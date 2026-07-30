@@ -103,6 +103,26 @@ jobs:
           "$ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager" --install "ndk;${NDK_VERSION}" > /dev/null
           echo "ANDROID_NDK_HOME=$ANDROID_SDK_ROOT/ndk/${NDK_VERSION}" >> "$GITHUB_ENV"
 
+      - name: Apply WinNative patches
+        if: steps.src.outputs.changed == 'true'
+        run: |
+          # Both are build-time rewrites rather than committed edits, so the
+          # daily upstream merge above never conflicts with them. Both are
+          # idempotent and both fail loudly if upstream moves what they anchor
+          # on, which is what stops a silently half-patched engine from
+          # shipping.
+          #
+          # sdl_namespace: moves SDL's Java glue out of org.libsdl.app, which
+          # ARMSX2 also ships in the WinNative APK from a different SDL version.
+          # Without it liblove.so aborts on startup with a JNI NoSuchMethodError.
+          #
+          # boot_args: lets main.lua take the ROM path and game version from
+          # argv, since the host cannot set an environment variable this runtime
+          # can see; also defaults the engine's own on-screen D-pad off, because
+          # WinNative draws the Game Boy pad and the Retro menu itself.
+          ./scripts/winnative_sdl_namespace.sh
+          ./scripts/winnative_boot_args.sh
+
       - name: Build
         if: steps.src.outputs.changed == 'true'
         run: |
