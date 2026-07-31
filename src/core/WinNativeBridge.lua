@@ -103,6 +103,34 @@ local function optionRows(game)
   local built
   ok, built = pcall(builder, game)
   if not ok or type(built) ~= "table" then return {} end
+
+  -- Then the rows mods add, which buildRows does NOT include: the engine runs
+  -- the ui.options.rows hook in OptionsMenu.new, and the host never opens that
+  -- screen. Without this the voxel mod's own settings -- the world curve, the
+  -- wireframe, the time of day, 3D battles -- exist and work but are on a menu
+  -- nobody on this path can reach. Only its render pipelines came through,
+  -- because the engine splices those in inside buildRows itself.
+  --
+  -- The hook is the same call OptionsMenu.new makes, with the same identity
+  -- default, so what the host lists is what the engine's own OPTIONS screen
+  -- would list. That includes rows a mod REMOVES: the voxel mod takes BATTLE
+  -- LAYOUT away while battles are staged on the map, because OG is then the
+  -- only layout they can be composed in, and a row that decides nothing is
+  -- worse than no row.
+  --
+  -- Safe to run on every poll. A mod may pin a value from this hook -- this one
+  -- pins BATTLE LAYOUT and DAYTIME -- but both pins check before they write, so
+  -- once satisfied they are no-ops rather than a disk write ten times a second.
+  local okRuntime, Runtime = pcall(require, "src.mods.Runtime")
+  if okRuntime and type(Runtime) == "table" and type(Runtime.call) == "function" then
+    local okHook, hooked =
+      pcall(Runtime.call, "ui.options.rows", function(_, rows) return rows end, game, built)
+    -- A mod returning something that is not a row list is ignored rather than
+    -- allowed to empty the settings pane.
+    if okHook and type(hooked) == "table" and hooked[1] ~= nil then
+      built = hooked
+    end
+  end
   return built
 end
 

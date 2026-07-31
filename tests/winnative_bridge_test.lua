@@ -92,6 +92,34 @@ package.loaded["src.core.SaveData"] = {
   -- copy back into the running game after every slot change.
   loadOptions = function() return { saveSlots = { red = { active = activeSlot } } } end,
 }
+-- The mod hook. Rows a mod adds do NOT come from buildRows -- the engine runs
+-- this hook in OptionsMenu.new, a screen the host never opens -- so the bridge
+-- runs it too. This stub does both things a real mod does: splices a row in,
+-- and takes one away.
+CURVE_LABELS = { "OFF", "1", "2", "3" }
+curveIndex = 1
+hookCalls = 0
+package.loaded["src.mods.Runtime"] = {
+  call = function(name, default, game, rows)
+    if name ~= "ui.options.rows" then return default(game, rows) end
+    hookCalls = hookCalls + 1
+    local out = {}
+    for _, row in ipairs(rows) do
+      -- A mod removing an engine row it has taken control of.
+      if row.id ~= "battleLayout" then out[#out + 1] = row end
+    end
+    out[#out + 1] = {
+      id = "DRAMATIC_SHAPE:curve", label = "V-CURVE",
+      value = function() return CURVE_LABELS[curveIndex] end,
+      choices = function() return CURVE_LABELS, curveIndex end,
+      step = function(_, dir)
+        curveIndex = (curveIndex - 1 + dir) % #CURVE_LABELS + 1
+      end,
+    }
+    return out
+  end,
+}
+
 package.loaded["src.core.GameVersion"] = { get = function() return "red" end }
 package.loaded["src.core.GameSpeed"] = { LEVELS = { 1, 2, 4, 10 }, DEFAULT = 1 }
 
@@ -158,6 +186,19 @@ check("activate row marked activate", kind == "activate", tostring(kind))
 local _, kind2 = rowValue("voxel")
 check("step row marked step", kind2 == "step", tostring(kind2))
 check("tabs stripped from labels", state():match("row\tweird\tA B\tx y\t") ~= nil)
+
+print("mod rows reach the host")
+-- The rows a mod splices in are the ones the engine only assembles when its
+-- OWN options screen opens. The host never opens it, so without running the
+-- hook these settings are unreachable from WinNative even though they work.
+check("hook ran", hookCalls > 0, tostring(hookCalls))
+check("a mod's own row is published",
+      state():match("row\tDRAMATIC_SHAPE:curve\tV%-CURVE\tOFF\tstep") ~= nil)
+check("and carries its ladder, so the host can draw a dropdown",
+      state():match("vals\tDRAMATIC_SHAPE:curve\t0\tOFF\t1\t2\t3") ~= nil)
+-- A mod may also REMOVE a row it has taken control of; the host must not keep
+-- showing a setting that no longer decides anything.
+check("a row the mod removed is gone", rowValue("battleLayout") == nil)
 check("label preferred over character name", state():match("save\tslot1\tMAIN\t3:14\t2\t25\t1\t1") ~= nil)
 check("falls back to character name", state():match("save\tslot2\tB\t0:02\t0\t1\t0\t1") ~= nil)
 
