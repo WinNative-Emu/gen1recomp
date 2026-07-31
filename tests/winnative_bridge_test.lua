@@ -20,6 +20,8 @@ love = {
 local stepped = {}          -- id -> accumulated direction
 local activated = {}
 local optionValues = { voxel = "ON", tilt = "OFF", speed = "1X" }
+DAY_LABELS = { "SYNC", "DAY", "NIGHT", "DUSK", "DAWN" }
+dayIndex = 1
 
 package.loaded["src.ui.OptionsMenu"] = {
   buildRows = function()
@@ -37,6 +39,27 @@ package.loaded["src.ui.OptionsMenu"] = {
       -- A label containing a tab, to prove field separators cannot be forged.
       { id = "weird", label = "A\tB", value = function() return "x\ny" end,
         step = function() end },
+      -- A row carrying its own ladder, the way a mod's setting does. Nothing
+      -- in the bridge can know what a mod cycles through, so a mod that says
+      -- so is the only way its row can become a dropdown.
+      { id = "DRAMATIC_SHAPE:daytime", label = "DAYTIME",
+        value = function() return DAY_LABELS[dayIndex] end,
+        choices = function() return DAY_LABELS, dayIndex end,
+        step = function(_, dir)
+          dayIndex = (dayIndex - 1 + dir) % #DAY_LABELS + 1
+        end },
+      -- A volume row: enumerated from the stored option rather than declared,
+      -- and -- unlike every other ladder -- it CLAMPS at both ends instead of
+      -- wrapping, which is the case that breaks a naive shortest-path walk.
+      { id = "musicVol", label = "MUSIC VOL",
+        value = function(g)
+          local v = g.save.options.musicVol or 7
+          return v == 0 and "OFF" or tostring(v)
+        end,
+        step = function(g, dir)
+          local o = g.save.options
+          o.musicVol = math.max(0, math.min(7, (o.musicVol or 7) + dir))
+        end },
     }
   end,
 }
@@ -59,15 +82,29 @@ package.loaded["src.core.SaveData"] = {
   renamed = nil,
   renameSlot = function(_, id, name) renamedSlot = { id = id, name = name } end,
   slotSummary = function() return "" end,
+  -- Reads whichever slot is active, the way the real one resolves its path
+  -- through the active slot. slot3 is the created-but-never-written slot.
+  load = function()
+    if activeSlot == "slot3" then return nil end
+    return { player = { map = activeSlot } }, nil
+  end,
+  -- The slot registry lives in options.lua, so this is what the bridge has to
+  -- copy back into the running game after every slot change.
+  loadOptions = function() return { saveSlots = { red = { active = activeSlot } } } end,
 }
 package.loaded["src.core.GameVersion"] = { get = function() return "red" end }
 package.loaded["src.core.GameSpeed"] = { LEVELS = { 1, 2, 4, 10 }, DEFAULT = 1 }
 
 local saved, loaded, optionsFlushed = 0, 0, 0
+local restored, titled = nil, 0
 local game = {
   save = { options = { speed = 2 } },
   writeSave = function() saved = saved + 1 end,
+  -- The engine's BOOT path. Nothing the host menu does should reach it: it
+  -- rebuilds every subsystem and starts a new game.
   load = function() loaded = loaded + 1 end,
+  restoreSave = function(_, data) restored = data end,
+  returnToTitle = function() titled = titled + 1 end,
   writeOptions = function() optionsFlushed = optionsFlushed + 1 end,
 }
 
@@ -134,6 +171,71 @@ check("value updated in state", rowValue("voxel") == "OFF", tostring(rowValue("v
 check("options flushed", optionsFlushed == 1, tostring(optionsFlushed))
 check("seq advanced", tonumber(state():match("seq\t(%d+)")) > seqBefore)
 
+print("value ladders")
+local function vals(id)
+  for line in state():gmatch("[^\n]+") do
+    local f = {}
+    for x in line:gmatch("[^\t]+") do f[#f + 1] = x end
+    if f[1] == "vals" and f[2] == id then
+      local labels = {}
+      for i = 4, #f do labels[#labels + 1] = f[i] end
+      return tonumber(f[3]), labels
+    end
+  end
+  return nil
+end
+local dayIdx, dayLabels = vals("DRAMATIC_SHAPE:daytime")
+check("row-supplied ladder published", dayLabels ~= nil and #dayLabels == 5,
+      dayLabels and tostring(#dayLabels) or "missing")
+check("ladder index is zero-based for the host", dayIdx == 0, tostring(dayIdx))
+check("ladder labels in order", dayLabels and dayLabels[3] == "NIGHT",
+      dayLabels and tostring(dayLabels[3]))
+local volIdx, volLabels = vals("musicVol")
+check("volume ladder derived from the option", volLabels ~= nil and #volLabels == 8,
+      volLabels and tostring(#volLabels) or "missing")
+check("volume ladder starts at OFF", volLabels and volLabels[1] == "OFF")
+check("volume index tracks the stored value", volIdx == 7, tostring(volIdx))
+check("activate rows carry no ladder", vals("mods") == nil)
+-- "voxel" here is the stub's own id, not a pipeline: nothing describes it, so
+-- the host must be left to fall back to its arrows rather than shown a guess.
+check("unknown cyclers carry no ladder", vals("voxel") == nil)
+
+print("setting a row to a chosen value")
+send("set\tDRAMATIC_SHAPE:daytime\t3")
+tick()
+check("walked to the chosen value", dayIndex == 4, tostring(dayIndex))
+check("state reports the new index", (vals("DRAMATIC_SHAPE:daytime")) == 3,
+      tostring((vals("DRAMATIC_SHAPE:daytime"))))
+send("set\tDRAMATIC_SHAPE:daytime\t0")
+tick()
+check("walks back down a wrapping ladder", dayIndex == 1, tostring(dayIndex))
+
+-- The clamping case: MUSIC VOL 7 -> 0 looks like one step backwards if the
+-- ladder is assumed to wrap, and stepping down from 7 goes the wrong way.
+send("set\tmusicVol\t0")
+tick()
+check("clamping ladder still reaches its far end", game.save.options.musicVol == 0,
+      tostring(game.save.options.musicVol))
+check("clamping ladder index published", (vals("musicVol")) == 0,
+      tostring((vals("musicVol"))))
+send("set\tmusicVol\t7")
+tick()
+check("and comes back", game.save.options.musicVol == 7, tostring(game.save.options.musicVol))
+
+local flushedBefore = optionsFlushed
+send("set\tmusicVol\t7")
+tick()
+check("setting to the current value changes nothing", game.save.options.musicVol == 7)
+check("but is still flushed, harmlessly", optionsFlushed == flushedBefore + 1)
+
+-- Out of range, and a row with no ladder at all: both have to be inert rather
+-- than spin the walk loop.
+send("set\tmusicVol\t99", "set\tvoxel\t2", "set\tmods\t1", "set\tnosuchrow\t0")
+tick()
+check("an out-of-range index clamps to the ladder", game.save.options.musicVol == 7,
+      tostring(game.save.options.musicVol))
+check("survives set on rows with no ladder", state() ~= "")
+
 print("negative direction")
 send("step\ttilt\t-1")
 tick()
@@ -152,18 +254,45 @@ send("saveslot\tslot2")
 tick()
 check("saveslot switched the active slot", activeSlot == "slot2", activeSlot)
 check("saveslot wrote the game", saved == 2, tostring(saved))
+check("saveslot resynced the registry before writing",
+      game.save.options.saveSlots.red.active == "slot2",
+      tostring(game.save.options.saveSlots and game.save.options.saveSlots.red.active))
 activeSlot = "slot1"
 send("loadslot\tslot2")
 tick()
 check("active slot switched", activeSlot == "slot2", activeSlot)
-check("game reloaded", loaded == 1, tostring(loaded))
+-- The whole point: the slot's save is restored into the running game. Booting
+-- instead (Game:load) is what made Load look like it did nothing -- it built a
+-- brand new save and went back to the title screen.
+check("slot restored into the running game",
+      restored ~= nil and restored.player.map == "slot2",
+      restored and tostring(restored.player.map) or "nothing restored")
+check("did not take the boot path", loaded == 0, tostring(loaded))
 check("state shows new active slot", state():match("save\tslot2\tB\t0:02\t0\t1\t1\t1") ~= nil)
+
+-- An empty slot has no file to read, so there is nothing to restore and the
+-- running game must be left exactly as it was rather than half-reset.
+restored = nil
+send("loadslot\tslot3")
+tick()
+check("an empty slot restores nothing", restored == nil)
+check("and still does not boot", loaded == 0, tostring(loaded))
+activeSlot = "slot2"
+
 send("reset")
 tick()
-check("reset reloads", loaded == 2, tostring(loaded))
+check("reset power-cycles to the title", titled == 1, tostring(titled))
+check("reset does not re-run the whole boot", loaded == 0, tostring(loaded))
+local savedBefore = saved
 send("newslot")
 tick()
 check("slot created", #createdSlots == 1)
+check("new slot becomes the active one", activeSlot == "slot3", activeSlot)
+-- The host only offers this from its Save screen, so the point is to end up
+-- with the game saved in the new slot -- not to be handed an empty one.
+check("and the game is written into it", saved == savedBefore + 1,
+      tostring(saved) .. " vs " .. tostring(savedBefore))
+check("new slot does not power-cycle", titled == 1, tostring(titled))
 
 print("rename")
 send("renameslot\tslot1\tMY BEST RUN")

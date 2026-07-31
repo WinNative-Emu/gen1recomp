@@ -113,6 +113,223 @@ local function rowById(game, id)
   return nil
 end
 
+-- ------------------------------------------------------------- value ladders
+--
+-- A row descriptor says what a setting IS right now and how to nudge it; it
+-- does not say what else it could be.  That is all the engine's own menu needs,
+-- because that menu only ever cycles: press Right, get the next value.  The
+-- host draws a dropdown instead, and a dropdown has to know the whole list up
+-- front and where the current value sits in it.
+--
+-- Enumerating by stepping the row and watching what comes out is not an option.
+-- Every step runs the engine's real side effects -- Music.setVolumeLevel,
+-- PaletteFX.setMode, and in TILT's case switching a mod's world pipeline off,
+-- which stepping back does NOT undo.  Walking a ladder to read it would leave
+-- the game in a different state than it started in.
+--
+-- So the ladders are declared here, sourced from the same modules the rows
+-- themselves use, and nothing is stepped to describe a row.  Each entry returns
+-- the labels in ladder order and the 1-based index of the current value; the
+-- index comes from the stored option rather than by matching the value string,
+-- so a label that is translated or duplicated cannot misplace the selection.
+--
+-- A row with no entry here is simply not enumerable, and the host falls back to
+-- the arrows it drew before.  That is the case for anything an upstream sync
+-- adds, which is why the fallback matters more than the coverage.
+
+local function strings()
+  local ok, Strings = pcall(require, "src.core.Strings")
+  if ok and type(Strings) == "function" then return Strings end
+  return function(text) return text end
+end
+
+-- Index of `value` in `list`, defaulting to the first entry. Used for the
+-- ladders keyed by a stored string rather than a number.
+local function indexOf(list, value, fallback)
+  for i, entry in ipairs(list) do
+    if entry == value then return i end
+  end
+  return fallback or 1
+end
+
+-- Labels for a numeric 0..n ladder stored as a plain integer, where the module
+-- already owns the label table (TILT, GBC FX, MUSIC FILTER).
+local function levelLadder(labels, current)
+  local out = {}
+  for i, label in ipairs(labels) do out[i] = label end
+  local index = (tonumber(current) or 0) + 1
+  if index < 1 then index = 1 elseif index > #out then index = 1 end
+  return out, index
+end
+
+local function options(game)
+  return game and game.save and game.save.options or {}
+end
+
+-- 0 = OFF, then 1..7, the way OptionsMenu's volLabel renders them.
+local function volumeLadder(current)
+  local labels = { "OFF" }
+  for v = 1, 7 do labels[#labels + 1] = tostring(v) end
+  local index = (tonumber(current) or 7) + 1
+  if index < 1 then index = 1 elseif index > 8 then index = 8 end
+  return labels, index
+end
+
+local ENUMERATORS = {
+  textSpeed = function(game)
+    local S = strings()
+    -- TextSpeedOptionData's frame delays, in the order OptionsMenu lists them.
+    local delays = { 1, 3, 5 }
+    local labels = { S("FAST"), S("MEDIUM"), S("SLOW") }
+    return labels, indexOf(delays, options(game).textSpeed or 3, 2)
+  end,
+
+  animations = function(game)
+    local S = strings()
+    return { S("ON"), S("OFF") }, options(game).animations == false and 2 or 1
+  end,
+
+  battleStyle = function(game)
+    local S = strings()
+    return { S("SHIFT"), S("SET") }, options(game).battleStyle == "set" and 2 or 1
+  end,
+
+  battleLayout = function(game)
+    local S = strings()
+    return { S("OG"), S("WIDE") }, options(game).battleLayout == "wide" and 2 or 1
+  end,
+
+  ruleset = function(game)
+    local S = strings()
+    -- The same merged registry the row cycles: sorted, hidden ones excluded,
+    -- so a mod-registered ruleset is selectable here too.
+    local registry = game and game.data and game.data.rulesets or {}
+    local ids = {}
+    for id, record in pairs(registry) do
+      if not record.hidden then ids[#ids + 1] = id end
+    end
+    table.sort(ids)
+    if not ids[1] then return nil end
+    local labels = {}
+    for i, id in ipairs(ids) do
+      local record = registry[id]
+      labels[i] = S(record and record.name or id)
+    end
+    local constants = game and game.data and game.data.constants
+    local current = options(game).ruleset
+                    or (constants and constants.defaultRuleset) or "gen1_faithful"
+    return labels, indexOf(ids, current)
+  end,
+
+  musicVol = function(game) return volumeLadder(options(game).musicVol) end,
+  sfxVol = function(game) return volumeLadder(options(game).sfxVol) end,
+  pikaVol = function(game) return volumeLadder(options(game).pikaVol) end,
+
+  musicFilter = function(game)
+    return levelLadder({ "OFF", "1X", "2X", "3X" }, options(game).musicFilter or 0)
+  end,
+
+  colors = function(game)
+    local ok, PaletteFX = pcall(require, "src.render.PaletteFX")
+    if not ok then return nil end
+    local labels = {}
+    for i, mode in ipairs(PaletteFX.MODES) do labels[i] = PaletteFX.modeLabel(mode) end
+    return labels, indexOf(PaletteFX.MODES, options(game).colors or "gbc")
+  end,
+
+  tilt = function(game)
+    local ok, Tilt = pcall(require, "src.render.Tilt")
+    if not ok then return nil end
+    return levelLadder(Tilt.ANGLE_LABELS, options(game).tilt or 0)
+  end,
+
+  gbcfx = function(game)
+    local ok, GBCFX = pcall(require, "src.render.GBCFX")
+    if not ok then return nil end
+    return levelLadder(GBCFX.LABELS, options(game).gbcfx or 0)
+  end,
+
+  zoom = function(game)
+    local okZoom, Zoom = pcall(require, "src.render.Zoom")
+    local okRenderer, Renderer = pcall(require, "src.render.Renderer")
+    if not (okZoom and okRenderer) then return nil end
+    -- The legal range depends on the window's fit scale, so this ladder is the
+    -- one that genuinely changes shape at runtime -- a rotation resizes it.
+    local okScale, scale = pcall(Renderer.fitScale, Renderer)
+    local lo, hi = Zoom.offsetRange(okScale and scale or 1)
+    local labels, index, cursor = {}, 1, options(game).zoom or 0
+    for offset = lo, hi do
+      labels[#labels + 1] = Zoom.offsetLabel(offset)
+      if offset == cursor then index = #labels end
+    end
+    if not labels[1] then return nil end
+    return labels, index
+  end,
+
+  voidFill = function(game)
+    local ok, TileRenderer = pcall(require, "src.render.TileRenderer")
+    if not ok then return nil end
+    local modes = TileRenderer.VOID_FILLS
+    local labels = {}
+    for i, mode in ipairs(modes) do labels[i] = TileRenderer.voidFillLabel(mode) end
+    return labels, indexOf(modes, options(game).voidFill or "trees")
+  end,
+
+  videoMode = function(game)
+    local ok, VideoMode = pcall(require, "src.core.VideoMode")
+    if not ok then return nil end
+    local labels = {}
+    for i, mode in ipairs(VideoMode.MODES) do labels[i] = VideoMode.modeLabel(mode) end
+    return labels, indexOf(VideoMode.MODES, VideoMode.normalize(options(game).videoMode))
+  end,
+
+  fpsCap = function(game)
+    local ok, FrameCap = pcall(require, "src.core.FrameCap")
+    if not ok then return nil end
+    local labels = {}
+    for i, step in ipairs(FrameCap.STEPS) do labels[i] = tostring(step) end
+    return labels, indexOf(FrameCap.STEPS, FrameCap.normalize(options(game).fpsCap))
+  end,
+
+  speed = function(game)
+    local ok, GameSpeed = pcall(require, "src.core.GameSpeed")
+    if not ok then return nil end
+    local labels = {}
+    for i, level in ipairs(GameSpeed.LEVELS) do labels[i] = GameSpeed.levelLabel(level) end
+    return labels, indexOf(GameSpeed.LEVELS, GameSpeed.clamp(options(game).speed))
+  end,
+}
+
+-- Labels and the current position for one row, or nil when the row is not
+-- enumerable (an activate row, or a cycler nothing here knows the shape of).
+local function ladderFor(game, row)
+  -- A descriptor may carry its own ladder. Mod rows are the case that matters:
+  -- nothing in this file can know what a mod's setting cycles through, and a
+  -- mod that says so gets a dropdown for free.
+  if type(row.choices) == "function" then
+    local ok, labels, index = pcall(row.choices, game)
+    if ok and type(labels) == "table" and labels[1] ~= nil then
+      return labels, tonumber(index) or 1
+    end
+  end
+
+  -- A mod's render pipeline is a level ladder the registry already describes.
+  local pipelineId = tostring(row.id or ""):match("^pipeline:(.+)$")
+  if pipelineId then
+    local ok, Pipelines = pcall(require, "src.render.Pipelines")
+    if not ok then return nil end
+    return levelLadder(Pipelines.levelLabels(pipelineId), Pipelines.level(pipelineId))
+  end
+
+  local enumerate = ENUMERATORS[row.id]
+  if not enumerate then return nil end
+  local ok, labels, index = pcall(enumerate, game)
+  if not ok or type(labels) ~= "table" or labels[1] == nil then return nil end
+  index = tonumber(index) or 1
+  if index < 1 or index > #labels then index = 1 end
+  return labels, index
+end
+
 -- ---------------------------------------------------------------- save slots
 
 local function saveData()
@@ -183,6 +400,19 @@ local function buildState(game, importer)
       out[#out + 1] = table.concat({
         "row", clean(row.id), clean(row.label), clean(value), kind,
       }, "\t")
+
+      -- The whole ladder, so the host can offer the values rather than only
+      -- the arrows that walk between them. Sent as a separate record keyed by
+      -- row id: a host that does not understand it ignores the line and still
+      -- gets a working row, which is what makes this safe to add.
+      if kind == "step" then
+        local labels, index = ladderFor(game, row)
+        if labels then
+          local record = { "vals", clean(row.id), tostring(index - 1) }
+          for _, label in ipairs(labels) do record[#record + 1] = clean(label) end
+          out[#out + 1] = table.concat(record, "\t")
+        end
+      end
     end
   end
 
@@ -288,6 +518,44 @@ end
 
 -- -------------------------------------------------------------- command file
 
+-- Pull the slot registry back out of options.lua and into the running game's
+-- options table.
+--
+-- The two are separate tables holding the same thing. SaveData keeps the slot
+-- list, which slot is active and the custom slot names inside options.lua, and
+-- setActiveSlot / createSlot / renameSlot each rewrite that file from a copy
+-- they read fresh off disk -- they never see game.save.options. So after any of
+-- them the running game is holding a registry that is one change out of date,
+-- and the next writeOptions or writeSave encodes that stale copy straight back
+-- over the file: the slot switch, or the rename, silently undone.
+--
+-- Only saveSlots is taken. Everything else in the live options is authoritative
+-- -- a setting the player just changed has not been written yet.
+local function syncSlotRegistry(game)
+  local opts = game and game.save and game.save.options
+  local SaveData = saveData()
+  if not (opts and SaveData and type(SaveData.loadOptions) == "function") then return end
+  local ok, onDisk = pcall(SaveData.loadOptions)
+  if ok and type(onDisk) == "table" then opts.saveSlots = onDisk.saveSlots end
+end
+
+-- Back to the title screen with unsaved progress discarded, which is what
+-- resetting a Game Boy does.
+--
+-- Game:returnToTitle is the engine's own name for that -- it is what QUIT on
+-- the START menu runs. Game:load is the fallback only because an engine
+-- without returnToTitle would otherwise have no reset at all; it goes much
+-- further than a reset needs to, rebuilding the dataset, the mods and every
+-- render subsystem before it gets to the title.
+local function returnToTitle(game)
+  if not game then return end
+  if type(game.returnToTitle) == "function" then
+    pcall(game.returnToTitle, game)
+  elseif type(game.load) == "function" then
+    pcall(game.load, game)
+  end
+end
+
 local function applyCommand(game, parts)
   local verb = parts[1]
 
@@ -301,6 +569,59 @@ local function applyCommand(game, parts)
       if game and type(game.writeOptions) == "function" then
         pcall(game.writeOptions, game)
       end
+    end
+    return
+  end
+
+  -- Jump a row straight to a chosen value, which is what picking one out of the
+  -- host's dropdown means.
+  --
+  -- It is still the row's own step function that does it, walked until the
+  -- ladder reads back the value asked for. Assigning to save.options directly
+  -- would be one line and would skip every side effect a step carries -- the
+  -- volume never reaching the mixer, TILT never switching a world pipeline off
+  -- -- so the setting would look changed and not be. Stepping keeps the engine
+  -- the one thing that decides what changing a setting does.
+  if verb == "set" then
+    local row = rowById(game, parts[2])
+    local target = tonumber(parts[3])
+    if not (row and target and type(row.step) == "function") then return end
+    local labels, index = ladderFor(game, row)
+    if not labels then return end
+    target = math.floor(target) + 1  -- the host counts from zero
+    if target < 1 then target = 1 elseif target > #labels then target = #labels end
+
+    local size = #labels
+    -- Walk straight at the target rather than taking the shorter way round a
+    -- ladder assumed to wrap. Not every ladder does: the volume rows clamp at
+    -- OFF and at 7, so "one step back from 7 reaches 0" is true of the indices
+    -- and false of the setting, and a walk that believed it would step into the
+    -- clamp, get nothing, and oscillate. Walking towards the target is correct
+    -- either way, at the cost of a few more steps across a ladder that wraps.
+    --
+    -- Bounded by the ladder length, because a step is the row's own and need
+    -- not agree with the direction asked for -- TEXT SPEED only ever cycles
+    -- forwards. Any row that moves one place per step lands within that bound
+    -- whichever way it travels, and the bound stops one that does not from
+    -- spinning here.
+    for _ = 1, size do
+      if index == target then break end
+      local direction = (target > index) and 1 or -1
+      pcall(row.step, game, direction)
+      local _, moved = ladderFor(game, row)
+      if not moved then break end
+      if moved == index then
+        -- Refused to move at all, so this end of the ladder is a clamp the
+        -- ladder description did not show. Try the other way before giving up.
+        pcall(row.step, game, -direction)
+        _, moved = ladderFor(game, row)
+        if not moved or moved == index then break end
+      end
+      index = moved
+    end
+
+    if game and type(game.writeOptions) == "function" then
+      pcall(game.writeOptions, game)
     end
     return
   end
@@ -327,6 +648,9 @@ local function applyCommand(game, parts)
     local SaveData, version = saveData(), gameVersion()
     if SaveData and version and parts[2] then
       pcall(SaveData.setActiveSlot, version, parts[2])
+      -- Before the write, not after: writeSave persists the options table too,
+      -- and the copy it holds still names the slot we just switched away from.
+      syncSlotRegistry(game)
     end
     if game and type(game.writeSave) == "function" then
       pcall(game.writeSave, game)
@@ -336,13 +660,24 @@ local function applyCommand(game, parts)
 
   if verb == "loadslot" then
     local SaveData, version = saveData(), gameVersion()
-    if SaveData and version and parts[2] then
-      pcall(SaveData.setActiveSlot, version, parts[2])
-    end
-    -- Game:load re-reads the active slot, which is exactly what booting into
-    -- that slot does, so switching slots and reloading share one path.
-    if game and type(game.load) == "function" then
-      pcall(game.load, game)
+    if not (SaveData and version and parts[2]) then return end
+    -- Point the save paths at the chosen slot first: SaveData.load resolves
+    -- the file through the active slot, so this decides which save is read.
+    pcall(SaveData.setActiveSlot, version, parts[2])
+    -- Matters on the path where the slot turns out to be empty and nothing is
+    -- restored; a successful restore replaces the options table wholesale.
+    syncSlotRegistry(game)
+    -- Then read it and restore it into the running game, which is what the
+    -- title screen's CONTINUE does and what the engine's own F2 does.
+    --
+    -- Game:load is NOT this. It is the boot path: it reloads the dataset and
+    -- the mods, re-initialises input, audio and the renderer, and then builds
+    -- a save with SaveData.newGame before playing the intro into the title
+    -- screen. Calling it here restarted the game on a fresh save instead of
+    -- loading the slot, which looked from the outside like Load doing nothing.
+    local ok, loaded, recovered = pcall(SaveData.load, version)
+    if ok and loaded and game and type(game.restoreSave) == "function" then
+      pcall(game.restoreSave, game, loaded, recovered)
     end
     return
   end
@@ -378,29 +713,34 @@ local function applyCommand(game, parts)
     for i = 4, #parts do name = name .. "\t" .. parts[i] end
     if SaveData and version and parts[2] and name and name ~= "" then
       pcall(SaveData.renameSlot, version, parts[2], name)
+      -- Or the next settings change writes the old name back over it.
+      syncSlotRegistry(game)
     end
     return
   end
 
   if verb == "newslot" then
     local SaveData, version = saveData(), gameVersion()
-    if SaveData and version then
-      local ok, id = pcall(SaveData.createSlot, version)
-      if ok and id then
-        if type(id) == "table" then id = id.id end
-        pcall(SaveData.setActiveSlot, version, id)
-        if game and type(game.load) == "function" then
-          pcall(game.load, game)
-        end
-      end
+    if not (SaveData and version) then return end
+    local ok, id = pcall(SaveData.createSlot, version)
+    if not (ok and id) then return end
+    if type(id) == "table" then id = id.id end
+    pcall(SaveData.setActiveSlot, version, id)
+    syncSlotRegistry(game)
+    -- Then write the running game into it. The host only offers this from its
+    -- Save screen -- "save into a new slot" -- so the slot has to end up with
+    -- the save in it. Creating an empty one and leaving it would hand the
+    -- player a slot their game is not in, and switching the active slot to it
+    -- without writing would mean the next in-game SAVE landed somewhere they
+    -- had never chosen.
+    if game and type(game.writeSave) == "function" then
+      pcall(game.writeSave, game)
     end
     return
   end
 
   if verb == "reset" then
-    if game and type(game.load) == "function" then
-      pcall(game.load, game)
-    end
+    returnToTitle(game)
     return
   end
 
