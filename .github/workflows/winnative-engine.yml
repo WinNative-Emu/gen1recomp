@@ -120,8 +120,13 @@ jobs:
           # argv, since the host cannot set an environment variable this runtime
           # can see; also defaults the engine's own on-screen D-pad off, because
           # WinNative draws the Game Boy pad and the Retro menu itself.
+          # bridge: wires src/core/WinNativeBridge.lua into the engine, which
+          # is how the host reads the engine's settings and asks for changes.
+          # Without it WinNative's menu would have nothing to show real values
+          # from, and would be back to guessing state and injecting keystrokes.
           ./scripts/winnative_sdl_namespace.sh
           ./scripts/winnative_boot_args.sh
+          ./scripts/winnative_bridge.sh
 
       - name: Build
         if: steps.src.outputs.changed == 'true'
