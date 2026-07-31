@@ -86,8 +86,15 @@ patch = """function love.update(dt)
   -- for changes. Placed at the very top so it also runs while the importer is
   -- still on screen -- the host's menu needs to know a game has not booted yet,
   -- and the early returns below would otherwise hide that. Game is nil until
-  -- bootGame runs, which the bridge handles.
-  require("src.core.WinNativeBridge").update(Game)
+  -- bootGame runs, which the bridge handles. Importer is passed too: it only
+  -- exists during a first-boot ROM import, and it is the only thing that knows
+  -- how far along that import is -- the host draws its own loading screen from
+  -- it, so the player sees WinNative rather than the engine's own splash.
+  -- Returns true while the host has the game paused, which stops the game
+  -- stepping without stopping the poll below it -- otherwise there would be no
+  -- way to receive the command that unpauses. love.draw still runs, so the
+  -- paused frame stays on screen.
+  if require("src.core.WinNativeBridge").update(Game, Importer) then return end
 
 """
 

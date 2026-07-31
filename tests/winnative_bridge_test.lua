@@ -61,10 +61,11 @@ package.loaded["src.core.SaveData"] = {
   slotSummary = function() return "" end,
 }
 package.loaded["src.core.GameVersion"] = { get = function() return "red" end }
+package.loaded["src.core.GameSpeed"] = { LEVELS = { 1, 2, 4, 10 }, DEFAULT = 1 }
 
 local saved, loaded, optionsFlushed = 0, 0, 0
 local game = {
-  save = { options = {} },
+  save = { options = { speed = 2 } },
   writeSave = function() saved = saved + 1 end,
   load = function() loaded = loaded + 1 end,
   writeOptions = function() optionsFlushed = optionsFlushed + 1 end,
@@ -147,6 +148,11 @@ print("save / load / reset")
 send("save")
 tick()
 check("writeSave called", saved == 1, tostring(saved))
+send("saveslot\tslot2")
+tick()
+check("saveslot switched the active slot", activeSlot == "slot2", activeSlot)
+check("saveslot wrote the game", saved == 2, tostring(saved))
+activeSlot = "slot1"
 send("loadslot\tslot2")
 tick()
 check("active slot switched", activeSlot == "slot2", activeSlot)
@@ -165,6 +171,45 @@ tick()
 check("rename reached the engine", renamedSlot ~= nil and renamedSlot.id == "slot1")
 check("name with spaces preserved", renamedSlot and renamedSlot.name == "MY BEST RUN",
       renamedSlot and tostring(renamedSlot.name))
+
+print("rom import")
+local importer = { status = "Verifying Pokemon Red", progress = 0.25 }
+for _ = 1, 6 do Bridge.update(game, importer) end
+check("import stage and progress published",
+      state():match("import\tVerifying Pokemon Red\t250") ~= nil,
+      state():match("import[^\n]*"))
+local seqWithImport = tonumber(state():match("seq\t(%d+)"))
+importer.progress = 0.5
+for _ = 1, 6 do Bridge.update(game, importer) end
+check("progress moves without restating the menu",
+      state():match("import\tVerifying Pokemon Red\t500") ~= nil and
+      tonumber(state():match("seq\t(%d+)")) == seqWithImport,
+      "seq " .. tostring(seqWithImport) .. " -> " .. tostring(tonumber(state():match("seq\t(%d+)"))))
+tick()
+check("import line gone once the importer is", state():match("import\t") == nil)
+
+print("pause")
+check("not paused at rest", Bridge.update(game) ~= true)
+send("pause\t1")
+tick()
+check("update reports paused", Bridge.update(game) == true)
+check("state reports paused", state():match("paused\t1") ~= nil)
+check("polling continues while paused", (function()
+  send("pause\t0"); tick(); return Bridge.update(game) ~= true
+end)(), "could not unpause -- the poll stopped")
+check("state reports resumed", state():match("paused\t0") ~= nil)
+
+print("fast forward")
+check("speed starts at the player's setting", game.save.options.speed == 2)
+send("ff\t1")
+tick()
+check("speed raised", game.save.options.speed == 4, tostring(game.save.options.speed))
+check("state reports ff on", state():match("ff\t1") ~= nil)
+send("ff\t0")
+tick()
+check("previous speed restored, not reset to 1x", game.save.options.speed == 2,
+      tostring(game.save.options.speed))
+check("state reports ff off", state():match("ff\t0") ~= nil)
 
 print("batching and robustness")
 stepped.tilt = 0

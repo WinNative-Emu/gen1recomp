@@ -42,7 +42,21 @@ local POLL_FRAMES = 6
 local frame = 0
 local seq = 0
 local lastState = nil
+local lastMenuState = nil
 local enabled = nil
+
+-- Host-owned run state. The engine has no notion of either: pausing is the
+-- host holding the game still, and fast-forward is the host driving the
+-- engine's own speed setting, so both live here rather than in save.options.
+-- Neither is persisted -- a game should not come back paused.
+local paused = false
+local ffPrevSpeed = nil   -- the speed to restore when fast-forward turns off
+
+-- What fast-forward runs at. GameSpeed.LEVELS goes far higher, but those
+-- levels exist for the automated route-running bots; 4x is the "hold to skip
+-- this text" speed a player actually wants, and matches what fast-forward
+-- does on the libretro path.
+local FF_LEVEL = 4
 
 -- On by default, deliberately.  The obvious design is to have the host switch
 -- this on, but the host has no way to tell this runtime anything at startup
@@ -118,7 +132,7 @@ end
 
 -- ---------------------------------------------------------------- state file
 
-local function buildState(game)
+local function buildState(game, importer)
   local out = {}
   out[#out + 1] = "seq\t" .. seq
 
@@ -129,6 +143,34 @@ local function buildState(game)
   -- still importing a ROM there are no rows and no slots, and the host should
   -- show that rather than an empty menu that looks broken.
   out[#out + 1] = "booted\t" .. ((game and game.save) and "1" or "0")
+
+  -- Run state the host owns but cannot see from its side, so its menu can
+  -- show Pause and Fast Forward in the right position instead of guessing.
+  out[#out + 1] = "paused\t" .. (paused and "1" or "0")
+  out[#out + 1] = "ff\t" .. ((ffPrevSpeed ~= nil) and "1" or "0")
+
+  -- First-boot ROM import. The host covers the screen with its own loading
+  -- screen while this runs, so it needs the stage text and how far along it is;
+  -- without them it could only show a spinner and hope. Absent entirely once
+  -- the import is done, which is how the host knows to take its screen down.
+  if importer then
+    local status = importer.status
+    local progress = tonumber(importer.progress) or 0
+    if progress < 0 then progress = 0 elseif progress > 1 then progress = 1 end
+    out[#out + 1] = table.concat({
+      "import", clean(status or "Importing"),
+      tostring(math.floor(progress * 1000)),
+    }, "\t")
+  end
+
+  -- The engine's own frame rate. The host's performance overlay counts frames
+  -- it is told about, and nothing on the Java side sees this engine present --
+  -- SDL swaps buffers on its own thread -- so the rate has to come from here or
+  -- the overlay reads a flat zero.
+  if love.timer and love.timer.getFPS then
+    local okFps, fps = pcall(love.timer.getFPS)
+    if okFps then out[#out + 1] = "fps\t" .. tostring(math.floor(tonumber(fps) or 0)) end
+  end
 
   for _, row in ipairs(optionRows(game)) do
     if row.id then
@@ -211,15 +253,27 @@ end
 -- Written through a temporary file and renamed, so the host can never read a
 -- half-written state -- it polls this file on its own schedule and there is no
 -- lock between the two processes.
-local function writeState(game)
-  local ok, text = pcall(buildState, game)
+local function writeState(game, importer)
+  local ok, text = pcall(buildState, game, importer)
   if not ok then return end
-  -- The sequence number is the only part that always changes, so compare
-  -- without it to avoid rewriting an unchanged file every poll.
+  -- Two kinds of change, deliberately treated differently.
+  --
+  -- The frame rate moves every poll, and the sequence number is what tells the
+  -- host its menu is stale. If the rate counted as a change the host would
+  -- rebuild its menu ten times a second for a number that is not even on the
+  -- menu. So the comparison ignores both the sequence number and the frame
+  -- rate: the file is still rewritten so the rate stays fresh, but the sequence
+  -- only moves when something the menu actually shows has changed.
   local body = text:gsub("^seq\t%d+\n", "")
+  -- The import line moves constantly for the few seconds it exists, and the
+  -- host's loading screen reads it directly rather than through the menu, so it
+  -- is excluded from staleness for the same reason the frame rate is.
+  local menuBody = body:gsub("fps\t%-?%d+\n", ""):gsub("import\t[^\n]*\n", "")
   if body == lastState then return end
+  local menuChanged = menuBody ~= lastMenuState
   lastState = body
-  seq = seq + 1
+  lastMenuState = menuBody
+  if menuChanged then seq = seq + 1 end
   text = "seq\t" .. seq .. "\n" .. body
   pcall(love.filesystem.createDirectory, DIR)
   local wrote = select(1, pcall(love.filesystem.write, STATE_TMP, text))
@@ -266,6 +320,20 @@ local function applyCommand(game, parts)
     return
   end
 
+  -- Save INTO a chosen slot, the way the games themselves work: pick the slot,
+  -- then write. Distinct from "save", which writes wherever the player already
+  -- is without asking.
+  if verb == "saveslot" then
+    local SaveData, version = saveData(), gameVersion()
+    if SaveData and version and parts[2] then
+      pcall(SaveData.setActiveSlot, version, parts[2])
+    end
+    if game and type(game.writeSave) == "function" then
+      pcall(game.writeSave, game)
+    end
+    return
+  end
+
   if verb == "loadslot" then
     local SaveData, version = saveData(), gameVersion()
     if SaveData and version and parts[2] then
@@ -275,6 +343,29 @@ local function applyCommand(game, parts)
     -- that slot does, so switching slots and reloading share one path.
     if game and type(game.load) == "function" then
       pcall(game.load, game)
+    end
+    return
+  end
+
+  if verb == "pause" then
+    paused = parts[2] == "1"
+    return
+  end
+
+  if verb == "ff" then
+    local want = parts[2] == "1"
+    local opts = game and game.save and game.save.options
+    if not opts then return end
+    local ok, GameSpeed = pcall(require, "src.core.GameSpeed")
+    if not ok then return end
+    if want then
+      -- Remembered so turning fast-forward off restores whatever the player
+      -- had chosen on the Performance pane, rather than snapping to 1x.
+      if ffPrevSpeed == nil then ffPrevSpeed = opts.speed or GameSpeed.DEFAULT end
+      opts.speed = FF_LEVEL
+    elseif ffPrevSpeed ~= nil then
+      opts.speed = ffPrevSpeed
+      ffPrevSpeed = nil
     end
     return
   end
@@ -337,12 +428,19 @@ end
 -- ---------------------------------------------------------------- entry point
 
 -- Called once per frame from love.update, before the game steps.
-function WinNativeBridge.update(game)
-  if not isEnabled() then return end
+--
+-- Returns true when the host has paused the game, which is the caller's signal
+-- to skip the rest of love.update. Only the game's own stepping stops: this
+-- function keeps polling, or there would be no way to receive the command that
+-- unpauses, and love.draw keeps running so the frozen frame stays on screen.
+function WinNativeBridge.update(game, importer)
+  if not isEnabled() then return false end
   frame = frame + 1
-  if frame % POLL_FRAMES ~= 0 then return end
-  pcall(consumeCommands, game)
-  pcall(writeState, game)
+  if frame % POLL_FRAMES == 0 then
+    pcall(consumeCommands, game)
+    pcall(writeState, game, importer)
+  end
+  return paused
 end
 
 return WinNativeBridge
