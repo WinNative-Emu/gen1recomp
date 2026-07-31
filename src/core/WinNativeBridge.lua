@@ -180,14 +180,25 @@ local function buildState(game)
       for _, slot in ipairs(slots) do
         local id = slot.id or slot.slotId
         if id then
-          local summary = slot.summary
-          if summary == nil and SaveData.slotSummary then
-            local sOk, got = pcall(SaveData.slotSummary, slot.save or slot)
-            if sOk then summary = got end
-          end
+          -- listSlots reports three different things and they are easy to
+          -- confuse: `label` is the custom name the player gave the slot,
+          -- `name` is the player character's name read out of the save, and
+          -- `meta` is the summary line (badges, play time). The host shows the
+          -- label when there is one and falls back to the character name, so a
+          -- slot always has something to identify it by.
+          -- meta is a table of parts (badges, play time, Pokedex count), not a
+          -- sentence. They are sent as separate fields so the host can phrase
+          -- and translate the summary itself, the way it does for every other
+          -- system, rather than the engine baking English into a string.
+          local meta = type(slot.meta) == "table" and slot.meta or {}
           out[#out + 1] = table.concat({
-            "save", clean(id), clean(slot.name or id), clean(summary),
+            "save", clean(id),
+            clean(slot.label or slot.name or id),
+            clean(meta.timeText),
+            tostring(tonumber(meta.badges) or 0),
+            tostring(tonumber(meta.dexCount) or 0),
             (tostring(id) == tostring(active)) and "1" or "0",
+            slot.exists and "1" or "0",
           }, "\t")
         end
       end
@@ -264,6 +275,18 @@ local function applyCommand(game, parts)
     -- that slot does, so switching slots and reloading share one path.
     if game and type(game.load) == "function" then
       pcall(game.load, game)
+    end
+    return
+  end
+
+  if verb == "renameslot" then
+    local SaveData, version = saveData(), gameVersion()
+    -- parts[4..] rejoined: a slot name may contain spaces, and only tabs and
+    -- newlines are excluded by the wire format.
+    local name = parts[3]
+    for i = 4, #parts do name = name .. "\t" .. parts[i] end
+    if SaveData and version and parts[2] and name and name ~= "" then
+      pcall(SaveData.renameSlot, version, parts[2], name)
     end
     return
   end

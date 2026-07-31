@@ -42,15 +42,22 @@ package.loaded["src.ui.OptionsMenu"] = {
 }
 
 local activeSlot = "slot1"
+renamedSlot = nil
 local createdSlots = {}
 package.loaded["src.core.SaveData"] = {
   listSlots = function() return {
-    { id = "slot1", name = "MAIN", summary = "RED 3:14" },
-    { id = "slot2", name = "B", summary = "RED 0:02" },
+    -- Matches SaveData.listSlots: `label` is the custom slot name, `name` is
+    -- the character name from the save, `meta` the summary line.
+    { id = "slot1", label = "MAIN", name = "MAX", exists = true,
+      meta = { timeText = "3:14", badges = 2, dexCount = 25 } },
+    { id = "slot2", name = "B", exists = true,
+      meta = { timeText = "0:02", badges = 0, dexCount = 1 } },
   } end,
   activeSlot = function() return activeSlot end,
   setActiveSlot = function(_, id) activeSlot = id end,
   createSlot = function() local id = "slot3"; createdSlots[#createdSlots + 1] = id; return id end,
+  renamed = nil,
+  renameSlot = function(_, id, name) renamedSlot = { id = id, name = name } end,
   slotSummary = function() return "" end,
 }
 package.loaded["src.core.GameVersion"] = { get = function() return "red" end }
@@ -113,8 +120,8 @@ check("activate row marked activate", kind == "activate", tostring(kind))
 local _, kind2 = rowValue("voxel")
 check("step row marked step", kind2 == "step", tostring(kind2))
 check("tabs stripped from labels", state():match("row\tweird\tA B\tx y\t") ~= nil)
-check("slots listed", state():match("save\tslot1\tMAIN\tRED 3:14\t1") ~= nil)
-check("inactive slot flagged", state():match("save\tslot2\tB\tRED 0:02\t0") ~= nil)
+check("label preferred over character name", state():match("save\tslot1\tMAIN\t3:14\t2\t25\t1\t1") ~= nil)
+check("falls back to character name", state():match("save\tslot2\tB\t0:02\t0\t1\t0\t1") ~= nil)
 
 print("stepping a row")
 local seqBefore = tonumber(state():match("seq\t(%d+)"))
@@ -144,13 +151,20 @@ send("loadslot\tslot2")
 tick()
 check("active slot switched", activeSlot == "slot2", activeSlot)
 check("game reloaded", loaded == 1, tostring(loaded))
-check("state shows new active slot", state():match("save\tslot2\tB\tRED 0:02\t1") ~= nil)
+check("state shows new active slot", state():match("save\tslot2\tB\t0:02\t0\t1\t1\t1") ~= nil)
 send("reset")
 tick()
 check("reset reloads", loaded == 2, tostring(loaded))
 send("newslot")
 tick()
 check("slot created", #createdSlots == 1)
+
+print("rename")
+send("renameslot\tslot1\tMY BEST RUN")
+tick()
+check("rename reached the engine", renamedSlot ~= nil and renamedSlot.id == "slot1")
+check("name with spaces preserved", renamedSlot and renamedSlot.name == "MY BEST RUN",
+      renamedSlot and tostring(renamedSlot.name))
 
 print("batching and robustness")
 stepped.tilt = 0
