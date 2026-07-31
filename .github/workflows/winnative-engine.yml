@@ -51,9 +51,31 @@ jobs:
           git fetch --no-tags upstream "$branch"
           before=$(git rev-parse HEAD)
           if ! git merge --no-edit "upstream/$branch"; then
-            git merge --abort || git reset --hard "$before"
-            echo "::warning::Upstream merge conflicts; $SYNC_BRANCH left untouched. Resolve by hand, then re-run."
-            exit 0
+            # WinNative drives, so a conflict in a file this fork owns is not a
+            # question: our version wins. Those are all files upstream does not
+            # have -- the bridge, its test, the patch scripts, this workflow --
+            # so the only way one conflicts is upstream adding a file at the
+            # same path, and taking theirs would disable the host menu.
+            #
+            # Anything else is upstream conflicting with upstream, which we
+            # have no business guessing at: no file outside this list carries a
+            # committed change of ours (every engine edit is applied at build
+            # time precisely so this can never happen). Leave those, and say so.
+            unresolved=$(git diff --name-only --diff-filter=U)
+            ours=$(echo "$unresolved" | grep -E '^(scripts/winnative_|src/core/WinNativeBridge\.lua|tests/winnative_bridge_test\.lua|\.github/workflows/winnative-engine\.yml)' || true)
+            theirs=$(echo "$unresolved" | grep -vE '^(scripts/winnative_|src/core/WinNativeBridge\.lua|tests/winnative_bridge_test\.lua|\.github/workflows/winnative-engine\.yml)' || true)
+            if [ -n "$theirs" ]; then
+              git merge --abort || git reset --hard "$before"
+              echo "::warning::Upstream conflicts outside WinNative's own files; $SYNC_BRANCH left untouched:"
+              echo "$theirs" | sed 's/^/::warning::  /'
+              exit 0
+            fi
+            for f in $ours; do
+              echo "conflict in $f -- keeping WinNative's version"
+              git checkout --ours -- "$f"
+              git add -- "$f"
+            done
+            git commit --no-edit
           fi
           after=$(git rev-parse HEAD)
           if [ "$before" = "$after" ]; then
@@ -127,6 +149,34 @@ jobs:
           ./scripts/winnative_sdl_namespace.sh
           ./scripts/winnative_boot_args.sh
           ./scripts/winnative_bridge.sh
+
+      - name: Check the engine still honours WinNative's contract
+        if: steps.src.outputs.changed == 'true'
+        run: |
+          # The patch scripts above guard the four places we edit. This guards
+          # the rest: the engine functions and module tables the bridge calls,
+          # none of which are patched and all of which are called through pcall
+          # so that a fault cannot take a play session down. That safety is
+          # exactly why a rename upstream is silent -- the engine builds, the
+          # menu opens, and Load quietly starts a new game instead.
+          #
+          # Deliberately BEFORE the build: an engine that has lost the contract
+          # must not be published, and finding out here costs three seconds
+          # rather than a bundle release and a device.
+          ./scripts/winnative_contract.sh
+
+      - name: Bridge protocol tests
+        if: steps.src.outputs.changed == 'true'
+        run: |
+          # The host protocol itself, against a stubbed LOVE: every command the
+          # menu can send and every field it reads. Catches a change to the
+          # bridge; the contract check above catches a change under it.
+          lua_bin=$(command -v luajit || command -v lua5.1 || command -v lua || true)
+          if [ -z "$lua_bin" ]; then
+            sudo apt-get update -qq && sudo apt-get install -y -qq luajit >/dev/null
+            lua_bin=$(command -v luajit)
+          fi
+          "$lua_bin" tests/winnative_bridge_test.lua
 
       - name: Build
         if: steps.src.outputs.changed == 'true'
