@@ -144,6 +144,30 @@ local function buildState(game)
     end
   end
 
+  -- Which mods loaded, and why one did not. The host shows this on its own
+  -- menu, so a mod that is present but rejected -- wrong game version,
+  -- refused permission, a Lua error in its entry point -- says so, instead of
+  -- silently not being there and looking like the host failed to install it.
+  local status = game and game.modStatus
+  if type(status) == "table" then
+    for _, mod in ipairs(status.available or {}) do
+      if mod.id then
+        out[#out + 1] = table.concat({
+          "mod", clean(mod.id), clean(mod.name or mod.id),
+          clean(mod.version), clean(mod.state), clean(mod.error),
+        }, "\t")
+      end
+    end
+    -- Loader-level failures, which have no mod entry to hang off: a manifest
+    -- that would not parse never becomes a mod at all.
+    for _, err in ipairs(status.errors or {}) do
+      out[#out + 1] = table.concat({
+        "moderror", clean(type(err) == "table" and (err.id or err.path or "?") or "?"),
+        clean(type(err) == "table" and (err.message or err.error) or err),
+      }, "\t")
+    end
+  end
+
   local SaveData = saveData()
   if SaveData and version then
     local ok, slots = pcall(SaveData.listSlots, version)
