@@ -167,5 +167,38 @@ The console understands these verbs (anything else is evaluated as Lua):
 - `trace PAT | trace off` — trace events/hooks matching a glob pattern.
 - `help` — list the verbs.
 
+## Tool input and title-menu hooks
+
+Tool mods that need to act once per game logic tick can wrap `input.step`.
+It runs immediately before queued button edges are promoted, so input added by
+the wrapper is visible during that same fixed step. The callback receives
+`(next, game, dt)` and must call `next(game, dt)`.
+
+`ui.title_menu.items` receives `(next, game, items)` and follows the same
+decorate-after-`next` convention as `ui.start_menu.items`. It is the safe place
+for a tool to offer a fresh-session action before gameplay begins.
+
+Ephemeral tools can wrap `save.write(next, game)` and return `false` to veto a
+progress write before world state is captured or any bytes reach disk.
+
+`render.hud` receives `(next, game, viewport)` after the finished game frame is
+composited and before touch controls draw. The window-space viewport contains
+`width`, `height`, `gameX`, `gameY`, `gameWidth`, `gameHeight`, `scale`, `dpiX`,
+and `dpiY`, so a tool can use the letterbox margins without drawing over the
+playfield or pushing an updating game state.
+
+`render.compose` wraps the whole-window composite in `Renderer:endFrame`. It
+receives `(next, renderer, ctx)`; returning `true` without calling `next` hands
+the mod full control of the window, while calling `next` runs the engine's
+normal single-window composite so the mod can decorate around it. `ctx` carries
+the finished `worldCanvas` and `uiCanvas` with their SGB `zones` / `worldZones`,
+`worldActive`, the frame metrics (`ww`, `wh`, `pw`, `ph`, `ox`, `oy`, `vpw`,
+`vph`, `scale`, `Sx`, `Sy`, `dpiX`, `dpiY`), `renderer:blitCanvas(...)` for a
+palette-correct blit of either canvas into an arbitrary screen rect, and the
+`secondScreen` bridge (`available()` / `push(imageData, w, h)` / `setEnabled`)
+for driving a second physical display. This is what lets a mod lay the two
+passes out as two stacked Game Boy screens, or push one onto a second screen,
+without the engine knowing the layout.
+
 Developer mode also arms the mod loader's dev tripwire, which flags mods
 that reach outside their permission set.

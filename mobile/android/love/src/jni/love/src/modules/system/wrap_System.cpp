@@ -109,6 +109,30 @@ int w_createFile(lua_State *L)
 	return 1;
 }
 
+int w_syncHealthSteps(lua_State *L)
+{
+	luax_pushboolean(L, instance()->syncHealthSteps());
+	return 1;
+}
+
+int w_restartApp(lua_State *L)
+{
+	// Does not return on success: GameActivity.restartApp exits the process
+	// after scheduling the relaunch (#575).
+	luax_pushboolean(L, instance()->restartApp());
+	return 1;
+}
+
+int w_httpDownload(lua_State *L)
+{
+	const char *url = luaL_checkstring(L, 1);
+	const char *dest = luaL_checkstring(L, 2);
+	const char *ua = luaL_optstring(L, 3, nullptr);
+	const char *accept = luaL_optstring(L, 4, nullptr);
+	luax_pushboolean(L, instance()->httpDownload(url, dest, ua, accept));
+	return 1;
+}
+
 int w_hasBackgroundMusic(lua_State *L)
 {
 	lua_pushboolean(L, instance()->hasBackgroundMusic());
@@ -126,6 +150,9 @@ static const luaL_Reg functions[] =
 	{ "vibrate", w_vibrate },
 	{ "pickFile", w_pickFile },
 	{ "createFile", w_createFile },
+	{ "syncHealthSteps", w_syncHealthSteps },
+	{ "restartApp", w_restartApp },
+	{ "httpDownload", w_httpDownload },
 	{ "hasBackgroundMusic", w_hasBackgroundMusic },
 	{ 0, 0 }
 };

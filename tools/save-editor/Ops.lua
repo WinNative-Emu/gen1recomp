@@ -8,7 +8,8 @@
 --
 -- Clamps mirror the running game, not the UI: level 1-100, DV 0-15, party 6
 -- (src/pokemon/Party), box 20 x 12 (src/pokemon/Boxes), money 0-999999,
--- item stack 99 and 20 bag slots (src/inventory/Bag).
+-- item stack 99 and the configured bag capacity (20 by default;
+-- src/inventory/Bag).
 
 local Pokemon = require("src.pokemon.Pokemon")
 local PartyMod = require("src.pokemon.Party")
@@ -155,16 +156,158 @@ function Ops.setLevel(S, mon, level)
   return Ops.mark(S, ("%s is now Lv%d"):format(mon.species, mon.level))
 end
 
+-- A catalog id is only usable as a real mon when its record carries what the
+-- Gen1 formulas read: Stats.calc indexes baseStats.<stat> unconditionally
+-- (src/pokemon/Stats.lua, home/move_mon.asm CalcStat), because the asm's
+-- BaseStats is a fixed 151-entry table and every row is complete.  The
+-- editor's list is NOT that table -- it is every key in Data.pokemon after
+-- the mod merge -- and a mod loaded at api 1 can leave a partial record in
+-- there, since the schema violation downgrades to a warning rather than a
+-- rejection (src/mods/Schemas.lua R.pokemon).  So the editor tests the record
+-- instead of trusting the list: without this, picking such a species walked
+-- Stats.calc into `speciesDef.baseStats[key]` on a nil and took the window
+-- down (#541).
+local BASE_STAT_KEYS = { "hp", "attack", "defense", "speed", "special" }
+
+function Ops.speciesUsable(S, id)
+  local def = id and S.data.pokemon[id]
+  if type(def) ~= "table" or type(def.baseStats) ~= "table" then return false end
+  for _, key in ipairs(BASE_STAT_KEYS) do
+    if type(def.baseStats[key]) ~= "number" then return false end
+  end
+  return true
+end
+
+-- The one funnel every species change goes through (the picker, the stepper,
+-- anything later).  MonOps asserts and recalculates, so an unusable record is
+-- refused before it runs, and the round trip itself is fenced: a record that
+-- passes the check above but still trips a formula has to leave the mon
+-- exactly as it was and speak in the status bar, not take the editor with it.
+function Ops.setSpecies(S, mon, id)
+  if not mon then return false end
+  if id == mon.species then
+    return Ops.say(S, ("Already a %s"):format(tostring(id)))
+  end
+  if not Ops.speciesUsable(S, id) then
+    return Ops.say(S, ("%s has no usable base stats,  cannot assign it")
+      :format(tostring(id)))
+  end
+  -- MonOps.recalc replaces mon.stats with a fresh table rather than editing
+  -- it in place, so holding the old reference is a real rollback.
+  local wasSpecies, wasLevel, wasExp = mon.species, mon.level, mon.exp
+  local wasStats, wasHp = mon.stats, mon.hp
+  local ok, err = pcall(MonOps.setSpecies, S.data, mon, id)
+  if not ok then
+    mon.species, mon.level, mon.exp = wasSpecies, wasLevel, wasExp
+    mon.stats, mon.hp = wasStats, wasHp
+    return Ops.say(S, ("Could not set %s: %s"):format(tostring(id), tostring(err)))
+  end
+  return Ops.mark(S, ("Species set to %s"):format(id))
+end
+
+-- Kept for the keyboard and test path; the inspector opens the searchable
+-- picker instead of walking the catalog one arrow at a time (#541).  Skips
+-- ids Ops.setSpecies would refuse, so one bad record cannot park the walk.
 function Ops.stepSpecies(S, mon, delta)
   if not mon then return false end
   local list = S.cat.species
+  local n = #list
+  if n == 0 then return Ops.say(S, "No species in the catalog") end
   local idx = 1
   for i, id in ipairs(list) do
     if id == mon.species then idx = i break end
   end
-  local nextId = list[((idx - 1 + delta) % #list) + 1]
-  MonOps.setSpecies(S.data, mon, nextId)
-  return Ops.mark(S, ("Species set to %s"):format(nextId))
+  for step = 1, n do
+    local nextId = list[((idx - 1 + delta * step) % n) + 1]
+    if nextId ~= mon.species and Ops.speciesUsable(S, nextId) then
+      return Ops.setSpecies(S, mon, nextId)
+    end
+  end
+  return Ops.say(S, "No other species in the catalog can be assigned")
+end
+
+-- Search predicate behind the picker's field: the id, the display name, and a
+-- bare dex number ("25" finds PIKACHU), all case-insensitive and plain (no
+-- pattern magic, so a "." typed by accident matches a literal dot).
+function Ops.speciesMatches(S, id, query)
+  if not query or query == "" then return true end
+  local q = tostring(query):lower()
+  if id:lower():find(q, 1, true) then return true end
+  local def = S.data.pokemon[id]
+  local name = def and def.name
+  if name and tostring(name):lower():find(q, 1, true) then return true end
+  local dex = tonumber(def and def.dex)
+  -- dex matches exactly, in either the bare or the padded form the inspector
+  -- prints ("25" and "025" both find PIKACHU).  A substring match here would
+  -- pull in ELECTABUZZ (#125) on a search for 25, which reads as a bug.
+  return dex ~= nil and (q == tostring(dex) or q == ("%03d"):format(dex))
+end
+
+function Ops.speciesSearch(S, query)
+  local out = {}
+  for _, id in ipairs(S.cat.species) do
+    if Ops.speciesMatches(S, id, query) then out[#out + 1] = id end
+  end
+  return out
+end
+
+-- The picker is modal editor chrome, not a save mutation, so its flag lives
+-- with the other view state on S (State.new).  Ops owns the door only because
+-- both the inspector and App need one and neither should require the other.
+-- `opened` marks the frame the picker went up: the click that opened it is
+-- still live when the overlay draws later in that same frame (#541).
+function Ops.openSpeciesPicker(S, Kit)
+  if not S.editingMon then
+    return Ops.say(S, "Pick a slot first, then choose its species")
+  end
+  S.speciesPicker = { query = "", offset = 0, opened = true }
+  -- focus the field on open so the mobile soft keyboard rises with it (#529)
+  if Kit then Kit.focus = "species-picker" end
+  return true
+end
+
+function Ops.closeSpeciesPicker(S, Kit)
+  S.speciesPicker = nil
+  if Kit and Kit.blur then Kit.blur() end
+end
+
+-- The Boxes panel's add flow rides the same picker (#715): instead of
+-- silently dropping catalog entry #1 into the box, "+ Add mon here" and the
+-- dashed empty cells open the picker in box-add mode, and the committed
+-- species goes through Ops.boxAddSpecies below.  No selection is required:
+-- the target is the box, not a mon.
+function Ops.openBoxAddPicker(S, Kit)
+  local box = Ops.boxes(S)[S.selectedBox]
+  if #box >= BoxesMod.CAPACITY then
+    return Ops.say(S, ("Box %d is full (%d/%d)")
+      :format(S.selectedBox, #box, BoxesMod.CAPACITY))
+  end
+  S.speciesPicker = { query = "", offset = 0, opened = true, mode = "box-add" }
+  if Kit then Kit.focus = "species-picker" end  -- soft keyboard rises (#529)
+  return true
+end
+
+-- Commit half of the box-add picker.  Builds the mon exactly the way
+-- Ops.partyAdd does (MonOps.create at Lv5, owned by the save's player), so a
+-- box mon and a party mon born in the editor are indistinguishable.
+function Ops.boxAddSpecies(S, id)
+  local box = Ops.boxes(S)[S.selectedBox]
+  if #box >= BoxesMod.CAPACITY then
+    return Ops.say(S, ("Box %d is full (%d/%d)")
+      :format(S.selectedBox, #box, BoxesMod.CAPACITY))
+  end
+  if not Ops.speciesUsable(S, id) then
+    return Ops.say(S, ("%s has no usable base stats,  cannot add it")
+      :format(tostring(id)))
+  end
+  local mon = MonOps.create(S.data, id, 5)
+  mon.ot = S.save.player.name
+  mon.otId = S.save.player.id
+  table.insert(box, mon)
+  S.selectedBoxSlot = #box
+  S.editingMon = mon
+  return Ops.mark(S, ("Added %s Lv5 to box %d slot %d")
+    :format(id, S.selectedBox, #box))
 end
 
 function Ops.setDv(S, mon, key, value)
@@ -258,6 +401,9 @@ function Ops.selectBoxSlot(S, index)
   return true
 end
 
+-- Kept for the keyboard/test path; the Boxes panel itself goes through the
+-- species picker (Ops.openBoxAddPicker -> Ops.boxAddSpecies) so the user
+-- chooses what lands in the box instead of always getting catalog entry #1.
 function Ops.boxAdd(S)
   local box = Ops.boxes(S)[S.selectedBox]
   if #box >= BoxesMod.CAPACITY then
@@ -338,11 +484,13 @@ end
 
 function Ops.addToBag(S, id)
   if not id then return Ops.say(S, "Pick an item first") end
-  if Bag.add(S.save, id, 1) then
+  local capacity = Bag.capacity(S.data)
+  if Bag.add(S.save, id, 1, S.data) then
     return Ops.mark(S, ("Added %s to the bag (%d/%d slots)")
-      :format(id, Bag.slots(S.save), Bag.CAPACITY))
+      :format(id, Bag.slots(S.save), capacity))
   end
-  return Ops.say(S, ("Bag is full (%d/%d slots)"):format(Bag.slots(S.save), Bag.CAPACITY))
+  return Ops.say(S, ("Bag is full (%d/%d slots)")
+    :format(Bag.slots(S.save), capacity))
 end
 
 function Ops.bagAdjust(S, id, delta)
@@ -352,7 +500,7 @@ function Ops.bagAdjust(S, id, delta)
     if have >= Ops.STACK_MAX then
       return Ops.say(S, ("%s is already at x%d"):format(id, Ops.STACK_MAX))
     end
-    Bag.add(S.save, id, delta)
+    Bag.add(S.save, id, delta, S.data)
   else
     Bag.remove(S.save, id, -delta)
     if not S.save.inventory[id] then
@@ -411,7 +559,7 @@ function Ops.pcDrop(S, id)
   return Ops.mark(S, ("Dropped all %d %s from PC storage"):format(qty, id))
 end
 
--- Badges are boolean inventory flags, not stackable items, which is why the
+-- Badges are truthy inventory flags, not stackable items, which is why the
 -- design gives them toggle chips instead of quantity rows.
 function Ops.isBadgeId(id)
   return id:find("BADGE", 1, true) ~= nil
@@ -426,8 +574,13 @@ function Ops.badgeIds(S)
 end
 
 function Ops.toggleBadge(S, id)
-  local on = S.save.inventory[id] == true
-  S.save.inventory[id] = (not on) or nil
+  -- #515: badges are truthy inventory entries written as 1 by the in-game
+  -- grant (checkVictoryRewards, src/world/OverworldController.lua) and by
+  -- GenSave's .sav import; read and write that same shape here, or a badge
+  -- earned in game reads as unowned and an editor-written boolean blows up
+  -- Bag.add's `(inv[id] or 0) + qty` (src/inventory/Bag.lua).
+  local on = S.save.inventory[id] and true or false
+  S.save.inventory[id] = (not on) and 1 or nil
   return Ops.mark(S, ("%s %s"):format(id, on and "removed" or "earned"))
 end
 

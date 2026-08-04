@@ -111,8 +111,9 @@ M.POKEMON_TOWER_5F = {
 --
 -- PokemonTower6FDefaultScript starts the RESTLESS SOUL battle with NO
 -- Silph Scope check at the trigger -- the scope only decides whether the
--- battle is disguised (IsGhostBattle -> makeGhost: "too scared to move",
--- balls dodged). An earlier version of this port turned the player back
+-- disguise sticks (IsGhostBattle -> makeGhost: "too scared to move", balls
+-- dodged) or comes off in the unveil (makeUnveiledGhost, #492). An earlier
+-- version of this port turned the player back
 -- without the scope and never opened the battle, which made 6F
 -- impassable on any route that skips Rocket Hideout; vanilla lets the
 -- battle open and a POKE_DOLL end it (see wBattleResult below).
@@ -133,7 +134,13 @@ M.POKEMON_TOWER_6F = {
       -- or not the scope revealed it, so the "can't be caught" state rides
       -- the battle instead of IsGhostBattle alone (#444)
       battle.noCatch = true
-      if not game.save.inventory.SILPH_SCOPE then
+      -- InitWildBattle enters disguised for the RESTLESS SOUL either way
+      -- (core.asm:6698-6700).  The scope does not skip the disguise, it
+      -- buys the unveil PrintBeginningBattleText .isMarowak plays over it
+      -- before the battle proceeds as an ordinary wild one (#492).
+      if game.save.inventory.SILPH_SCOPE then
+        battle:makeUnveiledGhost()
+      else
         battle:makeGhost()
       end
       battle.onFinish = function(result)
@@ -353,6 +360,38 @@ M.ROCKET_HIDEOUT_B4F = {
         end))
     end,
 
+    -- Yellow swaps Rocket1/Rocket2 for Jessie & James and keeps a single
+    -- grunt, spelled ROCKETHIDEOUTB4F_ROCKET / TEXT_ROCKETHIDEOUTB4F_ROCKET
+    -- (pokeyellow/scripts/RocketHideoutB4F.asm), so the Red/Blue key above
+    -- never matched there and the LIFT KEY never dropped (#552, a
+    -- regression of #105).  Yellow also moves the drop off the second
+    -- talk: RocketHideoutB4FRocketEndBattleText is text_promptbutton +
+    -- text_asm, so its SetEvent EVENT_ROCKET_DROPPED_LIFT_KEY / ShowObject
+    -- TOGGLE_ROCKET_HIDEOUT_B4F_ITEM_5 run the instant the battle ends.
+    TEXT_ROCKETHIDEOUTB4F_ROCKET = function(game, ow, npc, done)
+      if not ow:trainerDefeated(npc) then
+        ow:engageTrainer(npc, function()
+          -- engageTrainer records the win before it calls back, so this
+          -- is the end-battle text's SetEvent + ShowObject
+          if ow:trainerDefeated(npc)
+             and not game.save.flags.EVENT_ROCKET_DROPPED_LIFT_KEY then
+            game.save.flags.EVENT_ROCKET_DROPPED_LIFT_KEY = true
+            local Commands = require("src.script.Commands")
+            Commands.show_object(
+              { game = game, save = game.save, overworld = ow },
+              "ROCKET_HIDEOUT_B4F", "ROCKETHIDEOUTB4F_LIFT_KEY")
+          end
+          done()
+        end)
+        return
+      end
+      -- RocketHideoutB4FRocketAfterBattleText: later talks only reprint
+      local TextBox = require("src.render.TextBox")
+      game.stack:push(TextBox.new(game,
+        game.data.text._RocketHideoutB4FRocketAfterBattleText
+        or "Oh no! I dropped\nthe LIFT KEY!", done))
+    end,
+
     TEXT_ROCKETHIDEOUTB4F_GIOVANNI = function(game, ow, npc, done)
       -- Giovanni has no trainer-header row (def_trainers 2); his text_asm
       -- owns both the engage and the BeatGiovanniScript aftermath.
@@ -502,146 +541,290 @@ M.GAME_CORNER = {
           end))
       end)
     end,
+    -- GameCornerClerk1Text (scripts/GameCorner.asm): the offer, a
+    -- YesNoChoice, then ¥1000 for 50 coins.  Yellow drops the "1" from the
+    -- object const and from every one of his text labels
+    -- (GameCornerClerkText, pokeyellow/scripts/GameCorner.asm) with an
+    -- identical body, so each line resolves under both spellings and the
+    -- handler is bound to both text ids just below (#552).
     TEXT_GAMECORNER_CLERK1 = function(game, ow, npc, done)
       local TextBox = require("src.render.TextBox")
-      local ChoiceBox = require("src.ui.ChoiceBox")
+      local Font = require("src.render.Font")
+      local Strings = require("src.core.Strings")
       local t = game.data.text
+      local function line(suffix, fallback)
+        return t["_GameCornerClerk1" .. suffix]
+               or t["_GameCornerClerk" .. suffix]
+               or fallback
+      end
+      -- GameCornerDrawCoinBox (scripts/GameCorner.asm; pokeyellow's copy is
+      -- identical): TextBoxBorder at hlcoord 11,0 with b=5 c=7, a 9x7-tile
+      -- window in the top right holding MONEY at (12,2) over the amount on
+      -- row 3 and COIN at (12,4) over the count on row 5.  Both
+      -- PrintBCDNumber calls pass LEADING_ZEROES, whose bit 7 SUPPRESSES
+      -- leading zeroes (home/print_bcd.asm), and neither passes LEFT_ALIGN,
+      -- so both numbers read plain and right-aligned against the inner edge
+      -- at column 18.  The asm draws the box before the offer and redraws it
+      -- after the purchase, so it stands for the whole exchange: a draw-only
+      -- state under the dialogue gets that lifetime, since StateStack draws
+      -- every state above the last opaque one and updates only the top
+      -- (src/core/StateStack.lua), and reading save each frame is the
+      -- redraw (#624).
+      local coinBox = { draw = function()
+        Font.drawBox(11, 0, 9, 7)
+        love.graphics.setColor(0, 0, 0, 1)
+        Font.draw(Strings("MONEY"), 96, 16)
+        local money = ("¥%d"):format(game.save.money or 0)
+        Font.draw(money, 152 - Font.width(money), 24)
+        Font.draw(Strings("COIN"), 96, 32)
+        local coins = ("%d"):format(game.save.coins or 0)
+        Font.draw(coins, 152 - Font.width(coins), 40)
+        love.graphics.setColor(1, 1, 1, 1)
+      end }
+      game.stack:push(coinBox)
+      -- Every branch below finishes here.  A TextBox pops itself before its
+      -- onDone runs, so the coin box is top of the stack again by then and
+      -- this pop takes it down, never someone else's state.
+      local function finish()
+        game.stack:pop()
+        done()
+      end
+      -- YesNoChoice is called with the offer still printed, so the prompt
+      -- has to ride the open text box (opts.choice) instead of being pushed
+      -- after it closes, which is what made the question vanish (#624).
       game.stack:push(TextBox.new(game,
-        (t._GameCornerClerk1DoYouNeedSomeGameCoinsText
-         or "Do you need some\ngame coins?\f¥1000 for 50."), function()
-        game.stack:push(ChoiceBox.new(game, function(yes)
+        line("DoYouNeedSomeGameCoinsText",
+             "Do you need some\ngame coins?\f¥1000 for 50."),
+        nil, { choice = function(yes)
           if not yes then
             game.stack:push(TextBox.new(game,
-              t._GameCornerClerk1PleaseComePlaySometimeText
-              or "No? Please come\nplay sometime!", done))
+              line("PleaseComePlaySometimeText",
+                   "No? Please come\nplay sometime!"), finish))
             return
           end
           -- scripts/GameCorner.asm GameCornerClerk1Text: coins need
           -- the COIN CASE and room for at least 9 coins (Has9990Coins)
           if not game.save.inventory.COIN_CASE then
             game.stack:push(TextBox.new(game,
-              t._GameCornerClerk1DontHaveCoinCaseText
-              or "You don't have a\nCOIN CASE!", done))
+              line("DontHaveCoinCaseText",
+                   "You don't have a\nCOIN CASE!"), finish))
             return
           end
           if (game.save.coins or 0) >= 9990 then
             game.stack:push(TextBox.new(game,
-              t._GameCornerClerk1CoinCaseIsFullText
-              or "Oops! Your COIN\nCASE is full.", done))
+              line("CoinCaseIsFullText",
+                   "Oops! Your COIN\nCASE is full."), finish))
             return
           end
           if game.save.money < 1000 then
             game.stack:push(TextBox.new(game,
-              t._GameCornerClerk1CantAffordTheCoinsText
-              or "You can't afford\nthe coins!", done))
+              line("CantAffordTheCoinsText",
+                   "You can't afford\nthe coins!"), finish))
             return
           end
           game.save.money = game.save.money - 1000
           game.save.coins = math.min(9999, (game.save.coins or 0) + 50)
+          -- the thanks text is the plain _GameCornerClerk1ThanksHereAre50-
+          -- CoinsText; the new count belongs in the coin box the asm
+          -- redraws here, not appended to the line (#624)
           game.stack:push(TextBox.new(game,
-            (t._GameCornerClerk1ThanksHereAre50CoinsText
-             or "Thanks! Here are\nyour 50 coins!")
-            .. ("\fCOINS: %d"):format(game.save.coins), done))
-        end))
-      end))
+            line("ThanksHereAre50CoinsText",
+                 "Thanks! Here are\nyour 50 coins!"), finish))
+        end }))
     end,
   },
 }
 
+-- Yellow's coin clerk is GAMECORNER_CLERK / TEXT_GAMECORNER_CLERK where Red
+-- and Blue spell him CLERK1, and the two text_asm bodies are identical, so
+-- one handler answers both ids.  Without the alias the Yellow clerk fell
+-- through to his extracted offer line with no yes/no box behind it (#552).
+M.GAME_CORNER.talk.TEXT_GAMECORNER_CLERK =
+  M.GAME_CORNER.talk.TEXT_GAMECORNER_CLERK1
+
 -- Game Corner prize lists (data/events/prizes.asm, prize_mon_levels.asm).
--- The six mon prizes differ between Red and Blue; the three TM prizes are
--- identical, so they are shared and appended to each version's mon list.
+-- Each counter owns ONE window of three prizes, not the whole catalogue:
+-- GetPrizeMenuId (engine/events/prize_menu.asm) subtracts
+-- TEXT_GAMECORNERPRIZEROOM_PRIZE_VENDOR_1 from hTextID and indexes
+-- PrizeDifferentMenuPtrs with the result, so vendor 1 sells
+-- PrizeMenuMon1Entries, vendor 2 PrizeMenuMon2Entries and vendor 3
+-- PrizeMenuTMsEntries (#623).  The mon windows and their levels differ per
+-- version; the TM window is identical in all three, so it is shared.
 local PRIZE_TMS = {
   { kind = "item", item = "TM_DRAGON_RAGE", cost = 3300 },
   { kind = "item", item = "TM_HYPER_BEAM", cost = 5500 },
   { kind = "item", item = "TM_SUBSTITUTE", cost = 7700 },
 }
-local RED_PRIZES = {
-  { kind = "mon", species = "ABRA", level = 9, cost = 180 },
-  { kind = "mon", species = "CLEFAIRY", level = 8, cost = 500 },
-  { kind = "mon", species = "NIDORINA", level = 17, cost = 1200 },
-  { kind = "mon", species = "DRATINI", level = 18, cost = 2800 },
-  { kind = "mon", species = "SCYTHER", level = 25, cost = 5500 },
-  { kind = "mon", species = "PORYGON", level = 26, cost = 9999 },
-  PRIZE_TMS[1], PRIZE_TMS[2], PRIZE_TMS[3],
+local RED_PRIZE_WINDOWS = {
+  {
+    { kind = "mon", species = "ABRA", level = 9, cost = 180 },
+    { kind = "mon", species = "CLEFAIRY", level = 8, cost = 500 },
+    { kind = "mon", species = "NIDORINA", level = 17, cost = 1200 },
+  },
+  {
+    { kind = "mon", species = "DRATINI", level = 18, cost = 2800 },
+    { kind = "mon", species = "SCYTHER", level = 25, cost = 5500 },
+    { kind = "mon", species = "PORYGON", level = 26, cost = 9999 },
+  },
+  PRIZE_TMS,
 }
-local BLUE_PRIZES = {
-  { kind = "mon", species = "ABRA", level = 6, cost = 120 },
-  { kind = "mon", species = "CLEFAIRY", level = 12, cost = 750 },
-  { kind = "mon", species = "NIDORINO", level = 17, cost = 1200 },
-  { kind = "mon", species = "PINSIR", level = 20, cost = 2500 },
-  { kind = "mon", species = "DRATINI", level = 24, cost = 4600 },
-  { kind = "mon", species = "PORYGON", level = 18, cost = 6500 },
-  PRIZE_TMS[1], PRIZE_TMS[2], PRIZE_TMS[3],
+local BLUE_PRIZE_WINDOWS = {
+  {
+    { kind = "mon", species = "ABRA", level = 6, cost = 120 },
+    { kind = "mon", species = "CLEFAIRY", level = 12, cost = 750 },
+    { kind = "mon", species = "NIDORINO", level = 17, cost = 1200 },
+  },
+  {
+    { kind = "mon", species = "PINSIR", level = 20, cost = 2500 },
+    { kind = "mon", species = "DRATINI", level = 24, cost = 4600 },
+    { kind = "mon", species = "PORYGON", level = 18, cost = 6500 },
+  },
+  PRIZE_TMS,
+}
+-- Yellow keeps the three windows but restocks both mon counters
+-- (pokeyellow/data/events/prizes.asm, prize_mon_levels.asm)
+local YELLOW_PRIZE_WINDOWS = {
+  {
+    { kind = "mon", species = "ABRA", level = 15, cost = 230 },
+    { kind = "mon", species = "VULPIX", level = 18, cost = 1000 },
+    { kind = "mon", species = "WIGGLYTUFF", level = 22, cost = 2680 },
+  },
+  {
+    { kind = "mon", species = "SCYTHER", level = 30, cost = 6500 },
+    { kind = "mon", species = "PINSIR", level = 30, cost = 6500 },
+    { kind = "mon", species = "PORYGON", level = 26, cost = 9999 },
+  },
+  PRIZE_TMS,
 }
 
-local function activePrizes()
-  return require("src.core.GameVersion").isBlue() and BLUE_PRIZES or RED_PRIZES
+local function prizeWindow(n)
+  local GameVersion = require("src.core.GameVersion")
+  local windows = RED_PRIZE_WINDOWS
+  if GameVersion.isBlue() then
+    windows = BLUE_PRIZE_WINDOWS
+  elseif GameVersion.isYellow() then
+    windows = YELLOW_PRIZE_WINDOWS
+  end
+  return windows[n]
 end
 
--- Prize counters (engine/menus/prize_menu.asm CeladonPrizeMenu; the prize
+-- Prize counters (engine/events/prize_menu.asm CeladonPrizeMenu; the prize
 -- list itself is data/events/prizes.asm, prize_mon_levels.asm).  Gen1 gates
 -- the prize window on the COIN CASE: it does IsItemInBag COIN_CASE first, and
 -- with no case prints RequireCoinCaseText and returns without ever opening a
 -- window; only with the case does it print ExchangeCoinsForPrizesText and then
 -- show the prizes.  #194: the port used to open the window unconditionally and
--- skip both text boxes.
-local function prizeCounter(game, ow, npc, done)
-  local ListMenu = require("src.ui.ListMenu")
-  local Commands = require("src.script.Commands")
-  local TextBox = require("src.render.TextBox")
-  local t = game.data.text
-  -- IsItemInBag COIN_CASE: without the case, deny and open no window
-  -- (COIN_CASE is a numeric count in save.inventory, nil when absent).
-  if not game.save.inventory.COIN_CASE then
+-- skip both text boxes.  wMaxMenuItem is 3, i.e. this window's three prizes
+-- plus the NO THANKS row, and HandlePrizeChoice confirms the pick with
+-- SoYouWantPrizeText + YesNoChoice before any coins move; every branch then
+-- rets out of CeladonPrizeMenu, so one transaction ends the conversation and
+-- buying again means talking to the counter again (#623).
+local function prizeCounter(window)
+  return function(game, ow, npc, done)
+    local ListMenu = require("src.ui.ListMenu")
+    local Commands = require("src.script.Commands")
+    local TextBox = require("src.render.TextBox")
+    local t = game.data.text
+    -- IsItemInBag COIN_CASE: without the case, deny and open no window
+    -- (COIN_CASE is a numeric count in save.inventory, nil when absent).
+    if not game.save.inventory.COIN_CASE then
+      game.stack:push(TextBox.new(game,
+        t._RequireCoinCaseText or "A COIN CASE is\nrequired!", done))
+      return
+    end
+    -- ExchangeCoinsForPrizesText plays before the prize window opens.
     game.stack:push(TextBox.new(game,
-      t._RequireCoinCaseText or "A COIN CASE is\nrequired!", done))
-    return
-  end
-  -- ExchangeCoinsForPrizesText plays before the prize window opens.
-  game.stack:push(TextBox.new(game,
-    t._ExchangeCoinsForPrizesText or "We exchange your\ncoins for prizes.",
-    function()
-      local items = {}
-      for _, p in ipairs(activePrizes()) do
-        local label
-        if p.kind == "mon" then
-          label = ("%s L%d"):format(game.data.pokemon[p.species].name, p.level)
-        else
-          label = game.data.items[p.item].name
+      t._ExchangeCoinsForPrizesText or "We exchange your\ncoins for prizes.",
+      function()
+        local items = {}
+        for _, p in ipairs(prizeWindow(window)) do
+          local label
+          if p.kind == "mon" then
+            label = ("%s L%d"):format(game.data.pokemon[p.species].name, p.level)
+          else
+            label = game.data.items[p.item].name
+          end
+          table.insert(items,
+            { label = label, right = tostring(p.cost), value = p })
         end
-        table.insert(items,
-          { label = label, right = tostring(p.cost), value = p })
-      end
-      local list
-      list = ListMenu.new(game, "PRIZES (COINS)", items, {
-        footer = ("COINS %d"):format(game.save.coins or 0),
-        onChoose = function(item)
-          local p = item.value
+        -- NoThanksText (data/events/prizes.asm) sits under the three prizes
+        table.insert(items, { label = "NO THANKS" })
+        local list
+        -- close the window first: every ending in HandlePrizeChoice leaves
+        -- the menu for good, and the closing line belongs over the map
+        local function finish(msg)
+          list:close()
+          game.stack:push(TextBox.new(game, msg, done))
+        end
+        local function buy(p)
           if (game.save.coins or 0) < p.cost then
-            list.footer = "Not enough coins!"
+            finish(t._SorryNeedMoreCoinsText or "Sorry, you need\nmore coins.")
+            return
+          end
+          -- HasEnoughCoins passed, so hand the prize over first and only
+          -- subtract once it landed: the asm rets before .subtractCoins when
+          -- the bag is full, or when both the party and every box are full
+          local roomless = t._OopsYouDontHaveEnoughRoomText
+                           or "Oops! You don't\nhave enough room."
+          if p.kind == "mon" then
+            -- no runner here, so give_pokemon reports through ctx.lastCheck
+            -- and skips the AskName prompt (Commands.give_pokemon)
+            local ctx = { save = game.save, game = game }
+            Commands.give_pokemon(ctx, p.species, p.level)
+            if not ctx.lastCheck then
+              finish(roomless)
+              return
+            end
+          elseif not require("src.inventory.Bag").add(
+              game.save, p.item, 1, game.data) then
+            finish(roomless)
             return
           end
           game.save.coins = game.save.coins - p.cost
-          if p.kind == "mon" then
-            Commands.give_pokemon({ save = game.save, game = game },
-                                  p.species, p.level)
-          else
-            game.save.inventory[p.item] = (game.save.inventory[p.item] or 0) + 1
-          end
-          list.footer = ("Got it! COINS %d"):format(game.save.coins)
-        end,
-        onCancel = done,
-      })
-      game.stack:push(list)
-    end))
+          -- no thank-you line: HereYouGoText is unreferenced in the asm,
+          -- which just redraws the coin box (PrintPrizePrice) and returns
+          list:close()
+          done()
+        end
+        list = ListMenu.new(game, "PRIZES (COINS)", items, {
+          footer = ("COINS %d"):format(game.save.coins or 0),
+          onChoose = function(item)
+            local p = item.value
+            if not p then -- NO THANKS is the B exit (cp 3 -> .noChoice)
+              list:close()
+              done()
+              return
+            end
+            local name = (p.kind == "mon")
+                         and game.data.pokemon[p.species].name
+                         or game.data.items[p.item].name
+            -- SoYouWantPrizeText names the prize out of wNameBuffer, which
+            -- is not one of TextBox's RAM tokens, so fill it in here
+            local ask = (t._SoYouWantPrizeText
+                         or "So, you want\n{RAM:wNameBuffer}?")
+                        :gsub("{RAM:wNameBuffer}", name)
+            game.stack:push(TextBox.new(game, ask, nil, {
+              choice = function(yes)
+                if not yes then
+                  finish(t._OhFineThenText or "Oh, fine then.")
+                  return
+                end
+                buy(p)
+              end,
+            }))
+          end,
+          onCancel = done,
+        })
+        game.stack:push(list)
+      end))
+  end
 end
 
 M.GAME_CORNER_PRIZE_ROOM = {
-  talk = { -- the three prize counters are bg events
-    TEXT_GAMECORNERPRIZEROOM_PRIZE_VENDOR_1 = prizeCounter,
-    TEXT_GAMECORNERPRIZEROOM_PRIZE_VENDOR_2 = prizeCounter,
-    TEXT_GAMECORNERPRIZEROOM_PRIZE_VENDOR_3 = prizeCounter,
+  talk = { -- the three prize counters are bg events, one window each
+    TEXT_GAMECORNERPRIZEROOM_PRIZE_VENDOR_1 = prizeCounter(1),
+    TEXT_GAMECORNERPRIZEROOM_PRIZE_VENDOR_2 = prizeCounter(2),
+    TEXT_GAMECORNERPRIZEROOM_PRIZE_VENDOR_3 = prizeCounter(3),
   },
 }
 

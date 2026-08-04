@@ -7,10 +7,18 @@ local Font = require("src.render.Font")
 local Music = require("src.core.Music")
 local GameVersion = require("src.core.GameVersion")
 local Strings = require("src.core.Strings")
+local Runtime = require("src.mods.Runtime")
+local Logger = require("src.core.Logger")
 
 local TitleState = {}
 TitleState.__index = TitleState
 TitleState.isOpaque = true
+
+-- Fill the window (aspect preserved, bars on the long axis) instead of sitting
+-- at the fixed integer scale.  The title screen is a full-bleed picture with no
+-- world behind it, so a small centred box in a large window is just wasted
+-- glass -- and unlike the overworld it has no zoom the player chose to respect.
+function TitleState:wantsFillScale() return true end
 
 -- SGB title zones (PalPacket_Titlescreen): the logo rows get LOGO2,
 -- the version-ribbon band LOGO1, the rest MEWMON.
@@ -300,6 +308,8 @@ local function hasSave()
   return ok and info ~= nil
 end
 
+local function sameItems(_, items) return items end
+
 -- The CONTINUE info window (main_menu.asm DisplayContinueGameInfo):
 -- PLAYER / BADGES / POKéDEX / TIME over the title, shown after choosing
 -- CONTINUE.  A confirms and loads the game, B returns to the main menu.
@@ -375,6 +385,13 @@ function TitleState:openMenu()
       love.event.quit()
     end
   end })
+  local hooked = Runtime.call("ui.title_menu.items", sameItems, game, items)
+  if type(hooked) == "table" then
+    items = hooked
+  else
+    Logger.error("ui.title_menu.items returned %s; keeping the vanilla items",
+                 type(hooked))
+  end
   local th = #items * 2 + 2
   local menu = Menu.new(game, items, { tx = 0, ty = 0, tw = 13, th = th })
   -- full-width title LOGO zones would recolor this box; see sgbPalettes

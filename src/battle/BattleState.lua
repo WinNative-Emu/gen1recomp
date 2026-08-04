@@ -23,18 +23,36 @@ local Pokemon = require("src.pokemon.Pokemon")
 local Runtime = require("src.mods.Runtime")
 local Screens = require("src.ui.Screens")
 local Status = require("src.battle.Status")
+local Timing = require("src.core.Timing")
 local TrainerAI = require("src.battle.TrainerAI")
 local TurnOrder = require("src.battle.TurnOrder")
 local TypeChart = require("src.battle.TypeChart")
+local RomText = require("src.core.RomText")
 local Strings = require("src.core.Strings")
 local WideBattle = require("src.battle.WideBattle")
+
+local romText = RomText
 
 local BattleState = {}
 BattleState.__index = BattleState
 BattleState.isOpaque = true
+
+function BattleState:romText(label, fallback, ...)
+  return romText(self.data, label, fallback, ...)
+end
 -- Letterbox voids around the 160x144 battle canvas fill white so the
 -- window reads as one continuous battle screen (no black bars).
 BattleState.letterboxWhite = true
+
+-- A battle is a self-contained SCREEN, not the window.  The overworld's
+-- dialogue box docks to the window edge on purpose (Renderer:setUIAnchor) --
+-- a box floating in the middle of a zoomed-out map reads as detached.  A
+-- battle is the opposite: pokered draws its text box and YES/NO in the same
+-- 160x144 tilemap as the HUD, and pulling them out to the window edge splits
+-- the composition in two -- the caught-mon nickname prompt lands a whole
+-- letterbox below the white field it is supposed to be printed on.  Anchors
+-- are held off for as long as a battle is in the stack.
+BattleState.holdsUIAnchors = true
 
 -- BATTLE LAYOUT: the classic 160x144 arrangement, or the widescreen one on
 -- a 304x144 surface (src/battle/WideBattle.lua).  Only the composition
@@ -49,6 +67,41 @@ end
 function BattleState:wideLayout()
   return self:isWideBattleLayout()
 end
+
+-- BATTLE SIZE: "fixed" keeps the classic integer-scaled letterbox (a GB pixel
+-- is a whole number of screen pixels, and the battle is the same size at any
+-- zoom); "fill" scales the battle surface to the window instead, so it fills
+-- vertically.  Filling means a fractional scale, so pixels stop being evenly
+-- sized -- that is the trade, which is why it is a setting rather than a
+-- change.  Only the battle surface is affected; the overworld is unchanged.
+function BattleState:wantsFillScale()
+  local options = self.game and self.game.save and self.game.save.options
+  return options and options.battleFit == "fill" or false
+end
+
+-- BATTLE BG: what fills the screen AROUND the battle -- the letterbox voids
+-- that grow as the window gets bigger or the view is zoomed out.  The battle
+-- screen itself is untouched: it keeps its white paper field in every mode.
+--
+--   "white"  the display mode's paper shade (the classic look)
+--   "black"  plain black bars
+--   "world"  the frozen overworld, dimmed
+--
+-- "world" works by making the battle NON-opaque: StateStack:visibleBase then
+-- finds the overworld below it and Game:draw keeps drawing the map, so the
+-- voids show it instead of a flat clear.  The battle still paints its own
+-- opaque 160x144 field over the top, so only the surround changes.
+function BattleState:bgMode()
+  local options = self.game and self.game.save and self.game.save.options
+  local mode = options and options.battleBg
+  if mode == "black" or mode == "world" then return mode end
+  return "white"
+end
+
+-- How far to dim the overworld behind a "world" background, 0..1.  Enough
+-- that the battle reads as the foreground rather than competing with a fully
+-- lit map behind it.
+BattleState.BG_WORLD_DIM = 0.55
 
 -- Renderer:setUISize asks the top state for its surface before anything draws
 function BattleState:uiSize()
@@ -291,10 +344,17 @@ function BattleState:picImage(img)
                or PaletteFX.mode == "classic"
   if self.grayPics or mono then return grayImage(img) end
   -- SET_PAL_BATTLE_BLACK covers every battle palette slot, so the pics go
-  -- dark with the HP bars while the blackout text is up (#292).  Below the
-  -- mono check on purpose: the forced-mono modes re-threshold the whole
-  -- frame downstream, and the DMG had no SGB darkening to begin with.
-  if self.blackedOut then return blackImage(self.data, img) end
+  -- dark with the HP bars while the blackout text is up (#292).  The intro
+  -- silhouette slide (SlidePlayerAndEnemySilhouettesOnScreen) darkens the
+  -- same way: the original slides both pics in under the %11100100
+  -- silhouette palette and only runs SET_PAL_BATTLE once they have landed,
+  -- so a still-sliding pic reads as a black silhouette, exactly like the
+  -- evolution movie's PAL_BLACK (#577).  Below the mono check on purpose:
+  -- the forced-mono modes re-threshold the whole frame downstream, and the
+  -- DMG had no SGB darkening to begin with.
+  if self.blackedOut or (self.introSlide or 0) > 0 then
+    return blackImage(self.data, img)
+  end
   return fadeImage(img, self:activeBgp())
 end
 
@@ -320,18 +380,21 @@ local CHARGE_TEXT = {
 -- pokered's <USER>/<TARGET> text macros (home/text.asm
 -- PlaceMoveUsersName): battle texts naming the enemy mon print
 -- "Enemy " before the nickname; player-side mons never get it.
+-- Translatable as one "Enemy %s" template (#779) so languages that
+-- qualify after the name, or decline, can (e.g. "%s ennemi").
 local function displayName(b)
-  return b.isPlayer and b.name or ("Enemy " .. b.name)
+  return b.isPlayer and b.name or Strings("Enemy %s", b.name)
 end
 
--- Apply the "Enemy " prefix to a pre-built message from a module that
--- only knows the raw nickname (Status.beforeMove/residual,
--- TrainerAI.useItem): splice it in before the first name occurrence.
+-- Apply the enemy qualifier to a pre-built message from a module that
+-- only knows the raw nickname (Status.beforeMove/residual): replace the
+-- first name occurrence with the qualified form.
 local function prefixEnemy(msg, battler)
   if battler.isPlayer then return msg end
   local s = msg:find(battler.name, 1, true)
   if not s then return msg end
-  return msg:sub(1, s - 1) .. "Enemy " .. msg:sub(s)
+  return msg:sub(1, s - 1) .. Strings("Enemy %s", battler.name)
+      .. msg:sub(s + #battler.name)
 end
 
 -- Level-up stats window (PrintStatsBox .LevelUpStatsBox: box (9,2)
@@ -465,6 +528,10 @@ BattleState.StatBox = StatBox -- the level-up stat window (PrintStatsBox)
 local function newBattle(game)
   local self = setmetatable({}, BattleState)
   self.game = game
+  -- InitBattleVariables (engine/battle/init_battle_variables.asm) zeroes
+  -- wPartyAndBillsPCSavedMenuItem, so entering a battle drops the party
+  -- cursor the field menu has been carrying (src/ui/PartyMenu.lua). #768
+  game.partyMenuSavedIndex = nil
   self.data = game.data
   -- ruleset from the merged registry (the requires above are the same
   -- records on a mod-free boot); an unknown save value falls back to the
@@ -516,9 +583,9 @@ function BattleState.newWild(game, species, level, opts)
   self.enemy = makeBattler(game.data, Pokemon.new(game.data, species, level), false)
   markSeen(game, species)
   if opts and opts.hooked then
-    self.introText = Strings("The hooked\n%s\nattacked!", self.enemy.name)
+    self.introText = self:romText("_HookedMonAttackedText", "The hooked\n%s\nattacked!", self.enemy.name)
   else
-    self.introText = Strings("Wild %s\nappeared!", self.enemy.name)
+    self.introText = self:romText("_WildMonAppearedText", "Wild %s\nappeared!", self.enemy.name)
   end
   return self
 end
@@ -581,6 +648,9 @@ function BattleState.newTrainer(game, oppClass, partyIndex)
   local self = newBattle(game)
   self.kind = "trainer"
   self.oppClass = oppClass
+  -- the object_event trainer arg (roster index).  computeMusicKind keys
+  -- data/scripts/victories.lua on class#party, so keep it on the battle (#782).
+  self.partyIndex = partyIndex or 1
   self.trainer = game.data.trainers[oppClass]
   assert(self.trainer, "unknown trainer class " .. tostring(oppClass))
   -- pret GetTrainerName_: RIVAL1/2/3 copy wRivalName into wTrainerName
@@ -645,30 +715,92 @@ function BattleState.newTrainer(game, oppClass, partyIndex)
   return self
 end
 
+-- The disguise itself.  InitWildBattle .isGhost (engine/battle/core.asm)
+-- swaps only the pic and the nick -- wEnemyMonSpecies2 still holds the real
+-- species, so the SGB palette stays the disguised mon's.  ghostReal keeps
+-- what LoadEnemyMonData puts back when the scope unveils.
+local function disguiseAsGhost(self)
+  self.ghostReal = { name = self.enemy.name, sprite = self.enemy.sprite }
+  self.enemy.name = "GHOST"
+  self.enemy.sprite = getImage("assets/generated/battle/front/ghost.png",
+                               monPalette(self.data, self.enemy.mon.species))
+  self.introText = Strings("The GHOST\nappeared!")
+end
+
 -- Pokémon Tower ghosts (engine/battle/core.asm): without the Silph Scope
 -- the enemy is "GHOST", you're too scared to attack, and balls fail.
 function BattleState:makeGhost()
   self.ghost = true
-  self.enemy.name = "GHOST"
-  -- the ghost keeps the disguised mon's SGB palette: InitWildBattle
-  -- swaps only the pic, wEnemyMonSpecies2 still holds the real species
-  -- (engine/battle/core.asm InitWildBattle .isGhost)
-  self.enemy.sprite = getImage("assets/generated/battle/front/ghost.png",
-                               monPalette(self.data, self.enemy.mon.species))
-  self.introText = Strings("The GHOST\nappeared!")
+  disguiseAsGhost(self)
+end
+
+-- The RESTLESS SOUL with the SILPH SCOPE in the bag.  Mechanically this is
+-- not a ghost battle at all -- IsGhostBattle (core.asm) returns false the
+-- moment the scope is in the bag, so the mon attacks, is attacked and rolls
+-- for flight normally -- but InitWildBattle still enters disguised: its
+-- .isGhost branch fires on wCurOpponent == RESTLESS_SOUL as well.  Taking
+-- the disguise off is PrintBeginningBattleText .isMarowak's job
+-- (engine/battle/common_text.asm), which enter() queues through
+-- queueScopeReveal (#492).
+function BattleState:makeUnveiledGhost()
+  self.scopeReveal = true
+  disguiseAsGhost(self)
+end
+
+-- MarowakAnim (engine/battle/ghost_marowak_anim.asm) counted in frames: the
+-- ghost pic is copied into OAM and flashed 8 times by xor-ing rOBP1 with
+-- $80 (10 frames a side), the BG pic underneath is swapped to the RESTLESS
+-- SOUL, rOBP1 is shifted left two bits every 10 frames until the ghost has
+-- faded into the paper (3 shifts), and the Marowak copy fades back in the
+-- same way (4 shifts).  Alpha over the paper is what those OBP shifts look
+-- like on screen.
+BattleState.GHOST_FLASH_FRAMES = 80
+BattleState.GHOST_FADE_OUT_FRAMES = 30
+BattleState.GHOST_FADE_IN_FRAMES = 40
+BattleState.GHOST_REVEAL_FRAMES = 150
+
+-- The rows .isMarowak prints over the disguise, after the "GHOST appeared!"
+-- box enter() has already queued: the unveil line, MarowakAnim, then "Wild
+-- MAROWAK appeared!" under the restored name.  The fall-through into
+-- .playSFX at the end is the same SFX_TRAINER_APPEARED the port does not
+-- play for trainer intros either, so it is left out here too.
+function BattleState:queueScopeReveal()
+  local unveiled = self.data.text and self.data.text._UnveiledGhostText
+  self:say(unveiled
+           or Strings("SILPH SCOPE\nunveiled the\vGHOST's identity!"))
+  self:act(function() self.ghostReveal = { t = 0 } end)
+  table.insert(self.queue, { wait = BattleState.GHOST_REVEAL_FRAMES })
+  self:say(self:romText("_WildMonAppearedText", "Wild %s\nappeared!",
+                   self.ghostReal and self.ghostReal.name or self.enemy.name))
 end
 
 -- The old man's catch tutorial (BATTLE_TYPE_OLD_MAN,
 -- engine/battle/core.asm DisplayBattleMenu .oldManName branch): no
 -- player mon; the battle menu appears under the OLD MAN's name and a
 -- scripted cursor hovers FIGHT, hops to ITEM and forces the item menu
--- (one POKé BALL x50).  The throw always catches; nothing is kept.
+-- (one POKé BALL x50).  Nothing is kept.
 -- Yellow's Pallet intro (BATTLE_TYPE_PIKACHU) is the same simulated
 -- script under "PROF.OAK" (pokeyellow core.asm .profOakName), so the
 -- displayed thrower name is a parameter.
-function BattleState:makeOldManDemo(name)
+-- The throw catches everywhere except Yellow's FIRST Viridian training.
+-- ItemUseBall's .oldManBattle branch checks EVENT_INITIAL_CATCH_TRAINING
+-- and, when it is set, stores anim data $63 in place of the $43 capture
+-- value -- three shakes, then a breakout (pokeyellow
+-- engine/items/item_effects.asm).  Red/Blue's ItemUseBall has no such
+-- branch and jumps straight to .captured, and Yellow's repeat "Watch
+-- closely!" demo resets the event before its battle
+-- (ViridianCityOldManStartCatchTrainingScript), so only the initial
+-- tutorial passes failThrow -- it stands in for that event (#636).
+function BattleState:makeOldManDemo(name, failThrow)
   self.demo = true
   self.demoName = name or "OLD MAN"
+  self.demoFails = failThrow and true or false
+  -- LoadPlayerBackPic and DisplayBattleMenu split on the same wBattleType:
+  -- BATTLE_TYPE_OLD_MAN gets .oldManName + OldManPicBack, BATTLE_TYPE_PIKACHU
+  -- gets .profOakName + ProfOakPicBack (pokeyellow core.asm).  The thrower
+  -- name the caller passes IS that distinction here, so it picks the pic too
+  -- -- data/scripts/story2.lua is the only site that names PROF.OAK (#557).
+  self.oakDemo = name == "PROF.OAK"
   -- Yellow's Pallet intro runs this before the player owns any mon
   -- (BATTLE_TYPE_PIKACHU precedes the lab gift), so newWild flagged the
   -- battle dead for lack of a party.  The demo never sends out, draws, or
@@ -697,6 +829,16 @@ end
 
 function BattleState:say(text)
   table.insert(self.queue, { text = text })
+end
+
+-- A message whose ROM tail is `text_end` / `done` rather than `prompt`:
+-- NextTextCommand returns straight out of PrintText on TX_END
+-- (home/text.asm:328-334) and only TX_PROMPT_BUTTON blinks the arrow and
+-- runs ManualTextScroll (home/text.asm:434-446), so these pages never wait
+-- on the player.  autoDelay is the frame hold before the queue moves on
+-- (0 = the next row starts immediately, as PrintText returning does) (#765).
+function BattleState:sayAuto(text, delay)
+  table.insert(self.queue, { text = text, auto = true, autoDelay = delay or 0 })
 end
 
 -- Message that opens YES/NO once typed out, keeping the text visible
@@ -737,6 +879,13 @@ end
 function BattleState:sayNext(text)
   self.nextInsert = (self.nextInsert or 0) + 1
   table.insert(self.queue, self.nextInsert, { text = text })
+end
+
+-- sayNext for a page that ends in `text_end` (see sayAuto) (#765)
+function BattleState:sayNextAuto(text, delay)
+  self.nextInsert = (self.nextInsert or 0) + 1
+  table.insert(self.queue, self.nextInsert,
+               { text = text, auto = true, autoDelay = delay or 0 })
 end
 
 -- insert a UI push right after the current queue item (dex page, the
@@ -785,9 +934,30 @@ function BattleState:drainNext(battler, stopAt)
                { drain = true, battler = battler, stopAt = stopAt })
 end
 
--- One frame of the HP-bar drain (engine/gfx/hp_bar.asm UpdateHPBar):
--- the bar animates a pixel per two frames, so displayed HP moves at
--- maxHP/96 per frame (48-pixel bar).  Returns true while animating.
+-- Queue a pure frame hold at the current insert point, the way the original
+-- spends DelayFrames between the beats of a turn.  Mirrors sayNext/drainNext
+-- so a caller can interleave holds with messages in source order.
+function BattleState:waitNext(frames)
+  if not frames or frames <= 0 then return end
+  self.nextInsert = (self.nextInsert or 0) + 1
+  table.insert(self.queue, self.nextInsert, { wait = frames })
+end
+
+-- One frame of the HP-bar drain (engine/gfx/hp_bar.asm UpdateHPBar).
+--
+-- The original walks the bar ONE HP POINT per loop iteration (:81-120), and
+-- what each iteration costs depends on the side:
+--   * UpdateHPBar_PrintHPNumber spends a DelayFrame (:234) reprinting the
+--     number, but only when wHPBarType is nonzero (:207-209) -- the player's
+--     own HUD and the party menu, never the enemy's;
+--   * UpdateHPBar_AnimateHPBar spends 2 frames for each pixel the bar
+--     actually moved (:147-148), and most single-HP steps move none.
+-- So the player's bar drains at 1 HP per frame plus 2 frames per pixel,
+-- while the enemy's costs nothing until it crosses a pixel boundary.  The
+-- old flat maxHP/96 rate was the enemy-side formula applied to both, which
+-- ran a 150 HP mon's full drain in 96 frames against hardware's 249.
+--
+-- Returns true while animating.
 function BattleState:stepHPDrain()
   local busy = false
   for _, b in ipairs({ self.player, self.enemy }) do
@@ -798,14 +968,30 @@ function BattleState:stepHPDrain()
          and b.shownHP >= b.drainFloor then
         goal = b.drainFloor
       end
-      if b.shownHP ~= goal then
-        local step = math.max(1, b.mon.stats.hp) / 96
-        if b.shownHP > goal then
-          b.shownHP = math.max(goal, b.shownHP - step)
-        else
-          b.shownHP = math.min(goal, b.shownHP + step)
+      if (b.drainHold or 0) > 0 then
+        b.drainHold = b.drainHold - 1
+        busy = true
+      elseif b.shownHP ~= goal then
+        local maxHP = math.max(1, b.mon.stats.hp)
+        local playerSide = (b == self.player)
+        local cost = 0
+        -- consume whole HP steps until this frame's budget is spent; on the
+        -- enemy HUD several free steps can land in the same frame
+        while b.shownHP ~= goal and cost < 1 do
+          local nextHP = b.shownHP + ((b.shownHP > goal) and -1 or 1)
+          cost = cost + Timing.hpDrainStepFrames(b.shownHP, nextHP,
+                                                 maxHP, playerSide)
+          b.shownHP = nextHP
         end
-        busy = busy or b.shownHP ~= goal
+        b.drainHold = math.max(0, cost - 1)
+        b.draining = true
+        busy = true
+      elseif b.draining then
+        -- .animateHPBarDone's final number print, one more pixel step and
+        -- Delay3 (hp_bar.asm:132-135); this frame is the first of them
+        b.draining = nil
+        b.drainHold = Timing.hpDrainClosingFrames(b == self.player) - 1
+        busy = true
       end
     end
   end
@@ -852,6 +1038,8 @@ function BattleState:startMessage(item)
   self.charIndex = 0
   self.msgWaiting = nil
   self.msgPrompt = nil
+  self.msgAutoWait = nil
+  self.msgHold = nil
   self.scrollPx = nil
   self:beginMsgLine()
 end
@@ -879,6 +1067,14 @@ function BattleState:updateQueue()
   if self.waitFrames and self.waitFrames > 0 then
     self.waitFrames = self.waitFrames - 1
     return true
+  end
+  -- WaitForSoundToFinish (home/delay.asm:15-20) blocks until the sfx has
+  -- actually stopped sounding, which is how the original gives a sound its
+  -- own clear window instead of letting the next beat play over it
+  if self.waitingSound then
+    local src = self.waitingSound
+    if src and src.isPlaying and src:isPlaying() then return true end
+    self.waitingSound = nil
   end
   -- an HP-bar drain holds the queue until the bar catches up
   if self.draining then
@@ -931,6 +1127,12 @@ function BattleState:updateQueue()
       self.waitFrames = item.wait
       return true
     end
+    if item.waitSound then
+      -- the source is fetched now, not when the row was queued, so the
+      -- act() that started the sound has already run
+      self.waitingSound = item.waitSound()
+      return true
+    end
     if item.mimicSelect then
       -- pause the queue on Mimic's copy menu (MoveSelectionMenu with
       -- wMoveMenuType = 1 lists the enemy's moves; cursor starts on 1)
@@ -951,6 +1153,16 @@ function BattleState:updateQueue()
     -- the animation ends (hitRow rows carry a hit with no animation --
     -- thrash/rage continuation turns that skip the announcement).
     if item.anim or item.hitRow then
+      -- PlayMoveAnimation writes wAnimationID, calls Delay3, and only then
+      -- jumps to MoveAnimation (core.asm:6635-6640), so three frames pass
+      -- between the move's announcement and the first frame of its
+      -- animation.  Put the row back and pay that first.
+      if item.anim and not item.animDelayed then
+        item.animDelayed = true
+        table.insert(self.queue, 1, item)
+        self.waitFrames = Timing.MOVE_ANIM_PRE
+        return true
+      end
       local mdef = item.anim and self.data.moves[item.anim]
       local anim = mdef and mdef.anim
       if item.anim == "POOF_ANIM" then
@@ -1022,17 +1234,38 @@ function BattleState:updateQueue()
   -- a \v CONT wait holds the box until A/B, then scrolls the next line in
   -- (home/text.asm ContText); this keeps a 3rd line on-screen (#216)
   if self.msgWaiting then
+    -- _ContText prints the â–¼ and runs ProtectedDelay3 BEFORE ManualTextScroll
+    -- starts watching the joypad (home/text.asm:263-267), so three frames
+    -- pass with the arrow up and the button ignored
+    if (self.msgPreWait or 0) > 0 then
+      self.msgPreWait = self.msgPreWait - 1
+      return true
+    end
     if input:wasPressed("a") or input:wasPressed("b") then
       self.msgWaiting = nil
       self:beginMsgLine()
+      -- then the two ScrollTextUpOneLine calls block for 5 frames each
+      -- (home/text.asm:280-305) before the next line starts typing
+      self.waitFrames = Timing.TEXT_SCROLL_PAIR
     end
     return true
   end
   local cur = self.shown[#self.shown]
   if #cur < #self.codes then
-    -- battle typewriter cadence: two glyphs per fixed step (as before)
-    for _ = 1, 2 do
-      if #cur >= #self.codes then break end
+    -- Battle text prints through the same PrintText path as everything
+    -- else, so it pays PrintLetterDelay per character (home/print_text.asm:
+    -- 4-45): hFrameCounter is loaded from wOptions & $f -- the OPTION text
+    -- speed, 1/3/5, default 3 -- and the loop spins until it drains, unless
+    -- A or B is held, which collapses the wait to a single DelayFrame.
+    -- This used to run two glyphs per frame flat, six times hardware speed
+    -- at the default setting, and ignored the text-speed option entirely.
+    local delay = (self.game.save.options and self.game.save.options.textSpeed)
+                  or 3
+    if delay ~= 1 and delay ~= 3 and delay ~= 5 then delay = 3 end
+    if input:isDown("a") or input:isDown("b") then delay = 1 end
+    self.charTimer = (self.charTimer or 0) + 1
+    while self.charTimer >= delay and #cur < #self.codes do
+      self.charTimer = self.charTimer - delay
       cur[#cur + 1] = self.codes[#cur + 1]
       self.charIndex = self.charIndex + 1
     end
@@ -1041,6 +1274,7 @@ function BattleState:updateQueue()
     -- scrolling, \n advances now (beginMsgLine scrolls if the box is full)
     if self.lines[self.lineIndex + 1].cont then
       self.msgWaiting = true
+      self.msgPreWait = Timing.TEXT_PRE_ADVANCE
     else
       self:beginMsgLine()
     end
@@ -1060,15 +1294,43 @@ function BattleState:updateQueue()
       end))
       return true
     end
-    if not (item and item.choice) then
+    if item and item.auto then
+      -- No prompt: this page's ROM tail is `text_end`, so PrintText is
+      -- already back with the box still on screen -- pokered's used-move
+      -- line (engine/battle/used_move_text.asm EndUsedMove1Text..
+      -- EndUsedMove5Text) and the item-use line (ItemUseText00,
+      -- engine/items/item_effects.asm) are both of that kind.  Only
+      -- TX_PROMPT_BUTTON waits on A/B (home/text.asm:434-446) (#765).
+      self.msgAutoWait = self.msgAutoWait or item.autoDelay or 0
+      if self.msgAutoWait > 0 then
+        self.msgAutoWait = self.msgAutoWait - 1
+      else
+        self.msgAutoWait = nil
+        -- the typed page stays drawn behind whatever runs next (the move
+        -- animation, the ball toss): PrintText leaves the textbox tilemap
+        -- alone and animations only touch sprites (#296)
+        self.msgHold = true
+        self.current = nil
+      end
+    elseif not (item and item.choice) then
       -- The page is typed out and waiting on the player: PromptText
       -- (home/text.asm:209-217) writes '▼' at (18,16) and ManualTextScroll
       -- blinks it until A/B, so the arrow belongs on a finished page and not
       -- only on a \v CONT hold (#317).  A flag of its own, not msgWaiting:
       -- that branch above scrolls the NEXT line in, which this page has not
       -- got, so reusing it would call beginMsgLine on a drained message.
-      self.msgPrompt = true
-      if input:wasPressed("a") or input:wasPressed("b") then
+      if not self.msgPrompt then
+        self.msgPrompt = true
+        -- PromptText runs ProtectedDelay3 between writing the arrow and
+        -- ManualTextScroll (home/text.asm:213-217), so the page holds for
+        -- three frames with the button ignored before it can be dismissed.
+        -- Without it a queued A press could clear a page the same frame its
+        -- last glyph landed, which is most of "it doesn't hold sometimes".
+        self.msgPromptWait = Timing.TEXT_PRE_ADVANCE
+      end
+      if (self.msgPromptWait or 0) > 0 then
+        self.msgPromptWait = self.msgPromptWait - 1
+      elseif input:wasPressed("a") or input:wasPressed("b") then
         self.msgPrompt = nil
         self.current = nil
       end
@@ -1094,7 +1356,7 @@ function BattleState:sendOutText(name)
   if pct >= 70 then return Strings("Go! %s!", name) end
   if pct >= 40 then return Strings("Do it! %s!", name) end
   if pct >= 10 then return Strings("Get'm! %s!", name) end
-  return Strings("The enemy's weak!\nGet'm! %s!", name)
+  return self:romText("_EnemysWeakText", "The enemy's weak!\nGet'm! %s!", name)
 end
 
 -- audio/play_battle_music.asm: gym leaders (wGymLeaderNo) get the
@@ -1102,14 +1364,17 @@ end
 -- gets the final-battle theme
 function BattleState:computeMusicKind()
   local isBoss = false
-  if self.kind == "trainer" and self.trainer then
+  if self.kind == "trainer" and self.oppClass then
+    -- wGymLeaderNo is written only by the eight gym scripts
+    -- (scripts/PewterGym.asm .. ViridianGym.asm), so the badge rosters in
+    -- victories.lua are exactly the fights that set it.  The lookup must
+    -- include the party index: a class-wide prefix match also caught
+    -- Giovanni's Rocket Hideout (#1) and Silph Co (#2) battles, which never
+    -- touch wGymLeaderNo and take MUSIC_TRAINER_BATTLE like any other
+    -- trainer (#782).
     local victories = require("data.scripts.victories")
-    for key, reward in pairs(victories) do
-      if reward.badge and key:find(self.trainer.id .. "#", 1, true) == 1 then
-        isBoss = true
-        break
-      end
-    end
+    local reward = victories[self.oppClass .. "#" .. tostring(self.partyIndex or 1)]
+    isBoss = reward ~= nil and reward.badge ~= nil
   end
   -- init_battle.asm: challenging a gym leader (wGymLeaderNo, the badge
   -- fights only -- not Lance or the Champion) bumps the companion's
@@ -1190,7 +1455,11 @@ function BattleState:enter()
   Music.playBattle(self.data, self.musicKind)
   -- intro presentation (SlidePlayerAndEnemySilhouettesOnScreen): both
   -- sides slide in; the trainer pics stay up until the send-outs
-  self.introSlide = 40
+  -- BATTLE BG "world" drops this battle's opacity so StateStack keeps drawing
+  -- the overworld underneath it (see bgMode).  Per instance, so the class
+  -- default stays opaque for every other battle and for older saves.
+  self.isOpaque = self:bgMode() ~= "world"
+  self.introSlide = Timing.BATTLE_SLIDE_IN_FRAMES
   self.showEnemyTrainer = self.kind == "trainer" and self.trainerPic ~= nil
   -- DrawAllPokeballs (common_text.asm:27) puts the party ball rows AND the
   -- HUD corner/underline tiles under them (PlacePlayerHUDTiles /
@@ -1214,7 +1483,8 @@ function BattleState:enter()
   -- fade, the ground-padding measurement and battle_sprite_scales.
   local backPath, backTrueColor =
     require("src.pokemon.Sprites").playerPath(self.data, "back",
-      { kind = "battle", demo = self.demo, battle = self })
+      { kind = "battle", demo = self.demo, oakDemo = self.oakDemo,
+        battle = self })
   self.playerBackPic = getImage(backPath,
     namedPalette(self.data, "MEWMON"), backTrueColor)
   self.showPlayerBack = self.playerBackPic ~= nil
@@ -1229,11 +1499,35 @@ function BattleState:enter()
   -- battle calls PlayCry BEFORE PrintText WildMonAppearedText, so the cry
   -- sounds with the "Wild X appeared!" box instead of waiting on the A
   -- press that clears its `prompt` (#303).  The Silph-Scope-less tower
-  -- ghost gets no cry at all (common_text.asm:43-48).
-  if self.kind ~= "trainer" and self.kind ~= "link" and not self.ghost then
+  -- ghost gets no cry at all (common_text.asm:43-48), and neither does the
+  -- unveiled MAROWAK: .isMarowak never reaches PlayCry (#492).
+  if self.kind ~= "trainer" and self.kind ~= "link"
+     and not self.ghost and not self.scopeReveal then
     queueEnemyCry()
   end
+  -- PrintBeginningBattleText .trainerBattle (common_text.asm): a trainer
+  -- battle gives SFX_SILPH_SCOPE a clear window -- PlaySound, then
+  -- WaitForSoundToFinish, which blocks -- and only after `ld c, 20 /
+  -- DelayFrames` do DrawAllPokeballs and the "wants to fight!" text run.
+  -- The balls and the text used to appear on the same frame the silhouettes
+  -- landed, so the sound had to share its whole duration with the ball draw
+  -- and the text scroll instead of landing on its own.
+  --
+  -- The sfx is extracted as "Trainer_Appeared" (tools/rom_manifest.json
+  -- sfxHeaders, bank 8 / $42bb -- the same header pokered names
+  -- SFX_Silph_Scope); nothing had ever played it.
+  if self.kind == "trainer" then
+    self:act(function()
+      self.introSfx = require("src.core.Sound").play(self.data,
+                                                     "Trainer_Appeared")
+    end)
+    table.insert(self.queue, { waitSound = function() return self.introSfx end })
+    table.insert(self.queue, { wait = Timing.TRAINER_INTRO_SFX_GAP })
+  end
   self:say(self.introText)
+  -- the unveil rides on that same box, before _InitBattleCommon clears the
+  -- intro chrome below (#492)
+  if self.scopeReveal then self:queueScopeReveal() end
   -- _InitBattleCommon (core.asm:6755-6762): the instant the intro text is
   -- dismissed both HUD blocks are cleared and ClearSprites drops the
   -- pokeball OAM, so the intro chrome never returns for the rest of the
@@ -1249,12 +1543,21 @@ function BattleState:enter()
     table.insert(self.queue, { wait = 16 })
     self:act(function()
       self.showEnemyTrainer = false
+      -- the slot is EMPTY from here until AnimateSendingOutMon runs below:
+      -- the pic has walked off and the mon is still in its ball, so nothing
+      -- stands in the enemy slot while TrainerSentOutText prints.  Without
+      -- this the front sprite popped in full-size the instant the trainer
+      -- left, sat there through the whole text box, and the grow-in then
+      -- restarted it from nothing -- the mon appearing before it was sent
+      -- out.  Mirrors the flag the mid-battle replacement already sets.
+      self.enemySendingOut = true
       self:slidePic("foe")
     end)
     self:say(Strings("%s sent\nout %s!", self.trainer.name, self.enemy.name))
     self:act(function()
       -- EnemySendOutFirstMon (core.asm:1421-1434): after the text the
       -- pic grows out of the ball (AnimateSendingOutMon), then the cry
+      self.enemySendingOut = false
       self:startGrowIn(self.enemy)
     end)
     queueEnemyCry()
@@ -1271,6 +1574,14 @@ function BattleState:enter()
     end)
     queueEnemyCry()
   end
+  -- StartBattle .foundFirstAliveEnemyMon (core.asm:152-156): the `call nz`
+  -- gates only EnemySendOutFirstMon -- the `ld c, 40 / call DelayFrames`
+  -- after it is unconditional, so a wild battle pays it too, between
+  -- "Wild X appeared!" and "Go! Y!".  It lands before .playerSendOutFirstMon
+  -- (:166), not at the end of the intro.  Appended, not waitNext'd: the
+  -- intro is built linearly, and waitNext's insert point is for rows added
+  -- while the queue is already running.
+  table.insert(self.queue, { wait = Timing.BATTLE_START_SENDOUT })
   if not self.safari and not self.demo then
     -- StartBattle .playerSendOutFirstMon (core.asm:236-240): the back pic
     -- walks off the LEFT edge (SlideTrainerPicOffScreen, hlcoord 1,5,
@@ -1311,6 +1622,9 @@ end
 -- (end_of_battle.asm clears wLowHealthAlarm when a battle ends)
 function BattleState:exit()
   require("src.core.Sound").stopLoop("Low_Health_Alarm")
+  -- end_of_battle.asm clears wPartyAndBillsPCSavedMenuItem as well, so the
+  -- field party menu comes back on slot 1 after a battle. #768
+  self.game.partyMenuSavedIndex = nil
   -- Free this battle's own GPU objects now rather than waiting on a GC
   -- finalizer: the two full-screen wavy-effect canvases (colorMode) and
   -- the AnimPlayer's per-instance tilesheet images/quads.  The shared
@@ -1335,6 +1649,19 @@ local function clearTrapping(battler)
   battler.trappingTurns = nil
   battler.trapMove = nil
   battler.trapDamage = nil
+end
+
+-- SendOutMon (core.asm:1733-1735) clears both battle cursors, though the
+-- disassembly only names one of them: `ld hl, wBattleAndStartSavedMenuItem /
+-- ld [hli], a / ld [hl], a` writes zero to that byte AND to the byte behind
+-- it, which is wPlayerMoveListIndex (wram.asm:242-244).  So every player
+-- send-out puts the main menu back on FIGHT and the move list back on the
+-- first slot; the cursors are only remembered across sub-menus of the mon
+-- that is already out (#737).  Enemy send-outs run EnemySendOutFirstMon,
+-- not SendOutMon, and leave both alone.
+local function sendOutMonCursors(self)
+  self.menuIndex = 1
+  self.moveIndex = 1
 end
 
 -- core.asm:297-300: both sides' FLINCHED bits are cleared as a turn's move
@@ -1622,11 +1949,11 @@ function BattleState:update(dt)
       end
       local mv = moves[self.moveIndex]
       if self.player.disabledSlot == self.moveIndex then
-        self:say(Strings("The move is\ndisabled!"))
+        self:say(self:romText("_MoveDisabledText", "The move is\ndisabled!"))
         self.phase = "messages"
         self.afterQueue = "menu"
       elseif mv.pp <= 0 then
-        self:say(Strings("No PP left for\nthis move!"))
+        self:say(self:romText("_MoveNoPPText", "No PP left for\nthis move!"))
         self.phase = "messages"
         self.afterQueue = "menu"
       else
@@ -1676,7 +2003,7 @@ function BattleState:resolveMimic(user, target, move, moveInst)
   table.insert(self.queue, self.nextInsert, { wait = 50 })
   if target.invulnerable
      or not self:accuracyRoll(move, user, target) then
-    self:sayNext(Strings("But, it failed!"))
+    self:sayNext(self:romText("_ButItFailedText", "But, it failed!"))
     return
   end
   local slots = {}
@@ -1686,7 +2013,7 @@ function BattleState:resolveMimic(user, target, move, moveInst)
   if #slots == 0 then
     -- .getRandomMove rerolls empty slots forever; a moveless target
     -- can't happen in practice, so just fail instead of hanging
-    self:sayNext(Strings("But, it failed!"))
+    self:sayNext(self:romText("_ButItFailedText", "But, it failed!"))
     return
   end
   if user.isPlayer and self.kind ~= "link" then
@@ -1747,7 +2074,7 @@ function BattleState:applyMimic(user, target, moveInst, slot)
   entry.mimic = true
   self:animNext("MIMIC", user.isPlayer)
   -- _MimicLearnedMoveText: "<USER> / learned / MOVE!"
-  self:sayNext(Strings("%s\nlearned\n%s!", displayName(user),
+  self:sayNext(self:romText("_MimicLearnedMoveText", "%s\nlearned\n%s!", displayName(user),
                                            self.data.moves[src.id].name))
 end
 
@@ -1810,19 +2137,30 @@ end
 -- skipped -- the old man branch jumps straight to .captured, $43 anim
 -- data = 3 shakes and caught (:155-164 + :193-200) -- and
 -- .oldManCaughtMon prints the caught text WITHOUT adding the mon to
--- the party or the dex (:568-570).  The "used" line reads OLD MAN
+-- the party or the dex (:568-570).  Yellow's initial training is the one
+-- exception (demoFails, #636): its .oldManBattle branch forces $63, so
+-- the same chain ends in a breakout and ItemUseBallText04 instead.
+-- The "used" line reads OLD MAN
 -- because DisplayBattleMenu swapped wPlayerName (core.asm:2024-2037);
 -- no ball is consumed (.done returns early, :576-578).
 function BattleState:oldManThrow()
   self.phase = "messages"
   self.afterQueue = "finish"
   self.result = "run" -- nothing is kept; wBattleResult only ends the demo
-  self:say(Strings("%s used\nPOKé BALL!", self.demoName or "OLD MAN"))
+  self:sayAuto(Strings("%s used\nPOKé BALL!", self.demoName or "OLD MAN"))
   self:act(function()
     require("src.core.Sound").play(self.data, "Ball_Toss")
     -- ItemUseBall's beat before the toss chain (like throwBall)
     self.nextInsert = (self.nextInsert or 0) + 1
     table.insert(self.queue, self.nextInsert, { wait = 20 })
+    if self.demoFails then
+      -- $63 instead of $43: the same three shakes, then POOF+SHOWPIC and
+      -- ItemUseBallText04.  No sound_caught_mon, and .captured is never
+      -- reached, so nothing touches the party or the dex either (#636).
+      self:ballChain("TOSS_ANIM", false, 3, "POKE_BALL")
+      self:sayNext(self:ballMissMessage(3))
+      return
+    end
     self:ballChain("TOSS_ANIM", true, 3, "POKE_BALL")
     self:actNext(function()
       require("src.core.Sound").play(self.data, "Caught_Mon")
@@ -2003,6 +2341,7 @@ function BattleState:resolveSwitch(newMon)
       previous = previous,
     })
     self:markParticipant()
+    sendOutMonCursors(self)
     self.sendingOut = true
     self:sayNext(self:sendOutText(self.player.name))
     self:animNext("POOF_ANIM", false)
@@ -2442,24 +2781,27 @@ function BattleState:applyHitFx(hit)
       prog[#prog + 1] = { dy = 0, frames = 3 }
     end
     self.fx.shakeProg = prog
-    self.waitFrames = 48 -- the predef blocks until the shake settles
+    self.waitFrames = Timing.SHAKE_VERTICAL -- the predef blocks until it settles
   elseif t == 2 then
     self.fx.shakeProg = fastShakeProg(8)
-    self.waitFrames = 72
+    self.waitFrames = Timing.SHAKE_HORIZ_HEAVY
   elseif t == 3 then
     self.fx.shakeProg = slowShakeProg(6, 2)
-    self.waitFrames = 48
+    self.waitFrames = Timing.SHAKE_HORIZ_SLOW
   elseif t == 4 then
     if hit.blink then
-      self.fx.blink = { target = hit.blink, frames = 20 }
-      self.waitFrames = 20
+      -- AnimationBlinkMon: 6 iterations of hide/5 frames/show/5 frames.
+      -- This is the animation for every plain damaging move the player
+      -- uses, and it ran at a third of its length.
+      self.fx.blink = { target = hit.blink, frames = Timing.BLINK_MON }
+      self.waitFrames = Timing.BLINK_MON
     end
   elseif t == 5 then
     self.fx.shakeProg = fastShakeProg(2)
-    self.waitFrames = 18
+    self.waitFrames = Timing.SHAKE_HORIZ_LIGHT
   elseif t == 6 then
     self.fx.shakeProg = slowShakeProg(3, 2)
-    self.waitFrames = 24
+    self.waitFrames = Timing.SHAKE_HORIZ_SLOW2
   end
 end
 
@@ -2663,6 +3005,35 @@ function BattleState:updateFx()
       end
     end
   end
+  -- The Silph Scope unveil (MarowakAnim; queueScopeReveal parks a wait row
+  -- of GHOST_REVEAL_FRAMES over it): the ghost flashes, fades out, the pic
+  -- and the nick swap back the way LoadEnemyMonData restores them, and the
+  -- real mon fades in (#492).
+  local gr = self.ghostReveal
+  if gr and self.enemy then
+    gr.t = gr.t + 1
+    local pf = self:picFxFor(self.enemy)
+    local flashEnd = BattleState.GHOST_FLASH_FRAMES
+    local outEnd = flashEnd + BattleState.GHOST_FADE_OUT_FRAMES
+    if gr.t <= flashEnd then
+      pf.fade = (math.floor((gr.t - 1) / 10) % 2 == 1) and 0.5 or 1
+    elseif gr.t <= outEnd then
+      pf.fade = 1 - math.ceil((gr.t - flashEnd) / 10) / 3
+    else
+      if not gr.swapped then
+        gr.swapped = true
+        local real = self.ghostReal
+        if real then
+          self.enemy.name = real.name or self.enemy.name
+          self.enemy.sprite = real.sprite or self.enemy.sprite
+        end
+      end
+      pf.fade = math.min(1, math.ceil((gr.t - outEnd) / 10) / 4)
+    end
+    if gr.t >= BattleState.GHOST_REVEAL_FRAMES then
+      self.ghostReveal, self.scopeReveal, pf.fade = nil, nil, nil
+    end
+  end
   -- the send-out grow-in (AnimateSendingOutMon): 3+4+5 frames, then
   -- the pic draws at full size again
   if self.growIn then
@@ -2677,10 +3048,24 @@ function BattleState:updateFx()
   -- so a sounding siren rides out the next hit's HP drain instead of
   -- dropping out mid-announcement (#293)
   self.lowHealthAlarmOn = self:lowHealthAlarmActive()
-  if self.lowHealthAlarmOn then
-    Sound.startLoop(self.data, "Low_Health_Alarm")
+  -- battle.low_health_alarm: on/off toggle for the siren loop, ctx.on
+  -- mirrors self.lowHealthAlarmOn. Vanilla just starts/stops the loop
+  -- each frame; a mod can wrap this to reshape the toggle (e.g. force
+  -- ctx.on false after some budget) before letting vanilla act on it.
+  if Runtime.wantsHook("battle.low_health_alarm") then
+    Runtime.call("battle.low_health_alarm", function(ctx)
+      if ctx.on then
+        Sound.startLoop(ctx.battle.data, "Low_Health_Alarm")
+      else
+        Sound.stopLoop("Low_Health_Alarm")
+      end
+    end, { on = self.lowHealthAlarmOn, battle = self })
   else
-    Sound.stopLoop("Low_Health_Alarm")
+    if self.lowHealthAlarmOn then
+      Sound.startLoop(self.data, "Low_Health_Alarm")
+    else
+      Sound.stopLoop("Low_Health_Alarm")
+    end
   end
 end
 
@@ -2726,8 +3111,11 @@ function BattleState:executeAction(user, target, action)
     -- trainer class AI actions (engine/battle/trainer_ai.asm)
     if action.special == "aiItem" then
       self.aiUses = (self.aiUses or 1) - 1
+      -- useItem's messages arrive final: its item line prints the raw
+      -- nickname on purpose (no "Enemy " in AIPrintItemUseText), so the
+      -- prefix splice must not touch them.
       for _, m in ipairs(TrainerAI.useItem(self, action.item)) do
-        self:sayNext(prefixEnemy(m, self.enemy))
+        self:sayNext(m)
       end
       self:drainNext()
       require("src.core.Sound").play(self.data, "Heal_Ailment")
@@ -2763,7 +3151,7 @@ function BattleState:executeAction(user, target, action)
       -- 3392): sleep/freeze/held/flinch keep the mon recharging next turn
       if self:preRechargeChecks(user, target) then return end
       user.mustRecharge = nil
-      self:sayNext(Strings("%s\nmust recharge!", displayName(user)))
+      self:sayNext(self:romText("_MustRechargeText", "%s\nmust recharge!", displayName(user)))
       return
     end
     if action.special == "bound" then
@@ -2808,8 +3196,8 @@ function BattleState:statusOnomatopoeia(user, kind)
     anim = isPlayer and "CONF_PLAYER_ANIM" or "CONF_ANIM"
   end
   local text = kind == "sleep"
-    and Strings("%s\nis fast asleep!", displayName(user))
-    or Strings("%s\nis confused!", displayName(user))
+    and self:romText("_FastAsleepText", "%s\nis fast asleep!", displayName(user))
+    or self:romText("_IsConfusedText", "%s\nis confused!", displayName(user))
   if kind == "sleep" and isPlayer then
     self:animNext(anim, isPlayer)
     self:sayNext(text)
@@ -2848,18 +3236,18 @@ function BattleState:preRechargeChecks(user, target)
     user.sleepTurns = (user.sleepTurns or 1) - 1
     if user.sleepTurns <= 0 then
       mon.status = nil
-      self:sayNext(Strings("%s\nwoke up!", displayName(user)))
+      self:sayNext(self:romText("_WokeUpText", "%s\nwoke up!", displayName(user)))
     else
       self:statusOnomatopoeia(user, "sleep")
     end
     return true
   end
   if mon.status == "FRZ" then
-    self:sayNext(Strings("%s\nis frozen solid!", displayName(user)))
+    self:sayNext(self:romText("_IsFrozenText", "%s\nis frozen solid!", displayName(user)))
     return true
   end
   if target.trappingTurns then
-    self:sayNext(Strings("%s\ncan't move!", displayName(user)))
+    self:sayNext(self:romText("_CantMoveText", "%s\ncan't move!", displayName(user)))
     return true
   end
   if user.flinched then
@@ -2867,7 +3255,7 @@ function BattleState:preRechargeChecks(user, target)
     -- player recharges, so the flinch eats the recharge turn and the
     -- flag survives (the Hyper Beam flinch glitch)
     user.flinched = false
-    self:sayNext(Strings("%s\nflinched!", displayName(user)))
+    self:sayNext(self:romText("_FlinchedText", "%s\nflinched!", displayName(user)))
     return true
   end
   return false
@@ -2888,7 +3276,7 @@ function BattleState:statusInterrupt(user, target)
                                    { id = "CONFUSED", power = 40, type = "NORMAL", accuracy = 100 },
                                    { rng = self.rng, forceCrit = false, typeless = true,
                                      screens = target })
-    self:sayNext(Strings("It hurt itself in\nits confusion!"))
+    self:sayNext(self:romText("_HurtItselfText", "It hurt itself in\nits confusion!"))
     self:clearVolatiles(user, true)
     self:applyDamage(user, dmg)
     if user.mon.hp <= 0 then self:onFaint(user) end
@@ -2928,9 +3316,13 @@ end
 -- damaging pipeline (EffectRegistry.runDamaging).
 
 -- Gen 1 status/stat primary effects call PlayCurrentMoveAnimation only
--- after they land; these failure texts print with no animation.
+-- after they land; these failure texts print with no animation.  Failures
+-- whose text is an ordinary sentence rather than one of the shared fail
+-- lines set msgs.failed instead of relying on this sniffer -- Substitute's
+-- two failure lines name the move, not the failure (#644).
 local function primaryEffectFailed(msgs)
   if not msgs or #msgs == 0 then return true end
+  if msgs.failed then return true end
   local m = msgs[1]
   if m == "But, it failed!" or m == "Nothing happened!" then return true end
   if m:find("didn't affect", 1, true) then return true end
@@ -2976,7 +3368,7 @@ function BattleState:performMove(user, target, moveInst, isCalled)
 
   self.moveAnimRow = nil
   if not (user.thrashTurns and moveInst == user.thrashMove and user.thrashAnnounced) then
-    self:sayNext(Strings("%s\nused %s!", displayName(user), move.name))
+    self:sayNextAuto(self:romText("_ItemUseText001", "%s\nused %s!", displayName(user), move.name))
     -- the move's animation plays right after the announcement; the
     -- damage path attaches the target's hit blink to this row so the
     -- blink follows the animation (pokered's order).  Mimic is the
@@ -3061,7 +3453,7 @@ function BattleState:performMove(user, target, moveInst, isCalled)
       -- SleepEffect/PoisonEffect/... call PlayCurrentMoveAnimation only
       -- after the effect lands; a miss skips it
       self:cancelMoveAnim()
-      self:sayNext(Strings("%s's\nattack missed!", displayName(user)))
+      self:sayNext(self:romText("_AttackMissedText", "%s's\nattack missed!", displayName(user)))
       return
     end
     local msgs = record.run(ctx)
@@ -3081,7 +3473,7 @@ function BattleState:performMove(user, target, moveInst, isCalled)
   if move.power == 0 and not (record and record.kind == "full") then
     MoveEffects.warnUnknown(move.effect)
     self:cancelMoveAnim()
-    self:sayNext(Strings("But, it failed!"))
+    self:sayNext(self:romText("_ButItFailedText", "But, it failed!"))
     return
   end
 
@@ -3090,7 +3482,7 @@ function BattleState:performMove(user, target, moveInst, isCalled)
 end
 
 function BattleState:continueTrapping(user, target)
-  self:sayNext(Strings("%s's\nattack continues!", displayName(user)))
+  self:sayNext(self:romText("_AttackContinuesText", "%s's\nattack continues!", displayName(user)))
   -- .MultiturnMoveCheck (core.asm:3554-3566) prints AttackContinuesText
   -- then jumps to GetPlayerAnimationType, so the trapping move's full
   -- animation replays each locked turn (same damage, animation shown).
@@ -3116,12 +3508,12 @@ function BattleState:continueBide(user, target)
     self:sayNext(Strings("%s\nis storing energy!", displayName(user)))
     return
   end
-  self:sayNext(Strings("%s\nunleashed energy!", displayName(user)))
+  self:sayNext(self:romText("_UnleashedEnergyText", "%s\nunleashed energy!", displayName(user)))
   local dmg = (user.bideDamage or 0) * 2
   user.bideTurns, user.bideDamage = nil, nil
   if dmg <= 0 then
     self:cancelMoveAnim()
-    self:sayNext(Strings("But, it failed!"))
+    self:sayNext(self:romText("_ButItFailedText", "But, it failed!"))
     return
   end
   -- .UnleashEnergy (core.asm:3501-3529) re-points wPlayerMoveNum at BIDE
@@ -3144,9 +3536,9 @@ function BattleState:applyDamage(target, dmg)
     target.substituteHP = target.substituteHP - dmg
     if target.substituteHP <= 0 then
       target.substituteHP = nil
-      self:sayNext(Strings("%s's\nSUBSTITUTE broke!", displayName(target)))
+      self:sayNext(self:romText("_SubstituteBrokeText", "%s's\nSUBSTITUTE broke!", displayName(target)))
     else
-      self:sayNext(Strings("The SUBSTITUTE\ntook damage for\n%s!", displayName(target)))
+      self:sayNext(self:romText("_SubstituteTookDamageText", "The SUBSTITUTE\ntook damage for\n%s!", displayName(target)))
     end
     return dmg
   end
@@ -3158,7 +3550,7 @@ function BattleState:applyDamage(target, dmg)
   end
   if target.rageMove and dealt > 0 then
     target.stages.attack = math.min(6, (target.stages.attack or 0) + 1)
-    self:sayNext(Strings("%s's\nRAGE is building!", displayName(target)))
+    self:sayNext(self:romText("_BuildingRageText", "%s's\nRAGE is building!", displayName(target)))
   end
   return dealt
 end
@@ -3191,13 +3583,31 @@ function BattleState:onFaint(battler)
   self:actNext(function()
     battler.fainted = true
     local Sound = require("src.core.Sound")
-    Sound.playCry(self.data, battler.mon.species)
-    Sound.play(self.data, "Faint_Fall")
+    if battler.isPlayer then
+      -- RemoveFaintedPlayerMon (core.asm:1040-1042): the player mon's
+      -- faint plays its ordinary species cry -- no Faint_Fall
+      Sound.playCry(self.data, battler.mon.species)
+    elseif self.kind ~= "wild" then
+      -- FaintEnemyPokemon (core.asm:732-771): the enemy faint plays no
+      -- species cry; trainer battles get SFX_FAINT_FALL, then SFX_FAINT_THUD
+      -- once it finishes (wild battles skip straight to the victory music)
+      Sound.play(self.data, "Faint_Fall")
+    end
     self.fx = self.fx or {}
-    self.fx.faint = { battler = battler, frames = 30 }
+    -- SlideDownFaintedMonPic: PIC_HEIGHT (7) slide steps, each closing with
+    -- DelayFrames 2 (core.asm:1186-1222).  The port held this one twice as
+    -- long as hardware.
+    self.fx.faint = { battler = battler, frames = Timing.FAINT_SLIDE }
   end)
   self.nextInsert = (self.nextInsert or 0) + 1
-  table.insert(self.queue, self.nextInsert, { wait = 30 })
+  table.insert(self.queue, self.nextInsert, { wait = Timing.FAINT_SLIDE })
+  if not battler.isPlayer and self.kind ~= "wild" then
+    -- FaintEnemyPokemon's SFX_FAINT_THUD lands as the slide does (after
+    -- Faint_Fall, before EnemyMonFaintedText)
+    self:actNext(function()
+      require("src.core.Sound").play(self.data, "Faint_Thud")
+    end)
+  end
   if not battler.isPlayer and self.kind == "wild" then
     -- FaintEnemyPokemon .wild_win (core.asm:792-795): beating a wild
     -- mon calls EndLowHealthAlarm and starts MUSIC_DEFEATED_WILD_MON
@@ -3216,7 +3626,10 @@ function BattleState:onFaint(battler)
   end
 end
 
-function BattleState:enemyMonFainted()
+-- Exp for the defeated enemy, shared by the faint path (enemyMonFainted)
+-- and, when a mod's battle.catch_exp hook says so, the catch path
+-- (storeCaughtMon).
+function BattleState:awardExp()
   -- exp is split among the mons that fought this enemy
   -- (engine/battle/experience.asm); traded mons earn x1.5; each
   -- participant gets the full stat exp
@@ -3294,27 +3707,44 @@ function BattleState:enemyMonFainted()
       end
     end
   end
-  -- with EXP.ALL, participants split half the exp and the other half
-  -- is divided among the whole party (engine/battle/experience.asm)
-  local expAll = (self.game.save.inventory.EXP_ALL or 0) > 0
-  for _, mon in ipairs(alive) do
-    applyShare(mon, participants * (expAll and 2 or 1), true)
-  end
-  if expAll then
-    -- the second GainExperience pass sets the gain flags for the WHOLE
-    -- party, so DivideExpDataByNumMonsGainingExp divides the already
-    -- halved-and-participant-divided exp again by the party count, and
-    -- .partyMonLoop still skips fainted mons (core.asm:818-858 +
-    -- experience.asm:9-13); each mon gets its own GainedText with the
-    -- "with EXP.ALL," tail (wBoostExpByExpAll) -- pokered prints no
-    -- summary line
-    for _, mon in ipairs(self.game.save.party) do
-      if mon.hp > 0 then
-        applyShare(mon, math.max(1, participants) * #self.game.save.party * 2, "expAll")
+  -- battle.exp_award: the participant/EXP.ALL split, factored out so a
+  -- mod can replace it wholesale (e.g. a flat undivided share to every
+  -- non-fainted party mon) without re-deriving participants/alive.
+  -- ctx.applyShare(mon, split, announce) is the same helper vanilla uses.
+  local function vanillaExpAward(ctx)
+    -- with EXP.ALL, participants split half the exp and the other half
+    -- is divided among the whole party (engine/battle/experience.asm)
+    local expAll = (self.game.save.inventory.EXP_ALL or 0) > 0
+    for _, mon in ipairs(ctx.alive) do
+      ctx.applyShare(mon, ctx.participants * (expAll and 2 or 1), true)
+    end
+    if expAll then
+      -- the second GainExperience pass sets the gain flags for the WHOLE
+      -- party, so DivideExpDataByNumMonsGainingExp divides the already
+      -- halved-and-participant-divided exp again by the party count, and
+      -- .partyMonLoop still skips fainted mons (core.asm:818-858 +
+      -- experience.asm:9-13); each mon gets its own GainedText with the
+      -- "with EXP.ALL," tail (wBoostExpByExpAll) -- pokered prints no
+      -- summary line
+      for _, mon in ipairs(self.game.save.party) do
+        if mon.hp > 0 then
+          ctx.applyShare(mon, math.max(1, ctx.participants) * #self.game.save.party * 2, "expAll")
+        end
       end
     end
   end
+  local awardCtx = { battle = self, participants = participants, alive = alive,
+                      applyShare = applyShare }
+  if Runtime.wantsHook("battle.exp_award") then
+    Runtime.call("battle.exp_award", vanillaExpAward, awardCtx)
+  else
+    vanillaExpAward(awardCtx)
+  end
   self.participants = {}
+end
+
+function BattleState:enemyMonFainted()
+  self:awardExp()
 
   if self.kind == "trainer" then
     -- EnemySendOutFirstMon / AnyEnemyPokemonAliveCheck (core.asm): scan
@@ -3353,10 +3783,12 @@ function BattleState:enemyMonFainted()
       -- SwitchPlayerMon runs AFTER TrainerSentOutText (core.asm:1436-1443)
       local shiftSwitchMon = nil
       if style ~= "set" and partyCount > 1 and self.player.mon.hp > 0 then
-        -- _TrainerAboutToUseText: "X is" / "about to use" then cont nick,
-        -- then para "Will PLAYER" / "change POKéMON?" with YES/NO.
-        self:say(Strings("%s is\nabout to use", self.trainer.name))
-        self:say(Strings("%s!", nextName))
+        -- _TrainerAboutToUseText (data/text/text_2.asm): "X is" / "about to
+        -- use" then a CONT to the nick, not a fresh box -- the box scrolls
+        -- "X is" off so "about to use" stays above the name, instead of the
+        -- page ending on a bare nick (#565).  Then para "Will PLAYER" /
+        -- "change POKéMON?" with YES/NO.
+        self:say(Strings("%s is\nabout to use\v%s!", self.trainer.name, nextName))
         self:sayChoice(
           Strings("Will %s\nchange POKéMON?", self.game.save.player.name),
           function(yes)
@@ -3432,6 +3864,7 @@ function BattleState:enemyMonFainted()
         self.participants = {}
         self:markParticipant()
         self.nextInsert = 0
+        sendOutMonCursors(self)
         self.sendingOut = true
         self:sayNext(self:sendOutText(self.player.name))
         self:animNext("POOF_ANIM", false)
@@ -3461,7 +3894,7 @@ function BattleState:enemyMonFainted()
     -- scripted battles that print their own follow-up leave it nil.
     self:actNext(function() self:playVictoryMusic() end)
     -- _TrainerDefeatedText: "<PLAYER> defeated\nTRAINER!"
-    self:sayNext(Strings("%s defeated\n%s!", self.game.save.player.name,
+    self:sayNext(self:romText("_TrainerDefeatedText", "%s defeated\n%s!", self.game.save.player.name,
                                              self.trainer.name))
     self:actNext(function()
       self.showEnemyTrainer = self.trainerPic ~= nil
@@ -3474,11 +3907,21 @@ function BattleState:enemyMonFainted()
       -- PrintEndBattleText prints one text box; a `para` (\f) inside it
       -- starts a fresh page, which is a message row of its own here (five
       -- EndBattleTexts carry one, e.g. _Route9Youngster1EndBattleText)
+      -- TrainerEndBattleText (home/trainers.asm) prints _TrainerNameText
+      -- (wNameBuffer then ": ", data/text/text_1.asm) and only then the
+      -- saved pointer, so the loss line opens with the trainer class tag on
+      -- its first line (RIVAL1/2/3 tag with the rival's name:
+      -- TrainerNamePointers aims those entries at wTrainerName).  The tag
+      -- prints once, so a `para` page carries no second copy (#566).
+      local tag = self.trainer and self.trainer.name
       for page in (self.endBattleText .. "\f"):gmatch("(.-)\f") do
-        if page ~= "" then self:sayNext(page) end
+        if page ~= "" then
+          self:sayNext(tag and (tag .. ": " .. page) or page)
+          tag = nil
+        end
       end
     end
-    self:sayNext(Strings("%s got ¥%d\nfor winning!", self.game.save.player.name, prize))
+    self:sayNext(self:romText("_MoneyForWinningText", "%s got ¥%d\nfor winning!", self.game.save.player.name, prize))
   end
   self.result = "win"
   self.afterQueue = "finish"
@@ -3494,7 +3937,7 @@ function BattleState:learnMove(mon, moveId)
   if #mon.moves < 4 then
     table.insert(mon.moves, { id = moveId, pp = mdef.pp })
     Runtime.emit("pokemon.move_learned", { mon = mon, moveId = moveId })
-    self:sayNext(Strings("%s learned\n%s!", mon.nickname or self.data.pokemon[mon.species].name,
+    self:sayNext(self:romText("_MimicLearnedMoveText", "%s learned\n%s!", mon.nickname or self.data.pokemon[mon.species].name,
                                             mdef.name))
     return
   end
@@ -3576,11 +4019,11 @@ function BattleState:playerMonFainted()
       local pSpd = (game.save.party[1].stats or { speed = 0 }).speed or 0
       if self:runRoll(pSpd, TurnOrder.effectiveSpeed(self.enemy)) then
         require("src.core.Sound").play(self.data, "Run")
-        self:say(Strings("Got away safely!"))
+        self:say(self:romText("_GotAwayText", "Got away safely!"))
         self.result = "run"
         self.afterQueue = "finish"
       else
-        self:say(Strings("Can't escape!"))
+        self:say(self:romText("_CantEscapeText", "Can't escape!"))
       end
     end)
   end)
@@ -3600,7 +4043,7 @@ function BattleState:openReplacementMenu()
       forceSwitch = true,
       onSwitch = function(mon)
         if mon.hp <= 0 then
-          self:say(Strings("There's no will\nto fight!"))
+          self:say(self:romText("_NoWillText", "There's no will\nto fight!"))
           return -- the menu-phase guard reopens the menu
         end
         self:restoreMimicked(self.player)
@@ -3614,6 +4057,7 @@ function BattleState:openReplacementMenu()
         })
         self:markParticipant()
         self.nextInsert = 0
+        sendOutMonCursors(self)
         self.sendingOut = true
         self:sayNext(self:sendOutText(self.player.name))
         self:animNext("POOF_ANIM", false)
@@ -3644,7 +4088,7 @@ function BattleState:safariAction(choice)
 
   if choice == "run" then
     require("src.core.Sound").play(self.data, "Run")
-    self:say(Strings("Got away safely!"))
+    self:say(self:romText("_GotAwayText", "Got away safely!"))
     self.result = "run"
     self.afterQueue = "finish"
     return
@@ -3652,7 +4096,7 @@ function BattleState:safariAction(choice)
 
   if choice == "ball" then
     st.balls = st.balls - 1
-    self:say(Strings("%s used\nSAFARI BALL!", playerName))
+    self:sayAuto(Strings("%s used\nSAFARI BALL!", playerName))
     self:act(function()
       require("src.core.Sound").play(self.data, "Ball_Toss")
       self.lastBall = "SAFARI_BALL"
@@ -3681,12 +4125,12 @@ function BattleState:safariAction(choice)
   end
 
   if choice == "bait" then
-    self:say(Strings("%s threw some\nBAIT.", playerName))
+    self:say(self:romText("_ThrewBaitText", "%s threw some\nBAIT.", playerName))
     self.safariCatchRate = math.floor(self.safariCatchRate / 2)
     self.baitFactor = math.min(255, self.baitFactor + self.rng(1, 5))
     self.escapeFactor = 0
   else -- rock
-    self:say(Strings("%s threw a\nROCK.", playerName))
+    self:say(self:romText("_ThrewRockText", "%s threw a\nROCK.", playerName))
     self.safariCatchRate = math.min(255, self.safariCatchRate * 2)
     self.escapeFactor = math.min(255, self.escapeFactor + self.rng(1, 5))
     self.baitFactor = 0
@@ -3702,13 +4146,13 @@ end
 function BattleState:safariEnemyTurn()
   if self.baitFactor > 0 then
     self.baitFactor = self.baitFactor - 1
-    self:sayNext(Strings("Wild %s\nis eating!", self.enemy.name))
+    self:sayNext(self:romText("_SafariZoneEatingText", "Wild %s\nis eating!", self.enemy.name))
   elseif self.escapeFactor > 0 then
     self.escapeFactor = self.escapeFactor - 1
     if self.escapeFactor == 0 then
       self.safariCatchRate = self.enemy.def.catchRate
     end
-    self:sayNext(Strings("Wild %s\nis angry!", self.enemy.name))
+    self:sayNext(self:romText("_SafariZoneAngryText", "Wild %s\nis angry!", self.enemy.name))
   end
   self:act(function()
     local speed = self.enemy.curStats.speed % 256
@@ -3724,7 +4168,7 @@ function BattleState:safariEnemyTurn()
       fled = self.rng(0, 255) < b
     end
     if fled then
-      self:sayNext(Strings("Wild %s\nran!", self.enemy.name))
+      self:sayNext(self:romText("_WildRanText", "Wild %s\nran!", self.enemy.name))
       self:actNext(function()
         require("src.core.Sound").play(self.data, "Run")
         startPicKind(self:picFxFor(self.enemy), "slideOff")
@@ -3791,11 +4235,11 @@ function BattleState:tryRun()
                                TurnOrder.effectiveSpeed(self.enemy))
   if escaped then
     require("src.core.Sound").play(self.data, "Run")
-    self:say(Strings("Got away safely!"))
+    self:say(self:romText("_GotAwayText", "Got away safely!"))
     self.result = "run"
     self.afterQueue = "finish"
   else
-    self:say(Strings("Can't escape!"))
+    self:say(self:romText("_CantEscapeText", "Can't escape!"))
     self:act(function()
       self:executeAction(self.enemy, self.player, self:enemyAction())
     end)
@@ -3832,9 +4276,9 @@ function BattleState:ballMissMessage(shakes)
   elseif shakes == 1 then
     return t._ItemUseBallText02 or Strings("Darn! The POKéMON\nbroke free!")
   elseif shakes == 2 then
-    return (t._ItemUseBallText03 or Strings("Aww! It appeared\nto be caught!")):gsub("%s+$", "")
+    return (t._ItemUseBallText03 or self:romText("_ItemUseBallText03", "Aww! It appeared\nto be caught!")):gsub("%s+$", "")
   end
-  return t._ItemUseBallText04 or Strings("Shoot! It was so\nclose too!")
+  return t._ItemUseBallText04 or self:romText("_ItemUseBallText04", "Shoot! It was so\nclose too!")
 end
 
 -- AskName (engine/menus/naming_screen.asm): ClearSprites, wild field blank,
@@ -3845,7 +4289,7 @@ function BattleState:askNicknameUI(mon, displayName)
   self.lockedBall = nil
   self.blankForAskName = true
   local TextBox = require("src.render.TextBox")
-  local text = Strings("Do you want to\ngive a nickname\nto %s?", displayName)
+  local text = self:romText("_DoYouWantToNicknameText", "Do you want to\ngive a nickname\nto %s?", displayName)
   local label = game.data.text and game.data.text._DoYouWantToNicknameText
   if label then
     -- extractor CONT is \t; TextBox scrolls on \n/\v
@@ -3875,6 +4319,12 @@ function BattleState:storeCaughtMon()
   -- (item_effects.asm:472-501), regenerating its move list from the
   -- base data -- a Mimic'd slot never leaves the battle with it
   self:restoreMimicked(self.enemy)
+  -- battle.catch_exp: vanilla catches never grant exp; a mod can flip
+  -- this to true to pay out the same award a faint would have.
+  if Runtime.wantsHook("battle.catch_exp")
+     and Runtime.call("battle.catch_exp", function() return false end, { battle = self }) then
+    self:awardExp()
+  end
   local game = self.game
   local dex = game.save.pokedex
   local species = self.enemy.mon.species
@@ -3968,7 +4418,7 @@ function BattleState:throwBall(ball)
   -- "<PLAYER> used <ITEM>!" line (#291).  Safari and the old man demo are
   -- still wIsInBattle == 1, and this port models both as kind == "wild".
   if self.kind == "wild" then
-    self:say(Strings("%s used\n%s!", self.game.save.player.name,
+    self:sayAuto(self:romText("_ItemUseText001", "%s used\n%s!", self.game.save.player.name,
                                      self.data.items[ball].name))
   end
   self:act(function()
@@ -3990,9 +4440,9 @@ function BattleState:throwBall(ball)
       end)
       self:animNext("BLOCKBALL_ANIM", true)
       self:sayNext(t._ThrowBallAtTrainerMonText1
-                   or Strings("The trainer\nblocked the BALL!"))
+                   or self:romText("_ThrowBallAtTrainerMonText1", "The trainer\nblocked the BALL!"))
       self:sayNext(t._ThrowBallAtTrainerMonText2
-                   or Strings("Don't be a thief!"))
+                   or self:romText("_ThrowBallAtTrainerMonText2", "Don't be a thief!"))
       self:act(function()
         self:executeAction(self.enemy, self.player, self:enemyAction())
       end)
@@ -4055,7 +4505,7 @@ function BattleState:openParty()
         if mon == self.player.mon then
           self:say(Strings("%s is\nalready out!", self.player.name))
         elseif mon.hp <= 0 then
-          self:say(Strings("There's no will\nto fight!"))
+          self:say(self:romText("_NoWillText", "There's no will\nto fight!"))
         else
           self:resolveSwitch(mon)
         end
@@ -4081,7 +4531,7 @@ end
 function BattleState:finish()
   if self.payDay and self.result == "win" then
     self.game.save.money = self.game.save.money + self.payDay
-    self:say(Strings("%s picked up\n¥%d!", self.game.save.player.name, self.payDay))
+    self:say(self:romText("_PickUpPayDayMoneyText", "%s picked up\n¥%d!", self.game.save.player.name, self.payDay))
     self.payDay = nil
     self.afterQueue = "finish"
     self.phase = "messages"
@@ -4118,7 +4568,21 @@ function BattleState:finish()
   require("src.core.Music").restoreMap(self.data)
   self.game.stack:pop()
   Runtime.emit("battle.ended", { battle = self, result = self.result or "run" })
-  if self.onFinish then self.onFinish(self.result or "run") end
+  -- Coming back from the battle screen is a fade, not a cut: EnterMap sees
+  -- BIT_BATTLE_OVER_OR_BLACKOUT set and runs MapEntryAfterBattle
+  -- (home/overworld.asm:22, :749-753) = GBFadeInFromWhite.  This is the one
+  -- choke point every battle -- wild, trainer, walk-up, scripted, link --
+  -- passes through on its way out, so the fade is guaranteed here rather
+  -- than depending on each caller having wrapped onFinish correctly.
+  local result = self.result or "run"
+  local onFinish = self.onFinish
+  if result == "lose" then
+    -- the blackout path warps to the heal point with its own transition
+    if onFinish then onFinish(result) end
+    return
+  end
+  self.game.stack:push(require("src.render.Transition").battleReturn(self.game,
+    function() if onFinish then onFinish(result) end end))
 end
 
 -- ---------------------------------------------------------------------
@@ -4174,10 +4638,14 @@ function BattleState:growInScale(battler)
 end
 
 -- battler hidden this frame? (damage blink)
+--
+-- AnimationBlinkMon hides the pic, waits DelayFrames 5, shows it, waits
+-- DelayFrames 5, six times over (animations.asm:1360-1376) -- a 10-frame
+-- period, not 8.  With Timing.BLINK_MON that is exactly six blinks.
 function BattleState:fxHidden(battler)
   local fx = self.fx
   if fx and fx.blink and fx.blink.target == battler and fx.blink.frames > 0 then
-    return self.frame % 8 < 4
+    return self.frame % 10 < 5
   end
   return false
 end
@@ -4193,11 +4661,15 @@ end
 -- pixels, so it scales with the pic's draw scale (the player's default 2x
 -- sinks 2x as fast to sink at the same visual rate); a mod scale composes
 -- the same way.  scale defaults to the vanilla side scale when unknown.
+-- SlideDownFaintedMonPic drops the pic one 8px row per 2-frame step, so
+-- the offset advances Timing.FAINT_SLIDE_STEP (4px) per frame at 1x --
+-- the full 56px PIC_HEIGHT slide over the 14-frame budget (#671: the
+-- old (30 - frames) math teleported the sprite 32px down on frame one).
 function BattleState:fxFaintOffset(battler, scale)
   local fx = self.fx
   if self:fxFaintActive(battler) then
     scale = scale or (battler.isPlayer and 2 or 1)
-    return (30 - fx.faint.frames) * 2 * scale
+    return (Timing.FAINT_SLIDE - fx.faint.frames) * Timing.FAINT_SLIDE_STEP * scale
   end
   return 0
 end
@@ -4303,6 +4775,18 @@ function BattleState:drawBattlerPic(battler, x, y, scale)
     return
   end
   if battler.fainted then return end
+
+  -- MarowakAnim's rOBP1 fades (updateFx): alpha over the paper is what those
+  -- palette shifts look like, and the test has to sit ahead of the plain
+  -- fast path below (#492)
+  local fadePf = self.picFx and self.picFx[battler]
+  if fadePf and fadePf.fade then
+    local cr, cg, cb, ca = love.graphics.getColor()
+    love.graphics.setColor(cr, cg, cb, ca * fadePf.fade)
+    love.graphics.draw(img, x, y, 0, scale, scale)
+    love.graphics.setColor(cr, cg, cb, ca)
+    return
+  end
 
   local pf = self.picFx and self.picFx[battler]
   if not pf or (not pf.kind and not pf.hidden and not pf.minimized
@@ -4869,11 +5353,12 @@ function BattleState:drawHUDs(slide)
     self:drawBallRow(self.enemyParty, 64, 16, -8)
   end
 
-  -- Safari shows only the ball count; the old man demo shows neither mon
-  if self.safari then
-    love.graphics.setColor(0, 0, 0, 1)
-    Font.draw(("BALLx%2d"):format(self.safari.balls), 88, 72)
-  end
+  -- A safari / old-man battle has no player mon out, so no player HUD (see
+  -- hidePlayer below).  Nothing takes its place: PrintSafariZoneSteps -- the
+  -- "nnn/500 / BALLx nn" box -- is start-menu only and returns early off the
+  -- nine interior maps (engine/overworld/player_state.asm:219-224), so no
+  -- ball count belongs over the battlefield.  The count lives in the BALL
+  -- menu item instead (drawTextArea, #540).
   -- Party pokeball rows and the HUD chrome under them, for exactly the
   -- window DrawAllPokeballs owns (common_text.asm:27, with the intro text).
   -- SetupOwnPartyPokeballs runs in EVERY battle, so the player's row belongs
@@ -4933,7 +5418,8 @@ end
 function BattleState:drawTextArea()
   Font.drawBox(0, 12, 20, 6)
   love.graphics.setColor(0, 0, 0, 1)
-  if self.phase == "messages" and (self.current or self.animPlaying) then
+  if self.phase == "messages"
+     and (self.current or self.animPlaying or self.msgHold) then
     -- during the move animation self.current is nil but shown still holds
     -- the "used X!" lines; keep drawing them like pokered, whose move
     -- animations only touch sprites and never the textbox tilemap (#296)
@@ -4978,6 +5464,11 @@ function BattleState:drawTextArea()
       Font.drawBox(0, 12, 20, 6)
       Font.draw(Strings("BALLx"), 16, 112); Font.draw(Strings("BAIT"), 112, 112)
       Font.draw(Strings("THROW ROCK"), 16, 128); Font.draw(Strings("RUN"), 112, 128)
+      -- DisplayBattleMenu .safariLeftColumn / .safariRightColumn print
+      -- wNumSafariBalls at hlcoord 7,14 with `lb bc, 1, 2` -- one byte, two
+      -- digits, space padded -- right after the "BALLx" label at columns
+      -- 2..6 (engine/battle/core.asm:2074-2079, 2107-2112) (#540)
+      Font.draw(("%2d"):format(self.safari.balls), 56, 112)
       Font.drawCode(0xED, (col == 0 and 8 or 104), 112 + row * 16)
     else
       -- BATTLE_MENU_TEMPLATE: box (8,12)-(19,17), "FIGHT <PK><MN> /
@@ -5069,7 +5560,8 @@ function BattleState:drawClassic()
   if sx == 0 and sy == 0 and fx and fx.shake and fx.shake > 0 then
     sx = self.frame % 4 < 2 and 2 or -2
   end
-  local slide = (self.introSlide or 0) * 4 -- intro slide-in offset
+  -- intro slide-in offset: 2 px per frame, so 144 px over 72 frames
+  local slide = (self.introSlide or 0) * Timing.BATTLE_SLIDE_PX_PER_FRAME
 
   if self:colorMode() then
     -- SGB pipeline: gray BG canvas -> (wavy) -> zone recolor with the

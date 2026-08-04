@@ -47,14 +47,23 @@ function PokedexMenu.new(game, opts)
     end
   end
   local list = ListMenu.new(game, "POKéDEX", items, {
-    footer = Strings("SEEN %d  OWNED %d", seen, owned),
+    -- SEEN / OWN in the original's fixed three-digit field: engine/menus/
+    -- pokedex.asm HandlePokedexListMenu prints both counts with
+    -- `lb bc, 1, 3` (hlcoord 16,3 and 16,6), labelled by PokedexSeenText
+    -- and PokedexOwnText ("OWN", not "OWNED").  The width is load bearing
+    -- here: a bare ListMenu footer goes through the 18-column text wrap,
+    -- so the old 19-glyph "SEEN 100  OWNED 100" split in two and its first
+    -- half landed on the list's last row at y=120 (#639).
+    footer = Strings("SEEN %3d  OWN %3d", seen, owned),
     pageJump = true, -- Left/Right page jumps like the original
     onCancel = opts.onCancel, -- B returns to the start menu when opened from it
-    onChoose = function(item)
+    onChoose = function(item, dexList)
       if not item.value then return end
       -- the DATA / CRY / AREA / QUIT choice (engine/menus/pokedex.asm
       -- PokedexMenuItemsText); CRY keeps the side menu open like the
-      -- original, QUIT returns to the list
+      -- original.  B is what returns to the list: HandlePokedexSideMenu
+      -- hands back b=2 for B and b=1 for QUIT, and ShowPokedexMenu sends
+      -- b=1 to .exitPokedex, so QUIT closes the whole Pokédex (#571)
       local Menu = require("src.ui.Menu")
       local Screens = require("src.ui.Screens")
       local entries = {
@@ -91,7 +100,13 @@ function PokedexMenu.new(game, opts)
             or Strings("Printer error!\n%s", tostring(err))))
         end }
       end
-      entries[#entries + 1] = { label = Strings("QUIT") }
+      entries[#entries + 1] = { label = Strings("QUIT"), onSelect = function()
+        -- .exitPokedex: drop the dex list too and hand back to whoever
+        -- opened it (the start menu, whose saved cursor is still on
+        -- POKéDEX -- wBattleAndStartSavedMenuItem)
+        dexList:close()
+        if opts.onCancel then opts.onCancel() end
+      end }
       game.stack:push(Menu.new(game, entries,
         { tx = 12, ty = 8, tw = 8,
           th = #entries * 2 + 2 }))

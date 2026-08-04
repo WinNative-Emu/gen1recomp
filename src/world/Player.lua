@@ -12,10 +12,24 @@ local Player = {}
 Player.__index = Player
 
 local STEP_FRAMES = 16
--- a turn in place holds for the ~2 frames the original spends on the
--- extra OverworldLoop pass (home/overworld.asm .handleDirectionButtonPress
--- returns to the loop without moving after a direction change)
-local TURN_FRAMES = 2
+-- a turn in place blocks movement for the one extra OverworldLoop pass the
+-- original spends after a direction change: .handleDirectionButtonPress ends
+-- `jp OverworldLoop` (home/overworld.asm), and OverworldLoop burns two
+-- DelayFrame calls before the next JoypadOverworld, so the step can only
+-- commit at the following poll -- the same 2-frames-per-iteration cadence
+-- that makes STEP_FRAMES 16 above (wWalkCounter = 8, 2px per
+-- AdvancePlayerSprite).
+-- Those polls sit on a 2-frame grid, so the hardware samples a press 0 or 1
+-- frames after the d-pad physically goes down and the release deadline lands
+-- 2 or 3 frames after that.  We sample on the frame the button goes down
+-- with none of that poll latency, so a flat 2 handed every tap the tightest
+-- case the original could produce; 4 covers the grid instead of
+-- undercutting it (#415).
+local TURN_FRAMES = 4
+-- The on-screen d-pad cannot produce a 60ms tap: a finger press and release
+-- run well past it even before the OS batches the touch events, so the
+-- overlay gets a longer window than a physical pad (#415).
+local TOUCH_TURN_FRAMES = 8
 
 function Player.new(data, cx, cy, facing)
   local self = setmetatable({}, Player)
@@ -27,10 +41,17 @@ function Player.new(data, cx, cy, facing)
   -- LoadSurfingPlayerSpriteGraphics, home/overworld.asm)
   local walkId = FieldDefaults.fieldValue(data, "playerSprites", "walk")
   local surfId = FieldDefaults.fieldValue(data, "playerSprites", "surf")
+  local surfPikaId = FieldDefaults.fieldValue(data, "playerSprites", "surfPikachu")
   local bikeId = FieldDefaults.fieldValue(data, "playerSprites", "bike")
   self.sprite = SpriteRenderer.new(data.sprites[walkId], "player")
   if surfId and data.sprites[surfId] then
     self.surfSprite = SpriteRenderer.new(data.sprites[surfId], "player")
+  end
+  -- Yellow's surfing-Pikachu ride (Yellow LoadSurfingPlayerSpriteGraphics2,
+  -- paired with field.playerSprites.surfPikachu). rotated in at pose()
+  -- when the SURF-mon is a Pikachu.
+  if surfPikaId and data.sprites[surfPikaId] then
+    self.surfPikachuSprite = SpriteRenderer.new(data.sprites[surfPikaId], "player")
   end
   if bikeId and data.sprites[bikeId] then
     self.bikeSprite = SpriteRenderer.new(data.sprites[bikeId], "player")
@@ -63,6 +84,11 @@ function Player.new(data, cx, cy, facing)
   self.progress = 0
   self.stepFlip = false
   self.turnTimer = 0
+  -- wCheckFor180DegreeTurn (home/overworld.asm): the original only lets a
+  -- turn in place happen on a poll whose previous pass found no direction
+  -- held.  It starts armed, tryMove spends it, and OverworldState:handleInput
+  -- re-arms it from a standstill.
+  self.turnArmed = true
   self.inputLocked = false
   return self
 end
@@ -71,14 +97,35 @@ function Player:position()
   return self.cellX, self.cellY
 end
 
+-- How long a fresh turn holds the step off for; see TURN_FRAMES.  The
+-- overlay is detected per source rather than by whether the touch controls
+-- are on screen, so a phone with a controller attached still gets the
+-- physical pad's window (Input:isTouchDown, src/core/Input.lua).
+function Player:turnWindow()
+  local frames = self.turnFrames or TURN_FRAMES
+  local input = require("src.core.Game").input
+  if input and input.isTouchDown and input:isTouchDown(self.facing) then
+    return math.max(frames, TOUCH_TURN_FRAMES)
+  end
+  return frames
+end
+
 -- Attempt to start a step; returns "moved"|"turned"|"blocked"|nil.
 function Player:tryMove(dir, map, entities)
   if self.moving or self.inputLocked then return nil end
   if self.facing ~= dir then
     self.facing = dir
-    self.turnTimer = self.turnFrames or TURN_FRAMES
     self.bumpFrames = nil -- turning to a new facing ends any wall-bonk cycle
-    return "turned"
+    -- .handleDirectionButtonPress only reaches the turn while
+    -- wCheckFor180DegreeTurn is still set, and .noDirectionButtonsPressed is
+    -- the one place that sets it (home/overworld.asm), so a facing change
+    -- made without the d-pad ever coming up steps straight away rather than
+    -- paying the turn delay at every corner (#415)
+    if self.turnArmed then
+      self.turnArmed = false
+      self.turnTimer = self:turnWindow()
+      return "turned"
+    end
   end
   if self.turnTimer > 0 then return nil end
   local ok, why = Collision.canMove(map, entities, self, dir)
@@ -248,6 +295,7 @@ function Player:pose()
   -- RodResponse (engine/items/item_effects.asm) zeroes wWalkBikeSurfState
   -- across FishingAnim, so casting from the water shows the on-foot sheet
   local sprite = (self.fishing and self.sprite)
+                 or (self.surfing and self.surfingPikachu and self.surfPikachuSprite)
                  or (self.surfing and self.surfSprite)
                  or (self.onBike and self.bikeSprite) or self.sprite
   return sprite, self.px, py, facing, phase, flip, hopping

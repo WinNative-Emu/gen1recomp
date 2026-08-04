@@ -111,7 +111,7 @@ Game.save.party = { mkMon("MACHOP", "STRENGTH") }
 Game.save.inventory = { RAINBOWBADGE = true }
 local ow = pushOW("SEAFOAM_ISLANDS_1F", 17, 10, "right")
 local pmStr = PartyMenu.new(Game)
-selectSubItem(pmStr, 3)
+selectSubItem(pmStr, 1)
 check(isText(Game.stack:top()), "STRENGTH opens _UsedStrengthText")
 eq(backdrop(), pmStr, "the party menu is the backdrop of _UsedStrengthText")
 drainOne()
@@ -133,7 +133,7 @@ Game.save.inventory = { SOULBADGE = true }
 ow = pushOW("PALLET_TOWN", 4, 13, "down")
 ow.player.surfing = false
 local pmSurf = PartyMenu.new(Game)
-selectSubItem(pmSurf, 3)
+selectSubItem(pmSurf, 1)
 check(isText(Game.stack:top()), "SURF opens _SurfingGotOnText")
 eq(backdrop(), pmSurf, "the party menu is the backdrop of _SurfingGotOnText")
 drainOne()
@@ -148,7 +148,7 @@ eq(Game.stack:top(), ow, "SURF ends on the map")
 ow = pushOW("PALLET_TOWN", 4, 15, "down")
 ow.player.surfing = true
 local pmNoOff = PartyMenu.new(Game)
-selectSubItem(pmNoOff, 3)
+selectSubItem(pmNoOff, 1)
 check(isText(Game.stack:top()), "a blocked dismount opens _SurfingNoPlaceToGetOffText")
 eq(backdrop(), pmNoOff, "the party menu is the backdrop of the no-place message")
 drainOne()
@@ -160,7 +160,11 @@ ow.player.surfing = false
 -- =====================================================================
 -- .flash: `xor a / ld [wMapPalOffset], a` is undone before PrintText in
 -- the asm, but the map is not on screen then -- the party menu is -- so
--- the lit cave may only appear once the blink hands the screen back
+-- the lit cave may only appear once the blink hands the screen back.
+-- The lighting itself happens as the message closes the menu, ahead of
+-- the blink like the asm: in ADVANCED that call rebakes every resident
+-- map, and behind the blink's completion that cost was spent with a
+-- blank white frame as the newest thing on screen (#610).
 -- =====================================================================
 Game.save.flashLit = false
 Game.save.party = { mkMon("PIKACHU", "FLASH") }
@@ -168,13 +172,15 @@ Game.save.inventory = { BOULDERBADGE = true }
 ow = pushOW("ROCK_TUNNEL_1F", 15, 4, "down")
 eq(ow.dark, true, "ROCK_TUNNEL_1F loads dark before FLASH")
 local pmFlash = PartyMenu.new(Game)
-selectSubItem(pmFlash, 3)
+selectSubItem(pmFlash, 1)
 check(isText(Game.stack:top()), "FLASH opens _FlashLightsAreaText")
 eq(backdrop(), pmFlash, "the party menu is the backdrop of _FlashLightsAreaText")
 eq(ow.dark, true, "the tunnel is still dark while the message is up")
 drainOne()
 check(isBlink(Game.stack:top()), "the blink follows the FLASH message")
-eq(ow.dark, true, "the tunnel is still dark when the blink starts")
+-- lit before the blink is pushed, so no rebuild can run while the white
+-- frame is the newest one presented (#610); the blink hides it either way
+eq(ow.dark, false, "the tunnel is lit by the time the blink starts")
 settle(ow)
 eq(Game.stack:top(), ow, "FLASH ends on the map")
 eq(ow.dark, false, "the tunnel is lit once the blink hands the map back")

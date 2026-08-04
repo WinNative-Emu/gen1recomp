@@ -198,24 +198,43 @@ pack_game_love() {
   rm -f "$LOVE_FILE"
   # tools/save-editor ships with the app: the launcher's Edit button on a save
   # row opens it in-process, so it must be inside the archive (see build.sh).
+  # Deliberately NO fused mods: a mod inside game.love sits in the read-only
+  # APK, so the mod manager's Delete can't remove it and it reappears every
+  # launch.  Pokewalker ships as an importable .zip instead, which gives it
+  # a real install/upgrade/delete lifecycle.
+  # libs/ carries the vendored FlexLove toolkit the launcher UI is built on
+  # (src/import/LauncherView.lua requires it at the top level, and RomImporter
+  # calls into that view from both update and draw), so an archive without it
+  # dies on the first frame with nothing left to fall back to.
   (cd "$ROOT" && zip -q -9 -r "$LOVE_FILE" \
-    main.lua conf.lua src data assets tools/save-editor \
+    main.lua conf.lua src libs data assets tools/save-editor \
     tools/rom_manifest.json tools/rom_manifest_blue.json \
     tools/rom_manifest_yellow.json \
     -x '*.DS_Store' -x '*/.git/*' -x '*/.DS_Store' \
     -x 'data/generated/*' -x 'assets/generated/*')
-  if unzip -Z1 "$LOVE_FILE" \
-      | grep -Eq '^(data|assets)/generated/[^/]+|^(data|assets)/generated/.+/'; then
-    fail "game.love unexpectedly contains generated ROM data"
-  fi
-  # Do not pipe unzip straight into grep here: on a large archive grep can
-  # finish early and make unzip report SIGPIPE under `set -o pipefail`.
+  # List once and match against the captured text: piping unzip straight into
+  # grep under `set -o pipefail` SIGPIPEs unzip as soon as grep exits early,
+  # and the pipeline's 141 outranks grep's own status.  For the generated-data
+  # guard that inverted the test -- an archive that really did carry generated
+  # ROM data made grep match, killed unzip, and the `if` read the 141 as "no
+  # match" and let the build through (#774).  Same listing feeds the
+  # required-file gates below, as in scripts/build.sh and scripts/pack_love.sh.
   local archive_entries
   archive_entries="$(unzip -Z1 "$LOVE_FILE")"
+  if grep -Eq '^(data|assets)/generated/[^/]+|^(data|assets)/generated/.+/' \
+      <<< "$archive_entries"; then
+    fail "game.love unexpectedly contains generated ROM data"
+  fi
   grep -qx 'tools/save-editor/App.lua' <<< "$archive_entries" \
     || fail "game.love is missing the save editor (Edit on a save row would crash)"
   grep -qx "$YELLOW_MANIFEST_RELATIVE" <<< "$archive_entries" \
     || fail "game.love is missing the Yellow ROM import manifest"
+  # This gate exists because libs/ was added to scripts/build.sh's payload and
+  # to no other packager, so Android and iOS built an APK/IPA whose launcher
+  # threw on require("libs.flexlove.FlexLove") before drawing anything.  Source
+  # runs read libs/ off the working tree, so only a build can catch it.
+  grep -qx 'libs/flexlove/FlexLove.lua' <<< "$archive_entries" \
+    || fail "game.love is missing the FlexLove UI toolkit (launcher dies on frame 1)"
   say "game.love: $(du -h "$LOVE_FILE" | cut -f1) -> $LOVE_FILE"
 
   # This script packs its own game.love (it does not reuse build.sh's), so it
@@ -290,10 +309,32 @@ require_android_sdk() {
 # --------------------------------------------------------------- gradle
 run_gradle() {
   local task="assembleEmbedNoRecordDebug"
-  say "building APK ($task)"
+  local build_dir="$ANDROID_DIR"
 
+  # ndk-build is GNU make underneath and cannot cope with spaces anywhere in
+  # the project path ("Your APP_BUILD_SCRIPT points to an unknown file").
+  # When this checkout lives at a spaced path (e.g. "~/xCode Projects/..."),
+  # shadow the android tree to a space-free location and build there; the
+  # shadow persists across runs so gradle/ndk builds stay incremental.
+  case "$ANDROID_DIR" in
+    *" "*)
+      build_dir="${TMPDIR:-/tmp}/gen1recomp-android-shadow"
+      say "path contains spaces (ndk-build cannot handle them);"
+      say "shadow-building in: $build_dir"
+      mkdir -p "$build_dir"
+      rsync -a --delete \
+        --exclude=".gradle" --exclude="app/build" --exclude="love/build" \
+        --exclude="local.properties" \
+        "$ANDROID_DIR/" "$build_dir/"
+      if [ -f "$ANDROID_DIR/local.properties" ]; then
+        cp "$ANDROID_DIR/local.properties" "$build_dir/local.properties"
+      fi
+      ;;
+  esac
+
+  say "building APK ($task)"
   if ! (
-    cd "$ANDROID_DIR"
+    cd "$build_dir"
     ./gradlew --no-daemon "$task"
   ); then
     fail "gradle $task failed.
@@ -302,7 +343,7 @@ run_gradle() {
   You can still iterate on the .love payload with: scripts/build_android.sh --package-only"
   fi
 
-  local out_dir="$ANDROID_DIR/app/build/outputs/apk/embedNoRecord/debug"
+  local out_dir="$build_dir/app/build/outputs/apk/embedNoRecord/debug"
   if [ -d "$out_dir" ]; then
     say "APK output:"
     find "$out_dir" -name '*.apk' -exec ls -lh {} \;

@@ -528,5 +528,621 @@ do
   end
 end
 
+do
+  -- #515: badge read/write agreement between SaveData/the in-game grant
+  -- and the editor.  checkVictoryRewards (src/world/OverworldController.lua)
+  -- writes save.inventory[badge] = 1, a truthy number, not the boolean
+  -- `true` the editor used to compare against with `== true`.  This drives
+  -- the same field through a real save encode/decode round trip and checks
+  -- src/inventory/Badges.count (what the in-game badge case/count reads)
+  -- agrees with what the editor's own badge state shows.
+  local Badges = require("src.inventory.Badges")
+
+  local save = SaveData.newGame()
+  local id = Badges.list(Data)[1].id
+  -- simulate the in-game grant's exact representation, not the editor's
+  save.inventory[id] = 1
+  eq(Badges.count(Data, save), 1, "Badges.count sees a numeric 1 grant as earned")
+
+  local encoded = SaveData.encode(save)
+  local back = SaveData.decode(encoded)
+  eq(back.inventory[id], 1, "save round trip preserves the numeric badge flag")
+  eq(Badges.count(Data, back), 1, "Badges.count still agrees after the round trip")
+
+  local S = State.new()
+  S.data = Data
+  S.cat = Catalog.build(Data)
+  S.save = back
+  check(Ops.badgeIds(S)[1] ~= nil, "the editor's badge catalog is non-empty")
+  check(S.save.inventory[id] and true or false,
+        "the editor's own truthy read (panel badge chip state) sees the grant as earned")
+
+  -- toggling off then on again round-trips through the editor's own write
+  -- shape and still agrees with Badges.count
+  Ops.toggleBadge(S, id)
+  eq(S.save.inventory[id], nil, "toggleBadge clears the badge (nil, not false)")
+  eq(Badges.count(Data, S.save), 0, "Badges.count agrees once cleared")
+  Ops.toggleBadge(S, id)
+  eq(S.save.inventory[id], 1, "toggleBadge re-earns the badge as a truthy 1, matching the in-game grant")
+  eq(Badges.count(Data, S.save), 1, "Badges.count agrees once re-earned")
+end
+
+do
+  -- #529: focusing a text field raises the OS soft keyboard on Android/iOS
+  -- (love.keyboard.setTextInput(true, x, y, w, h)) and blurring lowers it;
+  -- desktop raises the same way but never lowers, since setTextInput is
+  -- global SDL state and the launcher's own text fields (RomImporter slot
+  -- rename, ROM finder) depend on it staying enabled.
+  --
+  -- This is the closest honest check this checkout can run: the real soft
+  -- keyboard is OS chrome outside the LOVE frame, unreachable by any
+  -- driver. A human still has to verify on an Android build that the
+  -- keyboard visibly rises over the Items search bar, typed characters
+  -- filter the list, and Enter/Escape/switching tabs lowers it again.
+  local Kit = require("Kit")
+  local calls = {}
+  local savedKeyboard, savedSystem = love.keyboard, love.system
+
+  local function stubOS(name)
+    love.system = { getOS = function() return name end }
+    love.keyboard = {
+      isDown = function() return false end,
+      setTextInput = function(...) calls[#calls + 1] = { ... } end,
+    }
+  end
+
+  -- Android: focusing raises with the field's rect, restaying focused on
+  -- the same id does not re-raise, and blur lowers it.
+  stubOS("Android")
+  Kit.focus = nil
+  Kit.beginFrame(15, 15, true)
+  Kit.textfield("kb-test", 10, 10, 100, 20, "", "type here")
+  eq(#calls, 1, "Android: focusing a field raises the soft keyboard")
+  check(calls[1][1] == true, "Android: raise call passes enable=true")
+  eq(calls[1][2], 10, "Android: raise call passes the field's x")
+  eq(calls[1][3], 10, "Android: raise call passes the field's y")
+  eq(calls[1][4], 100, "Android: raise call passes the field's w")
+  eq(calls[1][5], 20, "Android: raise call passes the field's h")
+
+  Kit.beginFrame(15, 15, false)
+  Kit.textfield("kb-test", 10, 10, 100, 20, "abc", "type here")
+  eq(#calls, 1, "Android: staying focused on the same field does not re-raise")
+
+  Kit.blur()
+  eq(#calls, 2, "Android: blur lowers the soft keyboard")
+  eq(calls[2][1], false, "Android: lower call passes enable=false")
+  check(Kit.focus == nil, "blur clears Kit.focus")
+
+  -- Desktop: focusing still raises (harmless there), but blur must not
+  -- disable text input globally -- the launcher's own fields rely on it
+  -- staying on.
+  calls = {}
+  stubOS("Mac OS X")
+  Kit.beginFrame(65, 65, true)
+  Kit.textfield("kb-test2", 60, 60, 80, 24, "", "")
+  eq(#calls, 1, "desktop: focusing a field still raises setTextInput")
+  Kit.blur()
+  eq(#calls, 1, "desktop: blur does not call setTextInput(false)")
+
+  love.keyboard, love.system = savedKeyboard, savedSystem
+  Kit.focus = nil
+end
+
+do
+  -- #541: changing species took the editor down.  The inspector's arrows
+  -- called MonOps.setSpecies on whatever record came next in the catalog, and
+  -- the stat recalculation indexes baseStats.<stat> unconditionally
+  -- (src/pokemon/Stats.lua, ported from home/move_mon.asm CalcStat) because
+  -- the asm's BaseStats is a fixed 151-entry table with no partial rows.  The
+  -- editor's catalog is NOT that table: it is every key in Data.pokemon after
+  -- the mod merge, and a partial record survives that merge as a warning
+  -- rather than a rejection (src/mods/Schemas.lua R.pokemon).  So the sweep
+  -- below is the real check -- every id the catalog offers has to either
+  -- assign or refuse in words, and neither may raise.
+  local S = State.new()
+  S.data = Data
+  S.save = SaveData.newGame()
+
+  -- a mod-shaped partial record: registered, listed, missing the stats the
+  -- Gen1 formulas read
+  Data.pokemon.TESTMON_PARTIAL = { name = "TESTMON", dex = 0,
+    baseStats = { hp = 40, attack = 30 }, growthRate = "MEDIUM_FAST",
+    types = { "NORMAL" }, learnset = {} }
+  S.cat = Catalog.build(Data)
+
+  check(Ops.speciesUsable(S, "PIKACHU"), "a complete record is usable")
+  check(Ops.speciesUsable(S, "TESTMON_PARTIAL") == false,
+        "a record missing base stats is not usable")
+  check(Ops.speciesUsable(S, "NO_SUCH_SPECIES") == false,
+        "an id that is not in the data at all is not usable")
+
+  local mon = MonOps.create(Data, "WARTORTLE", 20)
+  S.editingMon = mon
+  local statsBefore = mon.stats.attack
+  check(Ops.setSpecies(S, mon, "TESTMON_PARTIAL") == false,
+        "setSpecies refuses a record the formulas cannot use")
+  eq(mon.species, "WARTORTLE", "a refused setSpecies leaves the mon alone")
+  eq(mon.stats.attack, statsBefore, "a refused setSpecies leaves the stats alone")
+  check(S.status:match("base stats") ~= nil, "a refused setSpecies explains itself")
+  check(S.dirty == false, "a refused setSpecies does not dirty the save")
+
+  -- the crash itself: walk the whole catalog the way the arrows did
+  local landed = {}
+  local walkOk, walkErr = pcall(function()
+    for _ = 1, #S.cat.species do
+      Ops.stepSpecies(S, mon, 1)
+      landed[mon.species] = true
+      assert(Ops.speciesUsable(S, mon.species),
+        "stepSpecies parked on " .. tostring(mon.species))
+    end
+  end)
+  check(walkOk, "cycling the whole catalog never errors: " .. tostring(walkErr))
+  check(landed.TESTMON_PARTIAL == nil, "cycling steps over an unusable record")
+  check(landed.PIKACHU, "cycling still reaches ordinary species")
+
+  local backOk, backErr = pcall(function()
+    for _ = 1, #S.cat.species do Ops.stepSpecies(S, mon, -1) end
+  end)
+  check(backOk, "cycling backwards never errors: " .. tostring(backErr))
+
+  -- and every real id assigns, so "nothing crashes" cannot be bought by
+  -- refusing everything
+  local assigned, refused = 0, 0
+  for _, id in ipairs(S.cat.species) do
+    if id ~= "TESTMON_PARTIAL" then
+      local ok, err = pcall(Ops.setSpecies, S, mon, id)
+      check(ok, "setSpecies " .. id .. ": " .. tostring(err))
+      if ok and mon.species == id then assigned = assigned + 1 else refused = refused + 1 end
+    end
+  end
+  eq(refused, 0, "no real species is refused")
+  check(assigned > 140, "the whole dex assigns (" .. assigned .. " species)")
+
+  Data.pokemon.TESTMON_PARTIAL = nil
+end
+
+do
+  -- #541 search predicate.  The picker replaced the arrows, so the filter is
+  -- the only way to reach a species now and its rules are worth pinning: ids
+  -- and names substring-match case-insensitively, a dex number matches whole
+  -- (a substring match would answer "25" with ELECTABUZZ, #125), and the
+  -- query is plain text, not a Lua pattern.
+  local S = State.new()
+  S.data = Data
+  S.cat = Catalog.build(Data)
+  S.save = SaveData.newGame()
+
+  check(Ops.speciesMatches(S, "PIKACHU", "pika"), "lowercase query matches an id")
+  check(Ops.speciesMatches(S, "PIKACHU", "KACH"), "a mid-word substring matches")
+  check(Ops.speciesMatches(S, "PIKACHU", "25"), "a bare dex number matches")
+  check(Ops.speciesMatches(S, "PIKACHU", "025"), "the padded dex number matches")
+  check(Ops.speciesMatches(S, "ELECTABUZZ", "25") == false,
+        "a dex number does not substring-match #125")
+  check(Ops.speciesMatches(S, "PIKACHU", ""), "an empty query matches everything")
+
+  eq(#Ops.speciesSearch(S, ""), #S.cat.species, "an empty search lists the catalog")
+  -- a dot is a literal, not a pattern wildcard: MR.MIME is the one species
+  -- whose printed name carries one, so it is the whole result
+  local dots = Ops.speciesSearch(S, ".")
+  eq(#dots, 1, "a dot matches literally instead of matching everything")
+  eq(dots[1], "MR_MIME", "and the literal it matched is MR.MIME's name")
+  eq(#Ops.speciesSearch(S, "%a"), 0, "a pattern class is literal too")
+  check(#Ops.speciesSearch(S, "zzzznope") == 0, "a miss returns nothing")
+  local pika = Ops.speciesSearch(S, "pikachu")
+  eq(#pika, 1, "an exact name search narrows to one")
+  eq(pika[1], "PIKACHU", "and it is the right one")
+end
+
+do
+  -- #541 end to end through App: open the picker off a selected slot, type,
+  -- commit with Enter.  Enter and Escape have to be taken before the focused
+  -- field sees them -- Kit maps both to the same "\r" edit, which cannot tell
+  -- "commit the top match" from "give up".
+  local Kit = require("Kit")
+  local SpeciesPicker = require("SpeciesPicker")
+  local tmpPath = os.tmpname() .. "-picker-save.lua"
+  local data = SaveData.newGame()
+  data.party = { MonOps.create(Data, "WARTORTLE", 20) }
+  local f = io.open(tmpPath, "wb")
+  f:write(SaveData.encode(data))
+  f:close()
+
+  App.load(tmpPath, { version = "red" })
+  local S = App.getState()
+  S.tab = "party"
+
+  check(Ops.openSpeciesPicker(S, Kit) == false,
+        "the picker refuses to open with no slot selected")
+  check(S.speciesPicker == nil, "and it stayed closed")
+  check(S.status:match("Pick a slot") ~= nil, "and it said why")
+
+  Ops.selectParty(S, 1)
+  check(Ops.openSpeciesPicker(S, Kit) == true, "the picker opens on a selected slot")
+  check(S.speciesPicker ~= nil, "the picker is up")
+  eq(S.speciesPicker.query, "", "it opens with an empty query")
+  eq(Kit.focus, "species-picker", "it opens with the field focused (#529 keyboard)")
+
+  local ok, err = pcall(App.draw)
+  check(ok, "the picker draws headlessly: " .. tostring(err))
+
+  App.textinput("PIKACHU")
+  ok, err = pcall(App.draw)
+  check(ok, "the picker draws while typing: " .. tostring(err))
+  eq(S.speciesPicker.query, "PIKACHU", "typing reaches the picker's field")
+  eq(#SpeciesPicker.results(S), 1, "the list narrowed to the typed species")
+
+  App.keypressed("return")
+  eq(S.save.party[1].species, "PIKACHU", "Enter commits the top match")
+  check(S.speciesPicker == nil, "and closes the picker")
+  check(S.dirty, "and the save is dirty")
+
+  -- Escape leaves without touching the mon
+  Ops.openSpeciesPicker(S, Kit)
+  App.textinput("BULBASAUR")
+  App.draw()
+  App.keypressed("escape")
+  check(S.speciesPicker == nil, "Escape closes the picker")
+  eq(S.save.party[1].species, "PIKACHU", "Escape did not commit anything")
+  check(S.editingMon ~= nil, "Escape closed the picker, not the selection")
+
+  -- a query nothing matches cannot commit
+  Ops.openSpeciesPicker(S, Kit)
+  App.textinput("zzzznope")
+  App.draw()
+  App.keypressed("return")
+  check(S.speciesPicker ~= nil, "Enter on an empty result set keeps the picker up")
+  check(S.status:match("No species matches") ~= nil, "and says so")
+  eq(S.save.party[1].species, "PIKACHU", "and changes nothing")
+  Ops.closeSpeciesPicker(S, Kit)
+
+  os.remove(tmpPath)
+  for _, bak in ipairs(FsIo.globPrefix(tmpPath .. ".bak-")) do os.remove(bak) end
+end
+
+do
+  -- #541 modal shield.  Kit hit-tests without a z-order, so the picker cannot
+  -- simply be drawn last: the chrome and the panel underneath would take the
+  -- same tap.  App raises Kit.blockClicks around everything it draws before
+  -- the picker and lowers it for the picker's own layer, which is asserted
+  -- here by watching what Kit.press sees over one frame rather than by
+  -- clicking coordinates the design is free to move.
+  local Kit = require("Kit")
+  local tmpPath = os.tmpname() .. "-shield-save.lua"
+  local data = SaveData.newGame()
+  data.party = { MonOps.create(Data, "WARTORTLE", 20) }
+  local f = io.open(tmpPath, "wb")
+  f:write(SaveData.encode(data))
+  f:close()
+
+  App.load(tmpPath, { version = "red" })
+  local S = App.getState()
+  S.tab = "party"
+  Ops.selectParty(S, 1)
+
+  -- the shield itself: a raised shield refuses a click that hits
+  Kit.beginFrame(15, 15, true)
+  Kit.blockClicks = false
+  check(Kit.press(10, 10, 100, 20) == true, "an unshielded press takes the click")
+  Kit.blockClicks = true
+  check(Kit.press(10, 10, 100, 20) == false, "a shielded press refuses it")
+  Kit.blockClicks = false
+  Kit.endFrame()
+
+  local realPress = Kit.press
+  local seen = {}
+  Kit.press = function(...)
+    seen[#seen + 1] = Kit.blockClicks
+    return realPress(...)
+  end
+
+  Ops.openSpeciesPicker(S, Kit)
+  seen = {}
+  App.draw()
+  check(#seen > 0, "the opening frame dispatched clicks at all")
+  local allShielded = true
+  for _, v in ipairs(seen) do allShielded = allShielded and (v == true) end
+  check(allShielded,
+        "on the opening frame even the picker's own layer is shielded, so the "
+        .. "click that opened it cannot read as a tap outside")
+
+  seen = {}
+  App.draw()
+  check(seen[1] == true, "the frame under an open picker is shielded")
+  check(seen[#seen] == false, "the picker's own layer is not")
+  check(Kit.blockClicks == false, "the shield is down again once the frame ends")
+
+  Kit.press = realPress
+
+  -- a Close taken with the picker up must not leak the shield into the next
+  -- session, which would open deaf to every click
+  Kit.blockClicks = true
+  App.unload()
+  check(Kit.blockClicks == false, "unload lowers the shield")
+
+  os.remove(tmpPath)
+  for _, bak in ipairs(FsIo.globPrefix(tmpPath .. ".bak-")) do os.remove(bak) end
+end
+
+do
+  -- #497 shrank the layout to fit a phone's width; #715 replaced that with
+  -- reflow.  The scale never dips below the 0.9 readability floor now: a
+  -- narrow window keeps readable fonts and 26px tap targets and the panels
+  -- stack / drop columns / scroll instead of shrinking.  The width term
+  -- (width/640) only stops a portrait phone from inflating to the 1.6 cap
+  -- its height alone would buy.
+  local Kit = require("Kit")
+  local Theme = require("Theme")
+  local function about(got, want, msg)
+    check(math.abs(got - want) < 0.001,
+          msg .. string.format(" (got %.4f, want %.4f)", got, want))
+  end
+
+  about(Kit.layout(720, 1560), 720 / 640,
+    "portrait phone scales off its width, gently")
+  check(Kit.layout(720, 1560) >= 0.9,
+        "a portrait phone never drops below the readability floor")
+  about(Kit.layout(1560, 720), 720 / 768, "landscape phone still scales off height")
+  about(Kit.layout(360, 640), 0.9,
+    "a tiny window stops at the readable floor and reflows instead of shrinking")
+  about(Kit.layout(500, 800), 0.9, "500px wide sits on the floor too")
+
+  -- desktop and laptop sizes keep the height-only scale they always had
+  for _, size in ipairs({ { 1280, 800 }, { 1024, 768 }, { 1920, 1080 },
+                          { 1440, 900 }, { 2560, 1440 }, { 900, 700 } }) do
+    about(Kit.layout(size[1], size[2]),
+      Theme.clamp(math.min(size[1] / 640, size[2] / 768), 0.9, 1.6),
+      ("%dx%d keeps its height-based scale"):format(size[1], size[2]))
+  end
+end
+
+do
+  -- #497 draw pass at the two shapes the report came in on (720x1560 and
+  -- 1560x720, an A20s held either way).  The layout is what a human has to
+  -- judge, but a panel that lays itself out at a negative width is machine
+  -- visible: LOVE rejects a negative scissor, so the inspector's own clip
+  -- catches the collapse the roster used to cause by keeping an absolute
+  -- 300px floor on a 720px-wide window.
+  local Kit = require("Kit")
+  local Theme = require("Theme")
+  local tmpPath = os.tmpname() .. "-phone-save.lua"
+  local data = SaveData.newGame()
+  data.party = { MonOps.create(Data, "CHARIZARD", 100),
+                 MonOps.create(Data, "PIDGEY", 5) }
+  local f = io.open(tmpPath, "wb")
+  f:write(SaveData.encode(data))
+  f:close()
+
+  local oldDimensions = love.graphics.getDimensions
+  local oldScissor = love.graphics.setScissor
+  love.graphics.setScissor = function(_, _, width, height)
+    if width and (width < 0 or height < 0) then
+      error(("negative scissor %sx%s"):format(tostring(width), tostring(height)))
+    end
+  end
+
+  -- 720x1280 / 1280x720 are the #715 report's shapes (Android, both
+  -- orientations): the Map tab used to lay its viewport out at a negative
+  -- width in portrait and crash on the scissor.  The desktop sizes pin that
+  -- the responsive reflow does not disturb the layouts that already worked.
+  for _, size in ipairs({ { 720, 1560 }, { 1560, 720 }, { 480, 1040 },
+                          { 1280, 800 }, { 720, 1280 }, { 1280, 720 },
+                          { 1024, 768 }, { 1920, 1080 }, { 360, 640 } }) do
+    love.graphics.getDimensions = function() return size[1], size[2] end
+    App.load(tmpPath, { version = "red" })
+    local S = App.getState()
+    local label = ("%dx%d"):format(size[1], size[2])
+    for _, tab in ipairs({ "party", "boxes", "items", "events", "map", "dex" }) do
+      S.tab = tab
+      local ok, err = pcall(App.draw)
+      check(ok, ("the %s tab draws at %s: %s"):format(tab, label, tostring(err)))
+    end
+    check((S._mapViewW or 0) >= 0 and (S._mapViewH or 0) >= 0,
+      ("the map viewport stays non-negative at %s (#715)"):format(label))
+    S.tab = "party"
+    Ops.selectParty(S, 1)
+    local ok, err = pcall(App.draw)
+    check(ok, ("the inspector draws at %s: %s"):format(label, tostring(err)))
+    Ops.openSpeciesPicker(S, Kit)
+    ok, err = pcall(App.draw)
+    check(ok, ("the species picker draws at %s: %s"):format(label, tostring(err)))
+    ok, err = pcall(App.draw)
+    check(ok, ("the species picker redraws at %s: %s"):format(label, tostring(err)))
+    Ops.closeSpeciesPicker(S, Kit)
+  end
+
+  love.graphics.getDimensions = oldDimensions
+  love.graphics.setScissor = oldScissor
+
+  os.remove(tmpPath)
+  for _, bak in ipairs(FsIo.globPrefix(tmpPath .. ".bak-")) do os.remove(bak) end
+end
+
+do
+  -- #715 reflow audit.  Kit records every control that could take a click
+  -- while Kit.audit is set (shielded widgets are skipped, since a modal
+  -- legitimately covers what it shields).  The sweep below drives every tab
+  -- at the window shapes the reflow has to serve and FAILS if any two
+  -- controls overlap or any control escapes the window, which is exactly
+  -- the "buttons covering things" class of bug the shrink-to-fit layout
+  -- kept producing.  Rects clip to the region that bounds their hit test,
+  -- so a row scrolled out of a list is not a phantom overlap.
+  local Kit = require("Kit")
+
+  local function clipped(r)
+    local x1, y1, x2, y2 = r.x, r.y, r.x + r.w, r.y + r.h
+    if r.clip then
+      x1 = math.max(x1, r.clip.x); y1 = math.max(y1, r.clip.y)
+      x2 = math.min(x2, r.clip.x + r.clip.w); y2 = math.min(y2, r.clip.y + r.clip.h)
+    end
+    if x2 - x1 <= 1 or y2 - y1 <= 1 then return nil end
+    return x1, y1, x2, y2
+  end
+
+  local function overlap(a, b)
+    local ax1, ay1, ax2, ay2 = clipped(a)
+    if not ax1 then return false end
+    local bx1, by1, bx2, by2 = clipped(b)
+    if not bx1 then return false end
+    return math.min(ax2, bx2) - math.max(ax1, bx1) > 1
+       and math.min(ay2, by2) - math.max(ay1, by1) > 1
+  end
+
+  local function auditFrame(label, W, H)
+    local rects = Kit.audit
+    local controls = {}
+    for _, r in ipairs(rects) do
+      if r.class == "control" then controls[#controls + 1] = r end
+    end
+    check(#controls > 0, label .. ": the frame dispatched controls at all")
+    local collisions, escapes = 0, 0
+    for i = 1, #controls do
+      local a = controls[i]
+      local x1, y1, x2, y2 = clipped(a)
+      if x1 and (x1 < -0.5 or y1 < -0.5 or x2 > W + 0.5 or y2 > H + 0.5) then
+        escapes = escapes + 1
+        print(("  escape: %s (%.0f,%.0f %.0fx%.0f)")
+          :format(a.label, a.x, a.y, a.w, a.h))
+      end
+      for j = i + 1, #controls do
+        if overlap(a, controls[j]) then
+          collisions = collisions + 1
+          print(("  overlap: '%s' vs '%s' at (%.0f,%.0f) / (%.0f,%.0f)")
+            :format(a.label, controls[j].label, a.x, a.y,
+              controls[j].x, controls[j].y))
+        end
+      end
+    end
+    check(collisions == 0, label .. ": no two controls overlap")
+    check(escapes == 0, label .. ": every control stays inside the window")
+  end
+
+  local tmpPath = os.tmpname() .. "-audit-save.lua"
+  local data = SaveData.newGame()
+  data.party = {}
+  for i = 1, require("src.pokemon.Party").MAX do
+    data.party[i] = MonOps.create(Data, i % 2 == 0 and "PIDGEY" or "CHARIZARD",
+      10 * i)
+  end
+  local f = io.open(tmpPath, "wb")
+  f:write(SaveData.encode(data))
+  f:close()
+
+  local oldDimensions = love.graphics.getDimensions
+  local sizes = { { 500, 800 }, { 720, 1280 }, { 1280, 720 },
+                  { 1024, 768 }, { 900, 700 }, { 1920, 1080 } }
+  for _, size in ipairs(sizes) do
+    local W, H = size[1], size[2]
+    love.graphics.getDimensions = function() return W, H end
+    App.load(tmpPath, { version = "red" })
+    local S = App.getState()
+    -- populate the panels the fresh save leaves empty, so their controls
+    -- (quantity rows, box cells, dock rows, flags) are exercised too
+    Ops.selectParty(S, 1)
+    Ops.boxAdd(S); Ops.boxAdd(S)
+    Ops.addToBag(S, S.cat.items[1])
+    Ops.addToPc(S, S.cat.items[2])
+    Ops.setFlag(S, "EVENT_GOT_POKEDEX", true)
+    for _, tab in ipairs({ "party", "boxes", "items", "events", "map", "dex" }) do
+      S.tab = tab
+      Kit.audit = {}
+      local ok, err = pcall(App.draw)
+      check(ok, ("%dx%d %s draws: %s"):format(W, H, tab, tostring(err)))
+      if ok then auditFrame(("%dx%d %s"):format(W, H, tab), W, H) end
+      Kit.audit = nil
+    end
+    -- the species picker dialog reflows too; frame 2, since the opening
+    -- frame is fully shielded by design (#541) and would audit empty
+    S.tab = "party"
+    Ops.openSpeciesPicker(S, Kit)
+    App.draw()
+    Kit.audit = {}
+    local ok, err = pcall(App.draw)
+    check(ok, ("%dx%d species picker draws: %s"):format(W, H, tostring(err)))
+    if ok then auditFrame(("%dx%d species picker"):format(W, H), W, H) end
+    Kit.audit = nil
+    Ops.closeSpeciesPicker(S, Kit)
+  end
+  love.graphics.getDimensions = oldDimensions
+
+  os.remove(tmpPath)
+  for _, bak in ipairs(FsIo.globPrefix(tmpPath .. ".bak-")) do os.remove(bak) end
+end
+
+do
+  -- Box add flow: the Boxes panel's "+ Add mon here" and its dashed empty
+  -- cells open the SAME species picker the inspector uses, in box-add mode,
+  -- and the committed species lands in the selected box as a Lv5 mon built
+  -- by the same MonOps path Ops.partyAdd uses.
+  local Kit = require("Kit")
+  local BoxesMod = require("src.pokemon.Boxes")
+  local tmpPath = os.tmpname() .. "-boxadd-save.lua"
+  local f = io.open(tmpPath, "wb")
+  f:write(SaveData.encode(SaveData.newGame()))
+  f:close()
+
+  App.load(tmpPath, { version = "red" })
+  local S = App.getState()
+  S.tab = "boxes"
+
+  check(Ops.openBoxAddPicker(S, Kit) == true, "box-add picker opens")
+  check(S.speciesPicker ~= nil, "the picker is up")
+  eq(S.speciesPicker.mode, "box-add", "and it is in box-add mode")
+  eq(Kit.focus, "species-picker", "with the search field focused (#529)")
+
+  local ok, err = pcall(App.draw)
+  check(ok, "the box-add picker draws headlessly: " .. tostring(err))
+
+  App.textinput("PIKACHU")
+  App.draw()
+  App.keypressed("return")
+  local box = Ops.boxes(S)[S.selectedBox]
+  check(S.speciesPicker == nil, "committing closes the picker")
+  eq(#box, 1, "the commit added exactly one mon to the box")
+  local mon = box[1]
+  eq(mon.species, "PIKACHU", "the picked species landed in the box")
+  eq(mon.level, 5, "as a Lv5 mon, matching partyAdd's default")
+  check(mon.stats and mon.stats.hp and mon.stats.hp > 0,
+        "with real Gen1 stats from MonOps.create")
+  eq(mon.ot, S.save.player.name, "owned by the save's player")
+  eq(mon.otId, S.save.player.id, "with the player's trainer id")
+  check(S.editingMon == mon, "and the inspector now points at it")
+  check(S.dirty, "and the save is dirty")
+
+  -- Escape leaves without adding anything
+  Ops.openBoxAddPicker(S, Kit)
+  App.textinput("BULBASAUR")
+  App.draw()
+  App.keypressed("escape")
+  check(S.speciesPicker == nil, "Escape closes the box-add picker")
+  eq(#box, 1, "Escape added nothing")
+
+  -- an unusable (mod-partial) record refuses instead of crashing (#541)
+  Data.pokemon.TESTMON_BOXADD = { name = "TESTMON", dex = 0,
+    baseStats = { hp = 40 }, growthRate = "MEDIUM_FAST",
+    types = { "NORMAL" }, learnset = {} }
+  S.cat = Catalog.build(Data)
+  S.dirty = false
+  check(Ops.boxAddSpecies(S, "TESTMON_BOXADD") == false,
+        "a record without usable base stats is refused")
+  eq(#box, 1, "and nothing was added")
+  check(S.status:match("base stats") ~= nil, "and the refusal explains itself")
+  check(S.dirty == false, "and the save stays clean")
+  Data.pokemon.TESTMON_BOXADD = nil
+  S.cat = Catalog.build(Data)
+
+  -- a full box refuses to even open the picker
+  while #box < BoxesMod.CAPACITY do Ops.boxAdd(S) end
+  check(Ops.openBoxAddPicker(S, Kit) == false, "a full box refuses the picker")
+  check(S.speciesPicker == nil, "and it stays closed")
+  check(S.status:match("full") ~= nil, "and says why")
+
+  -- ...and a commit raced against a filling box refuses too
+  check(Ops.boxAddSpecies(S, "PIKACHU") == false,
+        "boxAddSpecies refuses a full box")
+
+  os.remove(tmpPath)
+  for _, bak in ipairs(FsIo.globPrefix(tmpPath .. ".bak-")) do os.remove(bak) end
+end
+
 print(string.format("save editor tests: %d passed, %d failed", passed, failed))
 if failed > 0 then os.exit(1) end

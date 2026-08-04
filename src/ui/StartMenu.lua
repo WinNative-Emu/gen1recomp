@@ -53,7 +53,6 @@ function StartMenu.new(game)
   -- (PrintSaveScreenText)
   table.insert(items, { label = Strings("SAVE"), onSelect = function()
     local TextBox = require("src.render.TextBox")
-    local ChoiceBox = require("src.ui.ChoiceBox")
     local badges = require("src.inventory.Badges").count(game.data, game.save)
     local owned = 0
     for _ in pairs(game.save.pokedex and game.save.pokedex.owned or {}) do
@@ -64,19 +63,29 @@ function StartMenu.new(game)
                           game.save.player.name or "RED", badges, owned,
                           math.floor(t / 3600), math.floor(t / 60) % 60)
     game.stack:push(TextBox.new(game,
-      panel .. Strings("\fWould you like to\nSAVE the game?"), function()
-      game.stack:push(ChoiceBox.new(game, function(yes)
+      panel .. Strings("\fWould you like to\nSAVE the game?"), nil, {
+      choice = function(yes)
         if not yes then return end
-        -- "Now saving..." beat before the write (save.asm
-        -- NowSavingString), then GameSavedText + SFX_SAVE
+        -- SaveMenu .save (engine/menus/save.asm:164-181): "Now saving..."
+        -- is a bare PlaceString held by DelayFrames 120, then GameSavedText,
+        -- which ends in `done` and so never reaches TX_PROMPT_BUTTON.
+        -- Neither page takes a button press (#765); the second waits on
+        -- SFX_SAVE (PlaySoundWaitForCurrent + WaitForSoundToFinish) and then
+        -- DelayFrames 30.  The write itself is invisible either side of the
+        -- "Now saving..." hold, so it stays on that box's onDone.
         game.stack:push(TextBox.new(game, Strings("Now saving..."), function()
           game:writeSave()
-          require("src.core.Sound").play(game.data, "Save")
           game.stack:push(TextBox.new(game,
-            Strings("%s saved\nthe game!", game.save.player.name or "RED")))
-        end))
-      end))
-    end))
+            Strings("%s saved\nthe game!", game.save.player.name or "RED"),
+            nil, { auto = {
+              sound = function()
+                return require("src.core.Sound").play(game.data, "Save")
+              end,
+              delay = 30,
+            } }))
+        end, { auto = { delay = 120 } }))
+      end,
+    }))
   end })
 
   table.insert(items, { label = Strings("OPTION"), onSelect = function()
@@ -105,12 +114,12 @@ function StartMenu.new(game)
   -- to the title after a confirm (defaultNo guards accidental quits)
   table.insert(items, { label = Strings("QUIT"), onSelect = function()
     local TextBox = require("src.render.TextBox")
-    local ChoiceBox = require("src.ui.ChoiceBox")
-    game.stack:push(TextBox.new(game, Strings("RETURN TO MAIN\nMENU?"), function()
-      game.stack:push(ChoiceBox.new(game, function(yes)
+    game.stack:push(TextBox.new(game, Strings("RETURN TO MAIN\nMENU?"), nil, {
+      defaultNo = true,
+      choice = function(yes)
         if yes then game:returnToTitle() end
-      end, { defaultNo = true }))
-    end))
+      end,
+    }))
   end })
 
   local hooked = Runtime.call("ui.start_menu.items", sameItems, game, items)
@@ -133,7 +142,12 @@ function StartMenu.new(game)
   local rowStep = 2
   local maxVisible = math.floor((Renderer.HEIGHT / 8 - 2) / rowStep)
   local menu = Menu.new(game, items,
-    { tx = 9, ty = 0, tw = 11, maxVisible = maxVisible, startCloses = true })
+    -- the START menu hugs the top-right corner of the SCREEN, not of a
+    -- centred letterbox: at 9,0 x 11 it is already flush with the top and
+    -- right of the 20x18 grid, so the anchor keeps it flush when the view
+    -- is zoomed out and the letterbox no longer fills the window
+    { tx = 9, ty = 0, tw = 11, maxVisible = maxVisible, startCloses = true,
+      anchor = "topright" })
   -- the cursor position survives closing the menu
   -- (wBattleAndStartSavedMenuItem, home/start_menu.asm)
   menu.index = math.min(game.save.startMenuIndex or 1, #items)
@@ -145,9 +159,16 @@ function StartMenu.new(game)
   end
 
   -- inside the Safari Zone the start menu also shows remaining steps and
-  -- SAFARI BALLs (PrintSafariZoneSteps): a 9x5 border at the top-left with
-  -- "steps/500" and "BALL xx"
-  if game.save.safari then
+  -- SAFARI BALLs (PrintSafariZoneSteps, engine/overworld/player_state.asm:
+  -- 219-224): a 9x5 border at the top-left with "steps/500" and "BALL xx".
+  -- It opens with `cp SAFARI_ZONE_EAST / ret c`, so only the nine interior
+  -- maps ($D9..$E1) get it -- SAFARI_ZONE_GATE is $9C and falls under that
+  -- early out, and used to show "502/500" while the player was still
+  -- standing at the counter (#540).  Same map set as the step counter's
+  -- (FieldDefaults safari.stepMaps via OverworldState:inSafariStepZone).
+  local ow = game.overworld
+  if game.save.safari and ow and ow.map and ow.inSafariStepZone
+     and ow:inSafariStepZone() then
     local baseDraw = menu.draw
     menu.draw = function(self)
       baseDraw(self)

@@ -4,7 +4,7 @@
 Yellow is a separate pret tree (pokeyellow), not a `_YELLOW` flip of pokered.
 Most of the ~3268 Red manifest symbols still exist under the same names in
 pokeyellow.sym (~3123 with shifted addresses).  The remainder need aliases,
-synthetic addresses (Mew in BaseStats), or omission (FightIntro* — Yellow's
+synthetic addresses (Mew in BaseStats), or omission (FightIntro* -- Yellow's
 intro movie is different; RomExtractor must skip those).
 
 Map/object/sprite/tileset/text metadata diverge enough that those sections are
@@ -48,7 +48,7 @@ from yellow_symbol_aliases import (  # noqa: E402
 
 try:
     from rom_data import CANONICAL_YELLOW_SHA1
-except ImportError:  # pragma: no cover — constant lands with GameVersion work
+except ImportError:  # pragma: no cover -- constant lands with GameVersion work
     CANONICAL_YELLOW_SHA1 = "cc7d03262ebfaf2f06772c1a480c7d9d5f4a38e1"
 
 DEV = "/Users/bryanbassett/Documents/development"
@@ -88,6 +88,25 @@ YELLOW_EXTRA_SYMBOLS = (
     "SurfingPikachu1Graphics1",
     "SurfingPikachu1Graphics2",
     "SurfingPikachu1Graphics3",
+    # Oak's own battle back pic.  LoadPlayerBackPic (engine/battle/core.asm)
+    # picks OldManPicBack for BATTLE_TYPE_OLD_MAN but ProfOakPicBack for
+    # BATTLE_TYPE_PIKACHU, the Pallet Town catch scene (#557).
+    "ProfOakPicBack",
+    # Base frames for the framed portrait TalkToPikachu draws, one per
+    # PikaPicAnimScript (data/pikachu/pikachu_pic_animation.asm).  These are
+    # raw address labels because the pikapic blobs carry no named symbols;
+    # RomExtractor's PIKAPIC_BASE table indexes them positionally, so the
+    # order here is not load bearing but every entry must resolve (#561).
+    "Pic_e4000", "Pic_e411c", "Pic_e4272", "Pic_e4383", "Pic_e458b",
+    "Pic_e467b", "Pic_e476e", "Pic_e49d1", "Pic_e4b39", "Pic_e4c3e",
+    "Pic_e5000", "Pic_e523f", "Pic_e548e", "Pic_e56d1", "Pic_e5924",
+    "Pic_e5b7d", "Pic_e5ddd", "GFX_e6020", "Pic_e6340", "Pic_e6587",
+    "Pic_e67d6", "GFX_e6e6f", "GFX_e718f", "GFX_e74af", "Pic_e77cf",
+    "Pic_f0abf", "Pic_f0cf4",
+    # Yellow-only overworld player surf sprite, loaded outside
+    # SpriteSheetPointerTable (LoadSurfingPlayerSpriteGraphics2) --
+    # needs its own extract like RedBikeSprite. (RFC 0001)
+    "SurfingPikachuSprite",
 )
 
 # Yellow-only dialogue whose bank labels carry no leading underscore, so
@@ -235,6 +254,37 @@ def _rebuild_yellow_sourced(yellow, pokeyellow):
     }
 
 
+def _remap_audio(yellow, yellow_symbols):
+    """Re-anchor the Red-copied audio section on pokeyellow.sym (#522).
+
+    Yellow's music bank $1f shifts after 1f:4294: Music_YellowIntro is a
+    3-channel header (pokeyellow audio/headers/musicheaders3.asm) where
+    Red's Music_IntroBattle had 4, so Red's addresses for every later
+    header land on a channel-2 row (one voice, and no tempo command --
+    Viridian Forest slow and hollow).  Yellow also has a single
+    wave-sample table at Audio1_WavePointers (audio.asm "Music 1"), not
+    Red's per-engine 0x4373 copies, and CryData moved to 0e:5462.  Names
+    absent from the sym (Music_IntroBattle, which Yellow only knows as
+    Music_YellowIntro) keep their positional mapping.
+    """
+    for name, header in yellow["audio"]["musicHeaders"].items():
+        symbol = yellow_symbols.by_name.get(name)
+        if symbol is not None:
+            header["bank"] = symbol.bank
+            header["address"] = symbol.address
+    wave = yellow_symbols.by_name.get("Audio1_WavePointers.wave0")
+    if wave is None:
+        raise SystemExit("pokeyellow.sym missing Audio1_WavePointers.wave0")
+    for engine in yellow["audio"]["waveBanks"]:
+        yellow["audio"]["waveBanks"][engine] = {
+            "bank": wave.bank, "address": wave.address,
+        }
+    cry = yellow_symbols.by_name.get("CryData")
+    if cry is None:
+        raise SystemExit("pokeyellow.sym missing CryData")
+    yellow["audio"]["cryData"] = {"bank": cry.bank, "address": cry.address}
+
+
 def derive(red, pokeyellow, symbols_path):
     """Return the Yellow manifest derived from the Red manifest dict."""
     yellow = copy.deepcopy(red)
@@ -261,6 +311,7 @@ def derive(red, pokeyellow, symbols_path):
     yellow = _drop_strings(yellow, dropped)
 
     rebuilt = _rebuild_yellow_sourced(yellow, pokeyellow)
+    _remap_audio(yellow, yellow_symbols)  # #522
 
     for label in YELLOW_EXTRA_TEXT_LABELS:
         if label not in yellow["text"]["labels"]:

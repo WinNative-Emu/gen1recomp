@@ -71,8 +71,12 @@ return {
       { "show_text", "_OaksLabRivalLeaveItAllToMeText" },
       { "set_flag", "EVENT_GOT_POKEDEX" },
       { "set_flag", "EVENT_OAK_GOT_PARCEL" },
+      -- OaksLabOakGivesPokedexScript: HideObject TOGGLE_LYING_OLD_MAN /
+      -- ShowObject TOGGLE_OLD_MAN_2 -- Yellow's tutorial old man stands
+      -- on the sleeper's cell (18,9); the Red/Blue walker OLD_MAN at
+      -- (17,5) never appears in Yellow (#617)
       { "hide_object", "VIRIDIAN_CITY", "VIRIDIANCITY_OLD_MAN_SLEEPY" },
-      { "show_object", "VIRIDIAN_CITY", "VIRIDIANCITY_OLD_MAN" },
+      { "show_object", "VIRIDIAN_CITY", "VIRIDIANCITY_OLD_MAN2" },
       { "stop_music" },
       { "play_music", "Music_MeetRival" },
       { "move_npc_to", RIVAL, 4, 7 },
@@ -143,17 +147,25 @@ return {
         -- OaksLabRivalExclamationScript: "!" over the rival
         { "emote", RIVAL, "shock" },
       }
-      -- .RivalPushesPlayerAwayFromEeveeBall + the PAD_RIGHT x2 shove:
-      -- the rival cuts across to the ball WHILE the player standing
-      -- below it is bumped two tiles right (both movements run in the
-      -- same beat, so the walk overlaps the shove like the original)
+      -- .RivalPushesPlayerAwayFromEeveeBall is DOWN then RIGHT x3 (the $07
+      -- bytes are Yellow's own step-right encoding, decoded by
+      -- engine/overworld/movement.asm Func_5288 -> Func_532b), and the
+      -- PAD_RIGHT x2 shove is NOT queued alongside it:
+      -- OaksLabRivalTakesPokeballScript .asm_1c564 polls every frame and
+      -- only simulates the pair once wNPCNumScriptedSteps reads 1 -- i.e.
+      -- as the rival begins the LAST byte, the step onto the tile the
+      -- player is standing on.  Starting both on one row had Red stroll
+      -- off the Eevee while the rival was still at the top of the table
+      -- (#559).
       if py == 4 then
-        rows[#rows + 1] = { "walk_npc", RIVAL,
-          { "down", "right", "right", "right" }, { wait = false } }
+        rows[#rows + 1] = { "walk_npc", RIVAL, { "down", "right", "right" } }
+        -- this one runs concurrently with the shove below
+        rows[#rows + 1] = { "walk_npc", RIVAL, { "right" }, { wait = false } }
         rows[#rows + 1] = { "face_player_dir", "left" }
         rows[#rows + 1] = { "move_player", "right", 2 }
-        -- let the rival finish the last stretch to (7,4)
-        rows[#rows + 1] = { "wait", 40 }
+        -- move_player blocks for both tiles, so the rival has already
+        -- landed on (7,4); this is just the beat before he turns up
+        rows[#rows + 1] = { "wait", 20 }
       else
         rows[#rows + 1] = { "move_npc_to", RIVAL, 7, 4 }
       end
@@ -275,10 +287,12 @@ return {
       table.insert(rows, { "label", "lost_lab" })
       table.insert(rows, { "set_field", "rivalStarter", 3 })
       table.insert(rows, { "label", "exit" })
-      -- OaksLabRivalStartsExitScript: parting shot, walk out past the
-      -- player, restore the lab theme
+      -- OaksLabRivalStartsExitScript: parting shot, rival exit fanfare, then
+      -- walk out past the player (#683).
       table.insert(rows, { "wait", 20 })
       table.insert(rows, { "show_text", "_OaksLabRivalSmellYouLaterText" })
+      table.insert(rows, { "stop_music" })
+      table.insert(rows, { "play_music", "Music_MeetRival" })
       table.insert(rows, { "move_npc_to", RIVAL, 4, 11 })
       table.insert(rows, { "hide_object", "OAKS_LAB", "OAKSLAB_RIVAL" })
       table.insert(rows, { "play_music", "Music_OaksLab" })

@@ -1,10 +1,10 @@
 # New features (deliberate additions beyond the original)
 
-Intentional enhancements this port adds on top of faithful Pokémon Red
-behavior. They have no Game Boy equivalent and are kept by design.
+Intentional enhancements this port adds on top of faithful Pokémon Red, Blue,
+and Yellow behavior. They have no Game Boy equivalent and are kept by design.
 Genuine divergences from the original (things still missing, wrong, or
-approximated) live in docs/known-differences.md; faithfully-ported
-behavior is in docs/behavior-porting-notes.md.
+approximated) live in docs/known-differences.md; faithfully-ported behavior is
+in docs/behavior-porting-notes.md.
 
 ## Survey zoom
 
@@ -143,6 +143,41 @@ effect, `=1` forces it available. The Anbernic handheld pack exports `0` from
 its launcher because the device reports `"Linux"` while its GPU is in the
 phone class (see [Anbernic RG34XXSP](anbernic-rg34xxsp.md)).
 
+## Performance tier (low-end devices)
+
+The Options **PERFORMANCE** row scales the port's optional presentation
+extras down for weaker hardware. The extras it governs are the three
+heaviest things the port adds on top of the original -- the whole-screen 3D
+**TILT** (transforms the entire map as a ground plane), the **GBC FX**
+post-process shader (a fullscreen pass), and survey **ZOOM** (zooming out
+renders the connected neighbor maps, a lot of extra overdraw) -- plus a hard
+FPS ceiling. None of this touches game logic, which is fixed-step off `dt`
+(`src/core/FixedStep.lua`), so every tier plays identically; they differ
+only in how much eye-candy the renderer is allowed to do.
+
+| Tier         | TILT | GBC FX | Survey ZOOM | Extra FPS ceiling |
+| ------------ | ---- | ------ | ----------- | ----------------- |
+| **HIGH**     | on   | on     | on          | none              |
+| **BALANCED** | off  | off    | on          | none              |
+| **LOW**      | off  | off    | off         | 60                |
+| **AUTO**     | picks a default from the device (below) |||
+
+- **AUTO** (the default) reads the device once at boot: ARM Linux handhelds
+  (e.g. the RG34XXSP) resolve to **LOW**, phones/tablets and very-low-core
+  desktops to **BALANCED**, and everything else -- a normal desktop, and
+  every existing `options.lua` that predates this option -- to **HIGH**,
+  so the common case is unchanged. See `src/core/Performance.detect`.
+- AUTO only chooses the *default*; all four tiers are selectable, so a
+  wrong guess is one row away from being overridden.
+- The clamps are applied **live** against your stored options and never
+  rewrite them (`Game:applyOptions`), so a lower tier hides your TILT / GBC
+  FX / ZOOM without forgetting them -- raising the tier restores exactly
+  what you had. (This is why the TILT / GBC FX / ZOOM rows still show your
+  saved choice on a clamped tier: it's your preference, waiting for a tier
+  that can afford it.)
+- Persisted as `save.options.performance` (`auto` | `high` | `balanced` |
+  `low`); unit-tested in `tests/engine/performance_tiers.lua`.
+
 ## Peer-to-peer link play (lua-enet)
 
 Trades and link battles connect two copies of the game directly over
@@ -157,6 +192,13 @@ tradeoff vs. the relay). Headless tests drive the protocol over an
 in-memory loopback (`Net.loopbackPair`); under LÖVE the same test file
 also exercises real UDP pairing.
 
+Red, Blue, and Yellow copies link with each other, as the real cable
+does. The compatibility fingerprint hashes only data a link mode can
+actually read, so Yellow's Dragonair/Dragonite catch-rate retunes (the
+only R/B/Y link-surface difference) no longer read as different games
+(issue #511). Moving the fingerprint is a link parity change: builds
+from before this fix will refuse to pair with builds after it.
+
 ## Fair play in link and online matches
 
 A link session is decided by the battle and nothing else, so for its
@@ -167,10 +209,15 @@ duration:
   closes, and apply again after. Fast-forward otherwise runs one peer's
   queue faster than the peer it is locked to and drains a tournament shot
   clock faster than the opponent racing it.
-- **Online play runs vanilla.** Picking ONLINE MATCH or TOURNAMENT with
-  mods enabled offers to switch them all off and relaunch (mods merge at
-  boot, so a restart is the only way). The restart is confirmed, not
-  silent. They stay listed as disabled, ready to switch back on.
+- **Online play runs vanilla, except for your language.** Picking ONLINE
+  MATCH or TOURNAMENT with mods enabled offers to switch the gameplay ones
+  off and relaunch (mods merge at boot, so a restart is the only way). The
+  restart is confirmed, not silent. They stay listed as disabled, ready to
+  switch back on. A mod that declares itself a translation and provably
+  writes nothing but text stays on: the two games hash the same link
+  surface, so a Spanish install and an English one can battle and trade,
+  each reading the game in its own language and naming the other player's
+  party out of its own text.
 - **Only a meaningful split ends a match.** The per-turn state signature
   both peers exchange is split three ways: `actives` and `bench` carry
   species, HP, status, stat stages, PP and the rest of the party, and a
@@ -272,12 +319,29 @@ window size on rotation. Desktop testing: `POKEPORT_TOUCH=1 love .` forces
 the overlay on and lets the mouse act as a finger (`=0` forces it off).
 
 The launcher's **Touch Controls** button opens a drag editor: move each
-button freely, **Disable** to hide the overlay permanently (for
-controllers / emulation handhelds — distinct from the temporary
-gamepad auto-hide), **Reset** for defaults, **Done** to save into
-`options.lua` as normalized window fractions so rotation keeps the
-relative placement. In-game, Options → **TOUCH PAD** toggles the same
-on/off flag without leaving a play session.
+button freely, resize the whole pad with **-/+** (60% to 160%), **Disable**
+to hide the overlay permanently (for controllers / emulation handhelds --
+distinct from the temporary gamepad auto-hide), **Reset** for defaults,
+**Done** to save into `options.lua` as normalized window fractions so a
+different screen keeps the relative placement.
+
+Portrait and landscape are edited and saved separately (#633): the editor
+follows whichever orientation is on screen, and **Reset** only clears that
+one, so a layout that works held upright does not have to double as the
+one used sideways. An `options.lua` from before this split keeps its single
+layout in both orientations until one of them is edited. In-game, Options →
+**TOUCH PAD** toggles the same on/off flag without leaving a play session.
+
+## Screen orientation lock (Android)
+
+Options → **ORIENTATION** (also in the launcher's gear menu) locks the
+screen to **PORTRAIT**, **LANDSCAPE** (either landscape, following the
+device), or **REVERSE LANDSCAPE**, or leaves it on **AUTO** (#592). AUTO
+allows every orientation but defers to the system: with auto-rotate turned
+off in Android's quick settings, the game stays put instead of following
+the sensor (#716). Changes apply immediately -- the screen rotates as the
+row is stepped -- and persist in `options.lua`. Android only: iOS follows
+the app's fixed orientation list, and desktop windows rotate nothing.
 
 ## Translation support
 
@@ -312,6 +376,28 @@ plus a glyph-page and charmap stub, a naming-grid stub, and a
 be packed). `--refresh` re-harvests after an engine update, keeping
 existing translations and parking orphaned keys rather than dropping them.
 
+A translation can also skip glyph pages entirely: scaffolding with
+`--pixel-font` (or registering `mod.content.font:register("ttf", {})` in
+an existing mod) renders text through a bundled TTF covering Latin with
+diacritics, Cyrillic, kana and CJK, while box borders and `<PK>`-style
+macro glyphs keep their tiles. The font is "Plain Pixel Font" by Douglas
+Vautour (Burpy Fresh), licensed under CC-BY 4.0 (5x11 base characters,
+11x11 double-width; see `assets/fonts/plainpixel/README.md`). Options on
+the registry entry: `file` for a mod-shipped TTF, `size` (the font's
+design em; Plain Pixel rasterizes cleanly only at multiples of 15),
+`spacing` added to every advance, `yOffset` for vertical alignment
+against the 8px cell grid, `bold`, which double-prints at a 1px
+offset for fonts whose strokes read too light, and `tiles`, the
+characters that keep their ROM tile instead of coming from the TTF.
+
+`tiles` matters for a CJK translation. Sizing the font so a kana fills
+the 8px cell leaves Latin narrower than the tile font it replaces, which
+pulls the numeric columns out of line: the party menu's `:L12` stops
+sitting over `34/ 34`. Naming `"0123456789/:"` keeps those on the
+vanilla tiles, so numbers render exactly as they do in English while
+kana still come from the font. It takes a string of characters, or a
+list when a multi-character charmap sequence is meant.
+
 See the wiki's Translations guide.
 
 ## Save editor (bundled, reachable from the launcher)
@@ -338,8 +424,11 @@ semantics - so the two windows read as one app. Six tabs:
   party dock, so deposit and withdraw live in one place. Empty slots are
   clickable and create a mon there.
 - **Items**: money, a searchable item picker (replacing the arrows that
-  cycled one id at a time through ~250 items), the 20-slot bag, PC storage
-  with no slot cap, and the eight badges as toggle chips.
+  cycled one id at a time through ~250 items), the configurable bag (20 slots
+  by default), PC storage
+  with no slot cap, and the eight badges as toggle chips. The picker, the bag
+  and PC storage all scroll under the mouse wheel, so the whole catalog is
+  reachable one-handed without typing a query.
 - **Events**: flags, defeated trainers, taken items and per-map object
   toggles, with a real filter field and a two-column paged grid.
 - **Map**: any map rendered with the game's own renderer, warps followable,
@@ -381,3 +470,81 @@ kind, number, height/weight, dex text) to a PNG at 4x scale under
 `prints/` in the save directory, then reports the filename in a dialog.
 No printer hardware or link cable emulation involved; the file is the
 printout.
+
+## Find Mods (community mod indexes)
+
+A FIND MODS tab sits beside MODS in the launcher and browses a published
+mod index: a metadata-only feed listing mods that live in their authors'
+own repositories. No index ships with the launcher and none is ever added
+automatically, so the tab opens on an "Add an index" prompt until you name
+one; paste an index URL or its `owner/repo` and it is remembered in
+`options.lua`. More than one index can be added, and the listings merge.
+
+A feed author can publish per-mod release stats by adding three optional
+fields to an entry -- `downloads` (total across every release), and
+`first_release` / `last_release` (ISO days) -- which the listing shows in
+the same gold line the MODS tab uses. The fields are additive: feeds that
+carry them stay readable by every build that predates them, and feeds that
+do not render exactly as before.
+
+## Soft reset (all versions)
+
+Holding A, B, START and SELECT together restarts the game the way flicking
+a Game Boy's power switch did, dropping straight back to the title screen.
+It works from anywhere, including mid-battle, which the QUIT entry on the
+start menu cannot do: the original combo is how stationary and gift
+Pokemon get their stats rerolled without sitting through a full relaunch.
+Unsaved progress is discarded, exactly as on hardware.
+
+As on the original, the four buttons have to stay held for 16 straight
+polls (better than a quarter of a second) and any direction in the mix
+cancels it, so it is hard to hit by accident -- including on the on-screen
+touch controls, where it would take four fingers held on four separate
+controls.
+
+## Controls rebinding (CONTROLS screen)
+
+OPTIONS -> CONTROLS lists every Game Boy button with its current keyboard
+key and controller button side by side (Z/A). Press A on a row, then press
+and release the key or pad button you want; the rebind commits on the
+release. If that input already belongs to another row, the two rows swap,
+so no button is ever stranded without an input and no input ever serves
+two buttons. Holding a second key or pad button while the first is still
+down backs out of the capture without touching a keyboard; Escape still
+cancels too. SELECT clears one row back to its default, and START resets
+every binding after a confirmation.
+
+Controllers a system has no mapping for (common on Linux handhelds and
+off-brand pads) report bare button numbers rather than names. Those are
+rebindable on the same screen and show up as JOY1, JOY2 and so on in the
+controller column. Recognized controllers are read only through their
+named buttons, so a rebind on those is never shadowed by the factory
+layout underneath it.
+
+## Mod profiles (#593)
+
+The mod manager's PROFILES tab holds named setups. A profile remembers which
+mods are on, every mod's own options, and which save slot each game version
+plays, so swapping profiles swaps the whole playthrough and not just the mod
+list. The setup that existed before profiles shipped becomes PROFILE 1 the
+first time the manager opens.
+
+EXPORT.. writes the selected profile to `profiles/<NAME>.g1rmodlist` in the
+save directory; drop a `.g1rmodlist` someone shared into that folder and
+IMPORT.. adds it. Imported profiles never overwrite an existing one (a name
+clash gets a number). Mods the shared profile names but that are not installed
+are reported when the profile is applied; installing them is still a manual
+trip through the mods list or Find Mods.
+
+## Windows: no console windows on launcher actions
+
+Checking for updates, browsing a mod index, adding a mod repo, installing a
+mod and picking a ROM all run a host tool (curl, PowerShell) in a child
+process. On Windows those children used to each open their own console
+window, so a session could end up buried under half a dozen of them. The
+game now claims one console for itself at boot and hides it; the children
+inherit that invisible console and nothing pops up. Nothing else changes:
+file pickers are ordinary desktop dialogs and still appear normally, and a
+run started from a terminal (`lovec.exe`, what `scripts\run.ps1` prefers)
+keeps its terminal and its printed output. Set `POKEPORT_CONSOLE=1` to opt
+out.

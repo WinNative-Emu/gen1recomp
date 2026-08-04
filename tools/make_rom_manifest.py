@@ -280,7 +280,7 @@ def sprite_metadata(pokered, order):
     bike_png = re.sub(r"\.2bpp$", ".png", bike_source)
     with Image.open(os.path.join(pokered, bike_png)) as image:
         bike_width, bike_height = image.size
-    return {
+    out_manifest = {
         "order": out,
         "bike": {
             "label": "RedBikeSprite",
@@ -289,6 +289,20 @@ def sprite_metadata(pokered, order):
             "imageHeight": bike_height,
         },
     }
+    # Yellow-only: the surfing-Pikachu overworld ride sheet, parallel
+    # to the bike entry; absent in Red/Blue. (RFC 0001)
+    surf_source = files.get("SurfingPikachuSprite")
+    if surf_source:
+        surf_png = re.sub(r"\.2bpp$", ".png", surf_source)
+        with Image.open(os.path.join(pokered, surf_png)) as image:
+            surf_width, surf_height = image.size
+        out_manifest["surfPikachu"] = {
+            "label": "SurfingPikachuSprite",
+            "imageBase": "surfing_pikachu",
+            "imageWidth": surf_width,
+            "imageHeight": surf_height,
+        }
+    return out_manifest
 
 
 def text_metadata(pokered):
@@ -553,6 +567,7 @@ FIELD_ASSET_SYMBOLS = {
     "FightIntroFrontMon",
     "FightIntroFrontMon2",
     "FightIntroFrontMon3",
+    "GameBoyTiles",
     "GameFreakIntro",
     "GameFreakLogoGraphics",
     "GengarIntroTiles1",
@@ -561,6 +576,7 @@ FIELD_ASSET_SYMBOLS = {
     "HappyEmote",
     "HpBarAndStatusGraphics",
     "LedgeHoppingShadow",
+    "LinkCableTiles",
     "MoveAnimationTiles1",
     "NintendoCopyrightLogoGraphics",
     "PlayerCharacterTitleGraphics",
@@ -579,6 +595,9 @@ FIELD_ASSET_SYMBOLS = {
     "SlotMachineTiles2",
     "TheEndGfx",
     "TownMapCursor",
+    "TradeBubbleIconGFX",
+    "TradingAnimationGraphics",
+    "TradingAnimationGraphics2",
     "Version_GFX",
     "WorldMapTileGraphics",
 }

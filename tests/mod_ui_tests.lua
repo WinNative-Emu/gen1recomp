@@ -282,7 +282,8 @@ local function optGame()
 end
 local om = OptionsMenu.new(optGame())
 local WANT_IDS = { "textSpeed", "animations", "battleStyle", "battleLayout",
-                   "ruleset", "musicVol", "sfxVol", "musicFilter", "colors",
+                   "ruleset", "musicVol", "sfxVol", "musicFilter",
+                   "performance", "colors",
                    "tilt", "gbcfx", "zoom", "voidFill", "videoMode", "fpsCap",
                    "speed", "mods", "controls" }
 check(#om.rows == #WANT_IDS, "vanilla options row count (plus MODS/CONTROLS)")
@@ -320,35 +321,36 @@ check(om.game.save.options.musicVol == 6, "music volume steps down")
 for _ = 1, 10 do om.rows[6].step(om.game, -1) end
 check(om.game.save.options.musicVol == 0, "music volume clamps at 0")
 
--- ZOOM / VOID FILL rows
+-- ZOOM / VOID FILL rows (indices shifted +1 by the PERFORMANCE row spliced
+-- in ahead of COLORS)
 local Zoom = require("src.render.Zoom")
 local TileRenderer = require("src.render.TileRenderer")
 om.game.save.options.zoom = 0
 Zoom.offset = 0
-check(om.rows[12].value(om.game) == "FIT", "ZOOM row shows FIT at offset 0")
-om.rows[12].step(om.game, 1)
+check(om.rows[13].value(om.game) == "FIT", "ZOOM row shows FIT at offset 0")
+om.rows[13].step(om.game, 1)
 check(om.game.save.options.zoom == 1 and Zoom.offset == 1,
   "ZOOM row steps to IN1")
-om.rows[13].step(om.game, 1)
+om.rows[14].step(om.game, 1)
 check(om.game.save.options.voidFill == "water"
       and TileRenderer.voidFill == "water",
   "VOID FILL row cycles TREES → WATER")
-om.rows[13].step(om.game, 1)
+om.rows[14].step(om.game, 1)
 check(om.game.save.options.voidFill == "black", "VOID FILL steps to BLACK")
-om.rows[13].step(om.game, 1)
+om.rows[14].step(om.game, 1)
 check(om.game.save.options.voidFill == "trees", "VOID FILL wraps to TREES")
 
 -- the MAX FPS row cycles the render-cap steps and shows the value plain
 om.game.save.options.fpsCap = nil
-check(om.rows[15].value(om.game) == "60",
+check(om.rows[16].value(om.game) == "60",
   "MAX FPS row defaults to 60 with no saved cap")
-om.rows[15].step(om.game, 1)
+om.rows[16].step(om.game, 1)
 check(om.game.save.options.fpsCap == 75, "MAX FPS steps up from 60 to 75")
-check(om.rows[15].value(om.game) == "75", "the MAX FPS row renders the cap")
+check(om.rows[16].value(om.game) == "75", "the MAX FPS row renders the cap")
 om.game.save.options.fpsCap = 160
-om.rows[15].step(om.game, 1)
+om.rows[16].step(om.game, 1)
 check(om.game.save.options.fpsCap == 30, "MAX FPS wraps past the ceiling to 30")
-om.rows[15].step(om.game, -1)
+om.rows[16].step(om.game, -1)
 check(om.game.save.options.fpsCap == 160, "MAX FPS wraps back down to the ceiling")
 
 -- ------- FrameCap normalize / cycle (issue #88)
@@ -378,7 +380,7 @@ check(FrameCap.current == 60, "FrameCap.applyOptions defaults a missing key to 6
 -- the MODS row is the manager's discoverable home
 local mgGame = optGame()
 om = OptionsMenu.new(mgGame)
-om.rows[17].activate(mgGame)
+om.rows[18].activate(mgGame)
 check(getmetatable(mgGame.stack:top()) == ManagerState,
   "the MODS row opens the manager")
 check(mgGame.stack:top().screenId == "ManagerState",
@@ -388,18 +390,18 @@ check(mgGame.stack:top().screenId == "ManagerState",
 local BindingsMenu = require("src.ui.BindingsMenu")
 local cbGame = optGame()
 om = OptionsMenu.new(cbGame)
-om.rows[18].activate(cbGame)
+om.rows[19].activate(cbGame)
 local bm = cbGame.stack:top()
 check(getmetatable(bm) == BindingsMenu,
   "the CONTROLS row opens the rebind list")
 check(bm.screenId == "BindingsMenu",
   "the pushed rebind screen carries its screen id")
 check(#bm.items == 8, "one row per logical button")
-check(bm.items[1].label == "UP" and bm.items[1].right == "UP"
-  and bm.items[5].label == "A" and bm.items[5].right == "Z"
-  and bm.items[7].label == "START" and bm.items[7].right == "ESCAPE"
+check(bm.items[1].label == "UP" and bm.items[1].right == "UP/D-UP"
+  and bm.items[5].label == "A" and bm.items[5].right == "Z/A"
+  and bm.items[7].label == "START" and bm.items[7].right == "ESC/START"
   and bm.items[8].label == "SELECT" and bm.items[8].right == "TAB/BACK",
-  "with no rebind the rows mirror the fixed map")
+  "with no rebind the rows mirror the fixed map, key and pad both (#589)")
 check(cbGame.save.options.bindings == nil,
   "opening the screen alone writes nothing")
 check(bm.onKeyPressed == nil and bm.onGamepadPressed == nil,
@@ -410,18 +412,20 @@ check(bm.capture == bm.items[1] and bm.onKeyPressed ~= nil,
 local wroteOptions = false
 function cbGame:writeOptions() wroteOptions = true end
 bm:onKeyPressed("j")
+bm:onKeyReleased("j") -- a capture commits on the press's release (#589)
 check(cbGame.save.options.bindings.up.key == "j",
   "a captured key lands in options.bindings")
-check(bm.items[1].right == "J", "the row shows the new key")
+check(bm.items[1].right == "J/D-UP", "the row shows the new key")
 check(wroteOptions, "a rebind persists through writeOptions")
 check(bm.capture == nil and bm.onKeyPressed == nil
   and bm.onGamepadPressed == nil, "the capture disarms after one input")
 bm.index = 5
 press(bm, "a")
 bm:onGamepadPressed("y")
+bm:onGamepadReleased("y")
 check(cbGame.save.options.bindings.a.pad == "y",
   "a captured pad button lands beside the key slot")
-check(bm.items[5].right == "Z", "a pad rebind keeps the key column")
+check(bm.items[5].right == "Z/Y", "a pad rebind keeps the key column")
 press(bm, "b")
 check(#cbGame.stack.states == 0, "B closes the rebind screen")
 
@@ -506,6 +510,21 @@ check(#pm.subItems == 2, "a non-table submenu result keeps the vanilla list")
 hooks:removeOwner("bad")
 pm.submenu = nil
 
+-- ------- #768: the party cursor persists until a battle
+-- (PartyMenuInit reads wPartyAndBillsPCSavedMenuItem, HandlePartyMenuInput
+-- writes it back; InitBattleVariables / end_of_battle.asm zero it)
+pgame.save.party[2] = { species = "PIKACHU", hp = 10, stats = { hp = 10 },
+                        level = 5, moves = { { id = "TACKLE" } } }
+press(pm, "down")
+check(pgame.partyMenuSavedIndex == 2, "the party cursor is saved on move")
+local pm2 = PartyMenu.new(pgame)
+check(pm2.index == 2, "reopening the party menu keeps the cursor (#768)")
+pgame.save.party[2] = nil
+check(PartyMenu.new(pgame).index == 1,
+  "a shrunken party clamps the saved cursor back into range")
+pgame.partyMenuSavedIndex = nil -- a battle clears it (InitBattleVariables)
+check(PartyMenu.new(pgame).index == 1, "a battle resets the party cursor")
+
 -- ------- battle PKMN: SWITCH / STATS / CANCEL (#180)
 local switched
 local bgame = partyGame()
@@ -551,9 +570,9 @@ do
   pm.game = sgame
   sgame.stack:push(pm)
   press(pm, "a") -- open the submenu
-  check(pm.subItems[#pm.subItems].action == "strength",
-    "the strength row is listed with badge + move")
-  pm.subIndex = #pm.subItems
+  check(pm.subItems[1].action == "strength",
+    "the strength row is listed with badge + move, above STATS/SWITCH (#768)")
+  pm.subIndex = 1
   press(pm, "a") -- run STRENGTH
   local states = sgame.stack.states
   check(#states == 2 and states[1] == pm and states[2].pages ~= nil,
@@ -775,8 +794,9 @@ check(oak.demoSpecies == "NIDORINO" and oak.nameLen == 7,
 
 -- ------- intro.oak_speech.build
 local vanillaSteps = OakSpeech.defaultSteps(oak)
-check(#vanillaSteps == 9, "vanilla speech has nine steps")
-check(vanillaSteps[1].id == "oak_welcome" and vanillaSteps[9].id == "shrink",
+check(#vanillaSteps == 11, "vanilla speech has eleven steps")
+check(vanillaSteps[1].id == "oak_welcome"
+  and vanillaSteps[#vanillaSteps].id == "shrink",
   "vanilla speech anchors start and end")
 
 hooks:wrap("intro.oak_speech.build", function(nextFn, steps, speech)
@@ -795,7 +815,7 @@ hooks:removeOwner("fixture")
 
 hooks:wrap("intro.oak_speech.build", function() return 42 end, 0, "bad")
 built = oak:buildSteps()
-check(#built == 9 and built[1].id == "oak_welcome",
+check(#built == #vanillaSteps and built[1].id == "oak_welcome",
   "a non-table intro.oak_speech.build result degrades to vanilla")
 check(logged("intro.oak_speech.build returned"),
   "the intro build degrade is logged")
@@ -1079,6 +1099,36 @@ check(easy.name == "HARD" and ms:optionsTable().activeProfile == "HARD",
 ms:deleteProfile(easy)
 check(ms:findProfile("HARD") == nil
   and ms:optionsTable().activeProfile == nil, "delete clears the profile")
+
+-- #593: a profile carries mod options and the per-version save slot, and
+-- round-trips through the .g1rmodlist export
+local ModProfile = require("src.mods.ModProfile")
+ms:setOption("okmod", "hardcore", true)
+ms:saveCurrentAs()
+mgame.stack:top().onDone("SHARE")
+mgame.stack:pop()
+local shared = ms:findProfile("SHARE")
+check(shared.options.okmod.hardcore == true,
+  "a profile snapshots per-mod options, not just the enable set")
+ms:setOption("okmod", "hardcore", false)
+ms:applyProfile(shared)
+check(loader.modOptions.okmod.hardcore == true,
+  "applying a profile restores its mod options")
+local wire = ModProfile.encode(shared)
+local back = ModProfile.decode(wire)
+check(back and back.name == "SHARE" and back.options.okmod.hardcore == true,
+  "a .g1rmodlist body round-trips through the data-only parser")
+check(ModProfile.decode("return {}") == nil, "a non-modlist file is refused")
+check(#ModProfile.missingIds({ enabled = { ghost = true } }, ms.byId) == 1,
+  "a profile naming an uninstalled mod reports it missing")
+local seedOpts = { modProfiles = {} }
+ModProfile.ensureFirst(seedOpts, ms.status.available, {})
+check(#seedOpts.modProfiles == 1 and seedOpts.modProfiles[1].name == "PROFILE 1"
+  and seedOpts.modProfilesSeeded == true,
+  "the pre-profiles setup migrates into PROFILE 1 once")
+seedOpts.modProfiles = {}
+ModProfile.ensureFirst(seedOpts, ms.status.available, {})
+check(#seedOpts.modProfiles == 0, "seeding never runs twice")
 
 -- permissions rows
 local permy = manifest("permy", { permissions = { "network" } })

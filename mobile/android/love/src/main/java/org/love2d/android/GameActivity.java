@@ -31,23 +31,34 @@ import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
+import java.net.HttpURLConnection;
+import java.net.URL;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
 import android.Manifest;
+import android.app.AlarmManager;
 import android.app.AlertDialog;
+import android.app.PendingIntent;
 import android.content.Context;
 import android.content.DialogInterface;
 import android.content.Intent;
+import android.content.SharedPreferences;
 import android.content.pm.ActivityInfo;
 import android.content.pm.ApplicationInfo;
 import android.content.res.AssetManager;
+import android.hardware.Sensor;
+import android.hardware.SensorEvent;
+import android.hardware.SensorEventListener;
+import android.hardware.SensorManager;
 import android.media.AudioManager;
 import android.net.Uri;
 import android.os.Bundle;
 import android.os.Environment;
+import android.os.Handler;
+import android.os.Looper;
 import android.os.Vibrator;
 import android.util.Log;
 import android.util.DisplayMetrics;
@@ -67,6 +78,8 @@ public class GameActivity extends SDLActivity {
     public static final int RECORD_AUDIO_REQUEST_CODE = 3;
     public static final int FILE_PICKER_REQUEST_CODE = 4;
     public static final int FILE_CREATE_REQUEST_CODE = 5;
+    public static final int STEP_PERMISSION_REQUEST_CODE = 6;
+    public static final int RESTART_REQUEST_CODE = 7;
     /** @deprecated Prefer FILE_PICKER_REQUEST_CODE; kept for older call sites. */
     public static final int ROM_PICKER_REQUEST_CODE = FILE_PICKER_REQUEST_CODE;
     // Mirrors conf.lua's t.identity ("pokemon-love2d"): where the picked file
@@ -83,8 +96,27 @@ public class GameActivity extends SDLActivity {
     // basename as its body, so RomImporter:focus can say so in the launcher
     // instead of leaving the player on "No ROM imported" (issue #442).
     private static final String PICK_ERROR_FILENAME = "pick_error.flag";
+    // Step bridge (love.system.syncHealthSteps): pending-steps delivery
+    // consumed by the Pokéwalker mod, same contract as the iOS
+    // GRHealthBridge. Steps come from the hardware TYPE_STEP_COUNTER
+    // (cumulative since boot, counted by the OS whether or not any app is
+    // running), anchored in SharedPreferences so a walk is never credited
+    // twice.
+    private static final String PENDING_STEPS_FILENAME = "steps_pending.json";
+    private static final String STEP_PREFS = "pokewalker_steps";
+    private static final String STEP_PREF_ANCHOR = "anchor";
+    private static final String STEP_PREF_ANCHOR_WALLTIME = "anchor_walltime";
+    private static final long STEP_MAX_PER_SYNC = 50000;
     // Destination basename for the in-flight SAF pick (set by showFilePicker).
+    // Saved/restored across instance state: the picker is a separate activity
+    // and Android may destroy this one while it is up (memory pressure, or
+    // "Don't keep activities"). A recreated instance still receives
+    // onActivityResult, so without this a mod or save pick came back with the
+    // field reset and was filed as picked_rom.gb, which Lua then rejected as a
+    // bad ROM instead of installing it (#553).
     private String pendingPickFilename = PICKED_ROM_FILENAME;
+    private static final String STATE_PENDING_PICK = "pendingPickFilename";
+    private static final String STATE_PENDING_CREATE = "pendingCreateSuggestedName";
     // Suggested download name for the in-flight SAF create (set by showCreateDocument).
     private String pendingCreateSuggestedName = "export.sav";
     private static boolean immersiveActive = false;
@@ -149,6 +181,14 @@ public class GameActivity extends SDLActivity {
         }
 
         super.onCreate(savedInstanceState);
+        if (savedInstanceState != null) {
+            // Restore the in-flight SAF destinations, so a pick that returns to
+            // a recreated activity still lands under the basename it asked for.
+            String pick = savedInstanceState.getString(STATE_PENDING_PICK);
+            if (pick != null) pendingPickFilename = pick;
+            String create = savedInstanceState.getString(STATE_PENDING_CREATE);
+            if (create != null) pendingCreateSuggestedName = create;
+        }
         metrics = getResources().getDisplayMetrics();
 
         // Set low-latency audio values
@@ -296,12 +336,14 @@ public class GameActivity extends SDLActivity {
             Log.d("GameActivity", "Cancelling vibration");
             vibrator.cancel();
         }
+        teardownSecondaryDisplay();
         super.onPause();
     }
 
     @Override
     public void onResume() {
         super.onResume();
+        setupSecondaryDisplay();
     }
 
     /**
@@ -410,15 +452,23 @@ public class GameActivity extends SDLActivity {
      * Shows the system document picker (Storage Access Framework) so the
      * player can pick a ROM / mod / save from anywhere (Downloads, Drive,
      * etc.) without needing to know where the app's external files folder
-     * is. Requires API 19+ (ACTION_OPEN_DOCUMENT); the picked file (if any)
-     * arrives later in onActivityResult, not synchronously here.
+     * is. The picked file (if any) arrives later in onActivityResult, not
+     * synchronously here.
+     *
+     * API 21+ uses ACTION_OPEN_DOCUMENT; API 16-20 uses an ACTION_GET_CONTENT
+     * chooser instead. Below 19 OPEN_DOCUMENT does not exist, and on 19/20
+     * the stock DocumentsUI is unreliable -- it launches and then hands back
+     * RESULT_CANCELED with no data, which onActivityResult cannot tell apart
+     * from the player cancelling (#584). GET_CONTENT lets any installed file
+     * manager serve the pick, and both intents return the same content:// or
+     * file:// URI shapes, so the result path in onActivityResult stays
+     * picker-agnostic and unchanged.
      *
      * @param destFilename basename under the app save identity (e.g.
      *                     picked_rom.gb, picked_mod.zip, picked_save.sav)
      */
     @Keep
     public static boolean showFilePicker(String destFilename) {
-        if (android.os.Build.VERSION.SDK_INT < 19) return false;
         GameActivity self = (GameActivity) mSingleton;
         if (self == null) return false;
         if (destFilename == null || destFilename.length() == 0) {
@@ -432,11 +482,26 @@ public class GameActivity extends SDLActivity {
         }
 
         self.pendingPickFilename = destFilename;
-        Intent intent = new Intent(Intent.ACTION_OPEN_DOCUMENT);
+        if (android.os.Build.VERSION.SDK_INT >= 21) {
+            Intent intent = new Intent(Intent.ACTION_OPEN_DOCUMENT);
+            intent.addCategory(Intent.CATEGORY_OPENABLE);
+            intent.setType("*/*");
+            try {
+                self.startActivityForResult(intent, FILE_PICKER_REQUEST_CODE);
+                return true;
+            } catch (Exception e) {
+                // Some OEM / TV builds ship without DocumentsUI; fall through
+                // to the GET_CONTENT chooser below instead of giving up (#584).
+                Log.d("GameActivity", "could not open document picker: " + e.getMessage());
+            }
+        }
+        Intent intent = new Intent(Intent.ACTION_GET_CONTENT);
         intent.addCategory(Intent.CATEGORY_OPENABLE);
         intent.setType("*/*");
         try {
-            self.startActivityForResult(intent, FILE_PICKER_REQUEST_CODE);
+            self.startActivityForResult(
+                Intent.createChooser(intent, "Choose a file"),
+                FILE_PICKER_REQUEST_CODE);
             return true;
         } catch (Exception e) {
             Log.d("GameActivity", "could not open file picker: " + e.getMessage());
@@ -463,13 +528,126 @@ public class GameActivity extends SDLActivity {
     }
 
     /**
+     * Relaunches the whole app for love.system.restartApp, used by
+     * src/core/HostShell.lua when a mod toggle needs a cold boot (#575).
+     * love.event.quit("restart") re-runs LOVE's boot inside the same
+     * process, and the second love.filesystem.init throws once physfs
+     * failed to deinit ("already initialized"), killing the app. Instead
+     * we hand our launch intent to AlarmManager and then exit the process:
+     * the alarm lives in system_server, so it survives our death and
+     * cannot race the exit the way a plain startActivity right before
+     * Runtime.exit can on some OEMs, and the dead process guarantees no
+     * native (physfs / SDL / JNI) state leaks into the fresh run.
+     */
+    @Keep
+    public static boolean restartApp() {
+        GameActivity self = (GameActivity) mSingleton;
+        if (self == null) return false;
+        try {
+            Context context = self.getApplicationContext();
+            Intent intent = context.getPackageManager()
+                .getLaunchIntentForPackage(context.getPackageName());
+            if (intent == null) return false;
+            intent.addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP | Intent.FLAG_ACTIVITY_NEW_TASK);
+            int pendingFlags = PendingIntent.FLAG_CANCEL_CURRENT;
+            if (android.os.Build.VERSION.SDK_INT >= 23) {
+                // Mandatory mutability flag on API 31+; harmless from 23 up.
+                pendingFlags |= PendingIntent.FLAG_IMMUTABLE;
+            }
+            PendingIntent pending = PendingIntent.getActivity(
+                context, RESTART_REQUEST_CODE, intent, pendingFlags);
+            AlarmManager alarm = (AlarmManager) context.getSystemService(Context.ALARM_SERVICE);
+            if (alarm == null) return false;
+            alarm.set(AlarmManager.RTC, System.currentTimeMillis() + 250, pending);
+        } catch (Exception e) {
+            Log.d("GameActivity", "could not schedule restart: " + e.getMessage());
+            return false;
+        }
+        Runtime.getRuntime().exit(0);
+        return true; // unreachable, but keeps the JNI signature honest
+    }
+
+    /**
+     * Blocking HTTPS GET into destPath, exposed as love.system.httpDownload
+     * and used by src/core/HostShell.lua. Android ships no curl binary, so
+     * every remote fetch the desktop builds do with curl (mod index feeds,
+     * mod release lists, mod zips, thumbnails) comes through here (#597).
+     * Runs on LOVE's Lua thread, never the UI thread, so the platform's
+     * network-on-main-thread rule is not in play and a blocking call matches
+     * the curl semantics the Lua callers already expect.
+     *
+     * Redirects are followed by hand because HttpURLConnection silently drops
+     * a redirect that changes protocol, and only https is accepted: the feeds
+     * live on GitHub Pages / raw and a downgrade to http must fail, not fetch.
+     * The body lands in a .part file and is renamed only once complete, so a
+     * dropped connection can never leave a half file the caller trusts.
+     */
+    @Keep
+    public static boolean httpDownload(String url, String destPath, String userAgent, String accept) {
+        if (url == null || destPath == null) return false;
+        HttpURLConnection conn = null;
+        File tmp = new File(destPath + ".part");
+        try {
+            String current = url;
+            for (int hop = 0; hop < 5; hop++) {
+                URL parsed = new URL(current);
+                if (!"https".equalsIgnoreCase(parsed.getProtocol())) return false;
+                conn = (HttpURLConnection) parsed.openConnection();
+                conn.setInstanceFollowRedirects(false);
+                conn.setConnectTimeout(15000);
+                conn.setReadTimeout(60000);
+                conn.setRequestProperty("User-Agent",
+                    userAgent == null ? "gen1recomp" : userAgent);
+                if (accept != null) conn.setRequestProperty("Accept", accept);
+                int code = conn.getResponseCode();
+                if (code == 301 || code == 302 || code == 303 || code == 307 || code == 308) {
+                    String next = conn.getHeaderField("Location");
+                    conn.disconnect();
+                    conn = null;
+                    if (next == null) return false;
+                    current = new URL(parsed, next).toString();
+                    continue;
+                }
+                if (code < 200 || code > 299) return false;
+                InputStream in = new BufferedInputStream(conn.getInputStream());
+                OutputStream out = new BufferedOutputStream(new FileOutputStream(tmp));
+                try {
+                    byte[] buf = new byte[16384];
+                    int n;
+                    while ((n = in.read(buf)) > 0) out.write(buf, 0, n);
+                } finally {
+                    try { out.close(); } catch (IOException ignored) {}
+                    try { in.close(); } catch (IOException ignored) {}
+                }
+                File dest = new File(destPath);
+                dest.delete();
+                if (!tmp.renameTo(dest)) return false;
+                return dest.length() > 0;
+            }
+            return false;
+        } catch (Exception e) {
+            Log.d("GameActivity", "httpDownload failed: " + e.getMessage());
+            return false;
+        } finally {
+            if (conn != null) conn.disconnect();
+            if (tmp.exists()) tmp.delete();
+        }
+    }
+
+    /**
      * Shows ACTION_CREATE_DOCUMENT so the player can save a staged export
      * (pending_export.sav in the app save identity) to Downloads / Drive /
      * etc. Suggested name is the dialog's default filename.
+     *
+     * CREATE_DOCUMENT does not exist below API 19 and has no pre-SAF
+     * equivalent, so unlike showFilePicker this stays 19+ (#584); the false
+     * return degrades on the Lua side (RomImporter export) to "Exported
+     * inside the app folder", which is the correct pre-KitKat behavior.
      */
     @Keep
     public static boolean showCreateDocument(String suggestedName) {
         if (android.os.Build.VERSION.SDK_INT < 19) return false;
+        // (see showFilePicker for why the import side got a pre-19 path)
         GameActivity self = (GameActivity) mSingleton;
         if (self == null) return false;
         if (suggestedName == null || suggestedName.length() == 0) {
@@ -516,6 +694,160 @@ public class GameActivity extends SDLActivity {
         }
     }
 
+    /**
+     * Step sync, called from Lua as love.system.syncHealthSteps()
+     * (see modules/system/wrap_System.cpp). Asynchronous like the picker:
+     * returns whether a sync could be started; the result lands later as
+     * steps_pending.json in the save identity dir, where the Pokéwalker
+     * mod's poll consumes it.
+     *
+     * Android 10+ gates the step counter behind the ACTIVITY_RECOGNITION
+     * runtime permission; the first call shows the system prompt and a later
+     * sync (the mod retries on save load / option change) delivers.
+     */
+    @Keep
+    public static boolean syncHealthSteps() {
+        final GameActivity self = (GameActivity) mSingleton;
+        if (self == null) return false;
+        if (android.os.Build.VERSION.SDK_INT >= 29
+                && ActivityCompat.checkSelfPermission(self,
+                    Manifest.permission.ACTIVITY_RECOGNITION)
+                    != PackageManager.PERMISSION_GRANTED) {
+            self.runOnUiThread(new Runnable() {
+                @Override
+                public void run() {
+                    ActivityCompat.requestPermissions(self,
+                        new String[]{Manifest.permission.ACTIVITY_RECOGNITION},
+                        STEP_PERMISSION_REQUEST_CODE);
+                }
+            });
+            return true;
+        }
+        self.startStepSensorRead();
+        return true;
+    }
+
+    /**
+     * One-shot read of the cumulative hardware step counter. The sensor
+     * usually reports its cached value moments after registration; some
+     * devices hold the event until the next physical step, so the listener
+     * is given 20 seconds before being torn down (the next sync retries).
+     */
+    private void startStepSensorRead() {
+        final SensorManager manager =
+            (SensorManager) getSystemService(Context.SENSOR_SERVICE);
+        if (manager == null) return;
+        Sensor counter = manager.getDefaultSensor(Sensor.TYPE_STEP_COUNTER);
+        if (counter == null) {
+            Log.d("GameActivity", "no step counter sensor on this device");
+            return;
+        }
+        final SensorEventListener listener = new SensorEventListener() {
+            private boolean delivered = false;
+
+            @Override
+            public void onSensorChanged(SensorEvent event) {
+                if (delivered || event.values.length == 0) return;
+                delivered = true;
+                manager.unregisterListener(this);
+                deliverSteps((long) event.values[0]);
+            }
+
+            @Override
+            public void onAccuracyChanged(Sensor sensor, int accuracy) {
+            }
+        };
+        if (!manager.registerListener(listener, counter,
+                SensorManager.SENSOR_DELAY_NORMAL)) {
+            Log.d("GameActivity", "step counter listener registration failed");
+            return;
+        }
+        new Handler(Looper.getMainLooper()).postDelayed(new Runnable() {
+            @Override
+            public void run() {
+                // No-op if the listener already delivered and unregistered.
+                manager.unregisterListener(listener);
+            }
+        }, 20000);
+    }
+
+    /**
+     * Convert a cumulative counter reading into pending steps. The counter
+     * resets to zero on reboot: a reading below the stored anchor re-anchors
+     * without crediting (steps walked between the reboot and this sync are
+     * lost, which errs on the honest side).
+     */
+    private void deliverSteps(long counterNow) {
+        SharedPreferences prefs = getSharedPreferences(STEP_PREFS, MODE_PRIVATE);
+        long anchor = prefs.getLong(STEP_PREF_ANCHOR, -1);
+        long now = System.currentTimeMillis();
+        if (anchor < 0 || counterNow < anchor) {
+            prefs.edit()
+                .putLong(STEP_PREF_ANCHOR, counterNow)
+                .putLong(STEP_PREF_ANCHOR_WALLTIME, now)
+                .apply();
+            Log.d("GameActivity", "step anchor set at " + counterNow);
+            return;
+        }
+        long steps = Math.min(counterNow - anchor, STEP_MAX_PER_SYNC);
+        long fromWalltime = prefs.getLong(STEP_PREF_ANCHOR_WALLTIME, now);
+        if (steps <= 0) return;
+        prefs.edit()
+            .putLong(STEP_PREF_ANCHOR, counterNow)
+            .putLong(STEP_PREF_ANCHOR_WALLTIME, now)
+            .apply();
+
+        File dir = saveIdentityDir();
+        if (!dir.isDirectory() && !dir.mkdirs()) {
+            Log.d("GameActivity", "cannot create save dir for steps: " + dir);
+            return;
+        }
+        File pending = new File(dir, PENDING_STEPS_FILENAME);
+        long total = steps;
+        // Merge with an unconsumed earlier delivery so steps are never lost
+        // (same contract as the iOS bridge).
+        if (pending.isFile()) {
+            try {
+                byte[] raw = new byte[(int) Math.min(pending.length(), 4096)];
+                FileInputStream in = new FileInputStream(pending);
+                int read = in.read(raw);
+                in.close();
+                if (read > 0) {
+                    org.json.JSONObject old =
+                        new org.json.JSONObject(new String(raw, 0, read, "UTF-8"));
+                    total += Math.max(0, old.optLong("steps", 0));
+                }
+            } catch (Exception e) {
+                Log.d("GameActivity", "ignoring unreadable pending steps: " + e);
+            }
+        }
+        try {
+            org.json.JSONObject payload = new org.json.JSONObject();
+            payload.put("steps", total);
+            payload.put("from", isoTime(fromWalltime));
+            payload.put("to", isoTime(now));
+            File tmp = new File(dir, PENDING_STEPS_FILENAME + ".tmp");
+            FileOutputStream out = new FileOutputStream(tmp);
+            out.write(payload.toString().getBytes("UTF-8"));
+            out.close();
+            if (!tmp.renameTo(pending)) {
+                tmp.delete();
+                Log.d("GameActivity", "could not publish pending steps");
+                return;
+            }
+            Log.d("GameActivity", total + " steps pending for the Pokewalker mod");
+        } catch (Exception e) {
+            Log.d("GameActivity", "could not write pending steps: " + e);
+        }
+    }
+
+    private static String isoTime(long millis) {
+        java.text.SimpleDateFormat format =
+            new java.text.SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss'Z'", java.util.Locale.US);
+        format.setTimeZone(java.util.TimeZone.getTimeZone("UTC"));
+        return format.format(new java.util.Date(millis));
+    }
+
     private boolean copyFileToUri(File source, Uri destUri) {
         InputStream in = null;
         OutputStream out = null;
@@ -537,6 +869,13 @@ public class GameActivity extends SDLActivity {
             try { if (in != null) in.close(); } catch (IOException ignored) {}
             try { if (out != null) out.close(); } catch (IOException ignored) {}
         }
+    }
+
+    @Override
+    protected void onSaveInstanceState(Bundle outState) {
+        super.onSaveInstanceState(outState);
+        outState.putString(STATE_PENDING_PICK, pendingPickFilename);
+        outState.putString(STATE_PENDING_CREATE, pendingCreateSuggestedName);
     }
 
     @Override
@@ -739,6 +1078,17 @@ public class GameActivity extends SDLActivity {
                     }
                     break;
                 }
+                case STEP_PERMISSION_REQUEST_CODE: {
+                    if (grantResults[0] == PackageManager.PERMISSION_GRANTED) {
+                        Log.d("GameActivity", "Step permission granted");
+                        // Deliver right away so the sync the player just
+                        // opted into doesn't wait for the next launch.
+                        startStepSensorRead();
+                    } else {
+                        Log.d("GameActivity", "Did not get step permission.");
+                    }
+                    break;
+                }
                 default:
                     super.onRequestPermissionsResult(requestCode, permissions, grantResults);
             }
@@ -919,6 +1269,184 @@ public class GameActivity extends SDLActivity {
             }
 
             return applicationInfo.sourceDir + "!/lib/" + abi + "/?.so";
+        }
+    }
+
+    // Dual-screen: mirror the engine's bottom-screen canvas onto a secondary
+    // physical display. Driven from the engine through love_android_secondary_*
+    // in src/jni/love/src/common/android.cpp.
+    private static volatile SecondaryPresentation secondaryPresentation;
+    private static volatile boolean secondaryEnabled = false;
+
+    @Keep
+    public static void setSecondaryEnabled(final boolean on) {
+        secondaryEnabled = on;
+        final GameActivity self = (GameActivity) mSingleton;
+        if (self == null) return;
+        self.runOnUiThread(new Runnable() {
+            @Override public void run() {
+                if (on) setupSecondaryDisplay(); else teardownSecondaryDisplay();
+            }
+        });
+    }
+
+    private static void setupSecondaryDisplay() {
+        GameActivity self = (GameActivity) mSingleton;
+        if (self == null || !secondaryEnabled || secondaryPresentation != null) return;
+        try {
+            android.hardware.display.DisplayManager dm =
+                (android.hardware.display.DisplayManager) self.getSystemService(Context.DISPLAY_SERVICE);
+            if (dm == null) return;
+            Display chosen = null;
+            for (Display d : dm.getDisplays()) {
+                android.graphics.Point size = new android.graphics.Point();
+                d.getRealSize(size);
+                Log.d("GameActivity", "display id=" + d.getDisplayId() + " name=" + d.getName()
+                    + " size=" + size.x + "x" + size.y);
+                if (chosen == null && d.getDisplayId() != Display.DEFAULT_DISPLAY) {
+                    chosen = d;
+                }
+            }
+            if (chosen == null) {
+                Display[] pres =
+                    dm.getDisplays(android.hardware.display.DisplayManager.DISPLAY_CATEGORY_PRESENTATION);
+                if (pres != null && pres.length > 0) chosen = pres[0];
+            }
+            if (chosen == null) {
+                Log.d("GameActivity", "no secondary display found");
+                return;
+            }
+            SecondaryPresentation p = new SecondaryPresentation(self, chosen);
+            p.show();
+            secondaryPresentation = p;
+            Log.d("GameActivity", "secondary display presentation started on id=" + chosen.getDisplayId());
+        } catch (Throwable t) {
+            Log.d("GameActivity", "secondary display setup failed: " + t);
+            secondaryPresentation = null;
+        }
+    }
+
+    private static void teardownSecondaryDisplay() {
+        SecondaryPresentation p = secondaryPresentation;
+        secondaryPresentation = null;
+        if (p != null) {
+            try { p.dismiss(); } catch (Throwable t) {}
+        }
+    }
+
+    @Keep
+    public static boolean hasSecondaryDisplay() {
+        return secondaryPresentation != null;
+    }
+
+    @Keep
+    public static void updateSecondaryFrame(java.nio.ByteBuffer buf, int w, int h) {
+        SecondaryPresentation p = secondaryPresentation;
+        if (p != null && buf != null && w > 0 && h > 0) {
+            p.updateFrame(buf, w, h);
+        }
+    }
+
+    private static class SecondaryPresentation extends android.app.Presentation {
+        private final FrameView frameView;
+
+        SecondaryPresentation(Context context, Display display) {
+            super(context, display);
+            frameView = new FrameView(context);
+        }
+
+        @Override
+        protected void onCreate(Bundle savedInstanceState) {
+            super.onCreate(savedInstanceState);
+            android.view.Window w = getWindow();
+            if (w != null) {
+                w.setFlags(WindowManager.LayoutParams.FLAG_FULLSCREEN
+                    | WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS,
+                    WindowManager.LayoutParams.FLAG_FULLSCREEN
+                    | WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS);
+                w.setLayout(WindowManager.LayoutParams.MATCH_PARENT,
+                    WindowManager.LayoutParams.MATCH_PARENT);
+            }
+            setContentView(frameView);
+            applyImmersive();
+            frameView.post(new Runnable() {
+                @Override public void run() { applyImmersive(); }
+            });
+        }
+
+        @Override
+        public void onWindowFocusChanged(boolean hasFocus) {
+            super.onWindowFocusChanged(hasFocus);
+            if (hasFocus) applyImmersive();
+        }
+
+        private void applyImmersive() {
+            android.view.Window w = getWindow();
+            if (w == null) return;
+            if (android.os.Build.VERSION.SDK_INT >= 30) {
+                w.setDecorFitsSystemWindows(false);
+                android.view.WindowInsetsController c = w.getInsetsController();
+                if (c != null) {
+                    c.hide(android.view.WindowInsets.Type.systemBars());
+                    c.setSystemBarsBehavior(
+                        android.view.WindowInsetsController.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE);
+                }
+            } else {
+                w.getDecorView().setSystemUiVisibility(
+                    android.view.View.SYSTEM_UI_FLAG_LAYOUT_STABLE
+                    | android.view.View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION
+                    | android.view.View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN
+                    | android.view.View.SYSTEM_UI_FLAG_HIDE_NAVIGATION
+                    | android.view.View.SYSTEM_UI_FLAG_FULLSCREEN
+                    | android.view.View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY);
+            }
+        }
+
+        void updateFrame(java.nio.ByteBuffer buf, int w, int h) {
+            frameView.updateFrame(buf, w, h);
+        }
+    }
+
+    private static class FrameView extends View {
+        private android.graphics.Bitmap bitmap;
+        private final android.graphics.Rect dst = new android.graphics.Rect();
+        private final android.graphics.Paint paint = new android.graphics.Paint();
+        private final Object lock = new Object();
+        private int fw, fh;
+
+        FrameView(Context context) {
+            super(context);
+            paint.setFilterBitmap(false);
+            paint.setAntiAlias(false);
+            setBackgroundColor(0xFF000000);
+        }
+
+        void updateFrame(java.nio.ByteBuffer buf, int w, int h) {
+            synchronized (lock) {
+                if (bitmap == null || fw != w || fh != h) {
+                    if (bitmap != null) bitmap.recycle();
+                    bitmap = android.graphics.Bitmap.createBitmap(w, h, android.graphics.Bitmap.Config.ARGB_8888);
+                    fw = w; fh = h;
+                }
+                buf.rewind();
+                bitmap.copyPixelsFromBuffer(buf);
+            }
+            postInvalidate();
+        }
+
+        @Override
+        protected void onDraw(android.graphics.Canvas canvas) {
+            synchronized (lock) {
+                if (bitmap == null || fw == 0 || fh == 0) return;
+                int vw = getWidth(), vh = getHeight();
+                int s = Math.min(vw / fw, vh / fh);
+                if (s < 1) s = 1;
+                int dw = fw * s, dh = fh * s;
+                int dx = (vw - dw) / 2, dy = (vh - dh) / 2;
+                dst.set(dx, dy, dx + dw, dy + dh);
+                canvas.drawColor(0xFF000000);
+                canvas.drawBitmap(bitmap, null, dst, paint);
+            }
         }
     }
 }

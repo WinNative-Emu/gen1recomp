@@ -1696,10 +1696,13 @@ end
 -- ---------------------------------------------------------------- touch controls layout (#327)
 do
   local TC = require("src.core.TouchControls")
+  local SafeArea = require("src.core.SafeArea")
   local cfg = TC.normalizeConfig(nil)
   eq(cfg.enabled, true, "touchControls default enabled")
-  check(cfg.positions == nil, "touchControls default positions nil")
+  check(cfg.layouts.portrait.positions == nil, "touchControls default positions nil")
+  eq(cfg.layouts.landscape.scale, 1, "touchControls default scale 1")
 
+  -- pre-#633 file: one positions table seeds both orientations, as copies
   cfg = TC.normalizeConfig({
     enabled = false,
     positions = {
@@ -1710,16 +1713,26 @@ do
     },
   })
   eq(cfg.enabled, false, "normalizeConfig keeps enabled=false")
-  eq(cfg.positions.dpad.x, 1, "normalizeConfig clamps x high")
-  eq(cfg.positions.dpad.y, 0, "normalizeConfig clamps y low")
-  eq(cfg.positions.a.x, 0.5, "normalizeConfig keeps a")
-  check(cfg.positions.junk == nil, "normalizeConfig drops unknown controls")
-  check(cfg.positions.b == nil, "normalizeConfig drops non-numeric")
+  local pcfg, lcfg = cfg.layouts.portrait, cfg.layouts.landscape
+  eq(pcfg.positions.dpad.x, 1, "normalizeConfig clamps x high")
+  eq(pcfg.positions.dpad.y, 0, "normalizeConfig clamps y low")
+  eq(pcfg.positions.a.x, 0.5, "normalizeConfig keeps a")
+  check(pcfg.positions.junk == nil, "normalizeConfig drops unknown controls")
+  check(pcfg.positions.b == nil, "normalizeConfig drops non-numeric")
+  eq(lcfg.positions.dpad.x, 1, "legacy positions seed landscape too")
+  check(pcfg.positions ~= lcfg.positions,
+        "orientations never share one positions table (#633)")
 
   local L = TC.defaultLayout(400, 800)
   check(L.dpad.cx < 200, "default d-pad on left half")
   check(L.a.cx > 200, "default A on right half")
   check(L.dpad.cy > 400, "default d-pad in bottom half")
+
+  -- safe-area origin shifts defaults without changing relative layout
+  local Ls = TC.defaultLayout(400, 800, 20, 30)
+  eq(Ls.dpad.cx, L.dpad.cx + 20, "defaultLayout ox shifts controls")
+  eq(Ls.dpad.cy, L.dpad.cy + 30, "defaultLayout oy shifts controls")
+  eq(Ls.a.cx, L.a.cx + 20, "defaultLayout ox shifts A")
 
   -- applyOptions + visible gate (no real images needed for the gate)
   TC.enabled = true
@@ -1743,16 +1756,37 @@ do
   -- custom position applied through layout()
   local g = love.graphics
   local oldDim, oldFont = g.getDimensions, g.newFont
+  local oldSafe = love.window and love.window.getSafeArea
   g.getDimensions = function() return 400, 800 end
   g.newFont = function() return { getWidth = function() return 10 end,
                                   getHeight = function() return 10 end } end
-  TC.layoutW, TC.layoutH, TC.L = nil, nil, nil
+  love.window = love.window or {}
+  love.window.getSafeArea = function() return 0, 0, 400, 800 end
+  TC.layoutW, TC.layoutH, TC.layoutOx, TC.layoutOy, TC.L = nil, nil, nil, nil, nil
   local lay = TC:layout()
   eq(lay.dpad.cx, 100, "custom dpad cx = nx * ww")
   eq(lay.dpad.cy, 600, "custom dpad cy = ny * wh")
+
+  -- inset safe area: custom positions stay inside the usable rect
+  love.window.getSafeArea = function() return 10, 40, 380, 720 end
+  TC.layoutW, TC.layoutH, TC.layoutOx, TC.layoutOy, TC.L = nil, nil, nil, nil, nil
+  lay = TC:layout()
+  eq(lay.dpad.cx, 10 + 0.25 * 380, "safe-area custom dpad cx")
+  eq(lay.dpad.cy, 40 + 0.75 * 720, "safe-area custom dpad cy")
+  check(lay.dpad.cy <= 40 + 720 - lay.dpad.w * 0.5 + 1e-6,
+        "safe-area dpad clears bottom inset")
+
+  local x, y, w, h = SafeArea.rect()
+  eq(x, 10, "SafeArea.rect x")
+  eq(y, 40, "SafeArea.rect y")
+  eq(w, 380, "SafeArea.rect w")
+  eq(h, 720, "SafeArea.rect h")
+
   TC:clearPositions()
   check(TC.positions == nil, "clearPositions wipes overrides")
   g.getDimensions, g.newFont = oldDim, oldFont
+  if oldSafe then love.window.getSafeArea = oldSafe
+  else love.window.getSafeArea = nil end
 end
 
 -- ---------------------------------------------------------------- crit thresholds (CriticalHitTest)
@@ -2597,7 +2631,13 @@ do
   local popped = false
   local og = { data = Data, save = SD.newGame(),
                input = OInput, stack = { pop = function() popped = true end },
-               writeOptions = function(self) SD.saveOptions(self.save.options) end }
+               writeOptions = function(self) SD.saveOptions(self.save.options) end,
+               -- the PERFORMANCE row routes through Game:applyOptions; the
+               -- stub carries the headless slice of it (the tier record),
+               -- the display modules are re-applied at the end of the suite
+               applyOptions = function(self, o)
+                 require("src.core.Performance").applyOptions(o)
+               end }
   local om = OptionsMenu.new(og)
   local function press(btn)
     OInput.pressed = { [btn] = true }
@@ -2621,9 +2661,9 @@ do
      "A switches the battle screen to the WIDE layout")
   press("a")
   eq(og.save.options.battleLayout, "og", "BATTLE LAYOUT wraps back to OG")
-  for _ = 1, 2 do press("down") end
-  eq(om.index, 6, "cursor reaches MUSIC VOL")
-  eq(om.scroll, 2, "viewport scrolls to keep MUSIC VOL on screen")
+  for _ = 1, 5 do press("down") end
+  eq(om.index, 9, "cursor reaches MUSIC VOL")
+  eq(om.scroll, 5, "viewport scrolls to keep MUSIC VOL on screen")
   press("left")
   eq(og.save.options.musicVol, 6, "left lowers MUSIC VOL")
   press("right")
@@ -2638,25 +2678,33 @@ do
   press("a")
   eq(og.save.options.musicFilter, 0, "MUSIC FILTER wraps back to OFF")
   press("down")
-  eq(om.index, 9, "cursor reaches COLORS")
+  eq(om.index, 12, "cursor reaches PERFORMANCE")
+  press("a")
+  eq(og.save.options.performance, "high", "A cycles PERFORMANCE to HIGH")
+  eq(require("src.core.Performance").tier, "high",
+     "the live tier tracks the PERFORMANCE option")
+  for _ = 1, 3 do press("a") end
+  eq(og.save.options.performance, "auto", "PERFORMANCE wraps back to AUTO")
+  press("down")
+  eq(om.index, 13, "cursor reaches COLORS")
   press("a")
   for _ = 1, 4 do press("a") end
   press("down")
-  eq(om.index, 10, "cursor reaches TILT")
+  eq(om.index, 14, "cursor reaches TILT")
   press("a")
   eq(og.save.options.tilt, 1, "A cycles TILT to 15")
   eq(Tilt.level, 1, "Tilt level tracks TILT option")
   press("a"); press("a"); press("a")
   eq(og.save.options.tilt, 0, "TILT wraps back to OFF")
   press("down")
-  eq(om.index, 11, "cursor reaches GBC FX")
+  eq(om.index, 15, "cursor reaches GBC FX")
   press("a")
   eq(og.save.options.gbcfx, 1, "A cycles GBC FX to 1")
   eq(GBCFX.level, 1, "GBCFX level tracks GBC FX option")
   for _ = 1, 4 do press("a") end
   eq(og.save.options.gbcfx, 0, "GBC FX wraps back to OFF")
   press("down")
-  eq(om.index, 12, "cursor reaches ZOOM")
+  eq(om.index, 16, "cursor reaches ZOOM")
   local ZoomOpt = require("src.render.Zoom")
   press("a")
   eq(og.save.options.zoom, 1, "A cycles ZOOM to IN1")
@@ -2664,7 +2712,7 @@ do
   press("left")
   eq(og.save.options.zoom, 0, "left steps ZOOM back to FIT")
   press("down")
-  eq(om.index, 13, "cursor reaches VOID FILL")
+  eq(om.index, 17, "cursor reaches VOID FILL")
   local TR = require("src.render.TileRenderer")
   press("a")
   eq(og.save.options.voidFill, "water", "A cycles VOID FILL to WATER")
@@ -2674,7 +2722,7 @@ do
   press("a")
   eq(og.save.options.voidFill, "trees", "VOID FILL wraps back to TREES")
   press("down")
-  eq(om.index, 14, "cursor reaches VIDEO MODE")
+  eq(om.index, 18, "cursor reaches VIDEO MODE")
   press("a")
   eq(og.save.options.videoMode, "borderless",
      "A cycles VIDEO MODE to BORDERLESS")
@@ -2682,7 +2730,9 @@ do
   eq(og.save.options.videoMode, "windowed",
      "VIDEO MODE wraps back to WINDOWED")
   press("down")
-  eq(om.index, 15, "cursor reaches MAX FPS")
+  eq(om.index, 19, "cursor reaches FAITHFUL RATIO")
+  press("down")
+  eq(om.index, 20, "cursor reaches MAX FPS")
   press("a")
   eq(og.save.options.fpsCap, 75, "A cycles MAX FPS up from 60 to 75")
   eq(FrameCap.current, 75, "the live render cap tracks the MAX FPS option")
@@ -2691,7 +2741,7 @@ do
   for _ = 1, #FrameCap.STEPS - 1 do press("a") end
   eq(og.save.options.fpsCap, 60, "MAX FPS wraps back to 60")
   press("down")
-  eq(om.index, 16, "cursor reaches GAME SPEED")
+  eq(om.index, 21, "cursor reaches GAME SPEED")
   press("a")
   eq(og.save.options.speed, 2, "A cycles GAME SPEED to 2X")
   -- Driven by the level list rather than a literal press count: adding a
@@ -2700,19 +2750,19 @@ do
   for _ = 1, #GameSpeed.LEVELS - 1 do press("a") end
   eq(og.save.options.speed, 1, "GAME SPEED wraps back to NORMAL")
   press("down")
-  eq(om.index, 17, "cursor reaches MODS")
+  eq(om.index, 22, "cursor reaches MODS")
   press("down")
-  eq(om.index, 18, "cursor reaches CONTROLS")
+  eq(om.index, 23, "cursor reaches CONTROLS")
   press("down")
-  eq(om.index, 19, "CANCEL stays the fixed final row")
-  eq(om.scroll, 14, "CANCEL keeps the last option boxes on screen")
+  eq(om.index, 24, "CANCEL stays the fixed final row")
+  eq(om.scroll, 19, "CANCEL keeps the last option boxes on screen")
   om:draw() -- smoke: scrolled layout draws under the headless stub
   press("a")
   check(popped, "A on CANCEL closes the options menu")
   local om2 = OptionsMenu.new(og)
   OInput.pressed = { up = true }; om2:update(1 / 60); OInput.pressed = {}
-  eq(om2.index, 19, "up from the top wraps to CANCEL")
-  eq(om2.scroll, 14, "wrapping to CANCEL scrolls to the tail")
+  eq(om2.index, 24, "up from the top wraps to CANCEL")
+  eq(om2.scroll, 19, "wrapping to CANCEL scrolls to the tail")
   -- headless-safe: no love.audio, setters only update internal state
   require("src.core.Music").applyOptions(og.save.options)
   require("src.core.Sound").applyOptions(og.save.options)
@@ -2775,16 +2825,19 @@ do
   menu:update(0)
   eq(game.popCount(), 1, "Menu START-press closes when startCloses (start menu's PAD_START mask; no beep per HandleMenuInput_)")
 
+  -- both DisplayTwoOptionMenu branches hold 15 frames with the menu still
+  -- on screen before the answer lands (ChoiceBox.pending), so pump the
+  -- hold out after the press
   game = stubGame({ a = true })
   local yes
   local box = ChoiceBox.new(game, function(v) yes = v end)
-  box:update(0)
+  for _ = 0, require("src.core.Timing").YES_NO_ANSWER do box:update(0) end
   eq(yes, true, "ChoiceBox A on YES chooses true")
 
   game = stubGame({ b = true })
   local no
   box = ChoiceBox.new(game, function(v) no = v end)
-  box:update(0)
+  for _ = 0, require("src.core.Timing").YES_NO_ANSWER do box:update(0) end
   eq(no, false, "ChoiceBox B chooses false")
 end
 end
@@ -2803,7 +2856,8 @@ do
   local qreturned = 0
   local qg = {
     data = Data, save = qsave, stack = qstack,
-    input = { wasPressed = function(_, k) return qpressed[k] end },
+    input = { wasPressed = function(_, k) return qpressed[k] end,
+              isDown = function(_, k) return qpressed[k] or false end },
     returnToTitle = function() qreturned = qreturned + 1 end,
   }
   local qmenu = StartMenuQ.new(qg)
@@ -2824,7 +2878,12 @@ do
   check(qbox ~= qmenu and qbox ~= nil and qbox.pages ~= nil,
         "QUIT pushes a confirmation textbox")
   eq(qbox.pages[1][1], "RETURN TO MAIN", "confirm asks RETURN TO MAIN MENU?")
-  qbox.onDone()
+  -- opts.choice: the box pushes the YES/NO itself once the last page has
+  -- typed out, so pump it rather than reaching for the old onDone hook
+  for _ = 1, 600 do
+    if qstack:top() ~= qbox then break end
+    qbox:update(1 / 60)
+  end
   local qchoice = qstack:top()
   check(qchoice ~= qbox and qchoice ~= nil and qchoice.onChoose ~= nil,
         "textbox is followed by a YES/NO choice")
@@ -3337,6 +3396,14 @@ runSuites({ "tests/rom_importer_android_pick_test.lua" })
 
 -- ---------------------------------------------- Android mod / save SAF pick
 runSuites({ "tests/rom_importer_android_mod_pick_test.lua" })
+
+-- ---------------------------------------------- import with no picker (#482)
+runSuites({ "tests/rom_importer_no_picker_test.lua" })
+runSuites({ "tests/rom_importer_double_pick_test.lua" })
+-- ---------------------------------------------- Switch platform capabilities
+-- platform_nx_* / rom_importer_nx_* live in tests/engine/ (ROM-free T2) so
+-- CI's headless lane runs them without data/generated/.
+runSuites({ "tests/launcher_mods_install_zip_test.lua" })
 -- ---------------------------------------------- parity workstream tests
 -- Each tests/parity_*.lua is a self-contained file (own bootstrap + check,
 -- error()s if any assertion fails).  Globbed, so dropping a new parity

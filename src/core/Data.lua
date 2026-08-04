@@ -14,12 +14,12 @@ local MODULES = {
 -- Optional for compatibility with developer and stale caches.
 local OPTIONAL = { "audio", "palettes", "icons" }
 
--- The rules the engine still carries as literals.  The constants registry
--- deep-merges over these, so a value has to exist before a mod can patch
--- it; each one is the number the engine hard-codes today, so seeding them
--- changes nothing on a mod-free boot.
+-- Vanilla defaults for rules exposed through the constants registry.  A
+-- value has to exist before a mod can patch it; each one matches the
+-- engine's no-mod behavior, so seeding them changes nothing on a vanilla
+-- boot.
 local CONSTANT_DEFAULTS = {
-  bagSize = 20,                 -- BAG_ITEM_CAPACITY (src/inventory/Bag.lua)
+  bagSize = 20,                 -- BAG_ITEM_CAPACITY (Bag.capacity fallback)
   partyMax = 6,                 -- PARTY_LENGTH (src/pokemon/Party.lua)
   boxCount = 12, boxSize = 20,  -- Bill's PC (src/pokemon/Boxes.lua)
   moveMax = 4,
@@ -77,6 +77,13 @@ end
 function Data:applyVersionedFieldData()
   if require("src.core.GameVersion").isYellow() then
     self.field.trades = copy(YELLOW_TRADES)
+    -- The old man's catch demo is a RATTATA in Yellow
+    -- (scripts/ViridianCity.asm ViridianCityOldManStartCatchTrainingScript
+    -- .SetupBattle: ld a, RATTATA / ld [wCurOpponent], a) but the Yellow
+    -- manifest inherited Red's WEEDLE field.oldManBattle (#617), so old
+    -- Yellow caches carry the wrong demo species too.  The fixed import
+    -- manifest below stamps RATTATA for fresh imports.
+    self.field.oldManBattle = { species = "RATTATA", level = 5 }
   end
 end
 
@@ -196,7 +203,20 @@ local function loadModule(dir, name)
     if not chunk then return false, err end
     return pcall(chunk)
   end
-  return pcall(require, "data.generated." .. name)
+  local ok, mod = pcall(require, "data.generated." .. name)
+  if ok then return true, mod end
+  -- Fused PhysFS / Blue|Yellow prefix: load bytes from the active version's
+  -- cache explicitly when require cannot see the mounted tree.
+  local CacheFs = require("src.import.CacheFs")
+  local GameVersion = require("src.core.GameVersion")
+  local path = "data/generated/" .. name .. ".lua"
+  local bytes = CacheFs.readActive(path)
+  if type(bytes) == "string" then
+    local chunk, err = loadstring(bytes, "@" .. GameVersion.cachePrefix() .. path)
+    if not chunk then return false, err or mod end
+    return pcall(chunk)
+  end
+  return false, mod
 end
 
 function Data:load()

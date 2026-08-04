@@ -219,6 +219,24 @@ function SaveData.defaultOptions()
     -- battle screen composition: og (the 160x144 original) | wide
     -- (304x144, src/battle/WideBattle.lua)
     battleLayout = "og",
+    -- BATTLE SIZE: "fixed" = the classic integer-scaled letterbox; "fill" =
+    -- scale the battle surface to the window so it fills vertically.  See
+    -- BattleState:wantsFillScale.
+    battleFit = "fixed",
+    -- BATTLE BG: what fills the screen behind and around the battle.
+    -- "white" = the display mode's paper shade (the classic look),
+    -- "black" = plain black bars, "world" = the frozen overworld showing
+    -- through, dimmed.  See BattleState:bgMode.
+    battleBg = "white",
+    -- UI LAYOUT: "centered" = a fixed letterbox.  Every element sits where it
+    -- was drawn in the 160x144 canvas and the UI does not follow the survey
+    -- zoom, so nothing moves or resizes under the player.  The original
+    -- composition.  "dynamic" = the dialogue box docks to the window's bottom
+    -- edge, the START menu to its top right, and the UI steps down with the
+    -- zoom.  Centered is the default: dynamic reads better zoomed out, but it
+    -- moves the screen furniture, so it is opt-in.
+    -- See Game.dynamicUI, Renderer:setUIAnchor and Renderer:uiScale.
+    uiLayout = "centered",
     ruleset = "gen1_faithful",
     -- 0-7 like the GB's NR50 master volume
     musicVol = 7,
@@ -239,8 +257,16 @@ function SaveData.defaultOptions()
     voidFill = "trees",
     -- windowed | borderless (desktop fullscreen); ignored on mobile
     videoMode = "windowed",
+    -- lock the window to an exact 160x144 multiple, 1..4 (0 = OFF); see
+    -- src/core/FaithfulRes.lua.  Ignored on mobile.
+    faithfulRes = 0,
     -- hard render frame-rate cap; render-only pacing (issue #88, FrameCap.lua)
     fpsCap = 60,
+    -- graphics performance tier: auto | high | balanced | low.  "auto"
+    -- picks a default from the device (ARM handhelds/phones drop the heavy
+    -- extras); scales TILT / GBC FX / survey ZOOM / FPS but never game
+    -- logic.  See src/core/Performance.lua.
+    performance = "auto",
     -- Per-pipeline display levels, keyed by render_pipelines id (see
     -- src/render/Pipelines.lua).  A level for a mod that is not installed
     -- is kept rather than pruned, so re-enabling the mod restores the mode
@@ -249,13 +275,35 @@ function SaveData.defaultOptions()
     -- Native mod enablement is an installation option, not save-slot data.
     -- Missing entries mean enabled so newly installed mods work by default.
     mods = {},
+    -- Named setups the player can switch between (#593; src/mods/ModProfile.lua
+    -- owns the shape, src/mods/ManagerState.lua the UI): each row is
+    -- { name, enabled = {id=bool}, options = {id={k=v}}, slots = {version=slotId} }.
+    -- activeProfile names the row the live set currently matches (nil for
+    -- ad-hoc, so it has no default entry here; mergeOptions preserves it).
+    -- modProfilesSeeded records that the pre-profiles setup was already
+    -- migrated into PROFILE 1, so deleting every profile does not re-seed one.
+    modProfiles = {},
+    modProfilesSeeded = false,
     -- GitHub release checks for mods with a manifest "github" field
     -- (src/mods/ModUpdate.lua). Keyed by owner/repo; TTL is six hours.
     modUpdateCache = {},
+    -- Community mod indexes the player has chosen to browse
+    -- (src/mods/ModIndex.lua), in the order they added them.  Empty by
+    -- default and never populated automatically: adding an index is how a
+    -- player says they trust whoever publishes it, so the launcher asks
+    -- rather than shipping one.  Rows are { url, feed, base, fallback,
+    -- label }.
+    modIndexes = {},
+    -- Parsed index listings keyed by feed URL; TTL is 24 hours, matching how
+    -- often the feeds themselves rebuild.
+    modIndexCache = {},
     -- On-screen touch overlay (Android/iOS; see src/core/TouchControls.lua).
     -- enabled=false hides it permanently (distinct from auto-hide-on-gamepad).
-    -- positions are optional normalized centers {x=0..1, y=0..1} per control
-    -- (dpad/a/b/start/select); nil means the default layout.
+    -- layouts.portrait / layouts.landscape each hold optional normalized
+    -- centers {x=0..1, y=0..1} per control (dpad/a/b/start/select) plus a
+    -- size scale; nil positions mean that orientation draws the default
+    -- layout (#633).  Pre-#633 files stored one top-level positions table;
+    -- TouchControls.normalizeConfig folds it into both orientations on load.
     touchControls = { enabled = true },
   }
 end
@@ -1043,7 +1091,7 @@ local function reclaim(save, data, report)
     if type(entry) == "table" and known(data.items, entry.id) then
       table.remove(orphaned.items, i)
       if entry.from == "pcItems" or type(save.inventory) ~= "table"
-          or not Bag.add(save, entry.id, entry.count or 1) then
+          or not Bag.add(save, entry.id, entry.count or 1, data) then
         save.pcItems = save.pcItems or {}
         save.pcItems[entry.id] = (save.pcItems[entry.id] or 0) + (entry.count or 1)
       end

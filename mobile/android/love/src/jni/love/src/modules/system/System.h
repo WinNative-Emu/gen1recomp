@@ -128,6 +128,28 @@ public:
 	virtual bool createFile(const char *suggestedName = nullptr) const;
 
 	/**
+	 * Pokéwalker: stage pending real-world steps (steps_pending.json in the
+	 * save dir) from the platform step source. Android-only; false elsewhere.
+	 */
+	virtual bool syncHealthSteps() const;
+
+	/**
+	 * Relaunches the whole app with a fresh process (Android only; false
+	 * elsewhere). The in-process love.event.quit("restart") double-inits
+	 * physfs on Android and crashes, so src/core/HostShell.lua calls this
+	 * instead (#575). Does not return on success -- the process exits.
+	 **/
+	virtual bool restartApp() const;
+
+	/**
+	 * Blocking HTTPS GET into an absolute host path (Android only; false
+	 * elsewhere). Android has no curl, which is what every other platform
+	 * fetches the mod index with (#597).
+	 **/
+	virtual bool httpDownload(const char *url, const char *destPath,
+		const char *userAgent = nullptr, const char *accept = nullptr) const;
+
+	/**
 	 * Gets if the user is playing music on background.
 	 * Throws an exception on unsupported platforms.
 	 *

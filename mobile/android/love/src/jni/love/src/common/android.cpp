@@ -219,6 +219,75 @@ bool showCreateDocument(const char *suggestedName)
 	return result;
 }
 
+bool syncHealthSteps()
+{
+	JNIEnv *env = (JNIEnv*) SDL_AndroidGetJNIEnv();
+	jclass activity = env->FindClass("org/love2d/android/GameActivity");
+
+	jmethodID method = env->GetStaticMethodID(activity, "syncHealthSteps", "()Z");
+	jboolean result = env->CallStaticBooleanMethod(activity, method);
+
+	env->DeleteLocalRef(activity);
+	return result;
+}
+
+bool restartApp()
+{
+	JNIEnv *env = (JNIEnv*) SDL_AndroidGetJNIEnv();
+	jclass activity = env->FindClass("org/love2d/android/GameActivity");
+
+	// Old APK / new liblove skew: fail soft so HostShell.restart can fall
+	// back to a clean quit instead of aborting on a missing method (#575).
+	jmethodID method = env->GetStaticMethodID(activity, "restartApp", "()Z");
+	if (method == nullptr)
+	{
+		env->ExceptionClear();
+		env->DeleteLocalRef(activity);
+		return false;
+	}
+
+	// Does not return on success: the Java side exits the process.
+	jboolean result = env->CallStaticBooleanMethod(activity, method);
+
+	env->DeleteLocalRef(activity);
+	return result;
+}
+
+bool httpDownload(const char *url, const char *destPath, const char *userAgent, const char *accept)
+{
+	if (url == nullptr || destPath == nullptr)
+		return false;
+
+	JNIEnv *env = (JNIEnv*) SDL_AndroidGetJNIEnv();
+	jclass activity = env->FindClass("org/love2d/android/GameActivity");
+
+	// Old APK / new liblove skew: report "no transport" the same way a
+	// missing curl does, instead of aborting on a missing method (#597).
+	jmethodID method = env->GetStaticMethodID(activity, "httpDownload",
+		"(Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;)Z");
+	if (method == nullptr)
+	{
+		env->ExceptionClear();
+		env->DeleteLocalRef(activity);
+		return false;
+	}
+
+	jstring jurl = env->NewStringUTF(url);
+	jstring jdest = env->NewStringUTF(destPath);
+	jstring jua = env->NewStringUTF(userAgent != nullptr ? userAgent : "gen1recomp");
+	jstring jaccept = accept != nullptr ? env->NewStringUTF(accept) : nullptr;
+
+	jboolean result = env->CallStaticBooleanMethod(activity, method, jurl, jdest, jua, jaccept);
+
+	env->DeleteLocalRef(jurl);
+	env->DeleteLocalRef(jdest);
+	env->DeleteLocalRef(jua);
+	if (jaccept != nullptr)
+		env->DeleteLocalRef(jaccept);
+	env->DeleteLocalRef(activity);
+	return result;
+}
+
 /*
  * Helper functions for the filesystem module
  */
@@ -850,5 +919,52 @@ const char *getArg0()
 
 } // android
 } // love
+
+extern "C" __attribute__((visibility("default")))
+int love_android_secondary_ready()
+{
+	JNIEnv *env = (JNIEnv*) SDL_AndroidGetJNIEnv();
+	jclass activity = env->FindClass("org/love2d/android/GameActivity");
+	jmethodID m = env->GetStaticMethodID(activity, "hasSecondaryDisplay", "()Z");
+	jboolean ready = JNI_FALSE;
+	if (m)
+		ready = env->CallStaticBooleanMethod(activity, m);
+	else
+		env->ExceptionClear();
+	env->DeleteLocalRef(activity);
+	return ready ? 1 : 0;
+}
+
+extern "C" __attribute__((visibility("default")))
+void love_android_push_secondary(const void *rgba, int w, int h)
+{
+	if (!rgba || w <= 0 || h <= 0)
+		return;
+	JNIEnv *env = (JNIEnv*) SDL_AndroidGetJNIEnv();
+	jclass activity = env->FindClass("org/love2d/android/GameActivity");
+	jmethodID m = env->GetStaticMethodID(activity, "updateSecondaryFrame", "(Ljava/nio/ByteBuffer;II)V");
+	if (m)
+	{
+		jobject buf = env->NewDirectByteBuffer((void*) rgba, (jlong) w * (jlong) h * 4);
+		env->CallStaticVoidMethod(activity, m, buf, w, h);
+		env->DeleteLocalRef(buf);
+	}
+	else
+		env->ExceptionClear();
+	env->DeleteLocalRef(activity);
+}
+
+extern "C" __attribute__((visibility("default")))
+void love_android_secondary_enable(int on)
+{
+	JNIEnv *env = (JNIEnv*) SDL_AndroidGetJNIEnv();
+	jclass activity = env->FindClass("org/love2d/android/GameActivity");
+	jmethodID m = env->GetStaticMethodID(activity, "setSecondaryEnabled", "(Z)V");
+	if (m)
+		env->CallStaticVoidMethod(activity, m, on ? JNI_TRUE : JNI_FALSE);
+	else
+		env->ExceptionClear();
+	env->DeleteLocalRef(activity);
+}
 
 #endif // LOVE_ANDROID

@@ -15,6 +15,7 @@ local files = {
   "data.scripts.flavor.cerulean_trashed_house",
   "data.scripts.flavor.copycats_house_1f",
   "data.scripts.flavor.copycats_house_2f",
+  "data.scripts.flavor.fuchsia_city",
   "data.scripts.flavor.game_corner",
   "data.scripts.flavor.lavender_cubone_house",
   "data.scripts.flavor.lavender_mart",
@@ -60,6 +61,7 @@ local files = {
   "data.scripts.flavor.victory_road_2f",
   "data.scripts.flavor.viridian_city",
   "data.scripts.flavor.viridian_nickname_house",
+  "data.scripts.flavor.viridian_school_house", -- #503
   "data.scripts.flavor.wardens_house",
 }
 

@@ -50,6 +50,9 @@ function Menu.new(game, items, opts)
   -- only menus whose real mask includes PAD_START -- the start menu
   -- (engine/menus/draw_start_menu.asm) -- opt in here.
   self.startCloses = opts.startCloses or false
+  -- screen-edge anchor for this menu (see Menu:draw); nil keeps it in the
+  -- classic centred letterbox
+  self.anchor = opts.anchor
   self.onCancel = opts.onCancel
   -- BIT_NO_MENU_BUTTON_SOUND (wMiscFlags): the PC session runs its
   -- menus silent (home/window.asm HandleMenuInput_)
@@ -104,24 +107,46 @@ function Menu:update(dt)
 end
 
 function Menu:draw()
+  -- opts.anchor opts a menu out of the centred letterbox and onto a screen
+  -- edge (the START menu asks for "topright").  Only menus that ask for it
+  -- move; every other menu is placed exactly as before.
+  local r = self.anchor and self.game and self.game.renderer
+  if r and r.setUIAnchor then
+    r:setUIAnchor(self.tx * 8, self.ty * 8,
+                  self.tw * 8, self.th * 8, self.anchor)
+  end
   Font.drawBox(self.tx, self.ty, self.tw, self.th)
   love.graphics.setColor(0, 0, 0, 1)
   local visible = (self.maxVisible and math.min(self.maxVisible, #self.items))
     or #self.items
+  -- Row Y: pokered's boxed menus anchor the choices to the BOTTOM interior
+  -- row and let any slack fall as a blank row under the top edge --
+  -- draw_start_menu.asm (TextBoxBorder 10,0, then hlcoord 12,2 /
+  -- wTopMenuItemY 2), players_pc.asm and bills_pc.asm all do the same.  The
+  -- bottom border is ty + th - 1, so the last choice sits on ty + th - 2 and
+  -- row r counts back up from there.  Anchoring from the top instead only
+  -- agrees when th is exactly visible * rowStep + 2, which is Menu.new's
+  -- default but NOT what a caller sizing its own box passes: BagMenu's
+  -- USE/TOSS is th = 5 for two choices (#284, matching text_boxes.asm's
+  -- USE_TOSS_MENU_TEMPLATE rows 10..14), and a top anchor pushed TOSS onto
+  -- the bottom border (#564, #572).
   for row = 1, visible do
     local item = self.items[self.scroll + row]
     if not item then break end
     Font.draw(item.label, (self.tx + 2) * 8,
-      (self.ty + row * self.rowStep - (self.rowStep - 1)) * 8)
+      (self.ty + self.th - 2 - (visible - row) * self.rowStep) * 8)
   end
   local cursorRow = self.index - self.scroll
   Font.drawCode(Theme.cursor, (self.tx + 1) * 8,
-    (self.ty + cursorRow * self.rowStep - (self.rowStep - 1)) * 8)
+    (self.ty + self.th - 2 - (visible - cursorRow) * self.rowStep) * 8)
   -- moreArrow ($EE): the same "more below" glyph OptionRows/ManagerState
-  -- use, sat on the bottom border like TextBox's page-advance cursor
+  -- use, sat on the bottom border like TextBox's page-advance cursor.  It
+  -- has to be the border row, not ty + th - 2: that is the last interior
+  -- row, which the last choice now occupies, and Menu.new widens the box to
+  -- widest + 3 so tx + tw - 2 is exactly that label's final glyph (#564).
   if self.maxVisible and self.scroll + self.maxVisible < #self.items then
     Font.drawCode(Theme.moreArrow, (self.tx + self.tw - 2) * 8,
-      (self.ty + self.th - 2) * 8)
+      (self.ty + self.th - 1) * 8)
   end
   love.graphics.setColor(1, 1, 1, 1)
 end

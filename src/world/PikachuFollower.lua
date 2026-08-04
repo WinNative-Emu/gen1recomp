@@ -518,9 +518,12 @@ end
 -- pikachu_emotions.asm): pick a scripted emotion, then play its bubble
 -- and voiced PCM clip, and raise the framed Pikachu picture the original
 -- puts over the map (pikaemotion_pikapic -> pikachu_pic_animation.asm
--- PlacePikapicTextBoxBorder), drawn by OverworldController:drawUI.  The
--- per-emotion animation frames (gfx/pikachu/unknown_*) are not extracted,
--- so the front pic stands in for all twenty of them (#407).
+-- PlacePikapicTextBoxBorder), drawn by OverworldController:drawUI.  Each
+-- script's BASE 5x5 frame is ripped as pikachu/pikapic_N.png (#561); the
+-- pikaframe overlays it alternates with are a second full-body pose out of
+-- the same blob and are still unported, so picLift below stands in for
+-- their motion and the battle front pic covers caches built before the
+-- rip (#407).
 -- ---------------------------------------------------------------------
 
 -- PikachuEmotionTable, reduced to each entry's bubble + pikaemotion_pcm
@@ -715,9 +718,17 @@ function PikachuFollower.talk(game, ow, npc, done)
   -- 40x40 front pic is the size of PikaAnimTilemap_1's 5x5 base frame;
   -- Sprites.path keeps a mod's replacement skin in play.
   local Sprites = require("src.pokemon.Sprites")
-  local pic = Sprites.path(game.data, "PIKACHU", "front",
-                           { kind = "overworld" })
-  local anim = PIKAPIC[PIKAPIC_SCRIPT[emotion] or emotion] or PIKAPIC[1]
+  -- The chosen script's own base frame (its first pikapic_loadgfx, ripped as
+  -- pikachu/pikapic_N.png).  Red/Blue have no such art and Yellow caches
+  -- built before the rip do not carry it, so both fall back to the battle
+  -- front pic that stood in for every script before (#561).
+  local script = PIKAPIC_SCRIPT[emotion] or emotion
+  local pic = "assets/generated/pikachu/pikapic_" .. script .. ".png"
+  if not require("src.render.Assets").exists(pic) then
+    pic = Sprites.path(game.data, "PIKACHU", "front",
+                       { kind = "overworld" })
+  end
+  local anim = PIKAPIC[script] or PIKAPIC[1]
   local hold = anim.dur * PIKAPIC_TICK
   ow.emote = {
     npc = npc, frames = hold, bubble = bi or false, pikaPic = pic,
@@ -778,6 +789,14 @@ function PikachuFollower.onBillsHouseEnter(game, ow)
     return
   end
   if game.save.flags.EVENT_MET_BILL_2 then return end
+  -- BillsHouseScript0 (scripts/BillsHouse.asm:41-47) only runs the confused
+  -- walk while CheckPikachuStatusCondition comes back clear
+  -- (engine/pikachu/pikachu_status.asm:140, carry when the starter's status
+  -- byte is nonzero); a statused starter keeps trailing the player instead,
+  -- and that is the one state that lets onBillWalksAroundPlayer below fire,
+  -- since the confused beat ends in DisablePikachuFollowingPlayer (#455).
+  local starter = PikachuFollower.starterInParty(game.save)
+  if starter and starter.status then return end
   local npc = findFollower(ow)
   if not npc then return end
   ow.pikachuBillsScene = true
@@ -786,14 +805,66 @@ function PikachuFollower.onBillsHouseEnter(game, ow)
   end)
 end
 
+-- BillsHousePikachuWatchPlayer (scripts/BillsHouse_2.asm:133-156), reached
+-- from BillsHouseScript2 (scripts/BillsHouse.asm:58-69) only when the player
+-- faces down -- so Bill has to walk around them -- and Pikachu is still
+-- following, i.e. the confused beat above was skipped.  Both tables go
+-- through TryApplyPikachuMovementData
+-- (engine/events/try_pikachu_movement.asm:1-15), which keeps the data only
+-- when the caller's b equals GetPikachuFacingDirectionAndReturnToE
+-- (engine/pikachu/pikachu_follow.asm:1110-1151).  That byte is not the
+-- sprite's facing: it is Pikachu's position relative to the player, UP when
+-- Pikachu's MapY sits above the player's, DOWN below, and on a shared row
+-- LEFT when west, RIGHT when east ($ff on the same cell).  So WatchPlayer1
+-- (b = SPRITE_FACING_UP) means "Pikachu stands above the player" and
+-- WatchPlayer2 (b = SPRITE_FACING_RIGHT) means "Pikachu stands level with
+-- and east of the player".  ApplyPikachuMovementData_ walks a whole table
+-- synchronously (engine/pikachu/pikachu_movement.asm:9-18), so the second
+-- call does observe the finished walk; the two are mutually exclusive by
+-- geometry rather than by timing, since both routes end at
+-- (playerX - 1, playerY), west of the player, where the RIGHT test fails.
+-- Each closes on PIKAMOVEMENT_LOOK_RIGHT, leaving Pikachu watching the
+-- player while Bill talks; PIKAMOVEMENT_DELAY is dropped here as in the
+-- beats above (#455).
+function PikachuFollower.onBillWalksAroundPlayer(game, ow)
+  if not (GameVersion.isYellow() and ow.map and ow.map.id == "BILLS_HOUSE")
+     or ow.pikachuBillsScene then
+    return
+  end
+  local npc = findFollower(ow)
+  if not npc or not ow.player then return end
+  local steps
+  if npc.cellY < ow.player.cellY then       -- PikachuMovement_WatchPlayer1
+    steps = { { "left", 1 }, { "down", 1 } }
+  elseif npc.cellY == ow.player.cellY
+     and npc.cellX > ow.player.cellX then   -- PikachuMovement_WatchPlayer2
+    steps = { { "up", 1 }, { "left", 2 }, { "down", 1 } }
+  else
+    return
+  end
+  movePikachu(ow, npc, steps, function() npc.facing = "right" end)
+end
+
 function PikachuFollower.onBillEnteredMachine(game, ow)
   if not (GameVersion.isYellow() and ow.pikachuBillsScene) then return end
   local npc = findFollower(ow)
   if not npc then return end
+  -- BillsHouseScript3 (pokeyellow scripts/BillsHouse.asm:100-115).  The two
+  -- movement tables are named the wrong way round in the cartridge source:
+  -- hl is seeded with ..._EnterCellSeparatorDown, then
+  --   and a ; cp SPRITE_FACING_DOWN   (SPRITE_FACING_DOWN is 0)
+  --   jr nz, .applyPikachuMovement
+  -- keeps that seeded table when the player is NOT facing down, and only the
+  -- fallthrough -- facing down -- swaps in ..._EnterCellSeparatorNotDown.
+  -- So facing down takes the long way round the cell separator and every
+  -- other facing walks straight up.  Following the label names instead of the
+  -- branch inverts the scene (#455).
   local steps = ow.player.facing == "down"
-      and { { "up", 3 } }
-      or { { "up", 1 }, { "left", 1 }, { "up", 2 }, { "right", 1 } }
+      and { { "up", 1 }, { "left", 1 }, { "up", 2 }, { "right", 1 } }
+      or { { "up", 3 } }
   movePikachu(ow, npc, steps, function()
+    -- PIKAMOVEMENT_LOOK_UP closes the detour table before the bubble
+    npc.facing = "up"
     billsHouseEmotion(game, ow, npc, "QUESTION_BUBBLE")
   end)
 end
