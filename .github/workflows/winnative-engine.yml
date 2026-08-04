@@ -82,18 +82,21 @@ jobs:
             echo "Already up to date with upstream."
             exit 0
           fi
-          git submodule update --init --recursive || echo "::warning::submodule update incomplete"
-          if ! git push origin "HEAD:$SYNC_BRANCH"; then
-            git fetch --no-tags origin "$SYNC_BRANCH"
-            if git merge --no-edit "origin/$SYNC_BRANCH" && git push origin "HEAD:$SYNC_BRANCH"; then
-              echo "Re-merged a concurrent update to $SYNC_BRANCH."
-            else
-              git merge --abort || true
-              echo "::warning::$SYNC_BRANCH moved during the run; skipping. The next run picks it up."
-              exit 0
-            fi
+          rm -rf .github/workflows
+          git checkout "$before" -- .github/workflows 2>/dev/null || true
+          git add -A .github/workflows
+          if ! git diff --cached --quiet; then
+            git commit --amend --no-edit
+            echo "Dropped upstream's workflow files from the merge; a GitHub token may not push them."
           fi
-          echo "Merged $(git rev-list --count $before..$after) upstream commit(s)."
+          if [ "$(git rev-parse HEAD^{tree})" = "$(git rev-parse ${before}^{tree})" ]; then
+            git reset --hard "$before"
+            echo "Upstream touched only workflow files; nothing to merge."
+            exit 0
+          fi
+          git submodule update --init --recursive || echo "::warning::submodule update incomplete"
+          echo "merged=true" >> "$GITHUB_OUTPUT"
+          echo "Merged $(git rev-list --count $before..HEAD) upstream commit(s); the push waits until the build passes."
 
       - name: Has the source changed since the last release?
         id: src
@@ -229,6 +232,21 @@ jobs:
           name: gen1recomp-engine.zip
           path: dist/*.zip
           if-no-files-found: error
+
+      - name: Push the synced branch
+        if: steps.sync.outputs.merged == 'true'
+        run: |
+          if git push origin "HEAD:$SYNC_BRANCH"; then
+            echo "Pushed the upstream merge to $SYNC_BRANCH."
+            exit 0
+          fi
+          git fetch --no-tags origin "$SYNC_BRANCH"
+          if git merge --no-edit "origin/$SYNC_BRANCH" && git push origin "HEAD:$SYNC_BRANCH"; then
+            echo "Re-merged a concurrent update to $SYNC_BRANCH and pushed."
+            exit 0
+          fi
+          echo "::error::Could not push the upstream merge to $SYNC_BRANCH. The build passed, so nothing is broken, but the merge was not kept."
+          exit 1
 
       - name: Publish release
         if: steps.src.outputs.changed == 'true'
