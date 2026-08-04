@@ -1,0 +1,263 @@
+name: engine
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "0 21 * * *"
+  push:
+    branches: [winnative]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+env:
+  GH_REPO: ${{ github.repository }}
+  SYNC_BRANCH: winnative
+  # love-android 11.5a pins this NDK; scripts/build_android.sh asserts it.
+  NDK_VERSION: 25.2.9519653
+  ABI: arm64-v8a
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: winnative
+          fetch-depth: 0
+          submodules: recursive
+
+      - name: Sync upstream
+        id: sync
+        if: github.event_name != 'push'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          parent=$(gh repo view "$GITHUB_REPOSITORY" --json parent --jq 'if .parent then .parent.owner.login + "/" + .parent.name else "" end')
+          if [ -z "$parent" ]; then
+            echo "No upstream parent; building the branch as-is."
+            exit 0
+          fi
+          branch=$(gh repo view "$parent" --json defaultBranchRef --jq .defaultBranchRef.name)
+          echo "upstream $parent@$branch"
+          git config user.name "winnative-ci"
+          git config user.email "ci@winnative.dev"
+          git remote add upstream "https://github.com/$parent.git" 2>/dev/null || \
+            git remote set-url upstream "https://github.com/$parent.git"
+          git fetch --no-tags upstream "$branch"
+          before=$(git rev-parse HEAD)
+          if ! git merge --no-edit "upstream/$branch"; then
+            # WinNative drives, so a conflict in a file this fork owns is not a
+            # question: our version wins. Those are all files upstream does not
+            # have -- the bridge, its test, the patch scripts, this workflow --
+            # so the only way one conflicts is upstream adding a file at the
+            # same path, and taking theirs would disable the host menu.
+            #
+            # Anything else is upstream conflicting with upstream, which we
+            # have no business guessing at: no file outside this list carries a
+            # committed change of ours (every engine edit is applied at build
+            # time precisely so this can never happen). Leave those, and say so.
+            unresolved=$(git diff --name-only --diff-filter=U)
+            ours=$(echo "$unresolved" | grep -E '^(scripts/winnative_|src/core/WinNativeBridge\.lua|tests/winnative_bridge_test\.lua|\.github/workflows/winnative-engine\.yml)' || true)
+            theirs=$(echo "$unresolved" | grep -vE '^(scripts/winnative_|src/core/WinNativeBridge\.lua|tests/winnative_bridge_test\.lua|\.github/workflows/winnative-engine\.yml)' || true)
+            if [ -n "$theirs" ]; then
+              git merge --abort || git reset --hard "$before"
+              echo "::warning::Upstream conflicts outside WinNative's own files; $SYNC_BRANCH left untouched:"
+              echo "$theirs" | sed 's/^/::warning::  /'
+              exit 0
+            fi
+            for f in $ours; do
+              echo "conflict in $f -- keeping WinNative's version"
+              git checkout --ours -- "$f"
+              git add -- "$f"
+            done
+            git commit --no-edit
+          fi
+          after=$(git rev-parse HEAD)
+          if [ "$before" = "$after" ]; then
+            echo "Already up to date with upstream."
+            exit 0
+          fi
+          git submodule update --init --recursive || echo "::warning::submodule update incomplete"
+          if ! git push origin "HEAD:$SYNC_BRANCH"; then
+            git fetch --no-tags origin "$SYNC_BRANCH"
+            if git merge --no-edit "origin/$SYNC_BRANCH" && git push origin "HEAD:$SYNC_BRANCH"; then
+              echo "Re-merged a concurrent update to $SYNC_BRANCH."
+            else
+              git merge --abort || true
+              echo "::warning::$SYNC_BRANCH moved during the run; skipping. The next run picks it up."
+              exit 0
+            fi
+          fi
+          echo "Merged $(git rev-list --count $before..$after) upstream commit(s)."
+
+      - name: Has the source changed since the last release?
+        id: src
+        run: |
+          # The last commit touching anything outside .github, so editing the
+          # workflow never triggers a rebuild. The Android toolchain does not
+          # compile reproducibly, so comparing built bytes cannot decide this.
+          src=$(git log -1 --format=%H -- . ':(exclude).github')
+          prev=$(curl -sfL "https://github.com/${GITHUB_REPOSITORY}/releases/download/latest/source.sha" | tr -d '[:space:]' || true)
+          echo "source    $src"
+          echo "published ${prev:-<none>}"
+          echo "$src" > source.sha
+          if [ "$src" = "$prev" ]; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            echo "This source has already been built and released; nothing to do."
+          else
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - uses: actions/setup-java@v4
+        if: steps.src.outputs.changed == 'true'
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Install NDK
+        if: steps.src.outputs.changed == 'true'
+        run: |
+          "$ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager" --install "ndk;${NDK_VERSION}" > /dev/null
+          echo "ANDROID_NDK_HOME=$ANDROID_SDK_ROOT/ndk/${NDK_VERSION}" >> "$GITHUB_ENV"
+
+      - name: Apply WinNative patches
+        if: steps.src.outputs.changed == 'true'
+        run: |
+          # Both are build-time rewrites rather than committed edits, so the
+          # daily upstream merge above never conflicts with them. Both are
+          # idempotent and both fail loudly if upstream moves what they anchor
+          # on, which is what stops a silently half-patched engine from
+          # shipping.
+          #
+          # sdl_namespace: moves SDL's Java glue out of org.libsdl.app, which
+          # ARMSX2 also ships in the WinNative APK from a different SDL version.
+          # Without it liblove.so aborts on startup with a JNI NoSuchMethodError.
+          #
+          # boot_args: lets main.lua take the ROM path and game version from
+          # argv, since the host cannot set an environment variable this runtime
+          # can see; also defaults the engine's own on-screen D-pad off, because
+          # WinNative draws the Game Boy pad and the Retro menu itself.
+          # bridge: wires src/core/WinNativeBridge.lua into the engine, which
+          # is how the host reads the engine's settings and asks for changes.
+          # Without it WinNative's menu would have nothing to show real values
+          # from, and would be back to guessing state and injecting keystrokes.
+          ./scripts/winnative_sdl_namespace.sh
+          ./scripts/winnative_boot_args.sh
+          ./scripts/winnative_bridge.sh
+
+      - name: Check the engine still honours WinNative's contract
+        if: steps.src.outputs.changed == 'true'
+        run: |
+          # The patch scripts above guard the four places we edit. This guards
+          # the rest: the engine functions and module tables the bridge calls,
+          # none of which are patched and all of which are called through pcall
+          # so that a fault cannot take a play session down. That safety is
+          # exactly why a rename upstream is silent -- the engine builds, the
+          # menu opens, and Load quietly starts a new game instead.
+          #
+          # Deliberately BEFORE the build: an engine that has lost the contract
+          # must not be published, and finding out here costs three seconds
+          # rather than a bundle release and a device.
+          ./scripts/winnative_contract.sh
+
+      - name: Bridge protocol tests
+        if: steps.src.outputs.changed == 'true'
+        run: |
+          # The host protocol itself, against a stubbed LOVE: every command the
+          # menu can send and every field it reads. Catches a change to the
+          # bridge; the contract check above catches a change under it.
+          lua_bin=$(command -v luajit || command -v lua5.1 || command -v lua || true)
+          if [ -z "$lua_bin" ]; then
+            sudo apt-get update -qq && sudo apt-get install -y -qq luajit >/dev/null
+            lua_bin=$(command -v luajit)
+          fi
+          "$lua_bin" tests/winnative_bridge_test.lua
+
+      - name: Build
+        if: steps.src.outputs.changed == 'true'
+        run: |
+          # Builds the vendored love-android tree and packages game.love. The
+          # APK itself is not shipped: WinNative hosts the engine in its own
+          # process, so only the arm64-v8a runtime and the game archive are
+          # published. Building the APK is still the supported way to produce
+          # both, and it keeps this workflow on the upstream build path.
+          scripts/build_android.sh
+
+      - name: Collect
+        if: steps.src.outputs.changed == 'true'
+        run: |
+          apk="$(find mobile/android/app/build/outputs/apk dist/android -name '*.apk' | head -1)"
+          if [ -z "$apk" ]; then
+            echo "no APK produced" >&2
+            exit 1
+          fi
+          echo "extracting from $apk"
+          work=$(mktemp -d)
+          unzip -q "$apk" -d "$work"
+
+          mkdir -p stage/lib
+          if ! cp "$work/lib/$ABI/"*.so stage/lib/ 2>/dev/null; then
+            echo "APK carries no $ABI libraries" >&2
+            exit 1
+          fi
+
+          # game.love is the whole Lua engine plus its assets. It is an asset in
+          # the APK, but a fresh build also leaves it in the embed source tree.
+          love="$work/assets/game.love"
+          [ -f "$love" ] || love="mobile/android/app/src/embed/assets/game.love"
+          [ -f "$love" ] || { echo "game.love not found" >&2; exit 1; }
+          cp "$love" stage/game.love
+
+          ls -l stage stage/lib
+
+          # Packed with the same reproducible flags Retro-Consoles uses, so an
+          # unchanged engine keeps producing an identical archive and the
+          # bundler can skip the repack.
+          mkdir -p dist
+          ( cd stage && find . -type f | LC_ALL=C sort | \
+            zip -q -X -o "$OLDPWD/dist/gen1recomp-engine.zip" -@ )
+          ls -l dist
+
+      - uses: actions/upload-artifact@v4
+        if: steps.src.outputs.changed == 'true'
+        with:
+          name: gen1recomp-engine.zip
+          path: dist/*.zip
+          if-no-files-found: error
+
+      - name: Publish release
+        if: steps.src.outputs.changed == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          changed=0
+          for f in dist/*.zip; do
+            name=$(basename "$f")
+            prev=$(mktemp -d)/"$name"
+            if gh release download latest --pattern "$name" --output "$prev" 2>/dev/null && cmp -s "$prev" "$f"; then
+              echo "$name unchanged"
+            else
+              echo "$name changed"
+              changed=1
+            fi
+          done
+          if [ "$changed" = "0" ]; then
+            echo "Every artifact is byte-identical to the published release; nothing to publish."
+            exit 0
+          fi
+          tag="build-$(date -u +%Y%m%d)-${GITHUB_SHA:0:7}"
+          if ! gh release view "$tag" > /dev/null 2>&1; then
+            gh release create "$tag" --title "$tag" --notes "$ABI engine build from ${GITHUB_SHA}"
+          fi
+          gh release upload "$tag" dist/*.zip source.sha --clobber
+          if ! gh release view latest > /dev/null 2>&1; then
+            gh release create latest --title latest --notes "Rolling build."
+          fi
+          gh release upload latest dist/*.zip source.sha --clobber
+          gh release edit latest --notes "Rolling; newest immutable tag: $tag"
+          echo "$tag"
