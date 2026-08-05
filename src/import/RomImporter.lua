@@ -997,6 +997,25 @@ local function updaterAllowed()
   return true
 end
 
+-- #835: which column the launcher opens on.  `tab` starts at the --game
+-- shortcut's version (LaunchOptions.pendingTab) or Red; this then prefers the
+-- game play() last handed off, so relaunching lands on the game that was last
+-- played instead of always Red.  An explicit --game still wins, and a
+-- remembered version whose cache is gone or stale is ignored, since opening a
+-- column with no Play button would read as the launcher losing the import.
+-- Called from new() once self.ready is filled, which is what that check needs.
+function RomImporter:_applyLastVersionTab()
+  local okLO, LO = pcall(require, "src.core.LaunchOptions")
+  if okLO and LO.pendingTab then return end
+  local okOpt, opts = pcall(function()
+    return require("src.core.SaveData").loadOptions()
+  end)
+  local last = okOpt and opts and opts.lastVersion
+  if last and GameVersion.VERSIONS[last] and self.ready[last] then
+    self.tab = last
+  end
+end
+
 -- The launcher runs each GameVersion as an independent tab.  Each dropped or
 -- chosen ROM is routed to its version by SHA-1, extracted into that version's
 -- own cache (Red at the root, Blue under blue/, Yellow under yellow/), so all
@@ -1128,6 +1147,7 @@ function RomImporter.new(onComplete, opts)
     self.romName[version] = "pokemon_" .. info.id
       .. (info.id == "yellow" and ".gbc" or ".gb")
   end
+  self:_applyLastVersionTab()
 
   -- Android: import a save-dir .gb/.gbc that is not yet ready (USB drop or a
   -- leftover SAF pick), routed by SHA-1.  Already-imported carts are skipped
@@ -2240,6 +2260,17 @@ function RomImporter:play(version)
   if self.workState == "working" then return end
   if not self.ready[version] then return end
   self._handedOff = true
+  -- #835: remember the game being launched so the next launcher start opens on
+  -- its column (_applyLastVersionTab).  It rides options.lua rather than a file
+  -- of its own, so portable installs and POKEPORT_IDENTITY sandboxes keep it
+  -- with the rest of the launcher's persisted state.  A failed write only
+  -- costs the memory of the choice, so it must never block the boot.
+  pcall(function()
+    local SaveData = require("src.core.SaveData")
+    local opts = SaveData.loadOptions()
+    opts.lastVersion = version
+    SaveData.saveOptions(opts)
+  end)
   resetPointerCursor(self)
   -- The game draws with raw love.graphics from here on; drop the view's
   -- element tree and canvases before the handoff.
@@ -2378,10 +2409,18 @@ function RomImporter:runActions(queue)
 end
 
 -- Clicks are polled inside FlexLove (mouse + love.touch); host-forwarded
--- mousepressed stays inert so Android's synthesized mouse path cannot
--- double-fire a tap (#553).  Touch move/press/release must still reach
+-- mousepressed mints no click, so Android's synthesized mouse path cannot
+-- double-fire a tap (#553).  It DOES hand the pointer back from the pad
+-- cursor (#781): a Linux boot with a joystick present arms it (see the
+-- getJoystickCount block in new()), and while it is active
+-- LauncherView.update refuses to mint mouse clicks, so a real press must
+-- win the pointer back even when the polled motion yield misses (X11
+-- multi-monitor coords).  Same contract as PadCursor.yieldToPointer for
+-- the overlay hosts.  Touch move/press/release must still reach
 -- FlexLove.touch* or scroll containers never drag on phones.
-function RomImporter:mousepressed() end
+function RomImporter:mousepressed()
+  self._padCursorActive = false
+end
 
 function RomImporter:touchpressed(id, x, y, dx, dy, pressure)
   if not self._flex then return end
@@ -2426,6 +2465,13 @@ function RomImporter:_openSettings()
     return require("src.import.LauncherSettings").open()
   end)
   if ok and model then self._settings = model end
+end
+
+-- Quit from the launcher's own X.  It goes through love.event.quit so main.lua's
+-- love.quit hook still runs: that is where the worker threads are shut down
+-- (#339) and where a launcher close is told apart from a running game's (#785).
+function RomImporter:_quitApp()
+  if love.event and love.event.quit then love.event.quit() end
 end
 
 function RomImporter:_closeSettings()
