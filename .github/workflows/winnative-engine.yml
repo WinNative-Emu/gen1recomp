@@ -51,18 +51,19 @@ jobs:
           git fetch --no-tags upstream "$branch"
           before=$(git rev-parse HEAD)
           if ! git merge --no-edit "upstream/$branch"; then
-            # WinNative drives, so a conflict in a file this fork owns is not
-            # a question: our version wins. That is the bridge, its test, the
-            # patch scripts, and the whole of .github -- this fork keeps its
-            # own ROM-free ci.yml and its own release.yml, so every upstream
-            # edit to either lands here as a conflict.
+            # WinNative drives, so a conflict in a file this fork owns is not a
+            # question: our version wins. Those are all files upstream does not
+            # have -- the bridge, its test, the patch scripts, this workflow --
+            # so the only way one conflicts is upstream adding a file at the
+            # same path, and taking theirs would disable the host menu.
             #
             # Anything else is upstream conflicting with upstream, which we
-            # have no business guessing at. Leave those, and say so.
+            # have no business guessing at: no file outside this list carries a
+            # committed change of ours (every engine edit is applied at build
+            # time precisely so this can never happen). Leave those, and say so.
             unresolved=$(git diff --name-only --diff-filter=U)
-            owned='^(scripts/winnative_|src/core/WinNativeBridge\.lua|tests/winnative_bridge_test\.lua|\.github/)'
-            ours=$(echo "$unresolved" | grep -E "$owned" || true)
-            theirs=$(echo "$unresolved" | grep -vE "$owned" || true)
+            ours=$(echo "$unresolved" | grep -E '^(scripts/winnative_|src/core/WinNativeBridge\.lua|tests/winnative_bridge_test\.lua|\.github/workflows/)' || true)
+            theirs=$(echo "$unresolved" | grep -vE '^(scripts/winnative_|src/core/WinNativeBridge\.lua|tests/winnative_bridge_test\.lua|\.github/workflows/)' || true)
             if [ -n "$theirs" ]; then
               git merge --abort || git reset --hard "$before"
               echo "::warning::Upstream conflicts outside WinNative's own files; $SYNC_BRANCH left untouched:"
@@ -71,7 +72,7 @@ jobs:
             fi
             for f in $ours; do
               echo "conflict in $f -- keeping WinNative's version"
-              git checkout --ours -- "$f"
+              if git cat-file -e "$before:$f" 2>/dev/null; then git checkout "$before" -- "$f"; else git rm -q -f -- "$f" >/dev/null 2>&1 || git rm -q -f --cached -- "$f"; continue; fi
               git add -- "$f"
             done
             git commit --no-edit
