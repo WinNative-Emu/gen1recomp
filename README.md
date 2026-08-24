@@ -4,8 +4,12 @@ A native LÖVE2D recreation of Poke Red, Blue and Yellow. The engine and map
 behavior are hand-written Lua; game data and graphics are decoded from a ROM
 supplied by the player.
 
+And before you say, "that's not a recomp", you're wrong. Recomp is an acronym. ***Reverse Engineering Causes Obsessive Mental Problems***
+
+[Click Here for the AI Use Disclosure!](AIDisclosure.md)
+
 > [!CAUTION]
-> **We are NOT affiliated with the website `gen1recomp[.]com`** That website is not run by this project, was not authorized by us, and we have no idea who operates it. It is impersonating this project; do not download anything from it, and treat anything it hosts or claims as untrustworthy. Even if the site currently links back to this repository, the people behind it can change its content at any time, so nothing on it should ever be trusted. This GitHub repository and the Discord linked below are the only official sources for this project.
+> **We are NOT affiliated with the website `gen1recomp[.]com`** That website is not run by this project, was not authorized by us, and we have no idea who operates it. It is impersonating this project; do not download anything from it, and treat anything it hosts or claims as untrustworthy. Even if the site currently links back to this repository, the people behind it can change its content at any time, so nothing on it should ever be trusted. This GitHub repository and the Discord linked below are the only official sources for this project. Also, as I assumed would eventually happen, the idiot that made that website now pumped it full of adware. Please stay away from that website.
 
 <p align="center"><img src="https://raw.githubusercontent.com/bryanthaboi/gen1recomp/refs/heads/dev/assets/logo/logo.png"></p>
 
@@ -49,17 +53,19 @@ supplied by the player.
 
 ### Watch the latest update video
 
-[![Watch the latest update video](https://img.youtube.com/vi/8IOgqbe4YvA/maxresdefault.jpg)](https://www.youtube.com/watch?v=8IOgqbe4YvA)
-
+[![Watch the latest update video](https://img.youtube.com/vi/yi7LkWQPKKM/maxresdefault.jpg)](https://youtu.be/yi7LkWQPKKM)
 
 This project does not include a ROM, emulate the Game Boy, transpile assembly,
-or download a disassembly. A canonical US Poke Red, Blue, or Yellow ROM is the
-only game content input.
+or download a disassembly. A canonical US Poke Red, Blue, Yellow, Gold,
+Silver, or Crystal ROM is the only game content input.
 
 The ROM is verified, used during import, and then released from memory. It is
 not copied into the cache. Later launches load the private generated cache and
-do not ask for the ROM again. Red, Blue, and Yellow can all be imported and
-played side by side.
+do not ask for the ROM again. Red, Blue, Yellow, Gold, Silver, and Crystal can
+all be imported side by side. Gold, Silver, and Crystal are Gen 2 Phase 1
+(import + launcher; see `docs/gold-phase1.md`): the Gen 2 engine is still under
+construction, and Crystal is the newest of the three, so the launcher lists it
+as Crystal (Beta).
 
 ## Quick Start
 
@@ -67,12 +73,17 @@ Open the desktop app. On first boot, choose your legally obtained `.gb` /
 `.gbc` file or drop it onto the window. Import takes a few seconds and the
 game starts automatically.
 
-Only the canonical 1 MiB US Red, Blue, and Yellow ROMs are accepted. The
-importer verifies SHA-1 before creating any game data:
+Only the canonical US Red, Blue, Yellow (1 MiB), Gold, Silver, and Crystal
+(2 MiB) ROMs are accepted. The importer verifies SHA-1 before creating any
+game data:
 
 - Red: `ea9bcae617fdf159b045185467ae58b2e4a48b9a`
 - Blue: `d7037c83e1ae5b39bde3c30787637ba1d4c48ce2`
 - Yellow: `cc7d03262ebfaf2f06772c1a480c7d9d5f4a38e1`
+- Gold: `d8b8a3600a465308c9953dfa04f0081c05bdcb94`
+- Silver: `49b163f7e57702bc939d642a18f591de55d92dae`
+- Crystal (1.0): `f4cd194bdee0d04ca4eac29e09b8e4e9d818c133`
+- Crystal (1.1): `f2f52230b536214ef7c9924f483392993e226cfb`
 
 The packaged app contains neither a ROM nor pre-extracted game data. Music,
 sound effects, and cries are synthesized while the game runs from compact
@@ -116,24 +127,23 @@ supported out of the box.
 | `2`       | Cycle COLORS                                         |
 | `3`       | Cycle TILT (free-roam overworld)                     |
 | `4`       | Cycle ZOOM through every level (free-roam overworld) |
-| `5`       | Cycle GBC FX                                         |
 | `F1`      | Save                                                 |
 | `F2`      | Load                                                 |
 | `F10`     | Open / close the mod manager                         |
 
 
-COLORS, TILT, ZOOM, GBC FX, GAME SPEED, and VOID FILL are also in the
+COLORS, TILT, ZOOM, SHADER FX, GAME SPEED, and VOID FILL are also in the
 Options menu and persist in `options.lua`.
 
 ### Low-end devices
 
 **OPTIONS → PERFORMANCE** scales the port's optional extras for weaker
-hardware: **HIGH** (everything on), **BALANCED** (no 3D tilt or GBC FX),
+hardware: **HIGH** (everything on), **BALANCED** (no 3D tilt),
 **LOW** (also no survey zoom, FPS capped), or **AUTO** — the default, which
 picks a tier from your device (ARM handhelds → LOW, phones → BALANCED,
 normal desktops → HIGH, unchanged). It only scales presentation; the
 fixed-step game logic is identical on every tier, and a lower tier hides
-your tilt/zoom/GBC-FX preferences without forgetting them. Details in
+your tilt/zoom preferences without forgetting them. Details in
 [docs/new-features.md](docs/new-features.md#performance-tier-low-end-devices).
 
 ### Rulesets
@@ -213,7 +223,7 @@ entry: a desktop shortcut per game, a Steam entry, or a handheld frontend.
 
 | Option | Effect |
 | --- | --- |
-| `--game=red` | boot Red, skipping the launcher (`blue` and `yellow` too, or just `r` / `b` / `y`) |
+| `--game=red` | boot Red, skipping the launcher (`blue`, `yellow`, `gold`, `silver` and `crystal` too, or just `r` / `b` / `y` / `g` / `s` / `c`) |
 | `--slot=2` | load that save slot; takes a slot number or a slot id |
 | `--launcher` | open the launcher anyway, so you can edit a shortcut you already made |
 
@@ -240,7 +250,7 @@ in [docs/linux-arm64-build.md](docs/linux-arm64-build.md).
 
 ## iOS
 
-Every release ships `gen1recomp-*-ios.ipa`. Sideload it with AltStore
+Every release ships `gen1recomp++-*-ios.ipa`. Sideload it with AltStore
 (Windows or Mac) — see [docs/ios-sideload.md](docs/ios-sideload.md). To
 build and install from source on a Mac instead, see
 [docs/ios-install.md](docs/ios-install.md).
@@ -326,7 +336,7 @@ Maps can be edited in our own build of [Tiled](https://www.mapeditor.org),
 and exported back out as a mod; see
 [docs/tiled-map-editing.md](docs/tiled-map-editing.md).
 
-## Bugs and Ideas
+## Bugs
 
 Found a bug? A warp dropping you somewhere it shouldn't, a battle doing math
 that looks wrong, text in the wrong box, anything that does not match the
@@ -335,12 +345,6 @@ original game.
 Attach a screenshot if you can. It saves a lot of back and forth, and if you
 can't get one, the form asks you to describe what you saw instead.
 
-Thought of a feature that could be good, or a way to improve one that already
-exists?
-[Open a feature request](https://github.com/bryanthaboi/gen1recomp/issues/new?template=feature_request.yml).
-Say what you want, why it is worth doing, and how you picture it working. A
-request with real detail is one that can actually get built.
-
 ## More
 
 - [Link play](https://github.com/bryanthaboi/gen1recomp/wiki/Guide-Link-Play)
@@ -348,7 +352,8 @@ request with real detail is one that can actually get built.
 - [Save editor](https://github.com/bryanthaboi/gen1recomp/wiki/Guide-Save-Editor)
 — edit party, boxes, items, events, and Pokédex flags outside the game.
 - `docs/architecture.md` — runtime details;
-`docs/behavior-porting-notes.md` — formula provenance.
+`docs/behavior-porting-notes.md` — formula provenance;
+`docs/link-security.md` — what link play defends against, and what it doesn't.
 
 
 

@@ -142,6 +142,73 @@ local ok, err = pcall(function()
   local report = SaveData.validate(probe, Data)
   check(#report.lostMons == 0 and probe.party[1].species == "EDITMON",
     "validate keeps the modded mon while the mod is enabled")
+
+  -- Second editor session in the same process (launcher Close → Edit again):
+  -- host teardown must leave Runtime/Assets clean and Data unloaded so the
+  -- next App.load remounts mods instead of serving vanilla catalogs.
+  App.unload()
+  if Data._pristineKeys or Data.pokemon then Data:unloadGenerated() end
+  Runtime.reset()
+  Assets.installLoader(nil)
+  package.loaded["App"] = nil
+  package.loaded["Catalog"] = nil
+  App = require("App")
+  App.load(tmpPath)
+  S = App.getState()
+  loaded = S.mods:status().loaded
+  check(#loaded == 1 and loaded[1].id == "zz_editor_fixture",
+    "fixture mod loads again after host-style teardown")
+  hasSpecies = false
+  for _, id in ipairs(S.cat.species) do
+    if id == "EDITMON" then hasSpecies = true end
+  end
+  check(hasSpecies, "second App.load catalog still carries the mod's mon")
+  check(Data.pokemon.EDITMON ~= nil, "second merge lands EDITMON in Data again")
+
+  -- Gold-targeted mods: spa/spd records are usable, and a Gen 1-only
+  -- manifest stays out of Gold (no ROM cache / App.load("gold") required).
+  local ModTargets = require("src.mods.ModTargets")
+  local Ops = require("Ops")
+  check(not ModTargets.supports({}, "gold"),
+    "legacy gen1-only fixture does not support gold")
+  check(not ModTargets.supports({}, "silver"),
+    "nor silver")
+  check(not ModTargets.supports({ games = { "red" } }, "gold"),
+    "explicit gen1 games list does not support gold")
+  check(not ModTargets.supports({ games = { "red" } }, "silver"),
+    "nor silver")
+  check(ModTargets.supports({ games = { "gold" } }, "gold"),
+    "gold-targeted manifest supports gold")
+  check(not ModTargets.supports({ games = { "gold" } }, "silver"),
+    "and names one edition, not the generation")
+  check(ModTargets.supports({ games = { "gold", "silver" } }, "silver"),
+    "a whole-Gen-2 games list supports silver")
+  check(ModTargets.supports({ gen2compat = true }, "gold"),
+    "gen2compat legacy still supports gold")
+  check(ModTargets.supports({ gen2compat = true }, "silver"),
+    "and silver with it")
+
+  local goldS = {
+    data = {
+      pokemon = {
+        EDITMON = {
+          baseStats = {
+            hp = 50, attack = 50, defense = 50, speed = 50,
+            specialAttack = 50, specialDefense = 50,
+          },
+        },
+        G1ONLY = {
+          baseStats = {
+            hp = 50, attack = 50, defense = 50, speed = 50, special = 50,
+          },
+        },
+      },
+    },
+  }
+  check(Ops.speciesUsable(goldS, "EDITMON"),
+    "spa/spd EDITMON is usable on gold")
+  check(Ops.speciesUsable(goldS, "G1ONLY"),
+    "gen1 special record remains usable (dual-key gate)")
 end)
 
 os.remove(MOD_ROOT .. "/main.lua")
@@ -154,7 +221,7 @@ os.remove(tmpPath)
 love.filesystem = savedFS
 -- leave shared singletons the way we found them (the fixture merged one
 -- record into Data.pokemon)
-Data.pokemon.EDITMON = nil
+if Data.pokemon then Data.pokemon.EDITMON = nil end
 Assets.loader = savedBridge
 Assets.invalidate()
 Runtime.install(savedEvents, savedHooks, savedErrors)

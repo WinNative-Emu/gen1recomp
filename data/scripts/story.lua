@@ -127,7 +127,7 @@ M.VIRIDIAN_CITY = {
     game.stack:push(TextBox.new(game,
       game.data.text._ViridianCityOldManSleepyPrivatePropertyText
       or "You can't go\nthrough here!\fThis is private\nproperty!",
-      function() ow:scriptMove(ow.player, "down", 1) end))
+      function() ow:scriptMove(ow.player, "down", 1, nil, { collide = true }) end))
     return true
   end,
 }
@@ -140,22 +140,29 @@ M.VIRIDIAN_CITY = {
 -- Daisy hands over the TOWN MAP once Oak's errand is under way
 -- (scripts/BluesHouse.asm BluesHouseDaisySittingText)
 M.BLUES_HOUSE = {
+  -- scripts/BluesHouse.asm:12-16
+  onEnter = function(game, ow)
+    game.save.flags.EVENT_ENTERED_BLUES_HOUSE = true
+  end,
   talk = {
     TEXT_BLUESHOUSE_DAISY_SITTING = {
-      { "face_player" },                                     -- 1
-      { "check_flag", "EVENT_GOT_TOWN_MAP" },                -- 2
-      { "jump_if_true", 10 },                                -- 3
-      { "check_flag", "EVENT_GOT_STARTER" },                 -- 4
-      { "jump_if_false", 12 },                               -- 5
-      { "show_text", "_BluesHouseDaisyOfferMapText" },       -- 6
+      { "face_player" },
+      { "check_flag", "EVENT_GOT_TOWN_MAP" },
+      { "jump_if_true", "got_map" },
+      { "check_flag", "EVENT_GOT_POKEDEX" },
+      { "jump_if_false", "too_early" },
+      { "show_text", "_BluesHouseDaisyOfferMapText" },
       -- _GotMapText: "{PLAYER} got a\n{RAM:wStringBuffer}!" -- the
       -- buffer supplies "TOWN MAP" (scripts/BluesHouse.asm GotMapText)
-      { "give_item", "TOWN_MAP", 1, "_GotMapText" },         -- 7
-      { "set_flag", "EVENT_GOT_TOWN_MAP" },                  -- 8
-      { "jump", 13 },                                        -- 9
-      { "show_text", "_BluesHouseDaisyUseMapText" },         -- 10
-      { "jump", 13 },                                        -- 11
-      { "show_text", "_BluesHouseDaisyRivalAtLabText" },     -- 12
+      { "give_item", "TOWN_MAP", 1, "_GotMapText" },
+      { "hide_object", "BLUES_HOUSE", "BLUESHOUSE_TOWN_MAP" },
+      { "set_flag", "EVENT_GOT_TOWN_MAP" },
+      { "jump", "end" },
+      { "label", "got_map" },
+      { "show_text", "_BluesHouseDaisyUseMapText" },
+      { "jump", "end" },
+      { "label", "too_early" },
+      { "show_text", "_BluesHouseDaisyRivalAtLabText" },
     },
   },
 }
@@ -294,6 +301,7 @@ M.BILLS_HOUSE = {
 
 M.ROUTE_25 = {
   onEnter = function(game, ow)
+    game.save.pikachuMapScriptActive = nil
     local flags = game.save.flags
     if flags.EVENT_LEFT_BILLS_HOUSE_AFTER_HELPING then return end
     local Commands = require("src.script.Commands")
@@ -326,6 +334,7 @@ M.VERMILION_CITY = {
   -- only read while EVENT_1ST_LOCK_OPENED is unset (the gym is only
   -- reachable through this map, so a fresh visit always re-rolls).
   onEnter = function(game, ow)
+    game.save.pikachuMapScriptActive = nil
     local puz = game.save.trashPuzzle or {}
     game.save.trashPuzzle = puz
     puz.first = love.math.random(0, 7) * 2
@@ -347,7 +356,7 @@ M.VERMILION_CITY = {
     if shipLeft then
       game.stack:push(TextBox.new(game,
         t._VermilionCitySailor1ShipSetSailText or "The ship set sail.",
-        function() ow:scriptMove(ow.player, "up", 1) end))
+        function() ow:scriptMove(ow.player, "up", 1, nil, { collide = true }) end))
       return true
     end
     -- Walk-past is never facing-right / inFrontOfOrBehindGuardCoords, so
@@ -368,26 +377,39 @@ M.VERMILION_CITY = {
       ask .. "\f"
       .. (t._VermilionCitySailor1YouNeedATicketText
           or "You need a ticket\nto get aboard."),
-      function() ow:scriptMove(ow.player, "up", 1) end))
+      function() ow:scriptMove(ow.player, "up", 1, nil, { collide = true }) end))
     return true
   end,
   talk = {
-    -- the sailor guarding the dock gangway (VermilionCitySailor1Text):
-    -- flashing the ticket just lets you through -- he never hides, and
-    -- once the ship has sailed he only reports it gone
-    TEXT_VERMILIONCITY_SAILOR1 = {
-      { "face_player" },                                             -- 1
-      { "check_flag", "EVENT_SS_ANNE_LEFT" },                        -- 2
-      { "jump_if_true", 11 },                                        -- 3
-      { "show_text", "_VermilionCitySailor1DoYouHaveATicketText" },  -- 4
-      { "check_item", "S_S_TICKET" },                                -- 5
-      { "jump_if_false", 9 },                                        -- 6
-      { "show_text", "_VermilionCitySailor1FlashedTicketText" },     -- 7
-      { "jump", 12 },                                                -- 8
-      { "show_text", "_VermilionCitySailor1YouNeedATicketText" },    -- 9
-      { "jump", 12 },                                                -- 10
-      { "show_text", "_VermilionCitySailor1ShipSetSailText" },       -- 11
-    },
+    -- scripts/VermilionCity.asm:158 (#1651)
+    TEXT_VERMILIONCITY_SAILOR1 = function(game, ow, npc, done)
+      local Flags = require("src.script.Flags")
+      local TextBox = require("src.render.TextBox")
+      local t = game.data.text
+      if Flags.get(game.save, "EVENT_SS_ANNE_LEFT") then
+        game.stack:push(TextBox.new(game,
+          t._VermilionCitySailor1ShipSetSailText or "The ship set sail.",
+          done))
+        return
+      end
+      -- scripts/VermilionCity.asm:195
+      local p = ow and ow.player
+      if not p or p.facing == "right"
+         or (p.cellX == 19 and (p.cellY == 29 or p.cellY == 31)) then
+        game.stack:push(TextBox.new(game,
+          t._VermilionCitySailor1WelcomeToSSAnneText
+            or "Welcome to S.S.\nANNE!", done))
+        return
+      end
+      local ask = t._VermilionCitySailor1DoYouHaveATicketText
+        or "Welcome to S.S.\nANNE!\fExcuse me, do you\nhave a ticket?"
+      local tail = ((game.save.inventory.S_S_TICKET or 0) > 0)
+        and (t._VermilionCitySailor1FlashedTicketText
+             or "{PLAYER} flashed\nthe S.S.TICKET!")
+        or (t._VermilionCitySailor1YouNeedATicketText
+            or "You need a ticket\nto get aboard.")
+      game.stack:push(TextBox.new(game, ask .. "\f" .. tail, done))
+    end,
   },
 }
 
@@ -396,13 +418,14 @@ M.SS_ANNE_2F = {
     TEXT_SSANNE2F_RIVAL = {
       { "face_player" },                                  -- 1
       { "check_flag", "EVENT_BEAT_SS_ANNE_RIVAL" },       -- 2
-      { "jump_if_true", 9 },                              -- 3
+      { "jump_if_true", 9 },                              -- 3 (beaten: silent)
       { "show_text", "_SSAnne2FRivalText" },              -- 4
-      { "rival_battle", "OPP_RIVAL2", 1 },                -- 5
-      { "jump_if_false", 10 },                            -- 6
-      { "set_flag", "EVENT_BEAT_SS_ANNE_RIVAL" },         -- 7
-      { "show_text", "_SSAnne2FRivalDefeatedText" },      -- 8
-      { "jump", 10 },                                     -- 9 (already beaten: silent)
+      -- SSAnne2FRivalText's text_asm arms SaveEndBattleTextPointers
+      -- (scripts/SSAnne2F.asm:199), so the line prints in battle (#1688)
+      { "save_end_battle_text", "_SSAnne2FRivalDefeatedText" }, -- 5
+      { "rival_battle", "OPP_RIVAL2", 1 },                -- 6
+      { "jump_if_false", 9 },                             -- 7
+      { "set_flag", "EVENT_BEAT_SS_ANNE_RIVAL" },         -- 8
     },
   },
 }
@@ -828,13 +851,14 @@ M.SILPH_CO_11F = {
             -- every Silph rocket leaves off-screen (the street rockets are
             -- handled by M.SAFFRON_CITY.onEnter in story4.lua).  Queued, not
             -- run here: the battle's own callbacks are still unwinding, so
-            -- queueScript starts it on the first idle overworld frame --
-            -- after the end-battle "Arrgh!!" box victories.lua OPP_GIOVANNI#2
-            -- pushes (#722).
+            -- queueScript starts it on the first idle overworld frame (#722).
             if game.save.flags.EVENT_BEAT_SILPH_CO_GIOVANNI then
               ow:queueScript(silphAftermathRows())
             end
-          end, nil, true)
+          end,
+          -- "Arrgh!!" is armed for the battle screen, not the map
+          -- (scripts/SilphCo11F.asm:264-266 SaveEndBattleTextPointers) #1606
+          game.data.text._SilphCo10FGiovanniILostAgainText, true)
         end)
       end))
     return true
@@ -1058,6 +1082,7 @@ local championsRoomRivalScript = {
   -- OakCongratulatesPlayerScript: rival faces left, Oak faces down
   { "face_object", 1, "left" },                             -- 17
   { "face_object", 2, "down" },                             -- 18
+  { "load_player_starter_name" },
   { "show_text", "_ChampionsRoomOakCongratulatesPlayerText" }, -- 19
   -- OakDisappointedWithRivalScript: Oak turns to the rival (right)
   { "face_object", 2, "right" },                            -- 20
@@ -1067,23 +1092,13 @@ local championsRoomRivalScript = {
   { "show_text", "_ChampionsRoomOakComeWithMeText" },       -- 23
   { "move_npc", 2, "up", 2 },                               -- 24 OakExitChampionsRoomMovement
   { "hide_object", "CHAMPIONS_ROOM", "CHAMPIONSROOM_OAK" },  -- 25
-  -- ChampionsRoomPlayerFollowsOakScript / WalkToHallOfFame_RLEMovement
-  -- (PAD_UP 4, PAD_LEFT 1): the player walks out after Oak instead of the
-  -- screen just fading on the spot (#704).  The entrance walk leaves the
-  -- player at (4,3) and both north-wall warps sit on row 0, so the original
-  -- only ever spends three of those simulated steps -- CheckWarpsNoCollision
-  -- takes the HALL_OF_FAME warp the moment the walk lands on (4,0) and the
-  -- trailing UP/LEFT are dropped.  Scripted steps ignore collision here just
-  -- as they do in the original (CollisionCheckOnLand skips its checks while
-  -- wSimulatedJoypadStatesIndex is non-zero), so stepping through the
-  -- rival's cell at (4,2) is the ported behavior, not a clip.  Re-reported
-  -- as a clip in #847 and re-checked against home/overworld.asm
-  -- CollisionCheckOnLand, which is still the authority: do not "fix" it.
-  { "move_player", "up", 3 },                               -- 26
+  -- scripts/ChampionsRoom.asm WalkToHallOfFame_RLEMovement
+  { "move_player", "left", 1 },
+  { "move_player", "up", 3 },                               -- 27
   -- hand the induction off to the HALL_OF_FAME room (consumed by its
   -- onEnter), then warp up into it (destWarp 1 lands at (4,7) facing up)
-  { "set_field", "pendingHallOfFame", true },               -- 27
-  { "warp", "HALL_OF_FAME", 4, 7, "up" },                   -- 28
+  { "set_field", "pendingHallOfFame", true },               -- 28
+  { "warp", "HALL_OF_FAME", 4, 7, "up" },                   -- 29
 }
 
 M.CHAMPIONS_ROOM = {
@@ -1243,6 +1258,7 @@ local function pokemonTower2FRivalScript(playerX)
     { "jump_if_false", "end" },                                   -- 6 loss: stay
     { "set_flag", "EVENT_BEAT_POKEMON_TOWER_RIVAL" },             -- 7
     { "show_text", "_PokemonTower2FRivalDefeatedText" },          -- 8
+    { "play_music", "Music_MeetRival", { start = "rival" } },
     { "walk_npc", 1, exitDirs },                                  -- 9
     { "hide_object", "POKEMON_TOWER_2F", "POKEMONTOWER2F_RIVAL" }, -- 10
     { "jump", "end" },                                            -- 11

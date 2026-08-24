@@ -16,7 +16,43 @@ function ListMenu:sgbPalettes(game)
   return require("src.render.PaletteFX").wholeNamed(game.data, "MEWMON")
 end
 
+local BLACK = { 0, 0, 0, 1 }
+local MUTED_TEXT = { 0.55, 0.55, 0.55, 1 }
+
+-- row text runs from x=16 to the 160px screen's right margin (160-8, same
+-- margin item.right right-aligns against); GAP is the blank strip kept
+-- between a truncated label and item.right so the two never touch.
+local ROW_LEFT = 16
+local ROW_RIGHT_MARGIN = 160 - 8
+local LABEL_GAP = 4
+
+-- Truncate `text` to `pixels`, same convention as WideBattle.lua's own
+-- fitName (HP-bar names facing the identical "arbitrary text vs. fixed
+-- pixel budget" problem): cut on a whole glyph span, never mid-character,
+-- and mark the cut with a trailing '.'. ShaderFXScreen's preset names are
+-- player-supplied filenames of arbitrary length -- unclipped, a long one
+-- either overlapped/garbled item.right's "CONVERT" hint or ran past the
+-- screen's right edge outright.
+local function fitLabel(text, pixels)
+  local spans = Font.split(text or "")
+  local n = Font.spansFitting(spans, pixels)
+  if n >= #spans then return text or "" end
+  local out = {}
+  for i = 1, math.max(0, n - 1) do
+    out[#out + 1] = (text or ""):sub(spans[i].from, spans[i].to)
+  end
+  return table.concat(out) .. "."
+end
+
 local ROWS = 7
+-- LIST_MENU_BOX 4,2 - 19,12 (data/text_boxes.asm:13); 4 names from
+-- hlcoord 6,4 two rows apart (home/list_menu.asm:51-52, 364-365, 471-479)
+local ITEM_BOX = { tx = 4, ty = 2, tw = 16, th = 11 }
+local ITEM_ROWS = 4
+local ITEM_NAME_X, ITEM_TOP_Y = 48, 32
+local ITEM_CURSOR_X = 40
+local ITEM_QTY_X, ITEM_QTY_END = 112, 136
+local ITEM_MORE_X, ITEM_MORE_Y = 144, 88
 -- frames to wait before key-repeat kicks in, then between repeats
 local REPEAT_DELAY = 16
 local REPEAT_RATE = 4
@@ -51,6 +87,7 @@ function ListMenu.new(game, title, items, opts)
   local self = setmetatable({}, ListMenu)
   self.game = game
   self.title = title
+  self.kind = opts.kind or title
   self.items = items
   self.index = 1
   self.scroll = 0
@@ -82,7 +119,20 @@ function ListMenu.new(game, title, items, opts)
   -- for their whole run (engine/menus/pc.asm, engine/menus/players_pc.asm),
   -- so their lists opt out of the A/B beep the same way Menu's noSound does
   self.noSound = opts.noSound or false
-  self.rows = opts.rows or ((opts.dialogue or opts.messageBox) and 4 or ROWS)
+  -- the bag's item list: a partial box the map stays visible around, not a
+  -- screen of its own (home/list_menu.asm:29-31)
+  self.itemBox = opts.itemBox or false
+  if self.itemBox then
+    self.isOpaque = false
+    -- keep RunDefaultPaletteCommand's last palette: ItemMenuLoop never sets
+    -- its own (engine/menus/start_sub_menus.asm:300)
+    self.sgbPalettes = false
+    -- wMaxMenuItem is 2 for item lists; the fourth printed row is a
+    -- look-ahead the cursor cannot reach (home/list_menu.asm:46-48)
+    self.cursorRows = 3
+  end
+  self.rows = opts.rows or (self.itemBox and ITEM_ROWS)
+    or ((opts.dialogue or opts.messageBox) and 4 or ROWS)
   return self
 end
 
@@ -99,8 +149,9 @@ local function moveIndex(self, delta)
 end
 
 local function syncScroll(self)
-  if self.index - self.scroll > self.rows then
-    self.scroll = self.index - self.rows
+  local maxRow = self.cursorRows or self.rows
+  if self.index - self.scroll > maxRow then
+    self.scroll = self.index - maxRow
   end
   if self.index - self.scroll < 1 then self.scroll = self.index - 1 end
 end
@@ -205,7 +256,49 @@ function ListMenu:close()
   if top == self then self.game.stack:pop() end
 end
 
+-- PrintListMenuEntries, minus the price column StartMenu_Item never asks for
+-- (wPrintItemPrices = 0, engine/menus/start_sub_menus.asm)
+function ListMenu:drawItemBox()
+  love.graphics.setColor(1, 1, 1, 1)
+  Font.drawBox(ITEM_BOX.tx, ITEM_BOX.ty, ITEM_BOX.tw, ITEM_BOX.th)
+  love.graphics.setColor(0, 0, 0, 1)
+  if #self.items == 0 then
+    Font.draw(Strings("Nothing here."), ITEM_NAME_X, ITEM_TOP_Y)
+  end
+  local shown, sawCancel = 0, false
+  for row = 1, self.rows do
+    local i = self.scroll + row
+    local item = self.items[i]
+    if not item then break end
+    shown = shown + 1
+    if item.cancel then sawCancel = true end
+    local y = ITEM_TOP_Y + (row - 1) * 16
+    Font.draw(item.label, ITEM_NAME_X, y)
+    if item.right then
+      -- '×' at column 14, PrintNumber's two right-aligned digits after it
+      -- (home/list_menu.asm:479-490)
+      local count = item.right:sub(2)
+      Font.draw(item.right:sub(1, 1), ITEM_QTY_X, y + 8)
+      Font.draw(count, ITEM_QTY_END - Font.width(count), y + 8)
+    end
+    if i == self.index then
+      Font.drawCode(self.hollowIndex == i
+                    and Theme.cursorHollow or Theme.cursor, ITEM_CURSOR_X, y)
+    end
+    if self.swapIndex == i and i ~= self.index then
+      Font.drawCode(Theme.cursorHollow, ITEM_CURSOR_X, y)
+    end
+  end
+  -- the terminator prints CANCEL and returns before the '▼'
+  -- (home/list_menu.asm:372, 518-524)
+  if shown == self.rows and not sawCancel then
+    Font.drawCode(Theme.moreArrow, ITEM_MORE_X, ITEM_MORE_Y)
+  end
+  love.graphics.setColor(1, 1, 1, 1)
+end
+
 function ListMenu:draw()
+  if self.itemBox then return self:drawItemBox() end
   love.graphics.setColor(1, 1, 1, 1)
   love.graphics.rectangle("fill", 0, 0, 160, 144)
   love.graphics.setColor(0, 0, 0, 1)
@@ -218,22 +311,33 @@ function ListMenu:draw()
     local item = self.items[i]
     if not item then break end
     local y = 8 + row * 16
-    Font.draw(item.label, 16, y)
+    -- item.muted: a real, selectable row that isn't fully "ready" yet (e.g.
+    -- ShaderFXScreen's unconverted presets) -- readable, never hidden, same
+    -- "always still readable" convention kit/Theme.lua's own disabled state
+    -- documents, just not the generic list-item shape that lived here
+    -- before ShaderFXScreen needed it.
+    local textColor = item.muted and MUTED_TEXT or BLACK
+    love.graphics.setColor(unpack(textColor))
+    local budget = ROW_RIGHT_MARGIN - ROW_LEFT
+    if item.right then budget = budget - Font.width(item.right) - LABEL_GAP end
+    local label = fitLabel(item.label, budget)
+    Font.draw(label, 16, y)
     if item.ball then -- the Pokédex owned-ball marker tile
       -- one blank glyph after the name, measured in glyph advances rather
       -- than bytes: NIDORAN♂/♀ carry a multi-byte charmap entry, so
       -- `#item.label` overcounted by 2 and pushed their ball 16px right (#285)
-      local bx = 16 + Font.width(item.label) + 8 + 3
+      local bx = 16 + Font.width(label) + 8 + 3
       local by = y + 3
       love.graphics.circle("fill", bx, by, 3.5)
       love.graphics.setColor(1, 1, 1, 1)
       love.graphics.rectangle("fill", bx - 3.5, by - 0.5, 7, 1)
       love.graphics.circle("fill", bx, by, 1.2)
-      love.graphics.setColor(0, 0, 0, 1)
+      love.graphics.setColor(unpack(textColor))
     end
     if item.right then
       Font.draw(item.right, 160 - 8 - Font.width(item.right), y)
     end
+    love.graphics.setColor(unpack(BLACK))
     if i == self.index then
       -- hollowIndex: a chosen row keeps the hollow '▷' left behind by
       -- pokered's PlaceUnfilledArrowMenuCursor (the old man demo's

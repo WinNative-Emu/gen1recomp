@@ -5,7 +5,7 @@
 // without updating that patch (see mobile/ios/patch_love_src.py).
 //
 // Contract (mirrors love-android's GameActivity.showFilePicker):
-//   love.system.pickFile("rom"|"mod"|"sav") -> copies the user's pick into
+//   love.system.pickFile("rom"|"mod"|"sav"|"required_import") -> copies the user's pick into
 //   the LÖVE save directory as picked_rom.gb / picked_mod.zip /
 //   picked_save.sav; RomImporter's pending-file scan consumes it.
 //   love.system.createFile(name) -> exports save dir's pending_export.sav
@@ -26,8 +26,6 @@ public final class GRPickerBridge: NSObject {
     // silently doing nothing.
     private static var liveDelegates: [PickerDelegate] = []
 
-    // conf.lua t.identity — where LÖVE puts the fused save directory on iOS
-    // (<sandbox>/Library/Application Support/<identity>).
     private static let loveIdentity = "pokemon-love2d"
 
     @objc(httpDownloadWithUrl:destination:userAgent:accept:)
@@ -69,6 +67,124 @@ public final class GRPickerBridge: NSObject {
         return succeeded
     }
 
+    // MARK: - General HTTP request (love.system.httpRequest)
+
+    private static let httpMaxResponse = 4 * 1024 * 1024
+
+    // URLSession turns a 301/302/303 POST into a GET on its own. Save sync
+    // signs a method and a body, so every hop re-sends the original request
+    // against the new URL instead, and only over https.
+    private final class GRRedirectKeeper: NSObject, URLSessionTaskDelegate {
+        func urlSession(_ session: URLSession, task: URLSessionTask,
+                        willPerformHTTPRedirection response: HTTPURLResponse,
+                        newRequest request: URLRequest,
+                        completionHandler: @escaping (URLRequest?) -> Void) {
+            guard let original = task.originalRequest,
+                  let target = request.url,
+                  target.scheme?.lowercased() == "https" else {
+                completionHandler(nil)
+                return
+            }
+            var next = original
+            next.url = target
+            completionHandler(next)
+        }
+    }
+
+    private static let httpSession = URLSession(configuration: .ephemeral,
+                                                delegate: GRRedirectKeeper(),
+                                                delegateQueue: nil)
+
+    private static func httpEnvelope(_ head: String, _ payload: Data?) -> NSData {
+        var out = Data((head + "\n").utf8)
+        if let payload { out.append(payload) }
+        return out as NSData
+    }
+
+    private static func httpErrorText(_ error: Error) -> String {
+        var text = error.localizedDescription
+            .replacingOccurrences(of: "\r", with: " ")
+            .replacingOccurrences(of: "\n", with: " ")
+        if text.isEmpty { text = "the request failed" }
+        if text.count > 160 { text = String(text.prefix(160)) }
+        return text
+    }
+
+    /// Blocking HTTPS request with a chosen method, headers and byte body, the
+    /// iOS half of love.system.httpRequest (see the Android GameActivity one).
+    /// Headers arrive as "name: value" lines joined by newlines. The reply is
+    /// an envelope: a head line of "STATUS <code>" or "ERROR <text>", a
+    /// newline, then the raw response bytes -- read for 4xx and 5xx as well,
+    /// because a sync conflict answers 409 with the save that won.
+    @objc(httpRequestWithUrl:method:headers:body:bodyLength:userAgent:)
+    public static func httpRequest(url: UnsafePointer<CChar>?,
+                                   method: UnsafePointer<CChar>?,
+                                   headers: UnsafePointer<CChar>?,
+                                   body: UnsafePointer<UInt8>?,
+                                   bodyLength: Int32,
+                                   userAgent: UnsafePointer<CChar>?) -> NSData? {
+        guard let url, let requestURL = URL(string: String(cString: url)) else {
+            return httpEnvelope("ERROR missing url", nil)
+        }
+        guard requestURL.scheme?.lowercased() == "https" else {
+            return httpEnvelope("ERROR https only", nil)
+        }
+        let verb = (method.map { String(cString: $0) } ?? "GET").uppercased()
+        guard ["GET", "POST", "PUT", "DELETE"].contains(verb) else {
+            return httpEnvelope("ERROR unsupported request method", nil)
+        }
+
+        var request = URLRequest(url: requestURL)
+        request.httpMethod = verb
+        request.timeoutInterval = 60
+        request.setValue(userAgent.map { String(cString: $0) } ?? "gen1recomp",
+                         forHTTPHeaderField: "User-Agent")
+        if let headers, headers.pointee != 0 {
+            for line in String(cString: headers).split(separator: "\n") {
+                guard let colon = line.firstIndex(of: ":") else {
+                    return httpEnvelope("ERROR bad request header", nil)
+                }
+                let name = line[line.startIndex..<colon]
+                    .trimmingCharacters(in: .whitespaces)
+                let value = line[line.index(after: colon)...]
+                    .trimmingCharacters(in: .whitespaces)
+                if name.isEmpty {
+                    return httpEnvelope("ERROR bad request header", nil)
+                }
+                request.setValue(value, forHTTPHeaderField: name)
+            }
+        }
+        if verb != "GET", let body, bodyLength > 0 {
+            request.httpBody = Data(bytes: body, count: Int(bodyLength))
+        }
+
+        let semaphore = DispatchSemaphore(value: 0)
+        var envelope = httpEnvelope("ERROR no response", nil)
+        let task = httpSession.dataTask(with: request) { data, response, error in
+            defer { semaphore.signal() }
+            if let error {
+                envelope = httpEnvelope("ERROR " + httpErrorText(error), nil)
+                return
+            }
+            guard let http = response as? HTTPURLResponse else {
+                envelope = httpEnvelope("ERROR no response", nil)
+                return
+            }
+            let payload = data ?? Data()
+            if payload.count > httpMaxResponse {
+                envelope = httpEnvelope("ERROR the reply was too large", nil)
+                return
+            }
+            envelope = httpEnvelope("STATUS \(http.statusCode)", payload)
+        }
+        task.resume()
+        guard semaphore.wait(timeout: .now() + 65) == .success else {
+            task.cancel()
+            return httpEnvelope("ERROR the request timed out", nil)
+        }
+        return envelope
+    }
+
     // MARK: - Entry points called from liblove (C strings on purpose)
 
     @objc(presentPickerWithKind:saveDir:)
@@ -85,6 +201,8 @@ public final class GRPickerBridge: NSObject {
             types = [.zip]
         case "sav":
             destName = "picked_save.sav"
+        case "required_import":
+            destName = "picked_required_import.bin"
         // A Nintendo 64 cartridge, for mods that build assets out of one --
         // the voxel mod's Pokemon Stadium battle models are the caller this
         // was added for. Its own filename on purpose: an N64 ROM landing on
@@ -137,7 +255,7 @@ public final class GRPickerBridge: NSObject {
     // Kept beside the switch it describes, because the two drifting apart is
     // the only way this can lie.
     @objc public static func supportedPickerKinds() -> NSString {
-        return "rom,mod,sav,stadium" as NSString
+        return "rom,mod,sav,stadium,required_import" as NSString
     }
 
     @objc(presentExportWithName:saveDir:)
@@ -177,10 +295,10 @@ public final class GRPickerBridge: NSObject {
     // UIApplicationDidBecomeActive (see GRBootstrap.m).
     @objc public static func sweepInbox() {
         let fm = FileManager.default
-        guard let docs = fm.urls(for: .documentDirectory, in: .userDomainMask).first,
-              let appSupport = fm.urls(for: .applicationSupportDirectory,
-                                       in: .userDomainMask).first else { return }
-        let saveDir = appSupport.appendingPathComponent(loveIdentity, isDirectory: true)
+        migrateLegacySaveDirectory()
+        guard let docs = documentsDirectory(),
+              let saveDir = publicSaveDirectory() else { return }
+        guard docs.standardizedFileURL != saveDir.standardizedFileURL else { return }
         let wanted: Set<String> = ["gb", "gbc", "zip", "sav"]
         guard let items = try? fm.contentsOfDirectory(at: docs,
                                                       includingPropertiesForKeys: nil) else { return }
@@ -197,15 +315,21 @@ public final class GRPickerBridge: NSObject {
         }
     }
 
+    @objc public static func preparePublicDocuments() {
+        migrateLegacySaveDirectory()
+        if let saveDir = publicSaveDirectory() {
+            ensureDirectory(saveDir)
+        }
+    }
+
     // MARK: - Helpers
 
     private static func resolvedSaveDir(_ cstr: UnsafePointer<CChar>?) -> URL? {
         var dir = cstr.map { String(cString: $0) } ?? ""
         if dir.isEmpty {
-            guard let appSupport = FileManager.default
-                .urls(for: .applicationSupportDirectory, in: .userDomainMask).first
-            else { return nil }
-            dir = appSupport.appendingPathComponent(loveIdentity).path
+            migrateLegacySaveDirectory()
+            guard let saveDir = publicSaveDirectory() else { return nil }
+            dir = saveDir.path
         }
         let url = URL(fileURLWithPath: dir, isDirectory: true)
         ensureDirectory(url)
@@ -215,6 +339,75 @@ public final class GRPickerBridge: NSObject {
     private static func ensureDirectory(_ url: URL) {
         try? FileManager.default.createDirectory(at: url,
                                                  withIntermediateDirectories: true)
+    }
+
+    private static func documentsDirectory() -> URL? {
+        FileManager.default.urls(for: .documentDirectory,
+                                 in: .userDomainMask).first
+    }
+
+    private static func publicSaveDirectory() -> URL? {
+        documentsDirectory()
+    }
+
+    private static func legacySaveDirectory() -> URL? {
+        FileManager.default.urls(for: .applicationSupportDirectory,
+                                 in: .userDomainMask).first?
+            .appendingPathComponent(loveIdentity, isDirectory: true)
+    }
+
+    private static func migrateLegacySaveDirectory() {
+        let fm = FileManager.default
+        guard let destination = publicSaveDirectory(),
+              let legacy = legacySaveDirectory(),
+              fm.fileExists(atPath: legacy.path) else {
+            return
+        }
+        ensureDirectory(destination)
+        mergeDirectory(from: legacy, to: destination)
+        try? fm.removeItem(at: legacy)
+    }
+
+    private static func mergeDirectory(from source: URL, to destination: URL) {
+        let fm = FileManager.default
+        ensureDirectory(destination)
+        guard let items = try? fm.contentsOfDirectory(at: source,
+                                                       includingPropertiesForKeys: nil)
+        else { return }
+        for item in items {
+            let target = destination.appendingPathComponent(item.lastPathComponent)
+            var sourceIsDirectory = ObjCBool(false)
+            fm.fileExists(atPath: item.path, isDirectory: &sourceIsDirectory)
+            var targetIsDirectory = ObjCBool(false)
+            let targetExists = fm.fileExists(atPath: target.path,
+                                              isDirectory: &targetIsDirectory)
+            if sourceIsDirectory.boolValue && targetExists && targetIsDirectory.boolValue {
+                mergeDirectory(from: item, to: target)
+                continue
+            }
+            if targetExists {
+                if !sourceIsDirectory.boolValue && !targetIsDirectory.boolValue &&
+                    fm.contentsEqual(atPath: item.path, andPath: target.path) {
+                    try? fm.removeItem(at: item)
+                } else {
+                    moveToLegacyName(item, in: destination)
+                }
+                continue
+            }
+            try? fm.moveItem(at: item, to: target)
+        }
+    }
+
+    private static func moveToLegacyName(_ item: URL, in destination: URL) {
+        let fm = FileManager.default
+        let base = item.lastPathComponent + ".legacy"
+        var target = destination.appendingPathComponent(base)
+        var suffix = 2
+        while fm.fileExists(atPath: target.path) {
+            target = destination.appendingPathComponent("\(base).\(suffix)")
+            suffix += 1
+        }
+        try? fm.moveItem(at: item, to: target)
     }
 
     private static func copyItem(at src: URL, into dir: URL, named name: String) {

@@ -9,11 +9,23 @@ local function sortedKeys(t)
   return keys
 end
 
+-- Gen 2's generated tables carry provenance scalars (generation, source)
+-- beside the id-keyed records, so a wheel built from every key would offer
+-- them as pickable entries.  #1466
+local function sortedRecordKeys(t)
+  local keys = {}
+  for k, v in pairs(t or {}) do
+    if type(v) == "table" then table.insert(keys, k) end
+  end
+  table.sort(keys)
+  return keys
+end
+
 function Catalog.build(data)
   return {
-    species = sortedKeys(data.pokemon),
-    items = sortedKeys(data.items),
-    moves = sortedKeys(data.moves),
+    species = sortedRecordKeys(data.pokemon),
+    items = sortedRecordKeys(data.items),
+    moves = sortedRecordKeys(data.moves),
   }
 end
 
@@ -40,10 +52,11 @@ end
 
 local function shellListLua(dir)
   local out = {}
+  if not (io and io.popen) then return out end
   if package.config:sub(1, 1) == "\\" then
     -- cmd has no ls; dir /b prints bare names, so re-attach the directory
-    local p = io.popen(string.format('dir /b "%s\\*.lua" 2>nul', dir))
-    if p then
+    local ok, p = pcall(io.popen, string.format('dir /b "%s\\*.lua" 2>nul', dir))
+    if ok and p then
       for line in p:lines() do
         if line ~= "" then table.insert(out, dir .. "/" .. line) end
       end
@@ -51,8 +64,8 @@ local function shellListLua(dir)
     end
     return out
   end
-  local p = io.popen(string.format('ls "%s"/*.lua 2>/dev/null', dir))
-  if p then
+  local ok, p = pcall(io.popen, string.format('ls "%s"/*.lua 2>/dev/null', dir))
+  if ok and p then
     for line in p:lines() do
       table.insert(out, line)
     end
@@ -64,8 +77,8 @@ end
 local function readText(path)
   local fs = love and love.filesystem
   if fs and fs.read and fs.getInfo and fs.getInfo(path) then
-    local body = fs.read(path)
-    if body then return body end
+    local ok, body = pcall(fs.read, path)
+    if ok and body then return body end
   end
   local f = io.open(path, "r")
   if not f then return nil end
@@ -78,7 +91,7 @@ end
 -- scripts show up beside the vanilla EVENT_ ones
 function Catalog.scrapeEvents(scriptDir, headerPath, listFiles, extraDirs)
   listFiles = listFiles or function(dir)
-    return loveListLua(dir) or shellListLua(dir)
+    return loveListLua(dir) or shellListLua(dir) or {}
   end
 
   local found = {}
@@ -91,12 +104,14 @@ function Catalog.scrapeEvents(scriptDir, headerPath, listFiles, extraDirs)
     end
   end
 
-  local dirs = { scriptDir }
+  local dirs = {}
+  if scriptDir then dirs[#dirs + 1] = scriptDir end
   for _, dir in ipairs(extraDirs or {}) do
     dirs[#dirs + 1] = dir
   end
   for _, dir in ipairs(dirs) do
-    for _, path in ipairs(listFiles(dir)) do
+    local files = listFiles(dir) or {}
+    for _, path in ipairs(files) do
       local body = readText(path)
       if body then eat(body) end
     end
@@ -108,6 +123,24 @@ function Catalog.scrapeEvents(scriptDir, headerPath, listFiles, extraDirs)
   end
 
   return sortedKeys(found)
+end
+
+function Catalog.gen2EventList(engine, extraDirs)
+  local names = require("Gen2Flags").names(engine)
+  local modFlags = Catalog.scrapeEvents(nil, nil, nil, extraDirs)
+  local seen = {}
+  for _, name in ipairs(names) do seen[name] = true end
+  for _, name in ipairs(modFlags) do
+    if not seen[name] then
+      names[#names + 1] = name
+      seen[name] = true
+    end
+  end
+  return names
+end
+
+function Catalog.goldEventList(extraDirs)
+  return Catalog.gen2EventList("gs", extraDirs)
 end
 
 return Catalog

@@ -100,6 +100,7 @@ O.tradeFlags = O.townVisited + 44                         -- 2B (flag_array NUM_
 -- Sits 2 bytes (wPlayerCoins) past O.coins per the walk above; absolute
 -- 0x2852 (#763, #857).
 O.toggleObjectFlags = O.coins + 2                         -- 32B
+O.hiddenItemFlags = O.townVisited - 27
 -- Play time (wPlayTimeHours/Maxed/Minutes/Seconds/Frames) lives INSIDE the
 -- sMainData window (wMainDataStart..wMainDataEnd is copied verbatim into
 -- SRAM), 1866 bytes past wMainDataStart -- reached from the checksum-verified
@@ -396,10 +397,14 @@ local function encodeStatus(status)
   return 0
 end
 
+-- Def rows share a generated table's top level with provenance scalars on
+-- some data sets (src/import/RomExtractorGen2.lua stamps `generation` and
+-- `source` beside the entries), so every pairs(defs) walk here must keep
+-- to table rows: indexing a scalar row raises instead of skipping it.
 local function buildIndexCrosswalk(defs)
   local byIndex, byId = {}, {}
   for id, def in pairs(defs or {}) do
-    if def.index ~= nil then
+    if type(def) == "table" and def.index ~= nil then
       byIndex[def.index] = id
       byId[id] = def.index
     end
@@ -420,7 +425,8 @@ end
 local function buildDexCrosswalk(defs)
   local byDex, dexOf = {}, {}
   for id, def in pairs(defs or {}) do
-    local n = def.source and tonumber(def.source:match("BaseStats%[(%d+)%]"))
+    local n = type(def) == "table" and def.source
+      and tonumber(def.source:match("BaseStats%[(%d+)%]"))
     if n then
       byDex[n] = id
       dexOf[id] = n
@@ -438,7 +444,8 @@ end
 -- per slot -- i.e. HM01=196+.. , TM01=201+(number-1).
 local function addMachineIndices(defs, byIndex, byId)
   for id, def in pairs(defs or {}) do
-    if byId[id] == nil and def.machine and def.machine.number then
+    if type(def) == "table" and byId[id] == nil
+       and def.machine and def.machine.number then
       local base = def.machine.kind == "HM" and 195 or 200
       local idx = base + def.machine.number
       byIndex[idx] = id
@@ -764,6 +771,15 @@ function GenSave.decode(bytes, data, opts)
     end
   end
 
+  if data.hiddenItems then
+    save.hiddenTaken = {}
+    for i, row in ipairs(data.hiddenItems) do
+      if bitGet(bytes, O.hiddenItemFlags, i - 1) then
+        save.hiddenTaken[row[1] .. "_" .. row[2] .. "_" .. row[3]] = true
+      end
+    end
+  end
+
   -- FLY destinations.  wTownVisitedFlag's bit index IS the town's map index:
   -- engine/items/town_map.asm BuildFlyLocationsList loads the 16-bit value
   -- into de and rotates it right one bit per iteration with b counting up
@@ -944,6 +960,14 @@ function GenSave.encode(save, data, template)
         end
       end
       bitSet(buf, O.toggleObjectFlags, bitIdx, not visible)
+    end
+  end
+
+  if data.hiddenItems then
+    local taken = save.hiddenTaken or {}
+    for i, row in ipairs(data.hiddenItems) do
+      local key = row[1] .. "_" .. row[2] .. "_" .. row[3]
+      bitSet(buf, O.hiddenItemFlags, i - 1, taken[key] and true or false)
     end
   end
 

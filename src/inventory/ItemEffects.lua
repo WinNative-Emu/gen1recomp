@@ -25,6 +25,18 @@ local function noEffect(data)
   return romText(data, "_ItemUseNoEffectText", "It won't have\nany effect.")
 end
 
+local function registeredEffect(data, itemDef)
+    if not data or not itemDef or not itemDef.effect then
+        return nil
+    end
+
+    if not data.item_effects then
+        return nil
+    end
+
+    return data.item_effects[itemDef.effect]
+end
+
 local HEAL_AMOUNT = {
   POTION = 20, SUPER_POTION = 50, HYPER_POTION = 200,
   FRESH_WATER = 50, SODA_POP = 60, LEMONADE = 80,
@@ -45,6 +57,16 @@ local BALLS = {
 local STONES = {
   FIRE_STONE = true, WATER_STONE = true, THUNDER_STONE = true,
   LEAF_STONE = true, MOON_STONE = true,
+}
+
+-- Strings.source, not Strings: harvested at require time so the catalog
+-- generator can see the literal, same pattern as MoveEffects.lua's
+-- STAT_LABEL (#811) -- Strings(stat:upper()) alone is a dynamic argument
+-- the harvester can't discover.
+local STAT_LABEL = {
+  hp = Strings.source("HP"), attack = Strings.source("ATTACK"),
+  defense = Strings.source("DEFENSE"), speed = Strings.source("SPEED"),
+  special = Strings.source("SPECIAL"), accuracy = Strings.source("ACCURACY"),
 }
 
 -- vitamins: stat-exp boosters (ItemUseVitamin)
@@ -71,8 +93,31 @@ function ItemEffects.healsHP(id)
       or id == "REVIVE" or id == "MAX_REVIVE"
 end
 
+-- .useRareCandy prints over the still-drawn party menu
+-- (engine/items/item_effects.asm:1392-1418)
+function ItemEffects.keepsPartyMenuOpen(id)
+  return ItemEffects.healsHP(id) or id == "RARE_CANDY"
+end
+
+function ItemEffects.isBattleMedicine(id)
+  return HEAL_AMOUNT[id] ~= nil or STATUS_HEAL[id] ~= nil
+      or id == "MAX_POTION" or id == "FULL_RESTORE"
+      or id == "REVIVE" or id == "MAX_REVIVE"
+end
+
 -- Does this item need a party-member target?
-function ItemEffects.needsTarget(id, itemDef)
+-- 'data' is optional for compat purposes; targeting falls back to itemDef/vanilla detection
+function ItemEffects.needsTarget(id, itemDef, data)
+  if itemDef and itemDef.needsTarget ~= nil then
+      return itemDef.needsTarget
+  end
+
+  local effect = registeredEffect(data, itemDef)
+
+  if effect and effect.needsTarget ~= nil then
+    return effect.needsTarget
+  end
+
   return HEAL_AMOUNT[id] or STATUS_HEAL[id] or id == "MAX_POTION"
       or id == "FULL_RESTORE" or id == "REVIVE" or id == "MAX_REVIVE"
       or id == "RARE_CANDY" or STONES[id]
@@ -147,6 +192,28 @@ function ItemEffects.use(data, save, itemId, target, battle, moveIndex, ow)
   local itemDef = data.items[itemId]
   local name = itemDef and itemDef.name or itemId
 
+  local effectDef = registeredEffect(data, itemDef)
+  if effectDef then
+    if battle and effectDef.battle == false then
+        return "failed", { notTime(data, save) }
+    end
+
+    if not battle and effectDef.field == false then
+        return "failed", { notTime(data, save) }
+    end
+
+    return effectDef.use({
+        data = data,
+        save = save,
+        itemId = itemId,
+        item = itemDef,
+        target = target,
+        battle = battle,
+        moveIndex = moveIndex,
+        overworld = ow,
+    })
+  end
+
   -- ItemUseVitamin / ItemUsePPUp / ItemUseEvoStone / ItemUseCoinCase /
   -- ItemUseTMHM / ItemUseRepelCommon all refuse mid-battle
   -- (jp nz, ItemUseNotTime)
@@ -165,6 +232,17 @@ function ItemEffects.use(data, save, itemId, target, battle, moveIndex, ow)
   -- (ItemUsePokeFlute, engine/items/item_effects.asm); never consumed.
   if itemId == "POKE_FLUTE" then
     if not battle then
+      if ow and ow.map and ow.map.id == "PEWTER_POKECENTER"
+          and ow.pikachuPewterSleepScene then
+        local Follower = require("src.world.PikachuFollower")
+        local pika = Follower.current(ow)
+        local player = ow.player
+        if pika and player
+            and math.abs(pika.cellX - player.cellX) + math.abs(pika.cellY - player.cellY) == 1 then
+          return "flute_wake_pikachu", { romText(data, "_PlayedFluteHadEffectText",
+            "{PLAYER} played the\nPOKé FLUTE.") }
+        end
+      end
       -- standing next to a not-yet-beaten Snorlax: this is the ONLY way
       -- Snorlax wakes -- using the flute from the item-use menu, never
       -- just talking to it with the flute in the bag (see
@@ -232,7 +310,7 @@ function ItemEffects.use(data, save, itemId, target, battle, moveIndex, ow)
           "Nothing happened!") }
       end
       b.stages[stat] = cur + 1
-      return "consumed", { Strings("%s's\n%s rose!", b.name, stat:upper()) }
+      return "consumed", { Strings("%s's\n%s rose!", b.name, Strings(STAT_LABEL[stat])) }
     end
     -- ItemUseDireHit/ItemUseGuardSpec always set the bit and consume
     -- the item, even when it is already active
@@ -431,7 +509,7 @@ function ItemEffects.use(data, save, itemId, target, battle, moveIndex, ow)
     -- Spanish ROM puts the stat before the name), so the extracted line
     -- cannot be filled positionally; the engine wording stands
     return "consumed", { Strings("%s's %s\nrose!", monName(data, target),
-      vitaminStat == "hp" and "HP" or vitaminStat:upper()) }
+      Strings(STAT_LABEL[vitaminStat])) }
   end
 
   -- PP UP boosts the move the player picked (ItemUsePPUp's move menu)
@@ -453,7 +531,10 @@ function ItemEffects.use(data, save, itemId, target, battle, moveIndex, ow)
     if not target then return "failed", { noEffect(data) } end
     local speciesDef = data.pokemon[target.species]
     local ok = false
-    for _, m in ipairs(speciesDef.tmhm) do
+    -- a species record with no tmhm list at all is "teaches nothing", the
+    -- same as one whose list just does not name this move -- not a reason
+    -- to crash instead of refusing normally
+    for _, m in ipairs(speciesDef.tmhm or {}) do
       if m == itemDef.machine.move then ok = true break end
     end
     if not ok then

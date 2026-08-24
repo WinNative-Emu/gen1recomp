@@ -2,6 +2,7 @@
 --
 --   love . --game=red               -- boot Red
 --   love . --game=yellow --slot=2   -- boot Yellow on save slot 2
+--   love . --game=gold              -- boot Gold (src/core/Game2.lua)
 --   love . --game=red --launcher    -- open the launcher anyway (a shortcut
 --                                      the player wants to edit)
 --   POKEPORT_GAME=blue love .       -- same, for launchers that only pass env
@@ -37,6 +38,9 @@ local function normalizeVersion(v)
     r = "red", red = "red",
     b = "blue", blue = "blue",
     y = "yellow", yellow = "yellow",
+    g = "gold", gold = "gold",
+    s = "silver", silver = "silver",
+    c = "crystal", crystal = "crystal",
   }
   v = alias[v] or v
   if GameVersion.VERSIONS and not GameVersion.VERSIONS[v] then return nil end
@@ -65,10 +69,23 @@ local function argFlag(argv, name)
   return false
 end
 
+local cachedIntentGame = nil
+
 -- Returns version, slotId (either may be nil).  Command line wins over env,
 -- so a shortcut can override a machine-wide default.
 function LaunchOptions.resolve(argv)
+  if cachedIntentGame == nil then
+    if love.system and love.system.getOS and love.system.getOS() == "Android"
+        and love.system.getLaunchGame then
+      cachedIntentGame = normalizeVersion(love.system.getLaunchGame()) or false
+    else
+      cachedIntentGame = false
+    end
+  end
+  local intentGame = cachedIntentGame or nil
+
   local game = normalizeVersion(argValue(argv, "game"))
+    or intentGame
     or normalizeVersion(os.getenv("POKEPORT_GAME"))
     or normalizeVersion(os.getenv("POKEPORT_LAUNCH"))
   local slot = argValue(argv, "slot") or os.getenv("POKEPORT_SLOT")

@@ -192,13 +192,28 @@ bool System::pickFile(const char *kind) const
 			dest = "picked_mod.zip";
 		else if (strcmp(kind, "sav") == 0 || strcmp(kind, "save") == 0)
 			dest = "picked_save.sav";
+		else if (strcmp(kind, "required_import") == 0)
+			dest = "picked_required_import.bin";
 		else if (strcmp(kind, "rom") == 0)
 			dest = "picked_rom.gb";
+		// Unknown kinds used to fall through to the ROM destination. Refuse them
+		// so a newer Lua caller cannot silently route an unrelated file as a ROM.
+		else
+			return false;
 	}
 	return love::android::showFilePicker(dest);
 #else
 	LOVE_UNUSED(kind);
 	return false;
+#endif
+}
+
+const char *System::pickFileKinds() const
+{
+#ifdef LOVE_ANDROID
+	return "rom,mod,sav,required_import";
+#else
+	return "";
 #endif
 }
 
@@ -230,6 +245,35 @@ bool System::restartApp() const
 #endif
 }
 
+bool System::installApk(const char *path) const
+{
+#ifdef LOVE_ANDROID
+	return love::android::installApk(path);
+#else
+	LOVE_UNUSED(path);
+	return false;
+#endif
+}
+
+bool System::updateShortcuts(const std::vector<std::string> &versions) const
+{
+#ifdef LOVE_ANDROID
+	return love::android::updateAppShortcuts(versions);
+#else
+	LOVE_UNUSED(versions);
+	return false;
+#endif
+}
+
+std::string System::getLaunchGame() const
+{
+#ifdef LOVE_ANDROID
+	return love::android::getLaunchGame();
+#else
+	return "";
+#endif
+}
+
 bool System::httpDownload(const char *url, const char *destPath,
 	const char *userAgent, const char *accept) const
 {
@@ -241,6 +285,108 @@ bool System::httpDownload(const char *url, const char *destPath,
 	LOVE_UNUSED(userAgent);
 	LOVE_UNUSED(accept);
 	return false;
+#endif
+}
+
+bool System::httpPost(const char *url, const char *body, int bodyLen,
+	const char *contentType, const char *userAgent) const
+{
+#ifdef LOVE_ANDROID
+	return love::android::httpPost(url, body, bodyLen, contentType, userAgent);
+#else
+	LOVE_UNUSED(url);
+	LOVE_UNUSED(body);
+	LOVE_UNUSED(bodyLen);
+	LOVE_UNUSED(contentType);
+	LOVE_UNUSED(userAgent);
+	return false;
+#endif
+}
+
+bool System::httpRequest(const char *url, const char *method,
+	const char *const *headerPairs, int headerPairCount,
+	const char *body, int bodyLen, const char *userAgent,
+	std::string &out) const
+{
+#ifdef LOVE_ANDROID
+	return love::android::httpRequest(url, method, headerPairs, headerPairCount,
+		body, bodyLen, userAgent, out);
+#else
+	LOVE_UNUSED(url);
+	LOVE_UNUSED(method);
+	LOVE_UNUSED(headerPairs);
+	LOVE_UNUSED(headerPairCount);
+	LOVE_UNUSED(body);
+	LOVE_UNUSED(bodyLen);
+	LOVE_UNUSED(userAgent);
+	out.clear();
+	return false;
+#endif
+}
+
+int System::tlsOpen(const char *host, int port) const
+{
+#ifdef LOVE_ANDROID
+	return love::android::tlsOpen(host, port);
+#else
+	LOVE_UNUSED(host);
+	LOVE_UNUSED(port);
+	return -1;
+#endif
+}
+
+int System::tlsStatus(int handle) const
+{
+#ifdef LOVE_ANDROID
+	return love::android::tlsStatus(handle);
+#else
+	LOVE_UNUSED(handle);
+	return -1;
+#endif
+}
+
+int System::tlsSend(int handle, const char *data, int length) const
+{
+#ifdef LOVE_ANDROID
+	return love::android::tlsSend(handle, data, length);
+#else
+	LOVE_UNUSED(handle);
+	LOVE_UNUSED(data);
+	LOVE_UNUSED(length);
+	return -1;
+#endif
+}
+
+int System::tlsReceive(int handle, char *buf, int max) const
+{
+#ifdef LOVE_ANDROID
+	return love::android::tlsReceive(handle, buf, max);
+#else
+	LOVE_UNUSED(handle);
+	LOVE_UNUSED(buf);
+	LOVE_UNUSED(max);
+	return -1;
+#endif
+}
+
+bool System::tlsError(int handle, char *buf, int max) const
+{
+#ifdef LOVE_ANDROID
+	return love::android::tlsError(handle, buf, max);
+#else
+	LOVE_UNUSED(handle);
+	LOVE_UNUSED(buf);
+	LOVE_UNUSED(max);
+	return false;
+#endif
+}
+
+void System::tlsClose(int handle) const
+{
+#ifdef LOVE_ANDROID
+	love::android::tlsClose(handle);
+#else
+	LOVE_UNUSED(handle);
 #endif
 }
 

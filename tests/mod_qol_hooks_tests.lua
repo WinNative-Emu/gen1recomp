@@ -11,6 +11,10 @@ local Stats = require("src.pokemon.Stats")
 local Zoom = require("src.render.Zoom")
 local ListMenu = require("src.ui.ListMenu")
 local NamingScreen = require("src.ui.NamingScreen")
+local TextBox = require("src.render.TextBox")
+local ChoiceBox = require("src.ui.ChoiceBox")
+local PartyMenu = require("src.ui.PartyMenu")
+local Gen2PartyMenu = require("src.ui.gen2.PartyMenu")
 local Player = require("src.world.Player")
 local Music = require("src.core.Music")
 
@@ -159,6 +163,185 @@ do
   Runtime.call("battle.overlay", function() end, { kind = "wild" })
   check(drew, "battle.overlay runs after the vanilla no-op")
   unsub()
+end
+
+-- ------- battle UI visibility (companion / alternate renderers)
+
+do
+  local BattleState = require("src.battle.BattleState")
+  local Gen2BattleState = require("src.ui.gen2.BattleState")
+  check(BattleState.bottomUIVisible({ phase = "menu" }),
+    "battle bottom UI is visible without a mod")
+  check(Gen2BattleState.bottomUIVisible({ phase = "menu" }),
+    "Gold battle bottom UI is visible without a mod")
+  local seen
+  local unsub = wrap("battle.bottom_ui_visible", function(_, state)
+    seen = state
+    return false
+  end)
+  check(not BattleState.bottomUIVisible({ phase = "messages" }),
+    "a mod can hide the battle text and menu layer")
+  check(not Gen2BattleState.bottomUIVisible({ phase = "menu" }),
+    "the same hook hides Gold's battle text and menu layer")
+  local text = setmetatable({}, TextBox)
+  text:draw()
+  check(seen == text, "pushed text boxes use the same visibility hook")
+  unsub()
+
+  local battle = setmetatable({ isBattle = true }, BattleState)
+  local game = { stack = { states = {} } }
+  text = setmetatable({ game = game }, TextBox)
+  local choice = setmetatable({ game = game }, ChoiceBox)
+  game.stack.states = { battle, text, choice }
+  local queried = {}
+  unsub = wrap("battle.bottom_ui_visible", function(_, state)
+    queried[#queried + 1] = state
+    return state ~= battle
+  end)
+  text:draw()
+  choice:draw()
+  check(queried[1] == battle and queried[2] == battle and #queried == 2,
+    "battle overlays inherit a hidden bottom layer without drawing backings")
+  unsub()
+
+  check(BattleState.bottomUIVisible({ phase = "moveSelect" }),
+    "battle bottom UI returns when the hook is removed")
+  check(Gen2BattleState.bottomUIVisible({ phase = "moves" }),
+    "Gold battle bottom UI returns when the hook is removed")
+
+  local Chrome = require("src.ui.gen2.Chrome")
+  local clear, box, print = Chrome.clear, Chrome.box, Chrome.print
+  local boxes = 0
+  Chrome.clear = function() end
+  Chrome.box = function() boxes = boxes + 1 end
+  Chrome.print = function() end
+  local panel = setmetatable({
+    battle = { player = {}, enemy = {} }, phase = "resolving",
+    drawHud = function() end,
+  }, { __index = Gen2BattleState })
+  unsub = wrap("battle.bottom_ui_visible", function() return false end)
+  panel:drawPanel()
+  check(boxes == 0, "Gold skips its in-state battle box when a mod owns it")
+  unsub()
+  panel:drawPanel()
+  check(boxes == 1, "Gold draws its battle box again without the hook")
+  Chrome.clear, Chrome.box, Chrome.print = clear, box, print
+
+  check(BattleState.statusHUDVisible({}),
+    "battle status HUD is visible without a mod")
+  check(Gen2BattleState.statusHUDVisible({}),
+    "Gold battle status HUD is visible without a mod")
+  unsub = wrap("battle.status_hud_visible", function() return false end)
+  check(not BattleState.statusHUDVisible({}),
+    "a mod can hide the battle status HUD")
+  check(not Gen2BattleState.statusHUDVisible({}),
+    "the same hook hides Gold's battle status HUD")
+  unsub()
+  check(BattleState.statusHUDVisible({}),
+    "battle status HUD returns when the hook is removed")
+  check(Gen2BattleState.statusHUDVisible({}),
+    "Gold battle status HUD returns when the hook is removed")
+end
+
+-- ------- battle.caught_marker_visible (caught wild marker)
+
+do
+  local BattleState = require("src.battle.BattleState")
+  local state = { kind = "wild", enemy = { mon = { species = "RATTATA" } },
+    game = { save = { pokedex = { owned = { RATTATA = true } } } } }
+  check(not BattleState.caughtMarkerVisible(state),
+    "caught marker is opt-in")
+  local unsub = wrap("battle.caught_marker_visible", function() return true end)
+  check(BattleState.caughtMarkerVisible(state),
+    "a mod can show a caught wild marker")
+  state.kind = "trainer"
+  check(not BattleState.caughtMarkerVisible(state),
+    "trainer battles never show a caught marker")
+  state.kind, state.game.save.pokedex.owned.RATTATA = "wild", false
+  check(not BattleState.caughtMarkerVisible(state),
+    "uncaught wild Pokemon have no marker")
+  unsub()
+end
+
+-- ------- grid navigation ownership (alternate menu renderers)
+
+do
+  local BattleState = require("src.battle.BattleState")
+  local Gen2BattleState = require("src.ui.gen2.BattleState")
+  local battle = { wideLayout = function() return false end }
+  check(not BattleState.moveGridNavigation(battle),
+    "classic move navigation stays a list without a mod")
+  check(not Gen2BattleState.moveGridNavigation({}),
+    "Gold move navigation stays a list without a mod")
+  local unsub = wrap("battle.move_grid_navigation", function() return true end)
+  check(BattleState.moveGridNavigation(battle),
+    "a mod can opt the classic move menu into grid navigation")
+  check(Gen2BattleState.moveGridNavigation({}),
+    "the same hook opts Gold's move menu into grid navigation")
+
+  local pressed, moveCount = "right", 4
+  local gold = setmetatable({
+    phase = "moves", moveIndex = 1,
+    slideFrame = math.huge,
+    game = { input = {
+      wasPressed = function(_, key) return key == pressed end,
+    } },
+    updateAlarm = function() end,
+    stepHpAnim = function() return false end,
+    playerMoves = function()
+      local moves = {}
+      for i = 1, moveCount do moves[i] = {} end
+      return moves
+    end,
+  }, { __index = Gen2BattleState })
+  gold:update(0)
+  check(gold.moveIndex == 2,
+    "Gold grid navigation moves right across a companion move row")
+  pressed, gold.moveIndex = "down", 1
+  gold:update(0)
+  check(gold.moveIndex == 3,
+    "Gold grid navigation moves down the companion move column")
+  pressed, moveCount, gold.moveIndex = "down", 3, 2
+  gold:update(0)
+  check(gold.moveIndex == 2,
+    "Gold grid navigation does not select an empty fourth move slot")
+  unsub()
+  pressed, gold.moveIndex = "right", 1
+  gold:update(0)
+  check(gold.moveIndex == 1,
+    "removing the hook restores Gold's native vertical move list")
+  battle.wideLayout = function() return true end
+  check(BattleState.moveGridNavigation(battle),
+    "the native wide move grid remains enabled without a mod")
+
+  local game = {
+    save = { party = { {}, {}, {}, {}, {}, {} } },
+    input = { wasPressed = function(_, key) return key == "down" end },
+  }
+  local field = PartyMenu.new(game)
+  unsub = wrap("ui.party.grid_navigation", function() return true end)
+  field:update(0)
+  check(field.index == 2,
+    "field party navigation remains a native list when the hook is active")
+  game.partyMenuSavedIndex = nil
+  local menu = PartyMenu.new(game, { battle = {} })
+  menu:update(0)
+  check(menu.index == 3 and game.partyMenuSavedIndex == 3,
+    "a battle party can follow and remember a companion grid")
+  unsub()
+  menu:update(0)
+  check(menu.index == 4,
+    "removing the hook restores native list navigation immediately")
+
+  local gold = Gen2PartyMenu.new(game, { battle = true })
+  unsub = wrap("ui.party.grid_navigation", function() return true end)
+  gold:update(0)
+  check(gold.index == 3,
+    "a Gold battle party can follow the same companion grid")
+  unsub()
+  gold:update(0)
+  check(gold.index == 4,
+    "Gold restores native party list navigation without the hook")
 end
 
 -- ------- music.volume (distance / indoor muffling)

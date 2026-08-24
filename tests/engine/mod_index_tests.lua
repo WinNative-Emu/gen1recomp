@@ -114,23 +114,110 @@ do
     "a feed without release stats parses them as absent")
 end
 
--- release stats a feed can publish: total downloads and first/last dates
+-- release stats a feed can publish: download counts and first/last dates
 -- ride along additively, so a feed carrying them stays readable by every
 -- build that predates them
 do
   local withStats = {}
   for k, v in pairs(NUZLOCKE) do withStats[k] = v end
-  withStats.downloads = 1234
+  withStats.downloads = { total = 1578, recent = 388, window_days = 30,
+                          as_of = "2026-08-18T05:17:00.000Z" }
   withStats.first_release = "2024-05-31"
   withStats.last_release = "2026-07-01"
   local index = ModIndex.parse(feed({ withStats }))
   local m = index.mods[1]
-  eq(m.downloads, 1234, "total downloads are kept")
+  eq(m.downloads.total, 1578, "total downloads are kept")
+  eq(m.downloads.recent, 388, "the trailing-window count is kept")
+  eq(m.downloads.window_days, 30, "the window length is kept")
+  eq(m.downloads.as_of, "2026-08-18T05:17:00.000Z", "the read time is kept")
   eq(m.first_release, "2024-05-31", "first release date is kept")
   eq(m.last_release, "2026-07-01", "last release date is kept")
-  withStats.downloads = "9999"
-  m = ModIndex.parse(feed({ withStats })).mods[1]
-  eq(m.downloads, 9999, "numeric-string downloads are coerced")
+end
+
+-- ------- download counts: unknown is not zero
+--
+-- The feed's `downloads` object has three ways of saying "not known" -- the
+-- field absent, the field null, and a null count inside it -- and every one
+-- of them has to stay distinguishable from a real zero, because the browse
+-- card prints one and sorts the other.
+do
+  local function jsonWith(downloads)
+    local raw = {}
+    for k, v in pairs(NUZLOCKE) do raw[k] = v end
+    raw.downloads = downloads
+    return feed({ raw })
+  end
+  local function statsForJson(text)
+    return ModIndex.downloadStats(ModIndex.parse(text).mods[1])
+  end
+  local function statsFor(downloads)
+    return statsForJson(jsonWith(downloads))
+  end
+
+  check(statsFor(nil) == nil, "an absent downloads field is unknown")
+  -- Json.encode has no null of its own, so the literal the feed actually
+  -- sends is patched into the text.
+  local nulled = jsonWith({}):gsub('"downloads":%[%]', '"downloads":null', 1)
+  check(nulled:find('"downloads":null', 1, true) ~= nil,
+    "the null feed fixture really contains a null")
+  check(statsForJson(nulled) == nil, "a null downloads field is unknown")
+  check(statsFor({}) == nil, "an object with no counts is unknown")
+  eq(statsFor({ total = 0 }).total, 0, "a real zero total survives")
+
+  -- recent / window_days stay null until the index has more than a day of
+  -- history, even once total is a real number.
+  local young = statsFor({ total = 12, as_of = "2026-08-18T05:17:00.000Z" })
+  eq(young.total, 12, "a total with no window yet is still a total")
+  check(young.recent == nil and young.window_days == nil,
+    "no trailing window means no trending figure, not a zero one")
+
+  -- A cache written before the object shipped stored a bare number; it is
+  -- read back through the same door rather than migrated.
+  local legacy = ModIndex.downloadStats({ downloads = 4321 })
+  eq(legacy.total, 4321, "a bare number reads as the total")
+  check(legacy.recent == nil, "and carries no trending figure")
+  check(ModIndex.downloadStats({}) == nil, "a row with no counts is unknown")
+  check(ModIndex.downloadStats(nil) == nil, "no entry is unknown")
+end
+
+-- ------- release dates: the feed already dates every listing it can install
+--
+-- Sorting must span the whole index, not the pages a reader happened to
+-- visit, so the "last updated" date comes off the feed's own `latest` blob
+-- rather than out of a per-mod repo fetch.
+do
+  local raw = {}
+  for k, v in pairs(NUZLOCKE) do raw[k] = v end
+  local d = ModIndex.releaseDates(ModIndex.parse(feed({ raw })).mods[1])
+  eq(d.latest, "2026-07-31", "latest release date comes from latest.published_at")
+  check(d.first == nil, "the feed cannot date a first release from that alone")
+
+  raw.first_release = "2024-05-31"
+  raw.last_release = "2026-07-01"
+  d = ModIndex.releaseDates(ModIndex.parse(feed({ raw })).mods[1])
+  eq(d.first, "2024-05-31", "an explicit first_release wins")
+  eq(d.latest, "2026-07-01", "an explicit last_release beats the latest blob")
+
+  local bare = {}
+  for k, v in pairs(NUZLOCKE) do bare[k] = v end
+  bare.latest, bare.update_check = nil, "no installable release"
+  check(ModIndex.releaseDates(ModIndex.parse(feed({ bare })).mods[1]) == nil,
+    "a listing with no releases has no dates")
+  check(ModIndex.releaseDates(nil) == nil, "no entry has no dates")
+end
+
+-- ------- cache version: a copy written before a field existed cannot answer
+-- for it, and the TTL is a whole day
+do
+  local now = os.time()
+  check(ModIndex.cacheFresh({ checkedAt = now,
+    version = ModIndex.CACHE_VERSION }), "a current cache is fresh")
+  check(not ModIndex.cacheFresh({ checkedAt = now }),
+    "an unstamped cache is refetched rather than trusted for a day")
+  check(not ModIndex.cacheFresh({ checkedAt = now,
+    version = ModIndex.CACHE_VERSION - 1 }), "so is an older stamp")
+  check(not ModIndex.cacheFresh({ checkedAt = now - ModIndex.CACHE_TTL - 1,
+    version = ModIndex.CACHE_VERSION }), "and an expired one")
 end
 
 -- schema_version is a contract, not a hint: an unknown one is refused rather
@@ -296,6 +383,154 @@ do
   local cats = ModIndex.categoriesIn(index)
   eq(#cats, 1, "only categories an entry actually uses are offered")
   eq(cats[1], "GAMEPLAY", "and they keep the feed's declared order")
+end
+
+-- ------- carts: a second array on the same feed, at the same schema_version
+--
+-- The published index added carts without bumping schema_version, so an older
+-- build has to keep reading the feed and this one has to read both halves.
+-- The fixture below is the shape carts/<Author>@<id>/meta.json validates to.
+
+local OMEGA = {
+  folder = "bryanthaboi@omega_random_competition",
+  id = "omega_random_competition",
+  title = "OMEGA RANDOM COMPETITION",
+  author = "bryanthaboi",
+  summary = "Bois Club Randomizer as its own cartridge.",
+  version = "1.0.0",
+  base = "red",
+  seal = "sealed",
+  shell = "#7B1B22",
+  finish = "holo",
+  speeds = { 1, 2 },
+  tags = { "randomizer", "competition" },
+  repo = "https://github.com/bryanthaboi/omega-random-competition",
+  github = "bryanthaboi/omega-random-competition",
+  automatic_version_check = true,
+  mods = { { id = "bcr", source = "github", repo = "bryanthaboi/bcr",
+             version = "1.0.0", sha256 = ("83a111b4"):rep(8) } },
+  load_order = { "bcr" },
+  license = "MIT",
+  description_url = "data/carts/bryanthaboi@omega_random_competition/description.md",
+  update_check = "pending",
+}
+
+local JOHTO_CART = {
+  id = "johto_run", title = "Johto Run", author = "Ren", version = "2.1.0",
+  base = "gold", seal = "open",
+  repo = "https://github.com/ren/johto-run",
+  github = "ren/johto-run",
+  mods = { { id = "steps", source = "gamebanana", mod = 42, file = 99,
+             md5 = ("ab"):rep(16), enabled = false,
+             options = { pace = "fast" } } },
+  update_check = "ok",
+  latest = { version = "2.1.0", tag = "v2.1.0",
+             zip = { name = "johto_run-2.1.0.zip",
+                     url = "https://example.test/johto_run-2.1.0.zip" } },
+}
+
+local function cartFeed(carts, overrides)
+  local doc = { schema_version = 1, count = 1, cart_count = #carts,
+                categories = { "GAMEPLAY" },
+                base_games = { "red", "blue", "yellow", "gold", "silver" },
+                mods = { NUZLOCKE }, carts = carts }
+  for k, v in pairs(overrides or {}) do doc[k] = v end
+  return Json.encode(doc)
+end
+
+do
+  local index, err = ModIndex.parse(cartFeed({ OMEGA, JOHTO_CART }))
+  check(index ~= nil, "a feed carrying carts parses: " .. tostring(err))
+  eq(index.schemaVersion, 1, "carts arrive at schema_version 1, unbumped")
+  eq(#index.mods, 1, "the mods array still parses")
+  eq(#index.carts, 2, "and the carts array parses beside it")
+  local c = index.carts[1]
+  eq(c.id, "omega_random_competition", "cart id")
+  eq(c.title, "OMEGA RANDOM COMPETITION", "cart title")
+  eq(c.base, "red", "the game the cart plays as")
+  eq(c.seal, "sealed", "its seal")
+  eq(c.shell, "#7B1B22", "its shell colour")
+  eq(c.finish, "holo", "its finish")
+  eq(c.speeds[2], 2, "its speed ladder")
+  eq(c.tags[1], "randomizer", "its tags")
+  eq(c.license, "MIT", "its license")
+  eq(c.load_order[1], "bcr", "its load order")
+  eq(#c.mods, 1, "its pinned mod set")
+  eq(c.mods[1].source, "github", "a github pin keeps its source")
+  eq(c.mods[1].repo, "bryanthaboi/bcr", "with the repo it comes from")
+  eq(c.mods[1].version, "1.0.0", "the exact pinned version")
+  eq(#c.mods[1].sha256, 64, "and the digest that gates it")
+  check(ModIndex.isCart(c), "a parsed cart is marked as one")
+  check(not ModIndex.isCart(index.mods[1]), "a mod is not")
+
+  local g = index.carts[2]
+  eq(g.mods[1].source, "gamebanana", "a gamebanana pin keeps its source")
+  eq(g.mods[1].mod, 42, "with its mod page id")
+  eq(g.mods[1].file, 99, "and its file id")
+  eq(#g.mods[1].md5, 32, "and the digest GameBanana reports")
+  eq(g.mods[1].enabled, false, "a pin shipped switched off stays off")
+  eq(g.mods[1].options.pace, "fast", "frozen options survive")
+  eq(ModIndex.installUrl(g), "https://example.test/johto_run-2.1.0.zip",
+    "a cart resolves its release asset the same way a mod does")
+end
+
+-- the old-feed case: no carts key at all
+do
+  local index, err = ModIndex.parse(feed({ NUZLOCKE }))
+  check(index ~= nil, "a feed with no carts key still parses: " .. tostring(err))
+  eq(#index.mods, 1, "its mods are unaffected")
+  eq(type(index.carts), "table", "and carts is a list, never nil")
+  eq(#index.carts, 0, "an absent carts array is an empty one")
+end
+
+-- a broken cart row costs itself, not the whole feed
+do
+  local noBase = {}
+  for k, v in pairs(OMEGA) do noBase[k] = v end
+  noBase.base = nil
+  local noMods = {}
+  for k, v in pairs(JOHTO_CART) do noMods[k] = v end
+  noMods.id, noMods.mods = "empty_pins", {}
+  local index, err = ModIndex.parse(cartFeed({
+    noBase, "not even an object", { id = "bare" }, noMods, OMEGA }))
+  check(index ~= nil, "a feed with malformed carts still parses: " .. tostring(err))
+  eq(#index.carts, 1, "only the well-formed cart is listed")
+  eq(index.carts[1].id, "omega_random_competition", "and it is the intact one")
+  eq(#index.mods, 1, "the mods array is untouched by a bad cart")
+end
+
+-- search and filter: matches() already spans title / author / summary / id,
+-- so the cart half reuses it wholesale.  The category filter does not apply
+-- (a cart has none); base does.
+do
+  local index = ModIndex.parse(cartFeed({ OMEGA, JOHTO_CART }))
+  local carts = index.carts
+  eq(#ModIndex.filter(carts, {}), 2, "no filter keeps every cart")
+  eq(ModIndex.filter(carts, { query = "omega" })[1].id,
+    "omega_random_competition", "search matches a cart by title")
+  eq(ModIndex.filter(carts, { query = "Ren" })[1].id, "johto_run",
+    "search matches a cart by author")
+  eq(ModIndex.filter(carts, { query = "randomizer" })[1].id,
+    "omega_random_competition", "and by summary")
+  eq(#ModIndex.filter(carts, { query = "omega johto" }), 0,
+    "cart search terms are ANDed too")
+  eq(ModIndex.filter(carts, { base = "gold" })[1].id, "johto_run",
+    "filtering by base game keeps the carts for that game")
+  eq(#ModIndex.filter(carts, { base = "RED" }), 1,
+    "and compares case-insensitively")
+  eq(#ModIndex.filter(carts, { base = "silver" }), 0,
+    "a base no cart plays as filters everything out")
+  eq(#ModIndex.filter(carts, { category = "GAMEPLAY" }), 0,
+    "a cart carries no categories, so a category filter never matches one")
+  eq(ModIndex.filter(carts, { tag = "competition" })[1].id,
+    "omega_random_competition", "cart tags filter")
+
+  local bases = ModIndex.baseGamesIn(index)
+  eq(#bases, 2, "only base games a cart actually plays as are offered")
+  eq(bases[1], "red", "and they keep the feed's declared base_games order")
+  eq(bases[2], "gold", "in that order")
+  eq(#ModIndex.baseGamesIn(ModIndex.parse(feed({ NUZLOCKE }))), 0,
+    "a cartless feed offers no base games")
 end
 
 print("ok mod_index_tests")

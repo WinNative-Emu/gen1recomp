@@ -191,12 +191,12 @@ return function(game)
     return cond()
   end
 
-  -- Jump the flash clock to just under FLASH_FRAMES (220) once the shot is
+  -- Jump the flash clock to just under FLASH_FRAMES (368) once the shot is
   -- taken.  EvolutionState:update only compares self.t against that constant,
   -- so this ends the animation early without touching the palette logic.
   local function skipToEnd()
     local st = evoTop()
-    if st then st.t = 214 end
+    if st then st.t = 362 end
   end
 
   local function startEvo(species, into)
@@ -212,7 +212,7 @@ return function(game)
 
   -- ---- case 1: the reported case, SGB, mid-flash --------------------------
   local weedle = startEvo("WEEDLE", "KAKUNA")
-  U.wait(24) -- into the flash, far short of FLASH_FRAMES = 220
+  U.wait(24) -- into the flash, far short of FLASH_FRAMES = 368
   U.shot(game, DIR .. "/evo279_1_flash_sgb.png")
   local c1 = probe("flash/SGB", {
     monYellow1 = YELLOW[2], monYellow2 = YELLOW[3],
@@ -248,7 +248,7 @@ return function(game)
 
   -- ---- case 2: B-cancel settles on the OLD form's colours -----------------
   local karp = startEvo("MAGIKARP", "GYARADOS")
-  U.wait(24)
+  U.wait(100) -- past the 80-frame pre-animLoop delay before the poll starts
   U.hold(game, "b", 20) -- evolution.asm Evolution_CheckForCancel
   if not waitFor(function() return findText("stopped evolving") ~= nil end, 240) then
     check(false, "holding B prints \"stopped evolving\"")

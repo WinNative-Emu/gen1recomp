@@ -4,7 +4,9 @@
 
 local ItemEffects = require("src.inventory.ItemEffects")
 local ListMenu = require("src.ui.ListMenu")
+local Runtime = require("src.mods.Runtime")
 local TextBox = require("src.render.TextBox")
+local romText = require("src.core.RomText")
 
 local BagMenu = {}
 
@@ -16,29 +18,40 @@ local function buildItems(game)
   local items = {}
   for _, id in ipairs(Bag.order(game.save)) do
     local def = game.data.items[id]
+    -- PrintListMenuEntries skips the quantity for anything IsKeyItem_ owns:
+    -- the KeyItemFlags bitfield plus the HMs (item_effects.asm:2616-2641)
+    local unsellable = (def and def.keyItem) or id:find("^HM_") ~= nil
     table.insert(items, {
       value = id,
       label = def and def.name or id,
-      right = "x" .. game.save.inventory[id],
+      right = (not unsellable) and ("x" .. game.save.inventory[id]) or nil,
     })
   end
+  -- the $ff terminator's row: CANCEL is selectable and exits like B
+  -- (home/list_menu.asm:105-110, 523-528) #1685
+  items[#items + 1] = { cancel = true, label = Strings("CANCEL") }
   return items
 end
 
-local function consume(game, id)
+local function consume(game, id, list)
   Bag.remove(game.save, id, 1)
+  -- engine/items/inventory.asm:131-136
+  if not game.save.inventory[id] then
+    game.bagSavedMenuItem, game.bagListScrollOffset = 0, 0
+    if list then list.index, list.scroll = 1, 0 end
+  end
 end
 
 local function save_name(game)
   return game.save.player.name
 end
 
-local function showMessages(game, msgs, onDone)
+local function showMessages(game, msgs, onDone, opts)
   if not msgs or #msgs == 0 then
     if onDone then onDone() end
     return
   end
-  game.stack:push(TextBox.new(game, table.concat(msgs, "\f"), onDone))
+  game.stack:push(TextBox.new(game, table.concat(msgs, "\f"), onDone, opts))
 end
 
 -- run the use-flow for an item on a chosen target.  `picker` is the party
@@ -46,11 +59,27 @@ end
 -- the stack, so every exit that prints has to close it afterwards.  For
 -- every other item the picker popped itself first and closePicker's identity
 -- check makes it a no-op (#252).
-local function useOn(game, battle, id, target, list, moveIndex, picker)
+--
+-- Every result string used to fall through to this one unconditional
+-- function with no seam around it: a mod could not suppress a message,
+-- delay it behind a screen of its own, or replace the outcome for one item
+-- id.  The "item.use" hook wraps the whole dispatch (not a name per
+-- result -- a mod deciding what a Poké Doll or a stone does needs the
+-- SAME reach a vanilla `if result == ...` branch has, not a narrower one),
+-- the way "battle.overlay" and "ui.party.submenu" already wrap a
+-- screen's own default behavior elsewhere in src/ui.
+local function vanillaUseOn(game, battle, id, target, list, moveIndex, picker)
   local result, payload, extra = ItemEffects.use(game.data, game.save, id, target,
                                                  battle, moveIndex, game.overworld)
   local function closePicker()
     if picker then picker:close() end
+  end
+
+  -- .useItem_closeMenu ends at CloseStartMenu, so the START menu kept open
+  -- behind the bag comes down with it (start_sub_menus.asm:400-407) #1745
+  local function closeBag()
+    list:close()
+    if list.closeStartMenu then list.closeStartMenu() end
   end
 
   -- field POKé FLUTE: play the tune, then the no-effect text
@@ -60,10 +89,18 @@ local function useOn(game, battle, id, target, list, moveIndex, picker)
     return
   end
 
+  if result == "flute_wake_pikachu" then
+    require("src.core.Sound").play(game.data, "Pokeflute")
+    showMessages(game, payload, function()
+      game.overworld.pikachuPewterSleepScene = nil
+    end)
+    return
+  end
+
   -- field POKé FLUTE next to a not-yet-beaten Snorlax: "had effect" text,
   -- then the woke-up/battle sequence (data/scripts/story.lua snorlaxWake)
   if result == "flute_wake" then
-    list:close()
+    closeBag()
     require("src.core.Sound").play(game.data, "Pokeflute")
     showMessages(game, payload, function()
       local ow = game.overworld
@@ -76,7 +113,7 @@ local function useOn(game, battle, id, target, list, moveIndex, picker)
   end
 
   if result == "consumed_escape" then -- Poké Doll
-    consume(game, id)
+    consume(game, id, list)
     list:close()
     showMessages(game, payload, function()
       -- ItemUsePokeDoll sets wEscapedFromBattle and never touches
@@ -99,12 +136,11 @@ local function useOn(game, battle, id, target, list, moveIndex, picker)
     -- scripts -- the BICYCLE refuses with _CannotGetOffHereText and jumps
     -- back to ItemMenuLoop, so the bag stays open and no dismount happens
     -- (#513).  The gate sits ahead of UseItem, before ItemUseBicycle ever
-    -- runs, which is why it precedes list:close() here.
+    -- runs, which is why it precedes the mount/dismount here.
     if game.save.forcedBike then
       showMessages(game, { Strings("You can't get off\nhere.") })
       return
     end
-    list:close()
     local ow = game.overworld
     local Music = require("src.core.Music")
     -- IsBikeRidingAllowed (home/overworld.asm): the tilesets of
@@ -125,30 +161,33 @@ local function useOn(game, battle, id, target, list, moveIndex, picker)
       return false
     end
     if game.save.onBike then
+      closeBag()
       game.save.onBike = false
       Music.playMap(game.data, ow and ow.map.id, false)
       showMessages(game, { Strings("%s got off\nthe BICYCLE.", save_name(game)) })
     elseif bikeAllowed() then
+      closeBag()
       game.save.onBike = true
       Music.playMap(game.data, ow.map.id, true)
       showMessages(game, { Strings("%s got on\nthe BICYCLE!", save_name(game)) })
     else
+      -- NoCyclingAllowedHere -> ItemUseFailed zeroes the result byte and
+      -- .useItem_closeMenu loops back (item_effects.asm:2305-2319)
       showMessages(game, { Strings("No cycling\nallowed here.") })
     end
     return
   end
 
   if result == "fish" then
-    list:close()
     local ow = game.overworld
     local p = ow and ow.player
-    if ow and p then
-      local fx, fy = p:facingCell()
-      if ow.map:inBounds(fx, fy) and ow.map:isWaterCell(fx, fy) then
-        ow:goFishing(id)
-        return
-      end
+    if ow and p and ow:facingIsShoreOrWater() then
+      closeBag()
+      ow:goFishing(id)
+      return
     end
+    -- FishingInit's `ret c` -> ItemUseNotTime -> ItemUseFailed, so a rod
+    -- away from water leaves the bag up (item_effects.asm:1893-1901)
     showMessages(game, { Strings("No good! It's not\neven near water.") })
     return
   end
@@ -159,7 +198,7 @@ local function useOn(game, battle, id, target, list, moveIndex, picker)
                               game.save.player.name) })
       return
     end
-    consume(game, id)
+    consume(game, id, list)
     list:close()
     battle:throwBall(id)
     return
@@ -176,19 +215,28 @@ local function useOn(game, battle, id, target, list, moveIndex, picker)
       end
       if #target.moves < 4 then
         table.insert(target.moves, { id = moveId, pp = mdef.pp })
+        -- LearnedMove1Text: text_far, sound_get_item_1, text_promptbutton
+        -- (learn_move.asm), so the jingle rides the box
         showMessages(game, { Strings("%s learned\n%s!", target.nickname or
-          game.data.pokemon[target.species].name, mdef.name) })
-        if result == "learn" then consume(game, id) end
+          game.data.pokemon[target.species].name, mdef.name) }, closePicker,
+          TextBox.soundOpts(game, "Get_Item1"))
+        if result == "learn" then consume(game, id, list) end
+        list.items = buildItems(game)
+        list.index = math.min(list.index, math.max(1, #list.items))
         taught()
       else
         require("src.ui.Screens").push(game, "MoveLearnMenu", target, moveId,
           function(learned)
-            if learned and result == "learn" then consume(game, id) end
+            if learned and result == "learn" then consume(game, id, list) end
+            if learned then
+              list.items = buildItems(game)
+              list.index = math.min(list.index, math.max(1, #list.items))
+            end
             if learned then taught() end
+            closePicker()
           end)
       end
     end
-    list:close()
     teach()
     return
   end
@@ -239,8 +287,8 @@ local function useOn(game, battle, id, target, list, moveIndex, picker)
     local ow = game.overworld
     if ow and ESCAPE_ROPE_TILESETS[ow.map.def.tileset]
        and ow.map.id ~= "AGATHAS_ROOM" then
-      list:close()
-      consume(game, id)
+      closeBag()
+      consume(game, id, list)
       -- LeaveMapAnim spin-up + SFX_TELEPORT_EXIT_1, a fade, then land OUTSIDE
       -- the last Pokémon Center town door like Fly (#196), via the shared
       -- departure helper -- the same path Dig/Teleport take from the party menu
@@ -253,8 +301,20 @@ local function useOn(game, battle, id, target, list, moveIndex, picker)
     return
   end
 
+  if result == "kept" then
+    if battle then
+        list:close()
+        showMessages(game, payload, function()
+            battle:itemUsed({})
+        end)
+    else
+        showMessages(game, payload, closePicker)
+    end
+    return
+  end
+
   if result == "consumed" then
-    consume(game, id)
+    consume(game, id, list)
     -- refresh counts in the list
     for i, it in ipairs(list.items) do
       if it.value == id then
@@ -265,7 +325,7 @@ local function useOn(game, battle, id, target, list, moveIndex, picker)
     end
     list.index = math.min(list.index, math.max(1, #list.items))
     if extra and extra.evolveTo then
-      list:close()
+      -- engine/menus/start_sub_menus.asm:408 .useItem_partyMenu
       local Evolution = require("src.pokemon.Evolution")
       -- item_effects.asm ItemUseEvoStone sets wForceEvolution before
       -- TryEvolvingMon, so a stone evolution's B press is read and
@@ -299,8 +359,13 @@ local function useOn(game, battle, id, target, list, moveIndex, picker)
               local Evolution = require("src.pokemon.Evolution")
               local evoTo, evo = Evolution.pendingFor(game, target,
                                                      { kind = "levelup" })
+              -- the party menu stays up through TryEvolvingMon and only
+              -- comes down at RemoveUsedItem (item_effects.asm:1392-1418)
               if evoTo then
-                Evolution.evolve(game, target, evoTo, nil, evo and evo.method)
+                Evolution.evolve(game, target, evoTo, closePicker,
+                                 evo and evo.method)
+              else
+                closePicker()
               end
               return
             end
@@ -312,7 +377,7 @@ local function useOn(game, battle, id, target, list, moveIndex, picker)
               table.insert(target.moves, { id = moveId, pp = mdef.pp })
               local name = target.nickname or def.name
               showMessages(game, { Strings("%s learned\n%s!", name, mdef.name) },
-                           nextStep)
+                           nextStep, TextBox.soundOpts(game, "Get_Item1"))
             else
               require("src.ui.Screens").push(game, "MoveLearnMenu",
                                              target, moveId, nextStep)
@@ -345,9 +410,21 @@ local function useOn(game, battle, id, target, list, moveIndex, picker)
     return
   end
 
+  -- .chooseMon loops on a refusal, so the TM/HM picker stays up for another
+  -- pick (engine/items/item_effects.asm:2234, :2237) (#1686)
+  local machineDef = game.data.items[id]
+  if picker and picker.keepOpen and machineDef and machineDef.machine then
+    showMessages(game, payload)
+    return
+  end
   -- .healingItemNoEffect prints over the still-drawn party menu too, so the
   -- refusal closes the picker the same way (#252)
   showMessages(game, payload, closePicker) -- failed
+end
+
+local function useOn(game, battle, id, target, list, moveIndex, picker)
+  return Runtime.call("item.use", vanillaUseOn,
+    game, battle, id, target, list, moveIndex, picker)
 end
 
 local function pickTargetAndUse(game, battle, id, list)
@@ -358,10 +435,15 @@ local function pickTargetAndUse(game, battle, id, list)
   local def = game.data.items[id]
   local opts = {
     pickOnly = true,
-    -- HP medicine animates its bar with the picker still up (#252).  Only
-    -- out of battle: the in-battle tail closes the bag list underneath
-    -- first, which needs the picker already gone.
-    keepOpen = (not battle) and ItemEffects.healsHP(id),
+    -- USE_ITEM_PARTY_MENU / EVO_STONE_PARTY_MENU, not the trade and daycare
+    -- NORMAL_PARTY_MENU (item_effects.asm:813, :768). #1610
+    itemUse = true,
+    battle = battle,
+    -- HP medicine animates with the picker up (#252), RARE CANDY prints over
+    -- the party menu (item_effects.asm:1392-1418); TM/HM stays up through
+    -- `predef LearnMove` (item_effects.asm:2238) (#1686)
+    keepOpen = (not battle)
+      and (ItemEffects.keepsPartyMenuOpen(id) or (def and def.machine ~= nil)),
     onSwitch = function(mon, picker)
       if not wantsMove then
         useOn(game, battle, id, mon, list, nil, picker)
@@ -387,11 +469,12 @@ local function pickTargetAndUse(game, battle, id, list)
   -- TM/HM: open the party menu in Gen 1's TM/HM display mode so each mon
   -- shows ABLE / NOT ABLE from its learnset and the prompt reads "Use TM on
   -- which POKeMON?" (engine/items/item_effects.asm ItemUseTMHM ->
-  -- party_menu.asm TM/HM type). Stones and other pickOnly items keep the
-  -- plain HP layout (Gen 1 shows no ABLE/NOT ABLE for them), so gate
-  -- strictly on def.machine. #210
+  -- party_menu.asm TM/HM type). #210  Stones get the same ABLE / NOT ABLE
+  -- column: ItemUseEvoStone sets EVO_STONE_PARTY_MENU (party_menu.asm:114).
   if def and def.machine then
     opts.tmhm = { move = def.machine.move, kind = def.machine.kind }
+  elseif ItemEffects.isStone(id) then
+    opts.evoStone = id
   end
   require("src.ui.Screens").push(game, "PartyMenu", opts)
 end
@@ -404,16 +487,22 @@ local function useItem(game, battle, id, list)
     showMessages(game, payload)
     return
   end
-  if ItemEffects.needsTarget(id, def) and not ItemEffects.isBall(id) then
+  if ItemEffects.needsTarget(id, def, game.data) and not ItemEffects.isBall(id) then
     -- TMs/HMs boot up and announce their move before the target picker
     -- (ItemUseTMHM: BootedUpTMText / BootedUpHMText + TeachMachineMoveText)
     if def and def.machine then
       local moveDef = game.data.moves[def.machine.move]
       local moveName = moveDef and moveDef.name or def.machine.move
       local booted = def.machine.kind == "HM"
-        and "Booted up an HM!" or Strings("Booted up a TM!")
-      showMessages(game, { booted, Strings("It contained\n%s!", moveName) },
-        function() pickTargetAndUse(game, battle, id, list) end)
+        and romText(game.data, "_BootedUpHMText", "Booted up an HM!")
+        or romText(game.data, "_BootedUpTMText", "Booted up a TM!")
+      -- engine/items/item_effects.asm:2177 (#1686)
+      showMessages(game, { booted,
+        romText(game.data, "_TeachMachineMoveText",
+          "It contained\n%s!\fTeach %s\nto a POKéMON?", moveName, moveName) },
+        nil, { choice = function(yes)
+          if yes then pickTargetAndUse(game, battle, id, list) end
+        end })
       return
     end
     pickTargetAndUse(game, battle, id, list)
@@ -428,12 +517,15 @@ function BagMenu.new(game, opts)
   local list
   list = ListMenu.new(game, "ITEMS", buildItems(game), {
     kind = "bag",
-    footer = ("¥%d"):format(game.save.money),
+    -- StartMenu_Item zeroes wPrintItemPrices and draws no money box: the
+    -- LIST_MENU_BOX floats over the map (engine/menus/start_sub_menus.asm)
+    itemBox = true,
     -- B returns to the start menu when the bag was opened from it
     onCancel = opts.onCancel,
     -- SELECT reorders items like the original bag (swap_items.asm)
     onSelectKey = function(item, l)
-      if not item then return end
+      -- attempts to swap the CANCEL row are ignored (swap_items.asm:19-22)
+      if not item or item.cancel then return end
       if not l.swapIndex then
         l.swapIndex = l.index
         return
@@ -445,6 +537,12 @@ function BagMenu.new(game, opts)
       l.items = buildItems(game)
     end,
     onChoose = function(item)
+      -- A on CANCEL leaves the list exactly like B (home/list_menu.asm:105-110)
+      if item and item.cancel then
+        list:close()
+        if opts.onCancel then opts.onCancel() end
+        return
+      end
       local id = item.value
       local def = game.data.items[id]
       if list.swapIndex then -- A also completes a pending swap
@@ -456,6 +554,12 @@ function BagMenu.new(game, opts)
         return
       end
       if battle then -- no tossing mid-battle
+        useItem(game, battle, id, list)
+        return
+      end
+      -- the BICYCLE never gets the option box: StartMenu_Item jumps straight
+      -- to .useOrTossItem (start_sub_menus.asm:340-342) #1705
+      if id == "BICYCLE" then
         useItem(game, battle, id, list)
         return
       end
@@ -497,6 +601,25 @@ function BagMenu.new(game, opts)
       }, { tx = 13, ty = 10, tw = 7, th = 5 }))
     end,
   })
+  -- reopen on the saved cursor: engine/battle/core.asm:2230-2234 and
+  -- engine/menus/start_sub_menus.asm:319-323 #1732
+  local n, rows = #list.items, list.cursorRows or list.rows
+  if n > 0 then
+    local saved = game.bagListScrollOffset or 0
+    local index = math.min(saved + (game.bagSavedMenuItem or 0) + 1, n)
+    local scroll = math.min(saved, index - 1, math.max(0, n - rows))
+    list.index, list.scroll = index, math.max(0, scroll, index - rows)
+  end
+  local baseUpdate = list.update
+  list.update = function(self, dt)
+    baseUpdate(self, dt)
+    game.bagListScrollOffset = self.scroll
+    game.bagSavedMenuItem = self.index - self.scroll - 1
+  end
+  list.closeStartMenu = opts.onClose
+  -- the item box overlaps the kept-open START menu box, so neither docks to
+  -- a screen edge on its own (start_sub_menus.asm:302-329) #1745
+  list.holdsUIAnchors = true
   return list
 end
 

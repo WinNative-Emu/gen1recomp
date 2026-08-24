@@ -65,6 +65,17 @@ function PikachuFollower.starterInParty(save, needHealthy)
   return nil
 end
 
+function PikachuFollower.isStarterPikachu(save, mon)
+  if not (mon and mon.species == "PIKACHU") then return false end
+  local player = save.player or {}
+  return mon.otId == player.id and mon.ot == player.name
+end
+
+function PikachuFollower.isFollowingDisabled(ow)
+  return ow and (ow.pikachuBillsScene or ow.pikachuFanClubScene
+    or ow.pikachuPewterSleepScene) and true or false
+end
+
 -- ModifyPikachuHappiness.  mon is the party mon the event applied to for
 -- the per-mon reasons (IsThisPartyMonStarterPikachu); GYMLEADER and
 -- WALKING instead require any healthy starter in the party
@@ -122,6 +133,13 @@ local function shouldSpawn(game, ow)
   if not GameVersion.isYellow() then return false end
   local save = game.save
   if not (save.flags and save.flags.EVENT_GOT_STARTER) then return false end
+  -- save.pikachuInBall mirrors DisablePikachuOverworldSpriteDrawing (pokeyellow
+  -- scripts/OaksLab.asm); nil falls back to the rival-fight flag (#1009)
+  if save.pikachuInBall == nil then
+    if not save.flags.EVENT_BATTLED_RIVAL_IN_OAKS_LAB then return false end
+  elseif save.pikachuInBall then
+    return false
+  end
   if save.onBike or (ow.player and ow.player.surfing) then return false end
   if not (game.data.sprites and game.data.sprites.SPRITE_PIKACHU) then
     return false
@@ -192,6 +210,7 @@ function PikachuFollower.onMapEntered(game, ow, opts, viaMapLoad)
   -- Bill's House owns a short scripted scene that deliberately keeps
   -- Pikachu off the normal trailing loop.  A new map instance ends it.
   ow.pikachuBillsScene = nil
+  ow.pikachuFanClubScene = nil
   remove(ow)
   if not shouldSpawn(game, ow) then return end
   -- opts.keepPikachu is the follower a connection crossing kept alive:
@@ -403,7 +422,8 @@ end
 -- (pikachu_follow.asm keeps it one walk step behind)
 function PikachuFollower.update(game, ow)
   if ow.pikaHop then return end -- the counter hop owns the follower (#417)
-  if ow.pikachuBillsScene then return end
+  if ow.pikachuBillsScene or ow.pikachuFanClubScene
+      or ow.pikachuPewterSleepScene then return end
   local npc = findFollower(ow)
   if not npc then
     if shouldSpawn(game, ow) then PikachuFollower.onMapEntered(game, ow) end
@@ -706,6 +726,13 @@ function PikachuFollower.talk(game, ow, npc, done)
   ow.player.facing = OPPOSITE[npc.facing] or ow.player.facing
   local save = game.save
   local emotion = selectEmotion(game, ow, save)
+  if ow.pikachuPewterSleepScene then
+    local finish = done
+    done = function()
+      ow.pikachuPewterSleepScene = nil
+      if finish then finish() end
+    end
+  end
   local e = EMOTIONS[emotion] or EMOTIONS[1]
   if e.turnAway then
     npc.facing = ow.player.facing -- pikaemotion_9: back to the player
@@ -791,10 +818,41 @@ local function movePikachu(ow, npc, steps, onDone)
   nextStep(1)
 end
 
+function PikachuFollower.onFanClubEntered(game, ow)
+  if not (GameVersion.isYellow() and ow.map
+      and ow.map.id == "POKEMON_FAN_CLUB") then return end
+  local active = game.save.pikachuMapScriptActive
+  game.save.pikachuMapScriptActive = true
+  if active then return end
+  local starter = PikachuFollower.starterInParty(game.save)
+  local npc = findFollower(ow)
+  if not npc or (starter and starter.status) then return end
+  ow.pikachuFanClubScene = true
+  ow.player.facing = "down"
+  for _, other in ipairs(ow.npcs or {}) do
+    if other.def and other.def.name == "POKEMONFANCLUB_SEEL" then
+      other.movementStatus = 2
+      other.facing = "down"
+      break
+    end
+  end
+  billsHouseEmotion(game, ow, npc, "EXCLAMATION_BUBBLE")
+  movePikachu(ow, npc, { { "up", 1 }, { "right", 3 }, { "up", 1 } }, function()
+    npc.facing = "up"
+  end)
+end
+
 function PikachuFollower.onBillsHouseEnter(game, ow)
   if not (GameVersion.isYellow() and ow.map and ow.map.id == "BILLS_HOUSE") then
     return
   end
+  -- BillsHouse_CheckMetBill (scripts/BillsHouse.asm:22-40) sets
+  -- BIT_PIKACHU_MAP_SCRIPT_ACTIVE and rets nz before it looks at
+  -- EVENT_MET_BILL_2; the bit rides sMainData, so a reload inside the house
+  -- resumes at BillsHouseScript1's bare ret (#919).
+  local active = game.save.pikachuMapScriptActive
+  game.save.pikachuMapScriptActive = true
+  if active then return end
   if game.save.flags.EVENT_MET_BILL_2 then return end
   -- BillsHouseScript0 (scripts/BillsHouse.asm:41-47) only runs the confused
   -- walk while CheckPikachuStatusCondition comes back clear
@@ -883,6 +941,28 @@ function PikachuFollower.onBillExitedMachine(game, ow)
   idleReset(npc)
   npc.facing = "left"
   billsHouseEmotion(game, ow, npc, "EXCLAMATION_BUBBLE")
+end
+
+-- OaksLabPikachuMovementScript (pokeyellow scripts/OaksLab_2.asm): the
+-- companion clears the cell the rival stops on (#1021)
+function PikachuFollower.oaksLabMakeWay(game, ow, done)
+  if not GameVersion.isYellow() then return false end
+  local npc = findFollower(ow)
+  if not npc or not ow.player then return false end
+  local p = ow.player
+  local steps, facing
+  if p.cellY == 3 then -- .movement2, b = SPRITE_FACING_LEFT
+    if not (npc.cellY == p.cellY and npc.cellX < p.cellX) then return false end
+    steps, facing = { { "down", 1 }, { "right", 1 } }, "up"
+  else -- OaksLabPikachuMovementData1, b = SPRITE_FACING_DOWN
+    if npc.cellY <= p.cellY then return false end
+    steps, facing = { { "left", 1 }, { "up", 1 } }, "right"
+  end
+  movePikachu(ow, npc, steps, function()
+    npc.facing = facing -- PIKAMOVEMENT_LOOK_UP / _LOOK_RIGHT ends each table
+    if done then done() end
+  end)
+  return true
 end
 
 -- ---------------------------------------------------------------------

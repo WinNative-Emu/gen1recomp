@@ -1,12 +1,3 @@
--- Music playback supports compact ROM channel programs synthesized live by
--- ChipAudio, def-local chip programs (ChipAsm), and file definitions.  The
--- branch is chosen per song definition, never by a global import flag, so a
--- file-backed song and a chip song coexist in one dataset.  Songs with split
--- files chain def.file into def.loopFile in Music.update().
--- Map themes switch on map change; battles override with the battle
--- theme and restore afterwards; riding the bike overrides outdoor map
--- themes with the bike song until dismount.
-
 local Logger = require("src.core.Logger")
 local Runtime = require("src.mods.Runtime")
 
@@ -14,20 +5,10 @@ local Music = {}
 
 local VOLUME = 0.7
 
--- port additions driven by OptionsMenu / save.options: musicVol scales
--- VOLUME (0-7 level like the GB's NR50 master volume) and musicFilter
--- low-passes the song.  Each filter step keeps 40% of the previous
--- step's treble (highgain 0.4^level), so 2X/3X are the 1X filter
--- applied twice/three times over.
 local volumeScale = 1
 local FILTER_HIGHGAIN = { 0.4, 0.16, 0.064 }
 local filterLevel = 0
 
--- Forward-declared here so applyVolume (below) closes over the real playback
--- state rather than a nil global: the table literal is assigned further down,
--- but a `local state = {}` there would leave every reference above it bound
--- to the global `state`.  Before this, registering the `music.volume` mod
--- hook crashed applyVolume on `state.current` (a nil index).
 local state
 
 local function applyVolume(src)
@@ -83,6 +64,9 @@ state = {
   fanfareResume = false, -- start/resume state.source when the fanfare ends
   fade = nil,         -- active volume-ramp fade-out (see Music.fadeOut)
   tempo = nil,        -- alternate-tempo override in force for `current`
+  start = nil,
+  data = nil,
+  loop = nil,
   failed = {},        -- labels whose def could not be started; logged once
 }
 
@@ -115,11 +99,6 @@ function Music.duckForFanfare(src)
   end
 end
 
--- Overworld themes where the bike can be ridden (outdoor maps plus the
--- caves/dungeons where gen-1 allows cycling).  Indoor themes such as
--- Pokecenter/Gym/SilphCo never get replaced by the bike theme.
--- data.audio.outdoorSongs supersedes this; the copy stays as the fallback
--- for caches built before the importer wrote the table.
 local OUTDOOR = {
   Music_PalletTown = true,
   Music_Cities1 = true,
@@ -153,12 +132,23 @@ local SPECIAL = {
   evolution = "Music_SafariZone",
 }
 
+-- SpecialMapMusic (pokegold home/audio.asm:397)
+local SPECIAL_GEN2 = {
+  surf = "Music_Surf",
+  bike = "Music_Bicycle",
+  evolution = "Music_Evolution",
+}
+
 -- the label a scene role resolves to; call sites keep their own presence
 -- guard on the resolved label
 function Music.special(data, key)
   local special = data and data.audio and data.audio.special
   local label = special and special[key]
   if label ~= nil then return label end
+  if data and data.audio and data.audio.generation == 2
+     and SPECIAL_GEN2[key] ~= nil then
+    return SPECIAL_GEN2[key]
+  end
   return SPECIAL[key]
 end
 
@@ -215,9 +205,16 @@ local function startSong(data, def, wantLoop)
   return nil, nil, nil, "no chip program and no file"
 end
 
+-- Music_MeetRival_Ch{1,2,3}_AlternateStart (audio/alternate_tempo.asm:7)
+local RIVAL_ALT_START = {
+  redblue = { 0x71a2, 0x721d, 0x72b5 },
+  yellow = { 0x7075, 0x70f0, 0x7188 },
+}
+
 -- the single choke point every song choice passes through, so one hook
 -- covers map themes, battle themes, jingles and scene music
 local function selectSong(song, ctx)
+  if ctx and ctx.selected then return song end
   if not Runtime.wantsHook("music.select") then return song end
   return Runtime.call("music.select", function(chosen) return chosen end, song, {
     reason = ctx and ctx.reason or "direct",
@@ -233,24 +230,59 @@ end
 
 function Music.play(data, song, loop, ctx)
   if not song then return end
-  if not love.audio then return end -- headless test stub
+  if not (love and love.audio) then return end -- headless test stub
+  ctx = ctx or {}
   song = selectSong(song, ctx)
-  -- ctx.tempo is a Music_*AlternateTempo cue (audio/alternate_tempo.asm):
-  -- the same song restarted with channel 1 re-pointed at a stub whose only
-  -- difference is its `tempo`, so the same label at a different tempo is a
-  -- different cue and must not be deduped away (#847)
+
   local tempo = ctx and ctx.tempo or nil
+  local start = ctx and ctx.start or nil
   -- a hook may silence the cue outright, or swap in a label the dedupe
   -- below has to compare against
-  if not song or (song == state.current and tempo == state.tempo) then return end
+  if not song then return end
+  if song == state.current and tempo == state.tempo
+      and start == state.start then
+    -- ..(home/audio.asm ln 65)
+    if state.fade and state.fade.pending then
+      state.fade = nil
+      applyVolume(state.source)
+      applyVolume(state.loopSource)
+    end
+    return
+  end
   local def = songDef(data, song)
   if not def or state.failed[song] then return end
+
+  if ctx.fade and state.source then
+    local queued = {}
+    for key, value in pairs(ctx) do queued[key] = value end
+    queued.fade, queued.selected = nil, true
+    local pending = { data = data, song = song, loop = loop, ctx = queued }
+    if state.fade then
+      state.fade.pending = pending
+    else
+      Music.fadeOut(ctx.fade, pending)
+    end
+    return
+  end
   if tempo then
     -- shallow copy: the registry def is shared, only this playback is slowed
     local slowed = {}
     for key, value in pairs(def) do slowed[key] = value end
     slowed.tempo = tempo
     def = slowed
+  end
+  if start == "rival" and song == "Music_MeetRival"
+     and def.bank == 2 and def.address == 17050 then
+    local started = {}
+    for key, value in pairs(def) do started[key] = value end
+    local alt = require("src.core.GameVersion").isYellow()
+      and RIVAL_ALT_START.yellow or RIVAL_ALT_START.redblue
+    started.startChannels = {
+      { number = 1, address = alt[1] },
+      { number = 2, address = alt[2] },
+      { number = 3, address = alt[3] },
+    }
+    def = started
   end
   local wantLoop = loop ~= false
   local src, loopSrc, isChip, err = startSong(data, def, wantLoop)
@@ -288,6 +320,9 @@ function Music.play(data, song, loop, ctx)
   state.source, state.loopSource, state.chip = src, loopSrc, isChip
   state.current = song
   state.tempo = tempo
+  state.start = start
+  state.data = data
+  state.loop = loop
   if Runtime.wants("music.started") then
     Runtime.emit("music.started", {
       song = song, previous = previous, chip = isChip,
@@ -302,7 +337,8 @@ function Music.stop()
   stopSource(state.loopSource)
   require("src.core.ChipAudio").stopMusic()
   state.current, state.source, state.loopSource, state.fade = nil, nil, nil, nil
-  state.tempo = nil
+  state.tempo, state.start = nil, nil
+  state.data, state.loop = nil, nil
   state.chip = false
   state.pendingRestore = nil
   if previous and Runtime.wants("music.stopped") then
@@ -317,27 +353,32 @@ function Music.reload()
   Music.stop()
 end
 
--- Ramp the current song's volume to silence, then stop it, mirroring the
--- Game Boy's audio fade-out (home/fade_audio.asm FadeOutAudio +
--- home/audio.asm's .fadeOut): rAUDVOL's master volume steps 7 -> 0 in
--- integer levels, one level every `control` frames, and the music stops
--- when it reaches 0.  `control` is the wAudioFadeOutControl value the ROM
--- writes (oak_speech.asm sets 10 at the shrink beat -> 7*10 = 70 frames
--- to silence).  Ticked once per frame from Music.update().
-function Music.fadeOut(control)
-  if not state.source then Music.stop() return end
+function Music.fadeOut(control, pending)
+  if not state.source then
+    Music.stop()
+    if pending then
+      Music.play(pending.data, pending.song, pending.loop, pending.ctx)
+    end
+    return
+  end
   control = math.max(1, control or 10)
   state.fade = {
     control = control,
     counter = control,       -- frames until the next volume step
     level = 7,               -- current master-volume level (rAUDVOL nibble)
     from = VOLUME * volumeScale, -- level-7 (full) source volume
+    pending = pending,
   }
 end
 
--- the song a map should currently play, honoring the bike/surf overrides
+Music.MAP_FADE = 10
+
+-- the song a map should currently play, honoring the bike/surf overrides;
+-- Gen 2 has no outdoor gate (pokegold home/audio.asm:437)
 local function effectiveMapSong(data, song)
-  if not song or not outdoorSongs(data)[song] then return song end
+  if not song then return song end
+  local gen2 = data and data.audio and data.audio.generation == 2
+  if not gen2 and not outdoorSongs(data)[song] then return song end
   if state.onBike then
     local bike = Music.special(data, "bike")
     if bike and songDef(data, bike) then return bike end
@@ -351,14 +392,17 @@ end
 
 -- overworld map theme; onBike/surfing override outdoor themes with the
 -- bike/surf songs and restore the map theme when they end
-function Music.playMap(data, mapId, onBike, surfing)
-  local song = data and data.audio and data.audio.mapSongs
-    and mapId and data.audio.mapSongs[mapId] or nil
+function Music.playMap(data, mapId, onBike, surfing, fade, song)
+  song = song or (data and data.audio and data.audio.mapSongs
+    and mapId and data.audio.mapSongs[mapId]) or nil
   state.mapSong = song
   state.onBike = not not onBike
   state.surfing = not not surfing
   local play = effectiveMapSong(data, song)
-  if play then Music.play(data, play, nil, { reason = "map", mapId = mapId }) end
+  if play then
+    Music.play(data, play, nil,
+      { reason = "map", mapId = mapId, fade = fade })
+  end
 end
 
 -- toggle the surf override mid-map (starting/ending a surf)
@@ -420,11 +464,31 @@ function Music.oneShotPlaying()
   return state.pendingRestore == true
 end
 
+-- The label of the song that is current, or nil.  A read-only window on the
+-- state, for drivers and tests that need to assert what is playing.
+function Music.current()
+  return state.current
+end
+
+-- The remembered map song (wMapMusic), the same read-only window: what a
+-- battle's restore will replay.  setMapSong below is the write half.
+function Music.mapSong()
+  return state.mapSong
+end
+
 function Music.restoreMap(data)
   state.current = nil
   state.pendingRestore = nil
   local play = effectiveMapSong(data, state.mapSong)
   if play then Music.play(data, play, nil, { reason = "map" }) end
+end
+
+-- Overwrite the remembered map song without playing anything: the wMapMusic
+-- write in pokegold engine/pokegear/pokegear.asm RadioMusicRestartDE.  A radio
+-- station's song becomes the map music itself, so a battle's restoreMap brings
+-- the STATION back and only the next playMap (a map change) replaces it.
+function Music.setMapSong(song)
+  state.mapSong = song
 end
 
 -- 0-7 music volume (0 mutes), applied to the playing song and the
@@ -442,11 +506,48 @@ function Music.setFilterLevel(level)
   applyFilter(state.loopSource)
 end
 
+function Music.setPitch(pitch)
+  pitch = pitch or 1.0
+  if state.source then pcall(state.source.setPitch, state.source, pitch) end
+  if state.loopSource then pcall(state.loopSource.setPitch, state.loopSource, pitch) end
+end
+
 -- re-apply persisted audio options (Game calls this on boot and after
 -- loading a save)
 function Music.applyOptions(opts)
   Music.setVolumeLevel(opts and opts.musicVol or 7)
   Music.setFilterLevel(opts and opts.musicFilter or 0)
+  -- engine/menus/options_menu.asm SOUND row (wOptions STEREO bit)
+  local ChipAudio = require("src.core.ChipAudio")
+  ChipAudio.setStereo(opts and opts.sound == "STEREO")
+  -- setStereo may swap the queueable source so the new pan is not sitting
+  -- behind already-mixed buffers; re-bind so volume/filter follow (#1471)
+  if state.chip then
+    local src = ChipAudio.currentSource()
+    if src then
+      state.source = src
+      applyVolume(src)
+      applyFilter(src)
+    end
+  end
+end
+
+function Music.onDeviceReset()
+  if not love.audio then return end
+  if state.chip then
+    local src = require("src.core.ChipAudio").currentSource()
+    if not src then return end
+    state.source = src
+    applyVolume(src)
+    applyFilter(src)
+    return
+  end
+  local data, song = state.data, state.current
+  if not (data and song) then return end
+  local loop, tempo, start = state.loop, state.tempo, state.start
+  state.current = nil
+  Music.play(data, song, loop, { reason = "devicereset", selected = true,
+                                 tempo = tempo, start = start })
 end
 
 local function sourceStopped(src)
@@ -475,8 +576,13 @@ function Music.update(data)
       f.counter = f.control
       f.level = f.level - 1
       if f.level <= 0 then
+        -- ..(home/fade_audio.asm ln 36)
         state.fade = nil
+        local pending = f.pending
         Music.stop()
+        if pending then
+          Music.play(pending.data, pending.song, pending.loop, pending.ctx)
+        end
         return
       end
       local vol = f.from * f.level / 7

@@ -282,12 +282,19 @@ local function optGame()
 end
 local om = OptionsMenu.new(optGame())
 local WANT_IDS = { "textSpeed", "animations", "battleStyle", "battleLayout",
-                   "battleFit", "battleBg", "uiLayout",
+                   "battleFit", "battleHud", "battleBg", "uiLayout",
                    "ruleset", "musicVol", "sfxVol", "musicFilter",
                    "performance", "colors",
-                   "tilt", "gbcfx", "zoom", "voidFill", "videoMode",
-                   "faithfulRes", "fpsCap",
-                   "speed", "mods", "controls" }
+                   "tilt", "shaderfx", "shaderfx2", "zoom", "voidFill",
+                   "videoMode", "faithfulRes", "screenPos", "fpsCap",
+                   "speedOverworld", "speedBattle", "speedMenu",
+                   "mods", "controls", "dateFormat", "timeFormat" }
+local function orow(menu, id)
+  for _, row in ipairs(menu.rows) do
+    if row.id == id then return row end
+  end
+  error("no options row '" .. id .. "'")
+end
 check(#om.rows == #WANT_IDS, "vanilla options row count (plus MODS/CONTROLS)")
 for i, id in ipairs(WANT_IDS) do
   check(om.rows[i].id == id, "options row order: " .. id)
@@ -295,11 +302,12 @@ end
 
 -- ruleset row cycles the sorted non-hidden registry ids showing name
 om.game.save.options.ruleset = "gen1_faithful"
-check(om.rows[8].value(om.game) == "GEN 1", "ruleset row shows record.name")
-om.rows[8].step(om.game, 1)
+check(orow(om, "ruleset").value(om.game) == "GEN 1",
+  "ruleset row shows record.name")
+orow(om, "ruleset").step(om.game, 1)
 check(om.game.save.options.ruleset == "modern_clean",
   "ruleset row cycles sorted registry ids")
-om.rows[8].step(om.game, 1)
+orow(om, "ruleset").step(om.game, 1)
 check(om.game.save.options.ruleset == "gen1_faithful",
   "hidden rulesets are excluded from the cycle")
 
@@ -318,42 +326,86 @@ check(om.game.save.options.battleLayout == "wide", "battle layout flips to WIDE"
 check(om.rows[4].value(om.game) == "WIDE", "the WIDE layout renders its label")
 om.rows[4].step(om.game, 1)
 check(om.game.save.options.battleLayout == "og", "battle layout flips back")
-om.rows[9].step(om.game, -1)
+orow(om, "musicVol").step(om.game, -1)
 check(om.game.save.options.musicVol == 6, "music volume steps down")
-for _ = 1, 10 do om.rows[9].step(om.game, -1) end
+for _ = 1, 10 do orow(om, "musicVol").step(om.game, -1) end
 check(om.game.save.options.musicVol == 0, "music volume clamps at 0")
 
--- ZOOM / VOID FILL rows (indices track WANT_IDS above; the battle
--- composition rows -- BATTLE SIZE / BATTLE BG / UI LAYOUT -- sit ahead of
--- RULESET, and FAITHFUL RATIO lands between VIDEO MODE and MAX FPS)
+-- ZOOM / VOID FILL rows (looked up by id; WANT_IDS above pins the order,
+-- with SHADER FX / SHADER FX 2 right after TILT now that GBCFX.lua and
+-- its row are gone)
 local Zoom = require("src.render.Zoom")
 local TileRenderer = require("src.render.TileRenderer")
 om.game.save.options.zoom = 0
 Zoom.offset = 0
-check(om.rows[16].value(om.game) == "FIT", "ZOOM row shows FIT at offset 0")
-om.rows[16].step(om.game, 1)
+check(orow(om, "zoom").value(om.game) == "FIT",
+  "ZOOM row shows FIT at offset 0")
+orow(om, "zoom").step(om.game, 1)
 check(om.game.save.options.zoom == 1 and Zoom.offset == 1,
   "ZOOM row steps to IN1")
-om.rows[17].step(om.game, 1)
+orow(om, "zoom").step(om.game, -1)
+check(om.game.save.options.zoom == 0, "ZOOM row steps back to FIT")
+orow(om, "zoom").step(om.game, -1)
+check(om.game.save.options.zoom == -1 and Zoom.offset == -1,
+  "ZOOM row steps to OUT1")
+check(orow(om, "zoom").value(om.game) == "OUT1",
+  "ZOOM row shows OUT1")
+orow(om, "zoom").step(om.game, 1)
+check(om.game.save.options.zoom == 0, "ZOOM row steps back to FIT from OUT")
+orow(om, "voidFill").step(om.game, 1)
 check(om.game.save.options.voidFill == "water"
       and TileRenderer.voidFill == "water",
   "VOID FILL row cycles TREES → WATER")
-om.rows[17].step(om.game, 1)
+orow(om, "voidFill").step(om.game, 1)
 check(om.game.save.options.voidFill == "black", "VOID FILL steps to BLACK")
-om.rows[17].step(om.game, 1)
+orow(om, "voidFill").step(om.game, 1)
 check(om.game.save.options.voidFill == "trees", "VOID FILL wraps to TREES")
+
+-- the SHADER FX row now pushes a real ShaderFXScreen list instead of
+-- cycling in place. With no presets under ShaderFX.presetDir() (nothing
+-- is dropped in for this stub love.filesystem), the pushed screen must
+-- show OFF plus the permanent DOWNLOAD SHADERS row and stay a safe
+-- no-op rather than crash. SHADER FX 2 (the dual-shader secondary slot)
+-- mirrors it one row down, opening the same shared screen on
+-- "secondary" instead.
+local ShaderFX = require("src.render.ShaderFX")
+check(om.rows[16].id == "shaderfx", "row 16 is the SHADER FX row")
+check(om.rows[16].value(om.game) == "OFF", "SHADER FX shows OFF with no presets")
+check(om.rows[16].step == nil, "SHADER FX row has no step() any more")
+om.rows[16].activate(om.game)
+local sfxScreen = om.game.stack:top()
+check(sfxScreen and sfxScreen.title == "SHADER FX",
+  "SHADER FX row.activate() pushes a ShaderFXScreen")
+check(#sfxScreen.items == 2 and sfxScreen.items[1].label == "OFF"
+  and sfxScreen.items[2].download == true,
+  "ShaderFXScreen shows OFF + DOWNLOAD SHADERS with zero presets found")
+sfxScreen.onChoose(sfxScreen.items[1])
+check(ShaderFX.active("main") == false, "choosing OFF on an empty list stays a safe no-op")
+check(om.game.stack:top() == nil, "ShaderFXScreen pops itself after onChoose")
+
+check(om.rows[17].id == "shaderfx2", "row 17 is the SHADER FX 2 row")
+check(om.rows[17].value(om.game) == "OFF", "SHADER FX 2 shows OFF with no presets")
+om.rows[17].activate(om.game)
+local sfx2Screen = om.game.stack:top()
+check(sfx2Screen and sfx2Screen.title == "SHADER FX 2",
+  "SHADER FX 2 row.activate() pushes the shared ShaderFXScreen on the secondary slot")
+sfx2Screen.onChoose(sfx2Screen.items[1])
+check(ShaderFX.active("secondary") == false, "choosing OFF on the secondary slot is a safe no-op")
+check(ShaderFX.active() == false, "neither slot active means ShaderFX.active() is false")
+check(om.game.stack:top() == nil, "the secondary ShaderFXScreen pops itself after onChoose")
 
 -- the MAX FPS row cycles the render-cap steps and shows the value plain
 om.game.save.options.fpsCap = nil
-check(om.rows[20].value(om.game) == "60",
+check(orow(om, "fpsCap").value(om.game) == "60",
   "MAX FPS row defaults to 60 with no saved cap")
-om.rows[20].step(om.game, 1)
+orow(om, "fpsCap").step(om.game, 1)
 check(om.game.save.options.fpsCap == 75, "MAX FPS steps up from 60 to 75")
-check(om.rows[20].value(om.game) == "75", "the MAX FPS row renders the cap")
+check(orow(om, "fpsCap").value(om.game) == "75",
+  "the MAX FPS row renders the cap")
 om.game.save.options.fpsCap = 160
-om.rows[20].step(om.game, 1)
+orow(om, "fpsCap").step(om.game, 1)
 check(om.game.save.options.fpsCap == 30, "MAX FPS wraps past the ceiling to 30")
-om.rows[20].step(om.game, -1)
+orow(om, "fpsCap").step(om.game, -1)
 check(om.game.save.options.fpsCap == 160, "MAX FPS wraps back down to the ceiling")
 
 -- ------- FrameCap normalize / cycle (issue #88)
@@ -383,7 +435,7 @@ check(FrameCap.current == 60, "FrameCap.applyOptions defaults a missing key to 6
 -- the MODS row is the manager's discoverable home
 local mgGame = optGame()
 om = OptionsMenu.new(mgGame)
-om.rows[22].activate(mgGame)
+orow(om, "mods").activate(mgGame)
 check(getmetatable(mgGame.stack:top()) == ManagerState,
   "the MODS row opens the manager")
 check(mgGame.stack:top().screenId == "ManagerState",
@@ -393,7 +445,7 @@ check(mgGame.stack:top().screenId == "ManagerState",
 local BindingsMenu = require("src.ui.BindingsMenu")
 local cbGame = optGame()
 om = OptionsMenu.new(cbGame)
-om.rows[23].activate(cbGame)
+orow(om, "controls").activate(cbGame)
 local bm = cbGame.stack:top()
 check(getmetatable(bm) == BindingsMenu,
   "the CONTROLS row opens the rebind list")
@@ -407,6 +459,23 @@ check(bm.items[1].label == "UP" and bm.items[1].right == "UP/D-UP"
   "with no rebind the rows mirror the fixed map, key and pad both (#589)")
 check(cbGame.save.options.bindings == nil,
   "opening the screen alone writes nothing")
+
+-- shared date/time presentation stays in options.lua and is available to
+-- engine UI and mods without becoming checkpoint progress
+om.game.save.options.dateFormat = "device"
+om.game.save.options.timeFormat = "device"
+check(orow(om, "dateFormat").value(om.game) == "DEVICE",
+  "DATE FORMAT defaults to device locale")
+orow(om, "dateFormat").step(om.game, 1)
+check(om.game.save.options.dateFormat == "dmy"
+      and orow(om, "dateFormat").value(om.game) == "DD-MM-YYYY",
+  "DATE FORMAT exposes deterministic DMY override")
+check(orow(om, "timeFormat").value(om.game) == "DEVICE",
+  "TIME FORMAT defaults to device locale")
+orow(om, "timeFormat").step(om.game, 1)
+check(om.game.save.options.timeFormat == "24h"
+      and orow(om, "timeFormat").value(om.game) == "24 HOUR",
+  "TIME FORMAT exposes deterministic 24-hour override")
 check(bm.onKeyPressed == nil and bm.onGamepadPressed == nil,
   "no raw-input claim until a capture is armed")
 press(bm, "a")
@@ -565,9 +634,19 @@ check(not fpm.submenu and forced == fgame.save.party[1],
 
 -- ------- issues #320/#385: the STRENGTH texts print over the party menu
 do
+  -- PartyMenu delegates the move to OverworldState:useStrengthFieldMove;
+  -- parity_I_M covers that side, this one covers what the menu does after
   local owStub = { strengthActive = false,
-                   map = { def = { tileset = "OVERWORLD" } }, dark = false }
+                   map = { def = { tileset = "OVERWORLD" } }, dark = false,
+                   partyKnows = function(self, id) return self.knows == id end,
+                   knows = "STRENGTH" }
   local sgame = partyGame()
+  owStub.useStrengthFieldMove = function(self, _mon, onClose)
+    self.strengthActive = true
+    sgame.stack:push(require("src.render.TextBox").new(
+      sgame, "used\nSTRENGTH.", onClose))
+    return true
+  end
   sgame.overworld = owStub
   sgame.data.text = {} -- the strength texts fall back to Strings sources
   sgame.save.inventory.RAINBOWBADGE = 1
@@ -999,8 +1078,10 @@ press(ms, "select")
 check(avail[1].enabled == false, "SELECT quick-toggles the focused mod")
 check(ms:isStaged(avail[1]), "a flip against boot state is staged")
 check(ms:glyphFor(avail[1]) == ".", "staged mods show the staged glyph")
-check(mgame.save.options.mods.badmod == false,
-  "the live options table mirrors the flip")
+local managerScope = ms:enableScope()
+check(managerScope and mgame.save.options.modsByVersion
+  and mgame.save.options.modsByVersion[managerScope].badmod == false,
+  "the live options table mirrors the flip for this game")
 check(ms.restartPending, "staged changes arm the apply screen")
 ms:discardChanges()
 check(avail[1].enabled == true and not ms.restartPending,
@@ -1084,6 +1165,27 @@ check(loader.modOptions.okmod.hardcore == false
   and loader.modOptions.okmod.startMoney == 3000
   and loader.modOptions.okmod.tag == "BLUE",
   "RESET DEFAULTS restores every schema default")
+
+-- optional conditions keep mode-specific rows compact and refresh in place
+local conditionalSchema = {
+  { key = "mode", label = "MODE", type = "choice", default = "one",
+    choices = { { "ONE", "one" }, { "TWO", "two" } } },
+  { key = "oneOnly", label = "ONE ONLY", type = "toggle", default = false,
+    visible_if = { key = "mode", equals = "one" } },
+  { key = "twoOnly", label = "TWO ONLY", type = "toggle", default = false,
+    visible_if = { key = "mode", equals = "two" } },
+  { key = "notOne", label = "NOT ONE", type = "toggle", default = false,
+    visible_if = { key = "mode", not_equals = "one" } },
+}
+loader.modOptions.condmod = {}
+ms.cursor = 1
+ms.optionRows = ms:buildOptionRows({ id = "condmod" }, conditionalSchema)
+check(#ms.optionRows == 3 and ms.optionRows[2].id == "oneOnly",
+  "visible_if uses the controlling row default")
+ms.optionRows[1].step(mgame, 1)
+check(#ms.optionRows == 4 and ms.optionRows[2].id == "twoOnly"
+  and ms.optionRows[3].id == "notOne" and ms.cursor == 1,
+  "editing a controller refreshes conditions without moving the cursor")
 press(ms, "b")
 check(ms.screen == "list", "B leaves the options screen")
 
@@ -1142,6 +1244,18 @@ seedOpts.modProfiles = {}
 ModProfile.ensureFirst(seedOpts, ms.status.available, {})
 check(#seedOpts.modProfiles == 0, "seeding never runs twice")
 
+local LauncherMods = require("src.mods.LauncherMods")
+local testProfOpts = { activeProfile = "P1", modProfiles = { { name = "P1", enabled = { a = true } } } }
+local dupSnap = LauncherMods.duplicateProfile("P1", testProfOpts)
+check(dupSnap and dupSnap.name == "P1 (Copy)" and testProfOpts.activeProfile == "P1 (Copy)",
+  "duplicateProfile creates P1 (Copy) and activates it")
+check(LauncherMods.renameProfile("P1 (Copy)", "RenamedP", testProfOpts) == true,
+  "renameProfile renames active profile")
+check(testProfOpts.activeProfile == "RenamedP", "activeProfile updates on rename")
+check(LauncherMods.deleteProfile("RenamedP", testProfOpts) == true, "deleteProfile removes profile")
+check(#testProfOpts.modProfiles == 1 and testProfOpts.modProfiles[1].name == "P1", "only original profile remains")
+check(testProfOpts.activeProfile == "P1", "activeProfile falls back to remaining profile")
+
 -- permissions rows
 local permy = manifest("permy", { permissions = { "network" } })
 local msP = ManagerState.new(managerGame(fakeLoader({ permy })))
@@ -1178,7 +1292,7 @@ local Loader = require("src.mods.Loader")
 local uiFiles = {
   ["mods/uikit/manifest.json"] =
     '{"id":"uikit","name":"uikit","version":"1.0.0","entry":"main.lua","api":2}',
-  ["mods/uikit/main.lua"] = "return function(mod) _G.MOD_UI_API = mod end",
+  ["mods/uikit/main.lua"] = "return function(mod) mod.exports.api = mod end",
 }
 local uiFs = {
   read = function(path) return uiFiles[path] end,
@@ -1212,8 +1326,7 @@ local uiFs = {
 }
 local uiLoader = Loader.new({ fs = uiFs })
 check(uiLoader:load({}) == true, "the uikit fixture loads clean")
-local uiApi = _G.MOD_UI_API
-_G.MOD_UI_API = nil
+local uiApi = (uiLoader.exports.uikit or {}).api
 check(uiApi ~= nil, "the entry chunk received its api")
 check(uiApi.ui == ModUI, "mod.ui is the toolkit facade")
 check(uiApi.ui.Theme == Theme, "mod.ui.Theme reaches the theme module")

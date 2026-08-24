@@ -7,21 +7,26 @@
 -- the text is exhausted and A is pressed, then calls onDone.
 
 local Font = require("src.render.Font")
+local UIVisibility = require("src.battle.UIVisibility")
 local Theme = require("src.ui.Theme")
 local Timing = require("src.core.Timing")
 
 local TextBox = {}
 TextBox.__index = TextBox
+TextBox.isTextBox = true
 
 -- theme-free fallbacks; geometry resolves against Theme.textBox at
 -- construction time, so an unthemed boot stays byte-identical
 local BOX_TX, BOX_TY, BOX_TW, BOX_TH = 0, 12, 20, 6
 local MAX_COLS = 18
+-- pokegold constants/ram_constants.asm: TEXT_DELAY_FAST/MED/SLOW = 1/3/5
+local NAME_DELAYS = { FAST = 1, MID = 3, SLOW = 5 }
 
 -- opts.choice: when the last page has typed out, a YES/NO ChoiceBox pops
 -- up over the still-visible text (YesNoChoicePokeCenter and friends);
 -- the box then closes and choice(yes) runs instead of onDone.
 -- opts.defaultNo starts the cursor on NO.
+-- opts.choiceLabels / opts.choiceBox: data/yes_no_menu_strings.asm:16
 -- opts.auto: texts with no `prompt` (a text_asm/text_end tail, like
 -- _UsedStrengthText) never wait for a button: once the last page has
 -- typed out, auto.sound() runs (returning an audio source blocks like
@@ -39,7 +44,8 @@ local MAX_COLS = 18
 -- waits for nothing, shows no blinking arrow, and never pops itself --
 -- whoever pushed it owns the pop.  stay.onShown fires once, on the frame
 -- the last page finishes typing, which is where the caller pushes whatever
--- goes on top of it (#591).
+-- goes on top of it (#591).  stay.prompt waits out one arrowed A/B press
+-- first (TextCommand_PROMPT_BUTTON, home/text.asm:434-444) (#1511).
 function TextBox.new(game, text, onDone, opts)
   local self = setmetatable({}, TextBox)
   self.game = game
@@ -47,8 +53,18 @@ function TextBox.new(game, text, onDone, opts)
   self.choice = opts and opts.choice
   self.defaultNo = opts and opts.defaultNo
   self.choiceNoSound = opts and opts.noSound
+  self.choiceLabels = opts and opts.choiceLabels
+  self.choiceBox = opts and opts.choiceBox
+  self.money = opts and opts.money
   self.auto = opts and opts.auto
   self.stay = opts and opts.stay
+  -- engine/events/hidden_events/cinnabar_gym_quiz.asm:119
+  self.preSound = opts and opts.preSound
+  -- opts.instant: put the LAST page up already typed, with no typewriter and
+  -- no page waits.  A `yesorno` follows a `writetext` that has already been
+  -- read, so re-typing the line under the YES/NO box would be wrong -- the
+  -- cart never closed the box in the first place.
+  self.instant = opts and opts.instant
   local box = Theme.textBox or {}
   self.boxTx = box.tx or BOX_TX
   self.boxTy = box.ty or BOX_TY
@@ -68,8 +84,47 @@ function TextBox.new(game, text, onDone, opts)
   self.contAdvance = false
   self.done = false
   self.blink = 0
+  if self.instant then
+    self.pageIndex = #self.pages
+    -- Both lines of the page at once, which is what the box looks like the
+    -- moment before the prompt appears.
+    local page = self.pages[self.pageIndex] or {}
+    -- The page's LAST two lines, which is what the box is holding.  A `cont`
+    -- inside the page ran _ContTextNoPause (home/text.asm:442): TextScroll
+    -- twice, then the next line is written at TEXTBOX_INNERY + 2, i.e. the
+    -- bottom row.  Taking the first two would walk the text backwards the
+    -- instant the prompt appears.
+    for index = math.max(1, #page - 1), #page do
+      self.shown[#self.shown + 1] = Font.encode(page[index])
+    end
+    self.lineIndex = #page
+    self.codes = self.shown[#self.shown] or {}
+    self.charIndex = #self.codes
+    self.done = true
+    return self
+  end
   self:beginLine()
   return self
+end
+
+-- soundOpts: a jingle carried at the end of the string as a trailing text
+-- command (sound_get_item_1 and friends -> home/text.asm TextCommand_SOUND),
+-- which runs PlaySound then WaitForSoundToFinish once the last page has
+-- typed, so the box holds until the fanfare is over.  Merges into a caller's
+-- opts table; auto.wait keeps the trailing button press the plain A/B path
+-- gives every other box.
+function TextBox.soundOpts(game, sound, opts)
+  opts = opts or {}
+  local auto = opts.auto
+  -- auto = true is the no-button-wait arming (text_opts); keep that choice
+  if auto == true then auto = { wait = false } end
+  auto = auto or {}
+  if auto.wait == nil then auto.wait = true end
+  auto.delay = auto.delay or 0
+  auto.sound = type(sound) == "function" and sound
+    or function() return require("src.core.Sound").play(game.data, sound) end
+  opts.auto = auto
+  return opts
 end
 
 -- The runtime tokens substitute() knows, as handlers the tokens registry
@@ -79,9 +134,30 @@ end
 -- (home/give.asm), and it stays set afterwards.
 TextBox.TOKENS = {
   PLAYER = function(game) return game.save.player.name or "RED" end,
-  RIVAL = function(game) return game.save.player.rival or "BLUE" end,
+  -- A Gen 1 save keeps the rival on player.rival; a Gold save keeps him at
+  -- save.rival.name, seeded "???" by InitializeNPCNames and written by the
+  -- NameRival special, whose own InitName fallback (not the seed) is where
+  -- "SILVER" comes from (pokegold engine/events/specials.asm
+  -- NameRival .DefaultName).  The Gen 1
+  -- default must not leak into a Gold textbox: the cart's officer never says
+  -- BLUE.  The tail therefore splits by generation rather than ending on the
+  -- Gen 1 literal.  A Gold save with no rival record at all is one that never
+  -- reached the naming screen, and wRivalName is then still what
+  -- InitializeNPCNames seeded it with, "???"
+  -- (pokegold engine/menus/intro_menu.asm .Rival).
+  RIVAL = function(game)
+    local gold = game.save.generation == 2 or game.save.version == "gold"
+    return game.save.player.rival
+      or (game.save.rival and game.save.rival.name)
+      or (gold and "???" or "BLUE")
+  end,
+  -- Gen 2's TX_RAM points at wStringBuffer2, which getstring / getmonname /
+  -- getitemname fill.  An unset buffer prints nothing, the same as the cart's
+  -- freshly `@`-filled buffer.
+  STRBUF = function(game) return game.stringBuffer end,
   RAM = function(game, arg)
     if arg == "wStringBuffer" then return game.stringBuffer end
+    if arg == "wNameBuffer" then return game.stringBuffer end
     if arg == "wBoxNumString" then return game.boxNumString end
     -- SendNewMonToBox / _SentToBoxText reads the deposited nick here
     if arg == "wBoxMonNicks" then return game.boxMonNicks end
@@ -184,9 +260,30 @@ function TextBox:beginLine()
   table.insert(self.shown, {})
 end
 
+function TextBox:visibleText()
+  local page = self.pages[self.pageIndex]
+  if not page then return nil end
+  local out, count = {}, #(self.shown or {})
+  for i = math.max(1, self.lineIndex - count + 1), self.lineIndex do
+    if page[i] ~= nil then out[#out + 1] = page[i] end
+  end
+  return #out > 0 and out or nil
+end
+
 function TextBox:update(dt)
   local input = self.game.input
   self.blink = (self.blink + 1) % 60
+  -- home/text.asm:506
+  if self.preSound then
+    if not self.preStarted then
+      self.preStarted = true
+      self.preSrc = self.preSound()
+    end
+    if self.preSrc and self.preSrc.isPlaying and self.preSrc:isPlaying() then
+      return
+    end
+    self.preSound, self.preSrc = nil, nil
+  end
   -- A page or CONT advance blocks the whole box while the original's scroll
   -- and clear run (src/core/Timing.lua TEXT_SCROLL_PAIR / TEXT_PAGE_CLEAR).
   -- Nothing types and no input is read until it drains.
@@ -200,6 +297,15 @@ function TextBox:update(dt)
     -- exactly once (#591)
     if self.stay then
       if not self.stayShown then
+        -- stay.prompt: arrowed A/B wait, then the box stays up
+        -- (TextCommand_PROMPT_BUTTON, home/text.asm:434-444)
+        if self.stay.prompt
+           and not (input:wasPressed("a") or input:wasPressed("b")) then
+          return
+        end
+        if self.stay.prompt then
+          require("src.core.Sound").play(self.game.data, "Press_AB")
+        end
         self.stayShown = true
         if self.stay.onShown then self.stay.onShown() end
       end
@@ -260,6 +366,7 @@ function TextBox:update(dt)
           self.game.stack:pop() -- this text box, under the choice
           self.choice(yes)
         end, { defaultNo = self.defaultNo, noSound = self.choiceNoSound,
+               labels = self.choiceLabels, box = self.choiceBox,
                -- this box is anchored below it; the pair moves together
                anchor = "bottom" }))
       end
@@ -306,7 +413,8 @@ function TextBox:update(dt)
   -- typewriter cadence: one character every N frames, N = the OPTION
   -- text speed (TextSpeedOptionData frame delays 1/3/5); holding A/B
   -- prints every frame like the original's held-button fast path
-  local delay = (self.game.save.options and self.game.save.options.textSpeed) or 3
+  local rawSpeed = self.game.save.options and self.game.save.options.textSpeed
+  local delay = NAME_DELAYS[rawSpeed] or rawSpeed or 3
   if delay ~= 1 and delay ~= 3 and delay ~= 5 then delay = 3 end
   if input:isDown("a") or input:isDown("b") then delay = 1 end
   self.charTimer = (self.charTimer or 0) + 1
@@ -344,6 +452,7 @@ function TextBox:update(dt)
 end
 
 function TextBox:draw()
+  if not UIVisibility.bottomVisible(self, true) then return end
   -- The dialogue box belongs against the bottom of the screen, not floating
   -- in the middle of a zoomed-out letterbox.  Declared per frame; the
   -- renderer blits this region to the screen edge and the rest of the UI
@@ -353,7 +462,15 @@ function TextBox:draw()
     r:setUIAnchor(self.boxTx * 8, self.boxTy * 8,
                   self.boxTw * 8, self.boxTh * 8, "bottom")
   end
-  Font.drawBox(self.boxTx, self.boxTy, self.boxTw, self.boxTh)
+  -- The box's own tiles are all font-page ($79-$7e frame, ' ' $7f interior),
+  -- so they take whatever BG palette 0 colour 0 the screen UNDER the box is
+  -- using.  On every Gen 1 screen and nearly every Gold one that is white and
+  -- this is nil; the Pokegear's is a pale cream, and a call's pushed textbox
+  -- has to sit on the gear's paper rather than paint a white band across it
+  -- (pokegold engine/pokegear/pokegear.asm TownMapPals sends every tile
+  -- >= $60 to palette 0).  Gen 1's Game has no textboxPaper, so it stays nil.
+  local paper = self.game and self.game.textboxPaper and self.game:textboxPaper()
+  Font.drawBox(self.boxTx, self.boxTy, self.boxTw, self.boxTh, paper)
   love.graphics.setColor(0, 0, 0, 1)
   if self.scrollPx and self.scrollPx > 0 then
     self.scrollPx = self.scrollPx - 2
@@ -378,8 +495,17 @@ function TextBox:draw()
       pen = pen + Font.advanceOf(code)
     end
   end
+  if self.money then
+    -- money box (engine/menus/text_box.asm:130): DisplayMoneyBox at
+    -- hlcoord 11,0, the amount right-aligned on its middle row
+    Font.drawBox(11, 0, 9, 3)
+    love.graphics.setColor(0, 0, 0, 1)
+    local money = ("¥%d"):format(self.money() or 0)
+    Font.draw(money, 152 - Font.width(money), 8)
+  end
   if (self.waiting or (self.done and not self.choice and not self.auto
-                       and not self.stay))
+                       and (not self.stay
+                            or (self.stay.prompt and not self.stayShown))))
      and self.blink < 30 then
     -- page-advance cursor: glyph $EE by default, the blinking down arrow
     -- the original prints via `ld a, "▼"` (home/text.asm)

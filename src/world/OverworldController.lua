@@ -19,6 +19,7 @@ local Player = require("src.world.Player")
 local Runtime = require("src.mods.Runtime")
 local Screens = require("src.ui.Screens")
 local ScriptRunner = require("src.script.ScriptRunner")
+local Theme = require("src.ui.Theme")
 local Tilt = require("src.render.Tilt")
 local TextBox = require("src.render.TextBox")
 local Transition = require("src.render.Transition")
@@ -36,6 +37,10 @@ local mapScripts -- registry of hand-ported map scripts
 
 local COMPASS = { up = "north", down = "south", left = "west", right = "east" }
 local DIRVEC = { up = { 0, -1 }, down = { 0, 1 }, left = { -1, 0 }, right = { 1, 0 } }
+
+-- pokered's wNumberOfNoRandomBattleStepsLeft: three completed steps
+-- after a wild battle before another random battle can start.
+local WILD_ENCOUNTER_GRACE_STEPS = 3
 
 -- Fly animation coord paths (engine/overworld/player_animations.asm):
 -- y/x pairs in GB screen pixels, one pair every 3 frames (DoFlyAnimation's
@@ -76,13 +81,33 @@ local HEAL_BALL_XY = {
 -- swaps the two middle shades of the monitor/ball art in place
 local HEAL_FLASH_MAP = { [0] = 0, [1] = 2, [2] = 1, [3] = 3 }
 
+-- scripts/VermilionDock.asm:39 VermilionDockSSAnneLeavesScript: her hull is
+-- the four blocks (5..8, 1..2) of VermilionDock.blk
+local SS_ANNE_BLOCK = { x = 5, y = 1, w = 4, h = 2 }
+-- scripts/VermilionDock.asm:164 VermilionDock_SyncScrollWithLY splits rSCX at
+-- LY $50, so her top 16px -- the player's own cell row -- never scrolls
+local SS_ANNE_KEEP_PX = 16
+-- scripts/VermilionDock.asm:79 `ld e, $8`: eight 16px columns, and each
+-- .delay_between_drifts pass is eight frames per pixel
+local SS_ANNE_SAIL_PX, SS_ANNE_PX_FRAMES = 128, 8
+-- scripts/VermilionDock.asm:182 VermilionDock_EraseSSAnne: block 1 is the
+-- shoreline row she sat in, block 13 the open water below it
+local SS_ANNE_WATER = { 1, 13 }
+-- scripts/VermilionDock.asm:142 VermilionDock_EmitSmokePuff: a puff per
+-- column off the front smokestack, drifting east 2px per drift step
+local SS_ANNE_SMOKE = { dx = 64, dy = 20, drift = 2, every = 16, count = 5 }
+-- scripts/VermilionDock.asm:65 `ldh [rOBP1], a` with a = 0: the puff is white
+local SS_ANNE_SMOKE_MAP = { [0] = 0, [1] = 0, [2] = 0, [3] = 0 }
+
 -- Fishing rod placement (FishingRodOAM, engine/overworld/player_animations
 -- .asm).  Those dbsprite rows are raw shadow-OAM bytes like HEAL_BALL_XY
 -- above (screen = tile*8 + pixel - 8/16), measured against the player
 -- sprite's fixed screen spot: ResetPlayerSpriteData parks it at $3c/$40
 -- (home/reset_player_sprite.asm), i.e. screen (64,60).  So what ports over
--- is the delta from the sprite's top-left, which SpriteRenderer:draw puts at
--- (px, py - 4).  `tile` indexes the three stacked 8x8 tiles of
+-- is the delta from the sprite's top-left, which the vanilla
+-- SpriteRenderer:draw puts at (px, py - 4); custom frame anchors move that
+-- origin while keeping these offsets frame-relative.  `tile` indexes the
+-- three stacked 8x8 tiles of
 -- assets/generated/fx/fishing_rod.png: FishingRodOAM only ever draws $fd
 -- (row 0, up/down) and $fe (row 1, left/right), and RIGHT is the LEFT tile
 -- x-flipped.  Blitting the whole 8x24 sheet is what drew the rod as a
@@ -142,6 +167,21 @@ local function pooledNPC(pool, data, mapId, obj)
   return npc
 end
 OverworldState.pooledNPC = pooledNPC -- exposed for tests
+
+local function nearestWalkableCell(map, x, y)
+  for r = 1, 8 do
+    for dy = -r, r do
+      for dx = -r, r do
+        if math.abs(dx) == r or math.abs(dy) == r then
+          local nx, ny = x + dx, y + dy
+          if map:inBounds(nx, ny) and map:isWalkableCell(nx, ny) then
+            return nx, ny
+          end
+        end
+      end
+    end
+  end
+end
 
 -- connection hops rendered around the current map: two, so
 -- corner-adjacent maps (connections of connections) don't pop in and
@@ -206,6 +246,11 @@ function OverworldState.computeNeighbors(maps, rootId, hops, reachW, reachH)
   return out
 end
 
+function OverworldState:exit()
+  self.map = nil
+  self.neighbors = nil
+end
+
 function OverworldState:enter(mapId, x, y, facing, opts)
   Game = require("src.core.Game")
   Game.overworld = self
@@ -224,6 +269,9 @@ function OverworldState:enter(mapId, x, y, facing, opts)
   -- a fresh entry, or a stale flag can freeze player input forever
   self.engaging = false
   self.emote = nil
+  self.cancelledTrainerSight = nil
+  -- volatile WRAM state in pokered; never serialize across save/load
+  self.wildEncounterGraceSteps = 0
   -- survives save/load: a loaded game may start inside a building whose
   -- exit mat is a LAST_MAP warp
   self.lastOutdoor = Game.save.lastOutdoor
@@ -295,6 +343,7 @@ function OverworldState:setMap(mapId, x, y, facing, opts)
     self.parallelQueue = {}
   end
   self.marchers = {}
+  self.shipAnim = nil
   local queue = self.pendingScripts
   if queue then
     for i = #queue, 1, -1 do
@@ -318,6 +367,10 @@ function OverworldState:setMap(mapId, x, y, facing, opts)
     MapLoader.invalidateAll()
   end
   self.map = MapLoader.load(Game.data, mapId)
+  -- EnterMap -> ClearVariablesOnEnterMap zeroes wStepCounter
+  -- (engine/overworld/clear_variables.asm:7), but a connection crossing
+  -- never reaches EnterMap (home/overworld.asm:675 .loadNewMap)
+  if not (opts and opts.seamless) then Game.save.poisonSteps = 0 end
   -- STRENGTH deactivates on every real map load (home/overworld.asm
   -- EnterMap -> ResetUsingStrengthOutOfBattleBit clears BIT_STRENGTH_ACTIVE
   -- of wStatusFlags1).  setMap is the single choke point for every map-id
@@ -376,12 +429,23 @@ function OverworldState:setMap(mapId, x, y, facing, opts)
   -- NPC instances persist across connection crossings in self.npcPool
   -- (keyed by NPC.id): a neighbor map's wandering ghosts ARE the
   -- objects that become the real NPCs when the player crosses the
-  -- seam, so nothing snaps back to its spawn point in view of the
-  -- survey zoom.  Warps rebuild from scratch, like the original's
-  -- per-entry sprite init (home/overworld.asm LoadMapHeader
-  -- .loadSpriteData).
+  -- seam, so a map the player is not entering keeps its ghosts alive
+  -- in view of the survey zoom.  The map being entered does not --
+  -- crossing a seam runs .loadNewMap -> LoadMapHeader, whose
+  -- .loadSpriteData zeroes the sprite state data and re-seeds every
+  -- SPRITESTATEDATA2_MAPY/MAPX from the map header's object data
+  -- (home/overworld.asm), so an NPC who walked up to the player stands
+  -- on her spawn cell again the next time that map loads (#1028).  Only
+  -- the save-side spawn flags survive, and those live in Game.save, not
+  -- here.  Warps rebuild the whole pool from scratch; a seam crossing arms
+  -- the re-seed and applyPendingSpawnResets lands it off camera (#1755).
   if not (opts and opts.seamless and self.npcPool) then
     self.npcPool = {}
+  elseif fromMapId ~= mapId then
+    for _, obj in ipairs(self.map.def.objects or {}) do
+      local npc = self.npcPool[mapId .. "_obj_" .. obj.index]
+      if npc then npc.pendingSpawnReset = true end
+    end
   end
   self.npcs = {}
   for _, obj in ipairs(self.map.def.objects or {}) do
@@ -389,6 +453,15 @@ function OverworldState:setMap(mapId, x, y, facing, opts)
       local npc = pooledNPC(self.npcPool, Game.data, mapId, obj)
       npc.frozen = false
       table.insert(self.npcs, npc)
+    end
+  end
+  if opts and opts.via == "boot" and self.map:inBounds(x, y)
+     and not self.map:isWalkableCell(x, y) and not self.map:isWaterCell(x, y) then
+    local rx, ry = nearestWalkableCell(self.map, x, y)
+    if rx then
+      Logger.warn("saved position %s (%d,%d) is not walkable; moved to (%d,%d)",
+                  mapId, x, y, rx, ry)
+      x, y = rx, ry
     end
   end
   if self.player then
@@ -445,14 +518,27 @@ function OverworldState:setMap(mapId, x, y, facing, opts)
   -- walks out of the warp, not beside him (#863)
   require("src.world.PikachuFollower").onMapEntered(Game, self, opts, true)
 
-  -- opts.keepMusic: the Oak-escort warp keeps MUSIC_MEET_PROF_OAK
-  -- playing into the lab (BIT_NO_MAP_MUSIC in wStatusFlags7);
-  -- keepMusicOnce is the play_music opts.keep one-shot of the same bit
+  -- opts.keepMusic preserves the Oak-escort song across the lab warp,
+  -- matching BIT_NO_MAP_MUSIC: MUSIC_MUSEUM_GUY in Yellow and
+  -- MUSIC_MEET_PROF_OAK in Red/Blue. keepMusicOnce is the equivalent
+  -- one-shot set by play_music opts.keep.
   local keepMusic = (opts and opts.keepMusic) or self.keepMusicOnce
   self.keepMusicOnce = nil
   if not keepMusic then
-    require("src.core.Music").playMap(Game.data, mapId, Game.save.onBike,
-                                      self.player.surfing)
+    -- ..(home/overworld.asm ln 2346)
+    local Music = require("src.core.Music")
+    -- opts.freshBoot: switch instantly instead of cross-fading, like every
+    -- other map's PlayDefaultMusic on real hardware -- set only by
+    -- Game.lua's hard state teleports (onContinue, New Game, F2,
+    -- restoreCheckpointSave). Deliberately separate from opts.via ==
+    -- "boot" itself: dev tooling (src/dev/Console.lua's warp verb,
+    -- src/dev/HotReload.lua's reloadMap) reuses that same default for the
+    -- surf-restore/fresh-npc-pool branches above and must keep the
+    -- ordinary crossfade.
+    local fade = Music.MAP_FADE
+    if opts and opts.freshBoot then fade = nil end
+    Music.playMap(Game.data, mapId, Game.save.onBike, self.player.surfing,
+                  fade)
   end
 
   -- forced bike/surf tiles fire the moment the player is placed on the
@@ -501,6 +587,15 @@ function OverworldState:setMap(mapId, x, y, facing, opts)
   -- Route22Gate_Script rewrites wLastMap from the player's Y on entry
   -- too (not only on step), so a save/load mid-gate keeps exits correct
   if not (opts and opts.checkpoint) then self:syncLastMapRewrite() end
+  -- home/overworld.asm:1821 (JoypadOverworld runs RunMapScript every frame);
+  -- scripts/Route16Gate1F.asm:16, Route5Gate.asm:19, Route22Gate.asm:21
+  if opts and opts.freshBoot and not opts.checkpoint then
+    local standing = mapScripts and mapScripts.get(mapId)
+    if not (standing and standing.onStep
+            and standing.onStep(Game, self, self.player.cellX, self.player.cellY)) then
+      self:checkBadgeGate()
+    end
+  end
 end
 
 -- Neighbor maps drawn at the composed connection offsets: at least the
@@ -552,6 +647,41 @@ function OverworldState:rebuildNeighbors()
                        peers = peers })
       end
     end
+  end
+end
+
+-- the deferred half of the seam re-seed armed in setMap (#1755): the cart's
+-- connected map has no sprites to be seen snapping -- home/overworld.asm:2133
+function OverworldState:applyPendingSpawnResets()
+  local pool = self.npcPool
+  if not (pool and self.camera) then return end
+  local due
+  for _, npc in pairs(pool) do
+    if npc.pendingSpawnReset then
+      due = due or {}
+      due[npc] = true
+    end
+  end
+  if not due then return end
+  local cam = self.camera
+  local vw, vh = Game.renderer:worldViewSize()
+  local function onCamera(px, py)
+    return px + 16 > cam.x - 16 and px < cam.x + vw + 16
+       and py + 16 > cam.y - 16 and py < cam.y + vh + 16
+  end
+  for _, mv in ipairs(self.scriptMoves or {}) do due[mv.entity] = nil end
+  for entity in pairs(self.marchers or {}) do due[entity] = nil end
+  for _, npc in ipairs(self.npcs or {}) do
+    if due[npc] and onCamera(npc.px, npc.py) then due[npc] = nil end
+  end
+  for _, g in ipairs(self.ghosts or {}) do
+    if due[g.npc] and onCamera(g.npc.px + g.ox, g.npc.py + g.oy) then
+      due[g.npc] = nil
+    end
+  end
+  for npc in pairs(due) do
+    npc.pendingSpawnReset = nil
+    npc:resetToSpawn()
   end
 end
 
@@ -730,6 +860,92 @@ function OverworldState:bikeAllowed(mapId)
     if t == self.map.def.tileset then return true end
   end
   return false
+end
+
+-- Field-item entry points keep presentation and state transitions in the
+-- owning world instead of asking a supported facade to reproduce either one.
+function OverworldState:useBicycle()
+  local name = Game.save.player.name
+  if Game.save.onBike then
+    if Game.save.forcedBike then return false end
+    Game.save.onBike = false
+    require("src.core.Music").playMap(Game.data, self.map.id, false)
+    Game.stack:push(TextBox.new(Game,
+      Strings("%s got off\nthe BICYCLE.", name)))
+  elseif self:bikeAllowed(self.map.id) and not self.player.surfing then
+    Game.save.onBike = true
+    require("src.core.Music").playMap(Game.data, self.map.id, true)
+    Game.stack:push(TextBox.new(Game,
+      Strings("%s got on\nthe BICYCLE!", name)))
+  else
+    return false
+  end
+  return true
+end
+
+-- Field-move entry points keep presentation and state transitions in the
+-- overworld.  The party menu and supported mod facade both call these, so a
+-- shortcut cannot drift from the game's own move flow.
+function OverworldState:useFlashFieldMove(onClose)
+  -- A FLASH used in daylight must not carry into the next dark map.  Lighting
+  -- also happens before the blink: setDark may rebake an ADVANCED atlas, and
+  -- putting that work in WhiteFlash:onDone caused the frozen white frame in
+  -- #610.
+  local wasDark = self.dark
+  if wasDark then Game.save.flashLit = true end
+  Game.stack:push(TextBox.new(Game,
+    Game.data.text._FlashLightsAreaText
+      or Strings("A blinding FLASH\nlights the area!"), function()
+      if onClose then onClose() end
+      if wasDark then self:setDark(false) end
+      Game.stack:push(Transition.whiteFlash(Game))
+    end))
+  return true
+end
+
+function OverworldState:useStrengthFieldMove(mon, onClose)
+  mon = mon or self:partyKnows("STRENGTH")
+  if not mon then return false end
+  local def = Game.data.pokemon[mon.species]
+  local name = mon.nickname or def.name
+  self.strengthActive = true
+  local first = (Game.data.text._UsedStrengthText
+    or Strings("{RAM:wNameBuffer} used\nSTRENGTH."))
+    :gsub("{RAM:wNameBuffer}", name)
+  local second = (Game.data.text._CanMoveBouldersText
+    or Strings("{RAM:wNameBuffer} can\nmove boulders."))
+    :gsub("{RAM:wNameBuffer}", name)
+  Game.stack:push(TextBox.new(Game, first, function()
+    Game.stack:push(TextBox.new(Game, second, function()
+      if onClose then onClose() end
+      Game.stack:push(Transition.whiteFlash(Game))
+    end))
+  end, { auto = { sound = function()
+    return require("src.core.Sound").playCry(Game.data, mon.species)
+  end } }))
+  return true
+end
+
+function OverworldState:useSoftboiledFieldMove(user, target)
+  local heal = user and user.stats and math.floor(user.stats.hp / 5) or 0
+  if not user or not user.stats or not target or not target.stats
+      or target == user or target.hp <= 0
+      or target.hp >= target.stats.hp or user.hp <= heal then
+    Game.stack:push(TextBox.new(Game,
+      romText(Game.data, "_ItemUseNoEffectText", "It won't have\nany effect.")))
+    return false
+  end
+  local before = target.hp
+  user.hp = user.hp - heal
+  target.hp = math.min(target.stats.hp, target.hp + heal)
+  require("src.core.Sound").play(Game.data, "Heal_HP")
+  local def = Game.data.pokemon[target.species]
+  -- _PotionText's second slot is the recovered amount, same as
+  -- ItemEffects.lua's potion message -- the engine fallback never shows it
+  Game.stack:push(TextBox.new(Game,
+    romText(Game.data, "_PotionText", "%s's HP\nwas restored!",
+      target.nickname or def.name, target.hp - before)))
+  return true
 end
 
 -- The battle transition's dungeon wipe uses the explicit map lists in
@@ -913,6 +1129,27 @@ function OverworldState:update(dt)
       if da.onDone then da.onDone() end
     end
   end
+  -- scripts/VermilionDock.asm:80 .shift_columns_up
+  if self.shipAnim and not self.shipAnim.gone then
+    local sa = self.shipAnim
+    sa.frames = sa.frames + 1
+    if sa.frames >= SS_ANNE_PX_FRAMES then
+      sa.frames = 0
+      sa.off = sa.off + 1
+      if sa.off % SS_ANNE_SMOKE.every == 1
+         and #sa.puffs < SS_ANNE_SMOKE.count then
+        sa.puffs[#sa.puffs + 1] = { x = sa.px - sa.off + SS_ANNE_SMOKE.dx,
+                                    y = sa.py + SS_ANNE_SMOKE.dy }
+      end
+      for _, p in ipairs(sa.puffs) do p.x = p.x + SS_ANNE_SMOKE.drift end
+      if sa.off >= SS_ANNE_SAIL_PX then
+        sa.gone, sa.puffs = true, {}
+        local done = sa.onDone
+        sa.onDone = nil
+        if done then done() end
+      end
+    end
+  end
   if self.cutAnim then
     local ca = self.cutAnim
     ca.frames = ca.frames - 1
@@ -996,6 +1233,13 @@ function OverworldState:update(dt)
     end
   end
 
+  -- EnterMapAnim's .done tail re-enables the companion once the swoop or the
+  -- spin-down has landed (player_animations.asm:40)
+  if self.pikachuWarpHidden and not (self.flyAnim or self.flyArrive
+      or self.teleportOut or self.transitioning or self.player.spinning) then
+    self:showPikachuAfterWarp()
+  end
+
   -- Dig/Teleport/Escape-Rope departure spin (beginTeleportOut).  The sprite
   -- spins UP out of the map before the fade (player_animations.asm
   -- _LeaveMapAnim -> PlayerSpinWhileMovingUp + SFX_TELEPORT_EXIT_1), the
@@ -1065,7 +1309,9 @@ function OverworldState:update(dt)
   -- escort then walks an extra tile before PlayerEntryMovementRLE, and
   -- the player lands on desk Oak.
   local scripted = self.runner:isRunning() or #self.scriptMoves > 0
+                   or (self.hopLand or 0) > 0
                    or self.engaging or self.emote or self.teleportOut
+                   or self.flyAnim or self.flyArrive
   if not scripted and not self.transitioning then
     self:checkTrainerSight()
     -- CheckFightingMapTrainers (home/trainers.asm) zeroes hJoyHeld and
@@ -1073,11 +1319,16 @@ function OverworldState:update(dt)
     -- direction handling (JoypadOverworld runs the map script first) --
     -- the player can never start another step after being spotted.
     scripted = self.runner:isRunning() or #self.scriptMoves > 0
+               or (self.hopLand or 0) > 0
                or self.engaging or self.emote or self.teleportOut
+               or self.flyAnim or self.flyArrive
   end
-  if not scripted and not self.transitioning then
+  -- a scriptMove's onDone can push a text box on the frame it retires, and
+  -- DisplayTextID owns the loop from there (home/text_script.asm:3)
+  if not scripted and not self.transitioning and Game.stack:top() == self then
     self:handleInput()
   end
+  if (self.hopLand or 0) > 0 then self.hopLand = self.hopLand - 1 end
 
   local stepped = self.player:update()
   -- the warp-arrival cell goes stale the instant the player's real cell
@@ -1093,8 +1344,10 @@ function OverworldState:update(dt)
     local mapId = self.pendingSeamMusic
     self.pendingSeamMusic = nil
     if mapId == self.map.id then
-      require("src.core.Music").playMap(Game.data, mapId, Game.save.onBike,
-                                        self.player.surfing)
+      -- ..(home/overworld.asm ln 677)
+      local Music = require("src.core.Music")
+      Music.playMap(Game.data, mapId, Game.save.onBike, self.player.surfing,
+                    Music.MAP_FADE)
     end
   end
   if stepped and not scripted then
@@ -1103,6 +1356,7 @@ function OverworldState:update(dt)
 
   self.camera:follow(self.player.px, self.player.py,
                      Game.renderer:worldViewSize())
+  self:applyPendingSpawnResets()
 
   -- pan_camera offset rides on top of the follow; the ramp resumes its
   -- runner when it lands
@@ -1218,7 +1472,7 @@ function OverworldState:handleInput()
         if self:checkLedgeHop(dir) then return end
         if self:checkBoulderPush(dir) then return end
       end
-      local result, why = self.player:tryMove(dir, self.map, self.entities)
+      local result = self.player:tryMove(dir, self.map, self.entities)
       -- a collision while standing on a warp square fires the warp when the
       -- extra check passes (CheckWarpsCollision: route-gate doorways, dock
       -- entrances, ...), and only while BIT_STANDING_ON_WARP is set (issue
@@ -1231,7 +1485,9 @@ function OverworldState:handleInput()
           return result
         end
       end
-      if result == "blocked" and why ~= "entity" then
+      -- CollisionCheckOnLand (home/overworld.asm): a sprite takes the same
+      -- .collision branch as an impassable tile (#960)
+      if result == "blocked" then
         if (self.bumpCooldown or 0) <= 0 then
           require("src.core.Sound").play(Game.data, "Collision")
           self.bumpCooldown = 16
@@ -1339,6 +1595,76 @@ function OverworldState:startDustAnim(cx, cy, onDone)
   self.dustAnim = { x = cx, y = cy, frames = 32, onDone = onDone }
 end
 
+-- scripts/VermilionDock.asm:39 VermilionDockSSAnneLeavesScript: snapshot her
+-- hull tiles, flood her box with water, and slide the snapshot west from there
+function OverworldState:startSsAnneDeparture(onDone)
+  local map = self.map
+  local tx0, ty0 = SS_ANNE_BLOCK.x * 4, SS_ANNE_BLOCK.y * 4
+  local tiles = {}
+  for row = 1, SS_ANNE_BLOCK.h * 4 do
+    local r = {}
+    for col = 1, SS_ANNE_BLOCK.w * 4 do
+      r[col] = map:tileAt(tx0 + col - 1, ty0 + row - 1)
+    end
+    tiles[row] = r
+  end
+  for bx = SS_ANNE_BLOCK.x, SS_ANNE_BLOCK.x + SS_ANNE_BLOCK.w - 1 do
+    for by = SS_ANNE_BLOCK.y, SS_ANNE_BLOCK.y + SS_ANNE_BLOCK.h - 1 do
+      map:setBlock(bx, by, SS_ANNE_WATER[by - SS_ANNE_BLOCK.y + 1] or 13)
+    end
+  end
+  map.renderer:rebuild()
+  self.shipAnim = { px = tx0 * 8, py = ty0 * 8, tiles = tiles,
+                    off = 0, frames = 0, puffs = {}, onDone = onDone }
+end
+
+-- scripts/VermilionDock.asm:164: the rSCX split keeps her top 16px (the
+-- shoreline row and the gangway under the player) put while the rest sails
+function OverworldState:drawShipAnim(camX, camY)
+  local sa = self.shipAnim
+  if not sa then return end
+  local renderer = self.map.renderer
+  local img, quads = renderer.image, renderer.quads
+  local ox, oy = -math.floor(camX), -math.floor(camY)
+  local keep = SS_ANNE_KEEP_PX / 8
+  love.graphics.setColor(1, 1, 1, 1)
+  for row = 1, #sa.tiles do
+    if row <= keep or not sa.gone then
+      local slide = row > keep and sa.off or 0
+      local wy = sa.py + (row - 1) * 8 + oy
+      for col = 1, #sa.tiles[row] do
+        local quad = quads[sa.tiles[row][col]]
+        if quad then
+          love.graphics.draw(img, quad, sa.px + (col - 1) * 8 - slide + ox, wy)
+        end
+      end
+    end
+  end
+  if #sa.puffs == 0 then return end
+  local fxDef = Game.data.field.overworldFx
+  local smoke = fxDef and fxDef.smoke
+  if not smoke then return end
+  if self.smokeImg == nil then
+    local ok, image = pcall(love.graphics.newImage, smoke.path)
+    self.smokeImg = ok and image or false
+  end
+  if not self.smokeImg then return end
+  local shader = PaletteFX.shader()
+  if shader then
+    PaletteFX.sendColors(shader,
+      PaletteFX.permute(PaletteFX.GRAYS, SS_ANNE_SMOKE_MAP))
+    love.graphics.setShader(shader)
+  end
+  for _, p in ipairs(sa.puffs) do
+    for i = 0, 1 do
+      for j = 0, 1 do
+        love.graphics.draw(self.smokeImg, p.x + i * 8 + ox, p.y + j * 8 + oy)
+      end
+    end
+  end
+  if shader then love.graphics.setShader() end
+end
+
 -- Ledge hops (data/tilesets/ledge_tiles.asm): standing tile + ledge tile
 -- in front + matching input direction -> jump two cells.
 function OverworldState:checkLedgeHop(dir)
@@ -1372,20 +1698,34 @@ function OverworldState:checkLedgeHop(dir)
           return false
         end
         require("src.core.Sound").play(Game.data, "Ledge")
-        p.hopFrames, p.hopTotal = 32, 32 -- jump arc (cosmetic)
-        self:scriptMove(p, dir, 1, function() self:checkEdgeExit(dir) end)
+        p.ledgeHop = true -- BIT_LEDGE_OR_FISHING, no bike speedup mid-hop
+        local hop = p:stepLength() * 2
+        p.hopFrames, p.hopTotal = hop, hop -- jump arc (cosmetic)
+        self:scriptMove(p, dir, 1, function()
+          self:checkEdgeExit(dir)
+          self:finishLedgeHop()
+        end)
         return true
       end
       if not Collision.occupied(self.entities, lx, ly, p)
          and self.map:isWalkableCell(lx, ly) then
         require("src.core.Sound").play(Game.data, "Ledge")
-        p.hopFrames, p.hopTotal = 32, 32 -- jump arc (cosmetic)
-        self:scriptMove(p, dir, 2)
+        p.ledgeHop = true -- BIT_LEDGE_OR_FISHING, no bike speedup mid-hop
+        local hop = p:stepLength() * 2
+        p.hopFrames, p.hopTotal = hop, hop -- jump arc (cosmetic)
+        self:scriptMove(p, dir, 2, function() self:finishLedgeHop() end)
         return true
       end
     end
   end
   return false
+end
+
+-- _HandleMidJump .finishedJump lands with UpdateSprites + Delay3 before it
+-- clears the joypad bytes -- engine/overworld/player_animations.asm:509
+function OverworldState:finishLedgeHop()
+  self.player.ledgeHop = nil
+  self.hopLand = 3
 end
 
 -- walking off the map edge: connection crossing or edge warp (exit mats)
@@ -1493,9 +1833,7 @@ function OverworldState:crossConnection(dir, conn)
   -- fresh walk-cycle clock so the seam step always shows leg frames
   -- (mid-cycle stand phase would otherwise look like a slide)
   p.animClock = 0
-  p.stepFramesCur = Game.save.onBike
-    and (FieldDefaults.world(Game.data, "bikeStepFrames") or 8)
-    or (FieldDefaults.world(Game.data, "stepFrames") or 16)
+  p.stepFramesCur = p:stepLength()
   require("src.core.FixedStep"):discardCatchup()
   return true
 end
@@ -1595,6 +1933,28 @@ function OverworldState:syncSurfingPikachu()
   p.surfingPikachu = mon ~= nil and mon.species == "PIKACHU" or false
 end
 
+-- _LeaveMapAnim drops the companion's sprite before the animation starts and
+-- EnterMapAnim only puts it back once landed -- home/pikachu.asm:1, :10
+function OverworldState:hidePikachuForWarp()
+  self.pikachuWarpHidden = true
+  require("src.world.PikachuFollower").setVisible(self, false)
+end
+
+function OverworldState:showPikachuAfterWarp()
+  self.pikachuWarpHidden = nil
+  self.pikachuTrail = { x = self.player.cellX, y = self.player.cellY }
+  local Follower = require("src.world.PikachuFollower")
+  local npc = Follower.current(self)
+  if npc then
+    npc.cellX, npc.cellY = self.player.cellX, self.player.cellY
+    npc.px, npc.py = npc.cellX * 16, npc.cellY * 16
+    npc.targetX, npc.targetY = nil, nil
+    npc.goalX, npc.goalY = nil, nil
+    npc.moving = false
+  end
+  Follower.setVisible(self, true)
+end
+
 -- The rejection loop shared by the Good and Super Rods
 -- (item_effects.asm ItemUseGoodRod .RandomLoop / ReadSuperRodData): an
 -- odd random byte is no bite; otherwise a 2-bit pick rerolls until it
@@ -1637,6 +1997,10 @@ end
 -- Goldeen/Poliwag L10; Super Rod uses the map's extracted fishing group
 -- (no group means "Not even a nibble!").
 function OverworldState:goFishing(rod)
+  if GameVersion.isYellow() then
+    Game.save.pikachuEmotionModifier = 2
+    Game.save.pikachuMood = 0x81
+  end
   local pool, always = fishingPool(Game.data, rod, self.map.id)
   local enc
   if Runtime.wantsHook("encounter.fishing") then
@@ -1683,6 +2047,12 @@ function OverworldState:goFishing(rod)
   end))
 end
 
+function OverworldState:useFishingRod(rod)
+  if self.player.surfing or not self:facingIsShoreOrWater() then return false end
+  self:goFishing(rod)
+  return true
+end
+
 -- Fly to a visited town (called from the party menu).
 function OverworldState:flyTo(mapId)
   local spot = Game.data.field.flyWarps[mapId]
@@ -1691,6 +2061,7 @@ function OverworldState:flyTo(mapId)
   Game.save.forcedBike = nil -- HandleFlyWarpOrDungeonWarp res BIT_ALWAYS_ON_BIKE
   self.player.surfing = false
   self:syncSurfingPikachu()
+  self:hidePikachuForWarp()
   -- _LeaveMapAnim .flyAnimation: the bird flaps in place (8 x Delay3),
   -- then SFX_FLY and the up-right path, a 40-frame beat off screen, and
   -- the exit over the top-left -- the warp fades only once the bird is
@@ -1721,6 +2092,7 @@ function OverworldState:beginTeleportOut(onDone)
   require("src.core.Sound").play(Game.data, "Teleport_Exit1")
   self.player.surfing = false
   self:syncSurfingPikachu()
+  self:hidePikachuForWarp()
   self.player.inputLocked = true
   -- rising spin: the mirror of the arrival spin-drop set in startWarpTo, so
   -- spinRise lifts the sprite (Player:pose) while spinFrames counts down
@@ -1758,6 +2130,10 @@ function OverworldState:pushableAtCell(cx, cy)
   return nil
 end
 
+-- world.talk's fallthrough, hoisted so the A press does not build a closure
+-- on every press just to have one to hand a hook nobody may have wrapped
+local function vanillaTalk(ow, target) ow:talkTo(target) end
+
 -- what the A press resolved to, for world.interacted's listeners
 local function interacted(self, fx, fy, kind, target)
   Runtime.emit("world.interacted", { mapId = self.map.id, x = fx, y = fy,
@@ -1787,7 +2163,12 @@ function OverworldState:interact()
       -- talk() lands the follower on its cell first.
       require("src.world.PikachuFollower").talk(Game, self, npc)
     elseif not npc.moving then
-      self:talkTo(npc)
+      -- world.talk: the A press on an object, before the map's text tables
+      -- get it.  A runtime object a mod spawned (WorldAPI:spawnNpc) carries
+      -- no TEXT_* id, so the vanilla path has nothing to say for it; a mod
+      -- that owns the object wraps this and simply does not call next().
+      -- Everything else falls straight through to talkTo as before.
+      Runtime.call("world.talk", vanillaTalk, self, npc)
     end
     interacted(self, fx, fy, "npc", npc)
     return
@@ -1856,8 +2237,11 @@ function OverworldState:tryBookshelf(fx, fy)
     return true
   end
   if entry.screen then
-    -- Blue's house shelf opens the TOWN MAP (TownMapText)
-    pcall(Screens.push, Game, entry.screen)
+    -- engine/events/hidden_events/town_map.asm:1
+    Game.stack:push(TextBox.new(Game,
+      t[entry.text] or t._TownMapText
+      or romText(Game.data, "_TownMapText", "A TOWN MAP."),
+      function() pcall(Screens.push, Game, entry.screen) end))
     return true
   end
   local kind = entry.kind
@@ -1946,17 +2330,21 @@ function OverworldState:tryHiddenObject(fx, fy)
         -- leaves the spot unfound; _CantCarryMoreText is the Toss line (#872)
         local name = Game.data.items[h.item] and Game.data.items[h.item].name or h.item
         Game.stack:push(TextBox.new(Game,
-          Strings("%s found\n%s!", save.player.name, name) .. "\f"
+          romText(Game.data, "_FoundHiddenItemText", "%s found\n%s!",
+            save.player.name, name) .. "\f"
           .. romText(Game.data, "_HiddenItemBagFullText",
                      "But, {PLAYER} has\nno more room for\vother items!")))
         return true
       end
       save.hiddenTaken[key] = true
       local name = Game.data.items[h.item] and Game.data.items[h.item].name or h.item
-      -- hidden items always play SFX_GET_ITEM_2 (hidden_items.asm)
-      require("src.core.Sound").play(Game.data, "Get_Item2")
+      -- hidden items always play SFX_GET_ITEM_2, and FoundHiddenItemText's
+      -- text_asm tail runs it as PlaySoundWaitForCurrent +
+      -- WaitForSoundToFinish once the box has printed (hidden_items.asm)
       Game.stack:push(TextBox.new(Game,
-        Strings("%s found\n%s!", save.player.name, name)))
+        romText(Game.data, "_FoundHiddenItemText", "%s found\n%s!",
+          save.player.name, name),
+        nil, TextBox.soundOpts(Game, "Get_Item2")))
       return true
     end
   end
@@ -1968,9 +2356,9 @@ function OverworldState:tryHiddenObject(fx, fy)
       if not save.inventory.COIN_CASE then return false end
       save.hiddenTaken[key] = true
       save.coins = math.min(9999, (save.coins or 0) + h.coins)
-      require("src.core.Sound").play(Game.data, "Get_Item2")
       Game.stack:push(TextBox.new(Game,
-        Strings("%s found\n%d coins!", save.player.name, h.coins)))
+        Strings("%s found\n%d coins!", save.player.name, h.coins),
+        nil, TextBox.soundOpts(Game, "Get_Item2")))
       return true
     end
   end
@@ -2021,13 +2409,17 @@ function OverworldState:tryHiddenObject(fx, fy)
   for _, h in ipairs(extras.pcTiles[self.map.id] or {}) do
     if h.x == fx and h.y == fy and (not h.facing or h.facing == facing) then
       if self.map.id == "REDS_HOUSE_2F" then
-        -- The player's bedroom PC is the one location in Red/Blue whose PC
-        -- callback is OpenRedsPC (engine/events/hidden_objects/players_pc.asm),
-        -- which runs the PlayerPC predef directly -- item storage, no
-        -- SOMEONE'S/BILL'S PC main menu (DisplayPCMainMenu).  Every other
-        -- pcTile is a Pokémon Center-style PC that shows the multi-PC menu. (#228)
+        -- OpenRedsPC (engine/events/hidden_objects/players_pc.asm) runs the
+        -- PlayerPC predef directly, no DisplayPCMainMenu (#228)
         require("src.core.Sound").play(Game.data, "Turn_On_PC")
-        Screens.push(Game, "PlayerPC")
+        -- engine/menus/players_pc.asm:16
+        Game.stack:push(TextBox.new(Game,
+          (Game.data.text or {})._TurnedOnPC2Text
+          or romText(Game.data, "_TurnedOnPC2Text", "{PLAYER} turned on\nthe PC."),
+          function()
+            -- direct access: ExitPlayerPC rings SFX_TURN_OFF_PC (players_pc.asm, #960)
+            Screens.push(Game, "PlayerPC", { direct = true })
+          end, { instant = true }))
       else
         self:openPC()
       end
@@ -2196,16 +2588,12 @@ function OverworldState:trashCanSwitch(canIndex)
     local adj = tc.adjacent[puz.first]
     local masked = require("bit").band(love.math.random(0, 255), #adj)
     puz.second = masked == 0 and 0 or adj[masked]
-    -- VermilionGymTrashSuccessText1's text_asm tail plays SFX_SWITCH only
-    -- after the text has printed (text_far ...; text_asm;
-    -- WaitForSoundToFinish; PlaySound SFX_SWITCH; WaitForSoundToFinish),
-    -- and DisplayTextID's WaitForTextScrollButtonPress then holds the box
-    -- until the player dismisses it -- so the beep belongs on close, not
-    -- open.
+    -- engine/events/hidden_events/vermilion_gym_trash.asm:130 (text_asm tail:
+    -- SFX_SWITCH once the text has printed, before the button wait) (#1702)
     Game.stack:push(TextBox.new(Game,
       t._VermilionGymTrashSuccessText1
       or Strings("Hey! There's a\nswitch under the\ntrash!\fThe 1st electric\nlock opened!"),
-      function() require("src.core.Sound").play(Game.data, "Switch") end))
+      nil, TextBox.soundOpts(Game, "Switch")))
     return
   end
   -- .trySecondLock
@@ -2216,25 +2604,28 @@ function OverworldState:trashCanSwitch(canIndex)
     -- the clear floor block opens the doors (VermilionGymSetDoorTile)
     local door = FieldDefaults.fieldValue(Game.data, "hiddenExtras",
                                           "trashCans", "doorBlock")
-    self:replaceBlock(door.bx, door.by, door.block)
-    -- SuccessText3's text_asm tail plays SFX_GO_INSIDE after the text
-    -- prints, so the beep fires as the box closes, not as it opens.
+    -- engine/events/hidden_events/vermilion_gym_trash.asm:153 beeps as the
+    -- text finishes; scripts/VermilionGym.asm:30 beeps on the swap (#1702)
     Game.stack:push(TextBox.new(Game,
       t._VermilionGymTrashSuccessText3
       or Strings("The 2nd electric\nlock opened!\fThe motorized door\nopened!"),
-      function() require("src.core.Sound").play(Game.data, "Go_Inside") end))
+      function()
+        require("src.core.Sound").play(Game.data, "Go_Inside")
+        self:replaceBlock(door.bx, door.by, door.block)
+      end,
+      TextBox.soundOpts(Game, "Go_Inside")))
   else
     -- wrong can: ResetEvent EVENT_1ST_LOCK_OPENED and immediately
     -- re-roll the first switch (Random & $e)
     save.flags.EVENT_1ST_LOCK_OPENED = nil
     puz.first = love.math.random(0, 7) * 2
     puz.second = nil
-    -- VermilionGymTrashFailText's text_asm tail plays SFX_DENIED after the
-    -- text prints, so the beep fires as the box closes, not as it opens.
+    -- engine/events/hidden_events/vermilion_gym_trash.asm:162 (text_asm tail:
+    -- SFX_DENIED once the text has printed, before the button wait) (#1702)
     Game.stack:push(TextBox.new(Game,
       t._VermilionGymTrashFailText
       or Strings("Nope! There's\nonly trash here.\fHey! The electric\nlocks were reset!"),
-      function() require("src.core.Sound").play(Game.data, "Denied") end))
+      nil, TextBox.soundOpts(Game, "Denied")))
   end
 end
 
@@ -2427,6 +2818,15 @@ function OverworldState:trySurf(fx, fy, onClose)
   end))
 end
 
+function OverworldState:stopSurfing(onClose)
+  if onClose then onClose() end
+  self.player.surfing = false
+  require("src.core.Music").setSurfing(Game.data, false)
+  Game.stack:push(Transition.whiteFlash(Game, nil, function()
+    self:stepForwardOrCrossEdge(self.player.facing)
+  end))
+end
+
 function OverworldState:tryCut(fx, fy)
   -- UsedCut (engine/overworld/cut.asm) gates on the TILESET before
   -- anything else: only OVERWORLD (tree tile $3d) and GYM (plant tile
@@ -2600,8 +3000,8 @@ function OverworldState:talkTo(npc)
         "No more room for\nitems!")
       if GameVersion.isYellow() then
         local name = Game.data.items[d.item] and Game.data.items[d.item].name or d.item
-        noRoom = Strings("%s found\n%s!", Game.save.player.name, name)
-                 .. "\f" .. noRoom
+        noRoom = romText(Game.data, "_FoundItemText", "%s found\n%s!",
+                   Game.save.player.name, name) .. "\f" .. noRoom
       end
       Game.stack:push(TextBox.new(Game, noRoom))
       return
@@ -2616,10 +3016,12 @@ function OverworldState:talkTo(npc)
     end
     local name = Game.data.items[d.item] and Game.data.items[d.item].name or d.item
     local ddef = Game.data.items[d.item]
-    require("src.core.Sound").play(Game.data,
-      (ddef and ddef.keyItem) and "Get_Key_Item" or "Get_Item1")
+    -- FoundItemText: text_far, sound_get_item_1, text_end (pick_up_item.asm)
     Game.stack:push(TextBox.new(Game,
-      Strings("%s found\n%s!", Game.save.player.name, name)))
+      romText(Game.data, "_FoundItemText", "%s found\n%s!",
+        Game.save.player.name, name), nil,
+      TextBox.soundOpts(Game,
+        (ddef and ddef.keyItem) and "Get_Key_Item" or "Get_Item1")))
     return
   end
 
@@ -2671,10 +3073,10 @@ function OverworldState:talkTo(npc)
   if entry then
     if entry.mart then
       npc:facePlayer(self.player)
-      Game.stack:push(TextBox.new(Game, romText(Game.data, "_PokemartGreetingText", "Hi there!\nMay I help you?"), function()
-        Screens.push(Game, "ShopMenu", entry.mart)
-        unfreeze()
-      end))
+      -- the greeting stays in the box under the menu, so ShopMenu owns it
+      -- now -- home/text_script.asm:143
+      Screens.push(Game, "ShopMenu", entry.mart)
+      unfreeze()
       return
     end
     if entry.nurse then
@@ -2723,7 +3125,15 @@ function OverworldState:openPC(onDone)
     keepOpen = true,
     onSelect = function()
       require("src.core.Sound").play(Game.data, "Enter_PC")
-      Screens.push(Game, "BoxMenu")
+      -- engine/menus/pc.asm:73 BillsPC prints the access text before the farcall
+      local accessed = metBill
+        and romText(Game.data, "_AccessedBillsPCText",
+          "Accessed BILL's\nPC.\fAccessed POKéMON\nStorage System.")
+        or romText(Game.data, "_AccessedSomeonesPCText",
+          "Accessed someone's\nPC.\fAccessed POKéMON\nStorage System.")
+      Game.stack:push(TextBox.new(Game, accessed, function()
+        Screens.push(Game, "BoxMenu")
+      end))
       done()
     end,
   })
@@ -2733,7 +3143,13 @@ function OverworldState:openPC(onDone)
     label = (Game.save.player.name or "RED") .. "'s PC",
     keepOpen = true,
     onSelect = function()
-      Screens.push(Game, "PlayerPC")
+      -- pc.asm .playersPC plays SFX_ENTER_PC then prints AccessedMyPCText
+      -- before the farcall (engine/menus/pc.asm:54, #960)
+      require("src.core.Sound").play(Game.data, "Enter_PC")
+      Game.stack:push(TextBox.new(Game,
+        romText(Game.data, "_AccessedMyPCText",
+          "Accessed my PC.\fAccessed Item\nStorage System."),
+        function() Screens.push(Game, "PlayerPC") end))
       done()
     end,
   })
@@ -2744,9 +3160,29 @@ function OverworldState:openPC(onDone)
       label = Strings("PROF.OAK's PC"),
       keepOpen = true,
       onSelect = function()
+        -- pc.asm OaksPC plays SFX_ENTER_PC before the farcall (#960)
+        require("src.core.Sound").play(Game.data, "Enter_PC")
         self:openOaksPC(done)
       end,
     })
+
+    -- engine/pokemon/bills_pc.asm:48-60 PKMN LEAGUE row (#1566)
+    if #(Game.save.hallOfFame or {}) > 0 then
+      table.insert(items, {
+        label = Strings("<PK><MN>LEAGUE"),
+        keepOpen = true,
+        onSelect = function()
+          -- pc.asm PKMNLeague plays SFX_ENTER_PC, then PKMNLeaguePC prints
+          -- AccessedHoFPCText (engine/menus/pc.asm:67, league_pc.asm:2)
+          require("src.core.Sound").play(Game.data, "Enter_PC")
+          Game.stack:push(TextBox.new(Game,
+            romText(Game.data, "_AccessedHoFPCText",
+              "Accessed POKéMON\nLEAGUE's site.\fAccessed the HALL\nOF FAME List."),
+            function() Screens.push(Game, "LeaguePC") end))
+          done()
+        end,
+      })
+    end
   end
 
   local hooked = Runtime.call("ui.pc.items", sameItems, Game, items)
@@ -2762,13 +3198,16 @@ function OverworldState:openPC(onDone)
     done()
   end
   table.insert(items, { label = Strings("LOG OFF"), onSelect = logOff })
-  -- pokered sets BIT_NO_MENU_BUTTON_SOUND for the whole PC session
-  -- (engine/overworld/pokecenter_pc.asm / player_pc.asm); DisplayPCMainMenu
-  -- calls TextBoxBorder with c=14 (interior width, +2 for the border), so
-  -- tw here (total width) is 16
-  Game.stack:push(Menu.new(Game, items,
+  -- BIT_NO_MENU_BUTTON_SOUND for the whole PC session; DisplayPCMainMenu's
+  -- TextBoxBorder c=14 interior -> tw 16 (engine/overworld/pokecenter_pc.asm)
+  local menu = Menu.new(Game, items,
     { tx = 0, ty = 0, tw = 16, th = #items * 2 + 2, onCancel = logOff,
-      noSound = true }))
+      noSound = true })
+  -- engine/menus/pc.asm:5
+  Game.stack:push(TextBox.new(Game,
+    (Game.data.text or {})._TurnedOnPC1Text
+    or romText(Game.data, "_TurnedOnPC1Text", "{PLAYER} turned on\nthe PC."),
+    function() Game.stack:push(menu) end))
 end
 
 -- The PROF. OAK's PC session (engine/menus/oaks_pc.asm OpenOaksPC): the
@@ -2873,6 +3312,11 @@ end
 -- POKéMON" and "fighting fit".
 function OverworldState:nurseHeal(onDone, npc)
   local t = Game.data.text
+  if self.map.id == "PEWTER_POKECENTER" and self.pikachuPewterSleepScene then
+    Game.stack:push(TextBox.new(Game,
+      t._LooksContentText or Strings("PIKACHU looks\ncontent."), onDone))
+    return
+  end
   local bye = t._PokemonCenterFarewellText or romText(Game.data, "_PokemonCenterFarewellText", "We hope to see\nyou again!")
   local hello = t._PokemonCenterWelcomeText
                 or Strings("Welcome to our\nPOKéMON CENTER!")
@@ -2883,6 +3327,7 @@ function OverworldState:nurseHeal(onDone, npc)
   end
   -- Yellow's companion has its own beat threaded through this sequence
   local Follower = require("src.world.PikachuFollower")
+  -- YesNoChoicePokeCenter draws HEAL/CANCEL, not YES/NO (home/yes_no.asm:21)
   Game.stack:push(TextBox.new(Game, hello, nil, { choice = function(yes)
     if not yes then
       Game.stack:push(TextBox.new(Game, bye, onDone))
@@ -2927,17 +3372,36 @@ function OverworldState:nurseHeal(onDone, npc)
           -- line: it comes back on the counter facing the player
           Follower.setVisible(self, true)
           if npc then npc:facePlayer(self.player) end
-          self:finishNurseHeal(bye, onDone)
+          self:finishNurseHeal(bye, onDone, npc)
         end
       end))
     end)
-  end }))
+  end, choiceLabels = { "HEAL", "CANCEL" }, choiceBox = Theme.healCancelBox }))
 end
 
-function OverworldState:finishNurseHeal(bye, onDone)
+-- pokecenter.asm bows the nurse between the two PrintText calls (#995)
+function OverworldState:finishNurseHeal(bye, onDone, npc)
   local t = Game.data.text
   local fit = t._PokemonFightingFitText or Strings("Your POKéMON are\nfighting fit!")
-  Game.stack:push(TextBox.new(Game, fit .. "\f" .. bye, onDone))
+  Game.stack:push(TextBox.new(Game, fit, function()
+    local function farewell()
+      Game.stack:push(TextBox.new(Game, bye, function()
+        if npc then npc:facePlayer(self.player) end
+        if onDone then onDone() end
+      end))
+    end
+    if not npc then farewell() return end
+    -- engine/events/pokecenter.asm:36-39; Yellow's walk-down pose when the
+    -- sheet has it (pokeyellow engine/events/pokecenter.asm:82-88)
+    local yellow = GameVersion.isYellow()
+    npc.frameOverride = (yellow and npc.sprite.frames[3]) and 3 or 1
+    -- bubble = false is the silent world hold, this port's DelayFrames
+    self.emote = { npc = npc, frames = yellow and 40 or 20, bubble = false, onDone = function()
+      npc.frameOverride = nil
+      npc:facePlayer(self.player)
+      farewell()
+    end }
+  end))
 end
 
 -- The Cable Club link receptionist (TX_SCRIPT_CABLE_CLUB_RECEPTIONIST ->
@@ -2948,6 +3412,11 @@ end
 -- for the original serial handshake; declining prints "Please come again!"
 function OverworldState:cableClubReceptionist(onDone)
   local t = Game.data.text
+  if self.map.id == "PEWTER_POKECENTER" and self.pikachuPewterSleepScene then
+    Game.stack:push(TextBox.new(Game,
+      t._LooksContentText or Strings("PIKACHU looks\ncontent."), onDone))
+    return
+  end
   local welcome = t._CableClubNPCWelcomeText or romText(Game.data, "_CableClubNPCWelcomeText", "Welcome to the\nCable Club!")
   if not Game.save.flags.EVENT_GOT_POKEDEX then
     -- CableClubNPC .didNotConnect path before the pokedex
@@ -3016,13 +3485,40 @@ local function meetTrainerTheme(cls)
          or "Music_MeetMaleTrainer"
 end
 
+-- Public pre-trainer gate. A mod may retain continueBattle while a registered
+-- preparation screen is on top, then resume once with an optional ordered
+-- save-party index scope. The hook is cold on a no-mod boot.
+function OverworldState.prepareTrainerBattle(game, context, startBattle,
+    cancelBattle)
+  if not Runtime.wantsHook("trainer.before_battle") then
+    startBattle()
+    return false
+  end
+  local started = false
+  local function continueBattle(options)
+    if started then return false end
+    started = true
+    if type(options) == "table" and options.cancel == true then
+      if cancelBattle then cancelBattle() end
+    else
+      startBattle(options)
+    end
+    return true
+  end
+  local deferred = Runtime.call("trainer.before_battle",
+    function() return false end, game, context, continueBattle)
+  if deferred ~= true and not started then continueBattle() end
+  return deferred == true
+end
+
 -- Run the pre-battle text -> battle -> won text -> flags sequence.
 -- skipBattleText is for map scripts shaped like SilphCo11FDefaultScript
 -- (scripts/SilphCo11F.asm), which DisplayTextID the challenge line BEFORE
 -- the approach walk and then EngageMapTrainer with no further text: the
 -- caller already showed the box, so the battle starts without a second
 -- one (#869).
-function OverworldState:engageTrainer(npc, onDone, endBattleText, skipBattleText)
+function OverworldState:engageTrainer(npc, onDone, endBattleText, skipBattleText,
+                                      endBattleSound, endBattleIsReward)
   local d = npc.def
   Runtime.emit("world.trainer_engaged", { npc = npc, trainerClass = d.trainerClass,
                                           partyIndex = d.trainerParty })
@@ -3043,22 +3539,20 @@ function OverworldState:engageTrainer(npc, onDone, endBattleText, skipBattleText
                   or (header and header.won and Game.data.text[header.won])
 
   local BattleState = require("src.battle.BattleState")
-  local function startBattle()
-    -- TalkToTrainer (home/trainers.asm:88) prints the before-battle text
-    -- FIRST and only then runs `call EngageMapTrainer` / `jp
-    -- StartTrainerBattle`, so a trainer challenged on foot gets the sting
-    -- over the battle transition rather than under the dialogue.  Its
-    -- `bit BIT_SEEN_BY_TRAINER, [hl] / ret nz` guard is self.engaging
-    -- here: TrainerEngage (engine/overworld/trainer_sight.asm:224) already
-    -- started the sting before the "!" bubble on the sight path, so it
-    -- must not restart.  Script-driven challenges (gyms.lua leaders,
-    -- scripts/SilphCo11F.asm:269 Giovanni, scripts/FightingDojo.asm:122)
-    -- all `call EngageMapTrainer` too, and reach this same path (#764).
-    if not self.engaging then
-      local theme = meetTrainerTheme(d.trainerClass)
-      if theme then require("src.core.Music").play(Game.data, theme) end
-    end
-    local battle = BattleState.newTrainer(Game, d.trainerClass, d.trainerParty)
+  local stingPlayed = false
+  -- home/trainers.asm:109 prints, :123 engages (BIT_SEEN_BY_TRAINER =
+  -- self.engaging), then home/text_script.asm:96 waits for A (#764, #1683)
+  local function playMeetSting()
+    if stingPlayed or self.engaging then return end
+    stingPlayed = true
+    local theme = meetTrainerTheme(d.trainerClass)
+    if theme then require("src.core.Music").play(Game.data, theme) end
+  end
+  local function startBattle(options)
+    self.cancelledTrainerSight = nil
+    playMeetSting()
+    local battle = BattleState.newTrainer(Game, d.trainerClass, d.trainerParty,
+      options)
     battle.checkpointOrigin = {
       kind = "trainer_encounter",
       map = self.map.id,
@@ -3076,6 +3570,13 @@ function OverworldState:engageTrainer(npc, onDone, endBattleText, skipBattleText
     -- cuts (#282).  Substituted here because BattleState:say takes finished
     -- text, while TextBox expanded the {PLAYER}/{RIVAL} tokens itself.
     battle.endBattleText = wonText and TextBox.substitute(Game, wonText) or nil
+    -- the badge jingle rides the armed line's first page on the battle
+    -- screen (sound_get_item_1 in _TX_PRE dialogue; see gyms.lua) (#1606)
+    battle.endBattleSound = endBattleText ~= nil and endBattleSound or nil
+    -- one truth for both checkVictoryRewards call sites; endBattleIsReward
+    -- = false marks an armed line that is NOT the victories dialogue (#1606)
+    battle.rewardDialogueShown = endBattleText ~= nil
+                                 and endBattleIsReward ~= false
     battle.onFinish = function(result)
       if result == "win" then
         Game.save.defeatedTrainers[npc.id] = true
@@ -3085,7 +3586,8 @@ function OverworldState:engageTrainer(npc, onDone, endBattleText, skipBattleText
         -- checkVictoryRewards pushes the badge/prize box and starts the map's
         -- onVictory script UNDER whatever runs next, so the player still sees
         -- EndBattle (now inside the battle), then the reward, then AfterBattle
-        self:checkVictoryRewards(d.trainerClass, d.trainerParty)
+        self:checkVictoryRewards(d.trainerClass, d.trainerParty,
+                                 battle.rewardDialogueShown)
         self:afterBattle(result, battle)
         if onDone then onDone() end
       else
@@ -3095,10 +3597,32 @@ function OverworldState:engageTrainer(npc, onDone, endBattleText, skipBattleText
     end
     self:pushBattle(battle)
   end
+  local function prepareBattle()
+    if not Runtime.wantsHook("trainer.before_battle") then
+      startBattle()
+      return
+    end
+    OverworldState.prepareTrainerBattle(Game, {
+      trainerClass = d.trainerClass,
+      partyIndex = d.trainerParty or 1,
+      mapId = self.map.id,
+      npcId = npc.id,
+    }, startBattle, function()
+      if self.player then
+        self.cancelledTrainerSight = {
+          npcId = npc.id,
+          playerX = self.player.cellX,
+          playerY = self.player.cellY,
+        }
+      end
+      if onDone then onDone() end
+    end)
+  end
   if skipBattleText then
-    startBattle()
+    prepareBattle()
   else
-    Game.stack:push(TextBox.new(Game, battleText, startBattle))
+    Game.stack:push(TextBox.new(Game, battleText, prepareBattle,
+      { auto = { wait = true, delay = 0, sound = playMeetSting } }))
   end
 end
 
@@ -3118,12 +3642,67 @@ local function giveVictoryItem(reward)
   return true
 end
 
+-- A gym's reward text is not one box.  Every gym script carries a sound
+-- command right after the FIRST label of each reward group
+-- (scripts/PewterGym.asm PewterGymBrockReceivedBoulderBadgeText's
+-- sound_level_up, PewterGymReceivedTM34Text's sound_get_item_1, and the
+-- equivalents in the other seven), and home/text.asm TextCommand_SOUND
+-- plays it only once that page has typed out, then blocks on
+-- WaitForSoundToFinish before the next page prints.  So the pages
+-- accumulate and split into separate boxes at the sound points, each box
+-- chained off the previous one's button press.
+local function rewardChain()
+  local chain = { boxes = {}, pending = {} }
+  function chain.flush(sound)
+    if #chain.pending > 0 then
+      table.insert(chain.boxes,
+        { text = table.concat(chain.pending, "\f"), sound = sound })
+      chain.pending = {}
+    end
+  end
+  -- one reward group; `sound` rides its first page, where the scripts put it
+  function chain.add(labels, sound)
+    local text = Game.data.text or {}
+    local n = 0
+    for _, label in ipairs(labels or {}) do
+      if text[label] and text[label] ~= "" then
+        table.insert(chain.pending, text[label])
+        n = n + 1
+        if n == 1 and sound then chain.flush(sound) end
+      end
+    end
+  end
+  -- the synthetic stand-in line a reward with no `dialogue` shows
+  function chain.line(str, sound)
+    table.insert(chain.pending, str)
+    if sound then chain.flush(sound) end
+  end
+  function chain.push(done)
+    chain.flush()
+    local function step(i)
+      local box = chain.boxes[i]
+      if not box then
+        if done then done() end
+        return
+      end
+      local opts = box.sound and TextBox.soundOpts(Game, box.sound) or nil
+      Game.stack:push(TextBox.new(Game, box.text,
+        function() step(i + 1) end, opts))
+    end
+    step(1)
+  end
+  return chain
+end
+
 -- Badges/items awarded after specific battles (data/scripts/victories.lua).
 -- `deactivate` retires unfought gym/dojo trainers the way the originals'
 -- SetEvent / SetEventRange do after the leader victory.
 -- `hide` is { { mapId, objName }, ... } -- HideObject on those toggles
 -- (e.g. Brock victory clears PEWTERCITY_YOUNGSTER / ROUTE22_RIVAL1).
-function OverworldState:checkVictoryRewards(trainerClass, partyIndex)
+-- `shownOnBattleScreen`: `dialogue` already rode the battle screen as the
+-- armed end-battle line (scripts/CeruleanGym.asm:113)
+function OverworldState:checkVictoryRewards(trainerClass, partyIndex,
+                                            shownOnBattleScreen)
   local victories = require("data.scripts.victories")
   local reward = victories[trainerClass .. "#" .. tostring(partyIndex or 1)]
   if not reward then return self:runVictoryHook() end
@@ -3154,44 +3733,33 @@ function OverworldState:checkVictoryRewards(trainerClass, partyIndex)
     -- retries the hand-over later (offerGymTm via gyms.lua)
     tmGiven = giveVictoryItem(reward)
   end
-  local lines = {}
+  local chain = rewardChain()
   if reward.dialogue then
-    local text = Game.data.text or {}
-    for _, label in ipairs(reward.dialogue) do
-      if text[label] and text[label] ~= "" then
-        table.insert(lines, text[label])
-      end
+    if not shownOnBattleScreen then
+      chain.add(reward.dialogue, reward.badgeSound)
     end
     if reward.item then
-      for _, label in ipairs(reward.tmPre or {}) do
-        if text[label] and text[label] ~= "" then
-          table.insert(lines, text[label])
-        end
-      end
+      chain.add(reward.tmPre)
       if tmGiven then
-        for _, label in ipairs(reward.tmDialogue or {}) do
-          if text[label] and text[label] ~= "" then
-            table.insert(lines, text[label])
-          end
-        end
-      elseif reward.noRoom and text[reward.noRoom] and text[reward.noRoom] ~= "" then
-        table.insert(lines, text[reward.noRoom])
+        chain.add(reward.tmDialogue, reward.tmSound)
+      else
+        chain.add({ reward.noRoom })
       end
     end
   elseif reward.badge or reward.item then
     if reward.badge then
       local name = Game.data.items[reward.badge] and Game.data.items[reward.badge].name
                    or reward.badge
-      table.insert(lines, Strings("%s received\nthe %s!", Game.save.player.name, name))
+      chain.line(Strings("%s received\nthe %s!", Game.save.player.name, name),
+                 reward.badgeSound)
     end
     if tmGiven then
       local name = Game.stringBuffer or reward.item
-      table.insert(lines, Strings("%s received\n%s!", Game.save.player.name, name))
+      chain.line(Strings("%s received\n%s!", Game.save.player.name, name),
+                 reward.tmSound)
     end
   end
-  if #lines > 0 then
-    Game.stack:push(TextBox.new(Game, table.concat(lines, "\f")))
-  end
+  chain.push()
   self:runVictoryHook()
 end
 
@@ -3202,24 +3770,14 @@ end
 -- show again, then the same GiveItem check decides between the received
 -- lines and the "make room" text.
 function OverworldState:offerGymTm(reward, done)
-  local text = Game.data.text or {}
-  local lines = {}
-  local function addLine(label)
-    if label and text[label] and text[label] ~= "" then
-      table.insert(lines, text[label])
-    end
-  end
-  for _, label in ipairs(reward.tmPre or {}) do addLine(label) end
+  local chain = rewardChain()
+  chain.add(reward.tmPre)
   if giveVictoryItem(reward) then
-    for _, label in ipairs(reward.tmDialogue or {}) do addLine(label) end
+    chain.add(reward.tmDialogue, reward.tmSound)
   else
-    addLine(reward.noRoom)
+    chain.add({ reward.noRoom })
   end
-  if #lines > 0 then
-    Game.stack:push(TextBox.new(Game, table.concat(lines, "\f"), done))
-  elseif done then
-    done()
-  end
+  chain.push(done)
 end
 
 -- pokered reloads the map after every battle, re-running the map
@@ -3267,11 +3825,18 @@ function OverworldState:checkTrainerSight()
   if self.player.moving or self.engaging then return end
   if Game.stack:top() ~= self then return end
   local p = self.player
+  local cancelled = self.cancelledTrainerSight
+  if cancelled and (cancelled.playerX ~= p.cellX
+      or cancelled.playerY ~= p.cellY) then
+    self.cancelledTrainerSight = nil
+    cancelled = nil
+  end
   for _, npc in ipairs(self.npcs) do
     local d = npc.def
     -- CheckFightingMapTrainers engages ANY aligned trainer sprite,
     -- walkers included (they sight between steps)
     if d.trainerClass and not npc.moving
+       and not (cancelled and cancelled.npcId == npc.id)
        and not self:trainerDefeated(npc)
        and not mapScripts.talkScript(self.map.id, d.text)
        and trainerSpriteOnScreen(npc, p) then
@@ -3363,6 +3928,7 @@ function OverworldState:showMapText(textConst, npc, onDone)
     -- the winning contribution's rows run as their owner (09 §4.4): mod:
     -- field routing, strict dispatch and error reports all read the source
     self.runner:run(script, { npc = npc, onDone = onDone,
+      checkpointOnDone = onDone and "release_npc" or nil,
       source = mapScripts.talkSource(self.map.id, textConst) })
     return
   end
@@ -3414,7 +3980,7 @@ function OverworldState:applyFieldPoison()
   local queue = {}
   for _, mon in ipairs(fainted) do
     local name = mon.nickname or Game.data.pokemon[mon.species].name
-    table.insert(queue, Strings("%s\nfainted!", name))
+    table.insert(queue, romText(Game.data, "_PokemonFaintedText", "%s\nfainted!", name))
   end
   local alive = false
   for _, mon in ipairs(save.party) do
@@ -3472,6 +4038,21 @@ end
 
 function OverworldState:onStepComplete()
   local p = self.player
+  -- Defaulted: a state built without the constructor (a mod harness, a test
+  -- fixture) reaches this before :234 ever ran, and nil > 0 threw the step.
+  local grace = self.wildEncounterGraceSteps or 0
+  if grace > 0 then
+    self.wildEncounterGraceSteps = grace - 1
+  end
+  -- TryDoWildEncounter's first guard is `ld a, [wNPCMovementScriptPointerTable
+  -- Num] / and a / ret nz` (engine/battle/wild_encounters.asm:3-9): a step the
+  -- player did not take never rolls, which is why Oak's escort walks to the lab
+  -- through Pallet's grass without being jumped.
+  local runner = self.runner
+  local scripted = (runner and runner.isRunning and runner:isRunning())
+    or #(self.scriptMoves or {}) > 0
+    or self.engaging or self.emote or self.teleportOut
+  local suppressWildEncounter = grace > 0 or scripted and true or false
   self.todSteps = (self.todSteps or 0) + 1
   -- UpdatePikachuHappinessAndMood rides the step counter (poison.asm)
   require("src.world.PikachuFollower").onStep(Game.save)
@@ -3581,16 +4162,20 @@ function OverworldState:onStepComplete()
     end
   end
 
-  -- wild encounters in grass, on water while surfing, or -- on indoor
-  -- maps whose tileset is not FOREST -- on EVERY tile
+  -- wild encounters in grass, on water while surfing (at the map's water
+  -- rate, which is 0 on every indoor map), or -- on indoor maps whose
+  -- tileset is not FOREST -- on every other tile
   -- (wild_encounters.asm: caves, towers, the Mansion, Power Plant)
+  -- The cooldown is checked after all other step processing so repel and
+  -- movement systems continue to advance during the protected steps.
+  if suppressWildEncounter then return end
   local encDef = Game.data.encounters[self.map.id]
   local enc
   local indoor = Game.data.field.indoorEncounters
-  if p.surfing and encDef and encDef.water and self.map:isWaterCell(p.cellX, p.cellY) then
-    enc = self:rollEncounter({ grass = encDef.water }, "water")
-  elseif self.map:isGrassCell(p.cellX, p.cellY) then
+  if self.map:isGrassCell(p.cellX, p.cellY) then
     enc = self:rollEncounter(encDef, "grass")
+  elseif p.surfing and self.map:isWaterCell(p.cellX, p.cellY) then
+    enc = self:rollEncounter({ grass = encDef and encDef.water }, "water")
   elseif indoor and self.map.def.index >= indoor.firstIndoorMap
          and self.map.def.tileset ~= indoor.excludedTileset then
     enc = self:rollEncounter(encDef, "indoor")
@@ -3711,10 +4296,10 @@ function OverworldState:checkBadgeGate()
         if Game.save.inventory[g.badge] then
           if not Game.save.flags[passedFlag] then
             Game.save.flags[passedFlag] = true
-            -- Route22GateGuardGoRightAheadText plays sound_get_item_1
-            require("src.core.Sound").play(Game.data, "Get_Item1")
+            -- Route22GateGuardGoRightAheadText carries sound_get_item_1
             Game.stack:push(TextBox.new(Game,
-              t["_" .. g.passText] or Strings("Go right ahead!")))
+              t["_" .. g.passText] or Strings("Go right ahead!"),
+              nil, TextBox.soundOpts(Game, "Get_Item1")))
           end
           return false
         end
@@ -3723,7 +4308,7 @@ function OverworldState:checkBadgeGate()
         Game.stack:push(TextBox.new(Game,
           (t["_" .. g.failText] or Strings("You don't have the\nBOULDERBADGE yet!"))
           .. (t._Route22GateGuardICantLetYouPassText or ""), function()
-            self:scriptMove(p, "down", 1)
+            self:scriptMove(p, "down", 1, nil, { collide = true })
           end))
         return true
       end
@@ -3739,11 +4324,11 @@ function OverworldState:checkBadgeGate()
                           and Game.data.items[guard.badge].name or guard.badge
         if Game.save.inventory[guard.badge] then
           Game.save.flags[guard.event] = true
-          -- Route23OhThatIsTheBadgeText plays sound_get_item_1
-          require("src.core.Sound").play(Game.data, "Get_Item1")
+          -- Route23OhThatIsTheBadgeText carries sound_get_item_1
           local text = (t["_" .. g.passText] or
                         Strings("Oh! That is the\n{RAM}!")):gsub("{RAM:wNameBuffer}", badgeName)
-          Game.stack:push(TextBox.new(Game, text))
+          Game.stack:push(TextBox.new(Game, text,
+            nil, TextBox.soundOpts(Game, "Get_Item1")))
           return false
         end
         -- Route23YouDontHaveTheBadgeYetText plays SFX_DENIED
@@ -3751,7 +4336,7 @@ function OverworldState:checkBadgeGate()
         local text = (t["_" .. g.failText] or
                       Strings("You don't have the\n{RAM} yet!")):gsub("{RAM:wNameBuffer}", badgeName)
         Game.stack:push(TextBox.new(Game, text, function()
-          self:scriptMove(p, "down", 1)
+          self:scriptMove(p, "down", 1, nil, { collide = true })
         end))
         return true
       end
@@ -3791,7 +4376,7 @@ function OverworldState:checkForcedMovement()
             function()
               local back = ({ up = "down", down = "up",
                               left = "right", right = "left" })[p.facing]
-              self:scriptMove(p, back, 1)
+              self:scriptMove(p, back, 1, nil, { collide = true })
             end))
           return true
         end
@@ -3832,6 +4417,7 @@ function OverworldState:checkSeafoamCurrent()
         -- push so the B3F stair warps underfoot cannot bounce you back.
         self.forcedWarp = false
         require("src.core.Sound").play(Game.data, "Collision")
+        -- home/overworld.asm:1891
         self:scriptMove(p, "up", c.y == 17 and 2 or 1)
         return true
       end
@@ -3970,22 +4556,21 @@ end
 -- battle is optional; when given, Oak's Lab OPP_RIVAL1 losses skip the
 -- blackout (pret HandlePlayerBlackOut) so the map script can HealParty.
 function OverworldState:afterBattle(result, battle)
+  -- .battleOccurred tail-jumps to EnterMap (home/overworld.asm:353), so
+  -- ClearVariablesOnEnterMap zeroes wStepCounter on every battle return
+  Game.save.poisonSteps = 0
+  if battle and battle.kind == "wild" then
+    self.wildEncounterGraceSteps = WILD_ENCOUNTER_GRACE_STEPS
+  end
   local lead = Game.save.party[1]
   Logger.info("battle over: %s (lead %s %d/%d)", tostring(result),
               lead and lead.species or "-", lead and lead.hp or 0,
               lead and lead.stats.hp or 0)
-  local Evolution = require("src.pokemon.Evolution")
-  local function evolutions()
-    -- Only mons that gained a level this battle (EXP.ALL included).
-    -- Scanning the whole party re-offered B-cancelled evolutions forever (#213).
-    Evolution.checkParty(Game, nil, battle and battle.leveledUp)
-  end
   if result == "lose" then
     local oaksLabRival = battle and battle.oppClass == "OPP_RIVAL1"
       and self.map and self.map.id == "OAKS_LAB"
     if oaksLabRival then
       -- stay in the lab; OaksLabRivalEndBattleScript heals and continues
-      evolutions()
       return
     end
     -- blackout: revive the party at the last heal point; half the
@@ -3998,7 +4583,7 @@ function OverworldState:afterBattle(result, battle)
       / (FieldDefaults.world(Game.data, "blackoutMoneyDivisor") or 2))
     Runtime.emit("world.blacked_out",
       { save = Game.save, healTarget = self:healPoint() })
-    self:warpToHealPoint(evolutions)
+    self:warpToHealPoint()
   else
     -- EndTrainerBattle sets BIT_CUR_MAP_LOADED_1 (home/trainers.asm), which
     -- re-runs the floor's door callback: beating the last Rocket Hideout guard
@@ -4008,7 +4593,6 @@ function OverworldState:afterBattle(result, battle)
     if Game.save.safari and Game.save.safari.balls <= 0 then
       self:safariGameOver(Strings("PA: You're out of\nSAFARI BALLs!"))
     end
-    evolutions()
   end
 end
 
@@ -4025,6 +4609,30 @@ function OverworldState:restoreBattleContinuation(battle, origin)
     battle.onFinish = function(result) self:afterBattle(result, battle) end
     return true
   end
+  if origin.kind == "script_battle" then
+    if origin.battleKind ~= battle.kind
+        or (battle.kind == "trainer" and (origin.trainerClass ~= battle.oppClass
+          or origin.partyIndex ~= (battle.partyIndex or 1)))
+        or type(origin.script) ~= "table" or type(origin.pc) ~= "number" then
+      return false
+    end
+    local npc = origin.npcId and self.npcPool and self.npcPool[origin.npcId] or nil
+    if origin.npcId and not npc then return false end
+    battle.onFinish = function(result)
+      local runner = self.runner
+      if not runner or runner:isRunning() then
+        runner = ScriptRunner.new(game, self)
+        self.runner = runner
+      end
+      runner:run(origin.script, {
+        npc = npc,
+        source = origin.source,
+        resumeBattle = { result = result, battle = battle },
+      }, origin.pc)
+    end
+    battle.checkpointScriptContinuation = true
+    return true
+  end
   if origin.kind ~= "trainer_encounter" or battle.kind ~= "trainer"
       or origin.trainerClass ~= battle.oppClass
       or origin.partyIndex ~= (battle.partyIndex or 1)
@@ -4035,7 +4643,8 @@ function OverworldState:restoreBattleContinuation(battle, origin)
     if result == "win" then
       game.save.defeatedTrainers[origin.npcId] = true
       if origin.event then game.save.flags[origin.event] = true end
-      self:checkVictoryRewards(battle.oppClass, battle.partyIndex)
+      self:checkVictoryRewards(battle.oppClass, battle.partyIndex,
+                               battle.rewardDialogueShown)
     end
     self:afterBattle(result, battle)
     self.engaging = false
@@ -4193,6 +4802,14 @@ function OverworldState:startWarpTo(mapId, x, y, facing, onDone, opts)
   self.doorWarp = nil
   local arriveWarp = self.arriveWarp
   self.arriveWarp = nil
+  -- PlayMapChangeSound (home/overworld.asm) plays before the tail-called
+  -- GBFadeOutToBlack, so the SFX starts with the fade (#961)
+  if doorWarp then
+    local dest = Game.data.maps[mapId]
+    local outdoor = dest and Map.isOutdoor(dest)
+    require("src.core.Sound").play(Game.data,
+                                   outdoor and "Go_Outside" or "Go_Inside")
+  end
   Game.stack:push(Transition.new(Game, function()
     self:setMap(mapId, x, y, facing or "down", opts)
     -- the departure-side hide from flyAnim/teleportOut ends here, on the new
@@ -4200,6 +4817,11 @@ function OverworldState:startWarpTo(mapId, x, y, facing, onDone, opts)
     -- down, so the player is never drawable mid-fade nor standing bare on the
     -- landing frame (#916)
     self.playerHidden = false
+    -- setMap respawned a follower under the player; _LeaveMapAnim's Func_1510
+    -- suppression runs until EnterMapAnim lands (home/pikachu.asm:1)
+    if self.pikachuWarpHidden then
+      require("src.world.PikachuFollower").setVisible(self, false)
+    end
     -- The warp we land ON stays inert for the completed-step check until we
     -- physically step off it, so a warp whose destination cell is itself a
     -- warp cannot bounce us straight back (elevator cars, stacked stair/door
@@ -4229,9 +4851,6 @@ function OverworldState:startWarpTo(mapId, x, y, facing, onDone, opts)
       self.player.spinDrop = true
     end
     if doorWarp then
-      local outdoor = Map.isOutdoor(self.map.def)
-      require("src.core.Sound").play(Game.data,
-                                     outdoor and "Go_Outside" or "Go_Inside")
       -- PlayerStepOutFromDoor (engine/overworld/auto_movement.asm): any
       -- warp that lands on a door tile auto-steps south once, indoor or
       -- outdoor. Auto-walk leaves the mat, so the arrival disable
@@ -4349,13 +4968,14 @@ end
 -- scripted movement
 -- -------------------------------------------------------------------------
 
-function OverworldState:scriptMove(entity, dir, tiles, onDone)
+function OverworldState:scriptMove(entity, dir, tiles, onDone, opts)
   table.insert(self.scriptMoves, {
     entity = entity, dir = dir, remaining = tiles, onDone = onDone,
+    collide = opts and opts.collide or nil,
   })
 end
 
--- A step-in-place beat: the entity plays one walk-cycle animation (16
+-- A step-in-place beat: the entity plays one walk-cycle animation (32
 -- frames) without translating, keeping its current facing.  Ports the
 -- NPC_CHANGE_FACING movement byte (engine/overworld/movement.asm
 -- ChangeFacingDirection -> zero-delta TryWalking), used for Oak marching
@@ -4368,7 +4988,7 @@ end
 
 -- Advance scripted moves in two phases so a chained step (a new move
 -- queued by a completing move's onDone) begins the SAME frame the
--- previous one ends -- back-to-back 16-frame tiles like the GB's
+-- previous one ends -- back-to-back 32-frame tiles like the GB's
 -- simulated-joypad / NPC scripted movement, with no idle frame between
 -- tiles.  Phase 1 retires finished moves (which may chain new ones);
 -- phase 2 then starts every not-yet-moving move.
@@ -4391,14 +5011,23 @@ function OverworldState:updateScriptMoves()
         e.moving = true
         e.marching = true
         e.progress = 0
+        mv.remaining = mv.remaining - 1
+      elseif mv.collide
+             and not Collision.canMove(self.map, self.entities, e, mv.dir) then
+        -- home/overworld.asm:1224
+        e.facing = mv.dir
+        mv.remaining = 0
       else
         e.facing = mv.dir
         local tx, ty = Collision.target(e.cellX, e.cellY, mv.dir)
         e.targetX, e.targetY = tx, ty
+        -- a simulated d-pad press runs at the CURRENT walk/bike speed, not
+        -- whatever the last real step left behind -- home/overworld.asm:276
+        if e.stepLength then e.stepFramesCur = e:stepLength() end
         e.moving = true
         e.progress = 0
+        mv.remaining = mv.remaining - 1
       end
-      mv.remaining = mv.remaining - 1
     end
   end
   -- march_in_place toggles: re-arm the in-place cycle each time it ends.
@@ -4555,6 +5184,7 @@ function OverworldState:drawWorld()
     for _, nb in ipairs(self.neighbors) do
       nb.map.renderer:drawMapOnly(cam.x - nb.ox, bgY - nb.oy, vw, vh)
     end
+    self:drawShipAnim(cam.x, bgY)
   end
   -- per-billboard SGB palette source; only needed (and only paid for) when
   -- tilting.  nil headless / on stale palettes -> billboards go uncolorized.
@@ -4799,9 +5429,15 @@ function OverworldState:drawWorld()
           end
         end
         local quad = self.rodQuads[oam.tile]
-        -- the sprite's top-left is 4px above its cell (SpriteRenderer:draw)
-        local rx = p.px - cam.x + oam.dx
-        local ry = p.py - cam.y - 4 + oam.dy
+        -- Place the rod against the active sprite's anchored top-left.  The
+        -- vanilla result is still (px-cam, py-cam-4), while custom larger
+        -- sheets keep the rod attached to their feet.
+        -- Fishing always uses the on-foot player sheet; read its fields
+        -- directly so this FX pass does not advance pose-side animation.
+        local sprite, px, py = p.sprite, p.px, p.py
+        local sx, sy = sprite:getScreenOrigin(px, py, cam.x, cam.y)
+        local rx = sx + oam.dx
+        local ry = sy + oam.dy
         love.graphics.setColor(1, 1, 1, 1)
         if quad and oam.flip then
           love.graphics.draw(self.rodImg, quad, rx + 8, ry, 0, -1, 1)
@@ -4820,7 +5456,7 @@ function OverworldState:drawWorld()
     -- point projects under the pipeline's own camera.  That is the direct
     -- analogue of what :billboard does for tilt, and it keeps exactly one
     -- copy of every effect: the closures above are the ones that run.
-    local pw, ph = love.graphics.getDimensions()
+    local _, _, pw, ph = Game.renderer:playfieldRect()
     local pscale = Zoom.scale(Game.renderer:fitScale())
     local ctx = {
       state = self, cam = cam, vw = vw, vh = vh, bgY = bgY,
@@ -4905,6 +5541,7 @@ function OverworldState:drawWorld()
       for _, nb in ipairs(self.neighbors) do
         nb.map.renderer:drawMapOnly(cam.x - nb.ox, bgY - nb.oy, vw, vh)
       end
+      self:drawShipAnim(cam.x, bgY)
     end
   end
 

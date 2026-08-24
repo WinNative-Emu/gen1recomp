@@ -57,9 +57,10 @@ end
 package.loaded["src.core.Platform"] = nil
 package.loaded["src.import.RomImporter"] = nil
 RomImporter = require("src.import.RomImporter")
+local GameVersion = require("src.core.GameVersion")
 
 local function clearSavesInbox()
-  for _, ver in ipairs({ "red", "blue", "yellow" }) do
+  for _, ver in ipairs(GameVersion.ORDER) do
     local dir = "imports/saves/" .. ver
     for _, name in ipairs(love.filesystem.getDirectoryItems(dir) or {}) do
       love.filesystem.remove(dir .. "/" .. name)
@@ -135,6 +136,10 @@ check(createdDirs["imports/saves/blue"] == true,
   "RES-01: ensureSavesInboxDir creates imports/saves/blue/")
 check(createdDirs["imports/saves/yellow"] == true,
   "RES-01: ensureSavesInboxDir creates imports/saves/yellow/")
+check(createdDirs["imports/saves/gold"] == true,
+  "RES-01: ensureSavesInboxDir creates imports/saves/gold/")
+check(createdDirs["imports/saves/silver"] == true,
+  "RES-01: ensureSavesInboxDir creates imports/saves/silver/")
 
 -- NXSAV-02: notice/hint includes save dir + per-game imports/saves/<version>/ MTP path
 ri = freshImporter()

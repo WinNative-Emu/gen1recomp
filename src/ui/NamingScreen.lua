@@ -67,6 +67,7 @@ function NamingScreen.new(game, opts)
   self.game = game
   self.title = opts.title or Strings("YOUR NAME?")
   self.presets = opts.presets
+  self.introBox = opts.introBox
   self.maxLen = opts.maxLen or 7
   self.default = opts.default
   self.onDone = opts.onDone
@@ -79,20 +80,40 @@ end
 function NamingScreen:enter()
   if self.presets and #self.presets > 0 then
     local Menu = require("src.ui.Menu")
-    local items = { { label = Strings("NEW NAME") } }
+    -- engine/movie/oak_speech/oak_speech2.asm:1
+    self.choosing = true
+    self.isOpaque = false
+    local items = { {
+      label = Strings("NEW NAME"),
+      onSelect = function()
+        self.choosing = nil
+        self.isOpaque = nil
+      end,
+    } }
     for _, preset in ipairs(self.presets) do
       table.insert(items, {
         label = preset,
         onSelect = function()
           -- the menu already popped itself; pop the naming screen too
           self.game.stack:pop()
-          if self.onDone then self.onDone(preset) end
+          if self.onDone then self.onDone(preset, false) end
         end,
       })
     end
-    self.game.stack:push(Menu.new(self.game, items, {
-      tx = 4, ty = 0, tw = 12, th = #items * 2 + 2, cancelable = false,
-    }))
+    if self.introBox then
+      -- DisplayIntroNameTextBox (oak_speech2.asm:162): TextBoxBorder at
+      -- hlcoord 0,0 with b=$a c=$9, "NAME" at hlcoord 3,0, list at hlcoord 2,2
+      -- TextBoxBorder's b = $a is a fixed 12-row box, whatever the preset
+      -- list's length (oak_speech2.asm:163-166)
+      self.game.stack:push(Menu.new(self.game, items, {
+        tx = 0, ty = 0, tw = 11, th = 12,
+        itemY = 2, title = Strings("NAME"), cancelable = false,
+      }))
+    else
+      self.game.stack:push(Menu.new(self.game, items, {
+        tx = 4, ty = 0, tw = 12, th = #items * 2 + 2, cancelable = false,
+      }))
+    end
   end
 end
 
@@ -116,7 +137,7 @@ function NamingScreen:confirm()
   end
   Sound.play(self.game.data, "Press_AB")
   self.game.stack:pop()
-  if self.onDone then self.onDone(name) end
+  if self.onDone then self.onDone(name, true) end
 end
 
 function NamingScreen:grid()
@@ -193,6 +214,7 @@ function NamingScreen:update(dt)
 end
 
 function NamingScreen:draw()
+  if self.choosing then return end
   love.graphics.setColor(1, 1, 1, 1)
   love.graphics.rectangle("fill", 0, 0, 160, 144)
   love.graphics.setColor(0, 0, 0, 1)

@@ -3,7 +3,7 @@
 Every GitHub Release that includes Switch support ships an SD-ready zip:
 `gen1recomp-*-switch.zip`. Extract it at the root of your microSD (install
 or update, same steps), launch with **title override**, then import your
-own legal `.gb` ROM.
+own legal `.gb` / `.gbc` ROM.
 
 > You need a console that can run Switch homebrew (custom firmware / hbmenu).
 > This project does not help you set that up.
@@ -91,13 +91,14 @@ Do **not** launch from the Album applet path for normal play.
 
 This project ships **no** game data. On first launch:
 
-1. Put your own legally obtained Pokémon Red, Blue (`.gb`), or Yellow
-   (`.gbc`) dump into `switch/gen1recomp/pokemon-love2d/imports/` (the
-   launcher also shows the live save-dir path). All three can sit in the
+1. Put your own legally obtained Pokémon Red, Blue (`.gb`), Yellow, Gold, or
+   Silver (`.gbc`) dump into `switch/gen1recomp/pokemon-love2d/imports/` (the
+   launcher also shows the live save-dir path). All five can sit in the
    same folder.
-2. Use **Scan again** on that game's tab (Red / Blue / Yellow). Rescan
-   matches by ROM SHA-1 for the open tab only. A Red dump never imports
-   from the Yellow tab (and vice versa).
+2. Use **Scan again** on that game's tab (Red / Blue / Yellow / Gold /
+   Silver). Rescan matches by ROM SHA-1 for the open tab only. A Red dump
+   never imports from the Yellow tab (and vice versa). Gold and Silver are
+   Beta in the launcher; a clean US dump of either is enough to Play.
 
 ## 5. Import / Export a raw `.sav`
 
@@ -109,10 +110,15 @@ SD / FTP, same transfer methods as ROMs. Paths are **per game**:
 | Red | `imports/saves/red/` | `exports/red/` |
 | Blue | `imports/saves/blue/` | `exports/blue/` |
 | Yellow | `imports/saves/yellow/` | `exports/yellow/` |
+| Gold | `imports/saves/gold/` | `exports/gold/` |
+| Silver | `imports/saves/silver/` | `exports/silver/` |
 
-(Under the save dir `pokemon-love2d/`. The zip already creates these folders.)
+(Under the save dir `pokemon-love2d/`. The zip already creates these folders.
+Gold and Silver cart `.sav` import/export is not supported yet -- the folders
+exist so MTP browsing matches the other games. Gold and Silver progress still
+saves in-engine.)
 
-1. Copy a Gen1 `.sav` (32 KB) into that game's inbox under the save dir
+1. Copy a Gen 1 `.sav` (32 KB) into that game's inbox under the save dir
    ([switch-transfer.md](switch-transfer.md)).
 2. With the game's ROM already imported, open **that game's tab** →
    **SAVE FILES** → **Import save**. Only that folder is scanned.
@@ -177,7 +183,6 @@ hotkeys (`2`/`3`/`5` are claimed before any mod pipeline hotkey runs).
 | ----- | -------------- | ------------------- |
 | Select + **A** | `2` | COLORS |
 | Select + **B** | `3` | TILT |
-| Select + **Y** | `5` | GBC FX |
 | Select + **X** | `6` | Mod pipeline hotkey (if a mod registers `6`) |
 | Select + **L** | `7` | Mod pipeline hotkey (if a mod registers `7`) |
 

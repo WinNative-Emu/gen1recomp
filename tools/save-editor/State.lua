@@ -26,6 +26,7 @@ function State.new()
     -- App.load's opts; nil in a bare `love . --editor` run.
     version = nil,
     slotId = nil,
+    modRoots = nil,
     -- Hosted inside the launcher process (Edit on a save row) rather than a
     -- standalone `--editor` window: Close returns to the launcher instead of
     -- quitting, and App calls onClose() to do it.
@@ -43,6 +44,8 @@ function State.new()
     partyOffset = 0,       -- roster scroll position (#715)
     inspectorScroll = 0,   -- MonEditor body pixel scroll (#715)
     editingMon = nil,   -- reference into party or a box
+    nicknameDraft = nil,    -- text being typed in the inspector's nickname field
+    nicknameMon = nil,      -- the mon the draft belongs to (nil for none)
     -- species picker overlay: nil when closed, otherwise { query, offset }
     -- plus mode = "box-add" when it is adding to a box instead of changing a
     -- species (Ops.openBoxAddPicker).  Modal in the literal sense -- App

@@ -66,6 +66,8 @@ local pendingBuf -- a current-gen buffer popped from the worker but not yet
 -- the jingle ends.
 local musicHeld = false
 
+local suspended = false
+
 -- ---------------------------------------------------------------------------
 -- worker management
 -- ---------------------------------------------------------------------------
@@ -113,6 +115,8 @@ local function slimAudio(data)
     bankOrder = audio.bankOrder,
     waveBanks = audio.waveBanks,
     noiseHeaders = audio.noiseHeaders,
+    generation = audio.generation,
+    drumkits = audio.drumkits,
   }
 end
 
@@ -148,12 +152,15 @@ local MUSIC_FILL_INITIAL = 4
 local MUSIC_FILL_PER_CALL = 3
 
 local function fillSync(limit)
+  if suspended then return end
   local music = currentMusic
   if not music or not music.engine or music.engine:finished() then return end
   limit = limit or MUSIC_FILL_PER_CALL
-  local free = music.source:getFreeBufferCount()
+  local ok, free = pcall(music.source.getFreeBufferCount, music.source)
+  if not ok or type(free) ~= "number" then return end
   while free > 0 and limit > 0 and not music.engine:finished() do
-    music.source:queue(ChipSynth.soundData(music.engine, MUSIC_BUFFER_SAMPLES, 2))
+    local sd = ChipSynth.soundData(music.engine, MUSIC_BUFFER_SAMPLES, 2)
+    if not pcall(music.source.queue, music.source, sd) then return end
     free = free - 1
     limit = limit - 1
   end
@@ -172,7 +179,7 @@ local function playMusicSync(data, header, allowLoops)
   currentMusic = { source = source, engine = engine, threaded = false,
                    started = true, finished = false }
   fillSync(MUSIC_FILL_INITIAL)
-  if not musicHeld then source:play() end
+  if not musicHeld then pcall(source.play, source) end
   return source
 end
 
@@ -181,6 +188,9 @@ end
 -- ---------------------------------------------------------------------------
 
 local musicGen = 0
+-- bumps when SOUND flips so already-queued PCM (old pan) is dropped rather
+-- than playing out the ~6s stall-tolerance queue (#1471)
+local stereoEpoch = 0
 
 function ChipAudio.playMusic(data, header, allowLoops)
   if not ensureWorker() then
@@ -201,9 +211,12 @@ function ChipAudio.playMusic(data, header, allowLoops)
   cmdCh:push({ cmd = "play", gen = gen, header = header,
                allowLoops = allowLoops, audio = slimAudio(data),
                channelVolumes = ChipSynth.getChannelVolumes(),
-               channelPitches = ChipSynth.getChannelPitches() })
+               channelPitches = ChipSynth.getChannelPitches(),
+               stereo = ChipSynth.getStereo(),
+               stereoEpoch = stereoEpoch })
   currentMusic = { source = source, gen = gen, threaded = true,
-                   started = false, finished = false }
+                   started = false, finished = false,
+                   stereoEpoch = stereoEpoch }
   -- playback starts in update() once the first buffer arrives (~1 frame)
   return source
 end
@@ -212,7 +225,8 @@ local function pushChannelMix()
   if workerReady and cmdCh then
     cmdCh:push({ cmd = "channelMix",
                  volumes = ChipSynth.getChannelVolumes(),
-                 pitches = ChipSynth.getChannelPitches() })
+                 pitches = ChipSynth.getChannelPitches(),
+                 stereo = ChipSynth.getStereo() })
   end
 end
 
@@ -226,12 +240,16 @@ local function updateThreaded()
     return
   end
   while true do
-    local free = m.source:getFreeBufferCount()
+    local okFree, free = pcall(m.source.getFreeBufferCount, m.source)
+    if not okFree or type(free) ~= "number" then return end
     local buf = pendingBuf
     if buf then pendingBuf = nil else buf = outCh:pop() end
     if not buf then break end
     if buf.gen ~= m.gen then
       -- stale buffer from a superseded song: drop it
+    elseif buf.stereoEpoch ~= nil and m.stereoEpoch ~= nil
+        and buf.stereoEpoch ~= m.stereoEpoch then
+      -- stale pan mix from before a live SOUND toggle (#1471)
     elseif buf.done then
       m.finished = true
     elseif buf.error then
@@ -239,7 +257,7 @@ local function updateThreaded()
       m.finished = true
     elseif buf.sd then
       if free > 0 then
-        m.source:queue(buf.sd)
+        if not pcall(m.source.queue, m.source, buf.sd) then return end
       else
         pendingBuf = buf -- Source full; hold this one for next frame
         break
@@ -247,7 +265,9 @@ local function updateThreaded()
     end
   end
   if not m.started and not musicHeld then
-    if (MUSIC_BUFFER_COUNT - m.source:getFreeBufferCount()) > 0 then
+    local okFree, free = pcall(m.source.getFreeBufferCount, m.source)
+    if okFree and type(free) == "number"
+       and (MUSIC_BUFFER_COUNT - free) > 0 then
       pcall(function() m.source:play() end)
       m.started = true
     end
@@ -255,6 +275,7 @@ local function updateThreaded()
 end
 
 function ChipAudio.update()
+  if suspended then return end
   local m = currentMusic
   if not m then return end
   if m.threaded then
@@ -268,13 +289,16 @@ end
 -- Music has handled intentional fanfare pauses, so it never fights the normal
 -- pause/resume behavior.
 function ChipAudio.ensureMusicPlaying()
+  if suspended then return end
   local m = currentMusic
   if not m or m.finished or musicHeld then return end
   if m.threaded then
     if not m.started then return end
     local ok, playing = pcall(function() return m.source:isPlaying() end)
-    if ok and not playing
-       and (MUSIC_BUFFER_COUNT - m.source:getFreeBufferCount()) > 0 then
+    if not ok or playing then return end
+    local okFree, free = pcall(m.source.getFreeBufferCount, m.source)
+    if okFree and type(free) == "number"
+       and (MUSIC_BUFFER_COUNT - free) > 0 then
       pcall(function() m.source:play() end)
     end
   else
@@ -347,7 +371,80 @@ function ChipAudio.shutdown()
   if workerReady and cmdCh then cmdCh:push({ cmd = "quit" }) end
   if worker then pcall(function() worker:wait() end) end
   worker, cmdCh, outCh = nil, nil, nil
-  workerReady = false
+  workerReady = nil
+end
+
+function ChipAudio.currentSource()
+  return currentMusic and currentMusic.source
+end
+
+function ChipAudio.setSuspended(flag)
+  suspended = not not flag
+end
+
+function ChipAudio.isSuspended()
+  return suspended
+end
+
+function ChipAudio.rebuildPlayback()
+  local m = currentMusic
+  if not m then return true end
+  if not (love.audio and love.audio.newQueueableSource) then return false end
+  local ok, source = pcall(
+    love.audio.newQueueableSource, SAMPLE_RATE, 16, 2, MUSIC_BUFFER_COUNT)
+  if not ok or not source then return false end
+  pendingBuf = nil
+  local old = m.source
+  m.source = source
+  m.started = false
+  if old then pcall(old.stop, old) end
+  if not m.threaded then
+    fillSync(MUSIC_FILL_INITIAL)
+    if not musicHeld then pcall(source.play, source) end
+    m.started = true
+  end
+  return true
+end
+
+function ChipAudio.setStereo(enabled)
+  enabled = not not enabled
+  if ChipSynth.getStereo() == enabled then return end
+  ChipSynth.setStereo(enabled)
+  stereoEpoch = stereoEpoch + 1
+  local m = currentMusic
+  if m and m.engine then
+    ChipSynth.applyStereo(m.engine)
+  end
+  if workerReady and cmdCh then
+    cmdCh:push({ cmd = "channelMix",
+                 volumes = ChipSynth.getChannelVolumes(),
+                 pitches = ChipSynth.getChannelPitches(),
+                 stereo = enabled,
+                 stereoEpoch = stereoEpoch })
+  end
+  if not m then return end
+  pendingBuf = nil
+  if outCh then outCh:clear() end
+  m.stereoEpoch = stereoEpoch
+  -- QueueableSource cannot unqueue; swap so the ~6s stall-tolerance buffers
+  -- (mixed under the previous pan) do not have to play out first (#1471)
+  if not love.audio then return end
+  local ok, source = pcall(
+    love.audio.newQueueableSource, SAMPLE_RATE, 16, 2, MUSIC_BUFFER_COUNT)
+  if not ok or not source then return end
+  local old = m.source
+  m.source = source
+  m.started = false
+  if old then pcall(old.stop, old) end
+  if not m.threaded then
+    fillSync(MUSIC_FILL_INITIAL)
+    if not musicHeld then pcall(source.play, source) end
+    m.started = true
+  end
+end
+
+function ChipAudio.getStereo()
+  return ChipSynth.getStereo()
 end
 
 -- Runtime mix for one hardware channel (1..4).  Takes effect on the next
@@ -401,6 +498,8 @@ end
 -- program (20 §2 cache contract, chip music row)
 Assets.register(ChipAudio.invalidate)
 
+require("src.core.SessionLifecycle").registerProcessShutdown(ChipAudio.shutdown)
+
 -- ---------------------------------------------------------------------------
 -- one-shot effects (SFX, cries, low-health alarm): synchronous static Sources
 -- ---------------------------------------------------------------------------
@@ -411,11 +510,12 @@ local function renderEffect(data, header, options)
   return love.audio.newSource(sd, "static")
 end
 
-function ChipAudio.newSfx(data, name, pitch, tempo, header)
+function ChipAudio.newSfx(data, name, pitch, tempo, header, plainFrames)
   header = header or data.audio.sfx[name]
   return renderEffect(data, header, {
     frequencyOffset = pitch or 0,
     frameTicks = 0x80 + (tempo or 0x80),
+    plainFrames = plainFrames,
   })
 end
 
@@ -435,13 +535,18 @@ end
 -- a mono Source is spatialized by OpenAL at the listener position and spreads
 -- over every output an interface has (#626).  The siren itself is unchanged,
 -- both channels carry the same sample.
+-- PlayDanger (audio/engine.asm:531) counts one frame per call and resets with
+-- `cp 30 / jr c, .noreset`, so the cycle is frames 0..29 and the buffer holds
+-- exactly two of them.  DangerSoundHigh goes in on the `and a / jr z, .begin`
+-- frame 0 and DangerSoundLow on the `cp 16 / jr z, .halfway` frame 16, so the
+-- high tone owns 0..15 and the low tone 16..29.
 function ChipAudio.newLowHealthAlarm()
-  local samples = math.floor(SAMPLE_RATE * 62 / 60)
+  local samples = math.floor(SAMPLE_RATE * 60 / 60)
   local data = love.sound.newSoundData(samples, SAMPLE_RATE, 16, 2)
   local phase = 0
   for index = 0, samples - 1 do
-    local frame = math.floor(index * 60 / SAMPLE_RATE) % 31
-    local register = frame < 11 and 0x750 or 0x6EE
+    local frame = math.floor(index * 60 / SAMPLE_RATE) % 30
+    local register = frame < 16 and 0x750 or 0x6EE
     local frequency = 131072 / (2048 - register)
     phase = (phase + frequency / SAMPLE_RATE) % 1
     local value = (phase < 0.5 and 1 or -1) * 0.25

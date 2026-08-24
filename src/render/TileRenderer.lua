@@ -760,6 +760,8 @@ function TileRenderer:markCellBottomRedraw(cx, cy, camX, camY, colors)
   end
 end
 
+
+
 local WINDOW_MARGIN = 8 -- tiles of slack kept around the view between refills
 
 function TileRenderer:ensureWindow(camX, camY, vw, vh)
@@ -949,6 +951,13 @@ function TileRenderer.invalidate()
   frameImages = {}
   toggleImages = {}
   stripData = {}
+  -- RED++ per-map atlases are large Images; clear and release so an
+  -- in-process Play → launcher → Play loop does not keep every prior
+  -- session's bake in VRAM / Lua heap.
+  for key, img in pairs(gbcAtlasCache) do
+    safeRelease(img)
+    gbcAtlasCache[key] = nil
+  end
 end
 
 Assets.register(TileRenderer.invalidate)

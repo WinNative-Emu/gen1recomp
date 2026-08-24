@@ -91,11 +91,19 @@ mkdir -p "$GAME_SRC"
 (cd "$ROOT" && zip -q -9 -r "$WORK/game-payload.zip" \
   main.lua conf.lua src libs data assets tools/save-editor \
   tools/rom_manifest.json tools/rom_manifest_blue.json \
+  tools/rom_manifest_yellow.json tools/rom_manifest_gold.json \
+  tools/rom_manifest_silver.json tools/rom_manifest_crystal.json \
   -x '*.DS_Store' 'data/generated/*' 'assets/generated/*')
-if unzip -Z1 "$WORK/game-payload.zip" \
-    | grep -Eq '^(data|assets)/generated/[^/]+|^(data|assets)/generated/.+/'; then
-  fail "payload unexpectedly contains generated ROM data"
-fi
+payload_list="$(unzip -Z1 "$WORK/game-payload.zip")"
+printf '%s\n' "$payload_list" \
+  | grep -Eq '^(data|assets)/generated/[^/]+|^(data|assets)/generated/.+/' \
+  && fail "payload unexpectedly contains generated ROM data"
+printf '%s\n' "$payload_list" | grep -qxF "tools/rom_manifest_gold.json" \
+  || fail "payload is missing tools/rom_manifest_gold.json"
+printf '%s\n' "$payload_list" | grep -qxF "tools/rom_manifest_silver.json" \
+  || fail "payload is missing tools/rom_manifest_silver.json"
+printf '%s\n' "$payload_list" | grep -qxF "tools/rom_manifest_crystal.json" \
+  || fail "payload is missing tools/rom_manifest_crystal.json"
 unzip -q "$WORK/game-payload.zip" -d "$GAME_SRC"
 rm -f "$WORK/game-payload.zip"
 
@@ -190,6 +198,26 @@ get_controls
 [ -f "${controlfolder}/mod_${CFW_NAME}.txt" ] && source "${controlfolder}/mod_${CFW_NAME}.txt"
 
 GAMEDIR="$SHDIR/gen1recomp"
+# Anbernic stock keeps the launcher and the game folder side by side, so the
+# SHDIR-relative path above is correct there and is tried first.
+#
+# Other firmwares (muOS, and PortMaster's layout on several devices) keep
+# launcher scripts and port data in SEPARATE trees -- scripts under roms/ports,
+# data under ports -- so the sibling folder holds no game.
+#
+# Probe for the BINARY, not the directory: on a split layout this script has
+# usually already created "$SHDIR/gen1recomp/conf" and log.txt on an earlier
+# failed run (see mkdir/tee below), so an existence test matches a decoy of our
+# own making. Stock is unaffected -- its sibling holds the real binary and wins
+# on the first test.
+if [ ! -f "$GAMEDIR/bin/love.aarch64" ]; then
+  for candidate in "/$directory/ports/gen1recomp" \
+                   "/mnt/sdcard/ports/gen1recomp" \
+                   "/mnt/mmc/ports/gen1recomp" \
+                   "/roms/ports/gen1recomp"; do
+    if [ -f "$candidate/bin/love.aarch64" ]; then GAMEDIR="$candidate"; break; fi
+  done
+fi
 CONFDIR="$GAMEDIR/conf"
 mkdir -p "$CONFDIR"
 
@@ -202,11 +230,6 @@ export LD_LIBRARY_PATH="$GAMEDIR/libs.aarch64:${LD_LIBRARY_PATH:-}"
 export SDL_GAMECONTROLLERCONFIG="${sdl_controllerconfig:-}"
 # Mali / H700: prefer GLES where available
 export LOVE_GRAPHICS_USE_OPENGLES="${LOVE_GRAPHICS_USE_OPENGLES:-1}"
-# Same GPU class as a phone, but getOS() here says "Linux", so the Android
-# gate (issue #136) would not fire on its own: refuse GBC FX explicitly.
-# Hides the OPTIONS row, pins the level to OFF, and heals a level already
-# persisted in options.lua.
-export POKEPORT_GBCFX="${POKEPORT_GBCFX:-0}"
 
 $ESUDO chmod a+x ./bin/love.aarch64 2>/dev/null || chmod a+x ./bin/love.aarch64
 $ESUDO chmod 666 /dev/uinput 2>/dev/null || true
@@ -296,13 +319,6 @@ Native LÖVE 11.5 port of gen1recomp for Anbernic RG34XXSP on
 | Start / Select | Play or Choose ROM |
 
 In-game controls use the normal PortMaster / SDL pad map (rebind under OPTIONS → CONTROLS).
-
-### Display options
-
-GBC FX is disabled on this device (the H700's Mali GPU compiles that present
-pass and then shows a black frame), so the OPTIONS row is hidden. COLORS,
-TILT, ZOOM, VOID FILL and MAX FPS all work. To try it anyway, launch with
-`POKEPORT_GBCFX=1`.
 
 ### First run
 

@@ -34,7 +34,7 @@ local SEP = package.config:sub(1, 1)
 
 -- Cache-relative paths are prefixed with this before every read/write, so a
 -- version's import lands under its GameVersion.cachePrefix (red/, blue/,
--- yellow/).  The launcher sets it per import / per readiness check; it stays
+-- yellow/, gold/).  The launcher sets it per import / per readiness check; it stays
 -- "" outside those flows.  Runtime *reads* (require / newImage) do NOT go
 -- through here -- CacheFs.mountVersion overlays the active version's subtree
 -- onto the un-prefixed paths instead.
@@ -116,6 +116,8 @@ local physfsMountFn = nil
 local function resolveMount()
   if physfsMountFn ~= nil then return physfsMountFn end
   physfsMountFn = false
+  if Platform.isUWP() then return physfsMountFn end
+  if love and love.filesystem and love.filesystem._mounts then return physfsMountFn end
   local ok, ffi = pcall(require, "ffi")
   if not ok then return physfsMountFn end
   pcall(ffi.cdef,
@@ -159,6 +161,8 @@ local physfsUnmountFn = nil
 local function resolveUnmount()
   if physfsUnmountFn ~= nil then return physfsUnmountFn end
   physfsUnmountFn = false
+  if Platform.isUWP() then return physfsUnmountFn end
+  if love and love.filesystem and love.filesystem._mounts then return physfsUnmountFn end
   local ok, ffi = pcall(require, "ffi")
   if not ok then return physfsUnmountFn end
   pcall(ffi.cdef, "int PHYSFS_unmount(const char *oldDir);")
@@ -283,6 +287,43 @@ function CacheFs.write(rel, data)
   return love.filesystem.write(rel, data)
 end
 
+-- Open a cache-relative file for streaming replacement. The returned handle
+-- has write(bytes) and close() methods and follows the same portable/save-dir
+-- routing as CacheFs.write without forcing the caller to hold the whole file
+-- in one Lua string.
+function CacheFs.openWrite(rel)
+  rel = withPrefix(rel)
+  local root = CacheFs.root()
+  if root then
+    ensureParents(root, rel)
+    local f, err = io.open(realPath(root, rel), "wb")
+    if not f then return nil, err end
+    return {
+      write = function(_, data)
+        local ok, writeErr = f:write(data)
+        if not ok then return nil, writeErr end
+        return true
+      end,
+      close = function() f:close() end,
+    }
+  end
+  if not (love and love.filesystem and love.filesystem.newFile) then
+    return nil, "streaming cache writes are unavailable"
+  end
+  local parent = rel:match("^(.*)/[^/]+$")
+  if parent and not love.filesystem.createDirectory(parent) then
+    local info = love.filesystem.getInfo(parent)
+    local reason = info and ("a " .. info.type .. " already exists there")
+      or "unknown reason"
+    return nil, "could not create " .. parent .. ": " .. reason
+  end
+  local file, makeErr = love.filesystem.newFile(rel)
+  if not file then return nil, makeErr or "could not create cache file" end
+  local ok, openErr = file:open("w")
+  if not ok then return nil, openErr or "could not open cache file" end
+  return file
+end
+
 -- read cache-relative `rel`; returns the bytes or nil
 function CacheFs.read(rel)
   rel = withPrefix(rel)
@@ -301,7 +342,7 @@ function CacheFs.read(rel)
 end
 
 -- Read cache-relative `rel` for the active GameVersion when PhysFS may hide
--- prefixed Blue/Yellow trees (fused NX mount hole). Same order Data:load
+-- prefixed Blue/Yellow/Gold trees (fused NX mount hole). Same order Data:load
 -- already used: active version prefix with CacheFs.prefix cleared, then
 -- `rel` under the caller's CacheFs.prefix. Returns the bytes or nil.
 function CacheFs.readActive(rel)
@@ -316,6 +357,32 @@ function CacheFs.readActive(rel)
   end
   if type(bytes) == "string" then return bytes end
   return nil
+end
+
+-- Load a generated Lua table the way Data:load does: versioned save-dir
+-- bytes first (gold/data/generated/maps.lua), then the un-prefixed path.
+-- Game2/World used love.filesystem.load("data/generated/...") which misses
+-- on fused NX when the gold/ overlay mount fails -- intro art still loads
+-- via NxAssetOverlay, but oak_speech.lua / font.lua / maps.lua do not.
+function CacheFs.loadActive(rel)
+  local bytes = CacheFs.readActive(rel)
+  if type(bytes) == "string" then
+    local GameVersion = require("src.core.GameVersion")
+    local loader = loadstring or load
+    local chunk, err = loader(bytes, "@" .. GameVersion.cachePrefix() .. rel)
+    if not chunk then return nil, err end
+    local ok, value = pcall(chunk)
+    if not ok then return nil, value end
+    return value
+  end
+  if love and love.filesystem and love.filesystem.load then
+    local chunk, err = love.filesystem.load(rel)
+    if not chunk then return nil, err end
+    local ok, value = pcall(chunk)
+    if not ok then return nil, value end
+    return value
+  end
+  return nil, "Could not open file " .. rel .. ". Does not exist."
 end
 
 -- does cache-relative `rel` exist as a file?
@@ -547,14 +614,18 @@ function CacheFs.mountVersion(version)
   return true
 end
 
--- Undo mountVersion.  A process normally mounts exactly one version and then
--- boots it, but the launcher can open the save editor on one game's save,
--- close it, and press Play on another: with the first version's subtree
--- still prepended, the other's require("data.generated.*") and generated
--- art would silently resolve to the first game's files.  Callers must also
--- drop the generated modules from package.loaded
--- (src.core.Data:unloadGenerated) -- unmounting alone only fixes the read
--- path, not what require already cached.
+-- Undo mountVersion in LIFO order relative to mountVersion: generated-tree
+-- overlays first (assets, then data -- reverse of mountGeneratedTrees), then
+-- the version folder.  PHYSFS resolves by stack order; peeling the wrong
+-- layer first can leave another version's generated files winning a name.
+--
+-- A process normally mounts exactly one version and then boots it, but the
+-- launcher can open the save editor on one game's save, close it, and press
+-- Play on another: with the first version's subtree still prepended, the
+-- other's require("data.generated.*") and generated art would silently
+-- resolve to the first game's files.  Callers must also drop the generated
+-- modules from package.loaded (src.core.Data:unloadGenerated) -- unmounting
+-- alone only fixes the read path, not what require already cached.
 --
 -- Returns true when nothing was mounted or the unmount took.
 function CacheFs.unmountVersion(version)
@@ -566,6 +637,16 @@ function CacheFs.unmountVersion(version)
     base = love.filesystem.getSaveDirectory()
   end
   local done = false
+  -- LIFO vs mountGeneratedTrees: assets/generated, then data/generated.
+  if love.filesystem and love.filesystem.unmount then
+    local generated = {
+      prefix .. "assets/generated",
+      prefix .. "data/generated",
+    }
+    for _, src in ipairs(generated) do
+      done = love.filesystem.unmount(src) or done
+    end
+  end
   local fn = resolveUnmount()
   if fn and base then
     done = fn(base .. SEP .. sub) or done

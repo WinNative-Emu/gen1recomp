@@ -24,6 +24,7 @@ import org.libsdl.app.SDLActivity;
 
 import java.io.BufferedInputStream;
 import java.io.BufferedOutputStream;
+import java.io.ByteArrayOutputStream;
 import java.io.File;
 import java.io.FileInputStream;
 import java.io.FileNotFoundException;
@@ -36,6 +37,7 @@ import java.net.URL;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 
 import android.Manifest;
@@ -43,6 +45,7 @@ import android.app.AlarmManager;
 import android.app.AlertDialog;
 import android.app.PendingIntent;
 import android.content.Context;
+import android.content.ClipData;
 import android.content.DialogInterface;
 import android.content.Intent;
 import android.content.SharedPreferences;
@@ -53,6 +56,10 @@ import android.hardware.Sensor;
 import android.hardware.SensorEvent;
 import android.hardware.SensorEventListener;
 import android.hardware.SensorManager;
+import android.media.AudioAttributes;
+import android.media.AudioDeviceCallback;
+import android.media.AudioDeviceInfo;
+import android.media.AudioFocusRequest;
 import android.media.AudioManager;
 import android.net.Uri;
 import android.os.Bundle;
@@ -60,13 +67,18 @@ import android.os.Environment;
 import android.os.Handler;
 import android.os.Looper;
 import android.os.Vibrator;
+import android.provider.Settings;
 import android.util.Log;
 import android.util.DisplayMetrics;
-import android.view.*;
+import android.content.pm.ShortcutInfo;
+import android.content.pm.ShortcutManager;
 import android.content.pm.PackageManager;
+import android.graphics.drawable.Icon;
+import android.view.*;
 
 import androidx.annotation.Keep;
 import androidx.core.app.ActivityCompat;
+import androidx.core.content.FileProvider;
 
 public class GameActivity extends SDLActivity {
     private static DisplayMetrics metrics = null;
@@ -90,6 +102,9 @@ public class GameActivity extends SDLActivity {
     private static final String PICKED_ROM_FILENAME = "picked_rom.gb";
     private static final String PICKED_MOD_FILENAME = "picked_mod.zip";
     private static final String PICKED_SAVE_FILENAME = "picked_save.sav";
+    // Kept separate from the game-ROM destination so a dependency pick can
+    // never be mistaken for a game import when the picker returns on Android.
+    private static final String PICKED_REQUIRED_IMPORT_FILENAME = "picked_required_import.bin";
     private static final String PENDING_EXPORT_FILENAME = "pending_export.sav";
     private static final String EXPORT_DONE_FILENAME = "export_done.flag";
     // Written when a SAF pick cannot be read at all, with the destination
@@ -143,15 +158,51 @@ public class GameActivity extends SDLActivity {
 
     private static native void nativeSetDefaultStreamValues(int sampleRate, int framesPerBurst);
 
+    private static native void nativeAudioFocusLost();
+
+    private static native void nativeAudioFocusGained();
+
+    private static native void nativeAudioDeviceChanged();
+
+    private static native void nativeOnGameIntent(String game);
+
+    private static String initialGame = "";
+
+    private AudioManager.OnAudioFocusChangeListener audioFocusListener = null;
+    private Object audioFocusRequest = null;
+    private Object audioDeviceCallback = null;
+    private boolean audioFocusHeld = false;
+    private boolean audioDeviceCallbackPrimed = false;
+
+    /**
+     * Native libraries required by an optional Android host extension.
+     *
+     * Subclasses supplied by another product flavor may override this method.
+     * The libraries are loaded after LÖVE's dependencies and before liblove;
+     * liblove must remain last because SDL treats the final entry as the main
+     * shared object.
+     */
+    protected String[] getHostLibraries() {
+        return new String[0];
+    }
+
     @Override
     protected String[] getLibraries() {
-        return new String[] {
-            "c++_shared",
-            "mpg123",
-            "openal",
-            "love",
-        };
+        String[] hostLibraries = getHostLibraries();
+        String[] libraries = new String[hostLibraries.length + 4];
+        libraries[0] = "c++_shared";
+        libraries[1] = "mpg123";
+        libraries[2] = "openal";
+        System.arraycopy(hostLibraries, 0, libraries, 3, hostLibraries.length);
+        libraries[libraries.length - 1] = "love";
+        return libraries;
     }
+
+    protected void onHostCreateBeforeSDL(Bundle savedInstanceState) {}
+    protected void onHostCreateAfterSDL(Bundle savedInstanceState) {}
+    protected void onHostResume() {}
+    protected void onHostPause() {}
+    protected void onHostDestroy() {}
 
     @Override
     protected String getMainSharedObject() {
@@ -186,13 +237,19 @@ public class GameActivity extends SDLActivity {
         embed = getResources().getBoolean(R.bool.embed);
         needToCopyGameInArchive = embed;
 
+        Intent startIntent = getIntent();
+        if (startIntent != null && startIntent.hasExtra("game")) {
+            initialGame = startIntent.getStringExtra("game");
+        }
         if (!embed) {
             Intent intent = getIntent();
             handleIntent(intent);
             intent.setData(null);
         }
 
+        onHostCreateBeforeSDL(savedInstanceState);
         super.onCreate(savedInstanceState);
+        onHostCreateAfterSDL(savedInstanceState);
         if (savedInstanceState != null) {
             // Restore the in-flight SAF destinations, so a pick that returns to
             // a recreated activity still lands under the basename it asked for.
@@ -217,6 +274,12 @@ public class GameActivity extends SDLActivity {
     @Override
     protected void onNewIntent(Intent intent) {
         Log.d("GameActivity", "onNewIntent() with " + intent);
+        if (intent != null && intent.hasExtra("game")) {
+            String game = intent.getStringExtra("game");
+            if (game != null && !game.isEmpty()) {
+                nativeOnGameIntent(game);
+            }
+        }
         if (!embed) {
             handleIntent(intent);
             resetNative();
@@ -337,27 +400,58 @@ public class GameActivity extends SDLActivity {
 
     @Override
     protected void onDestroy() {
+        secondaryHostResumed = false;
         if (vibrator != null) {
             Log.d("GameActivity", "Cancelling vibration");
             vibrator.cancel();
         }
+        unregisterSecondaryDisplayListener();
+        teardownSecondaryDisplay();
+        secondaryEnabled = false;
+        synchronized (secondaryFrameLock) { secondaryFrame = null; }
+        unregisterAudioDeviceCallback();
+        abandonAudioFocus();
+        onHostDestroy();
         super.onDestroy();
     }
 
     @Override
     protected void onPause() {
+        secondaryHostResumed = false;
         if (vibrator != null) {
             Log.d("GameActivity", "Cancelling vibration");
             vibrator.cancel();
         }
+        unregisterSecondaryDisplayListener();
         teardownSecondaryDisplay();
+        unregisterAudioDeviceCallback();
+        abandonAudioFocus();
+        onHostPause();
         super.onPause();
     }
 
     @Override
     public void onResume() {
         super.onResume();
+        secondaryHostResumed = true;
+        onHostResume();
+        requestGameAudioFocus();
+        registerAudioDeviceCallback();
+        refreshDualScreenDisplayMode();
+        if (secondaryEnabled) registerSecondaryDisplayListener();
         setupSecondaryDisplay();
+    }
+
+    @Override
+    public boolean dispatchKeyEvent(KeyEvent event) {
+        // AYN's panel toggle emits virtual Right Shift, which SDL maps to a
+        // gameplay button. The setting is absent on other Android devices.
+        if (secondaryEnabled && dualScreenDisplayMode != -1
+                && event.getKeyCode() == KeyEvent.KEYCODE_SHIFT_RIGHT
+                && event.getDeviceId() == KeyCharacterMap.VIRTUAL_KEYBOARD) {
+            return true;
+        }
+        return super.dispatchKeyEvent(event);
     }
 
     /**
@@ -479,7 +573,8 @@ public class GameActivity extends SDLActivity {
      * picker-agnostic and unchanged.
      *
      * @param destFilename basename under the app save identity (e.g.
-     *                     picked_rom.gb, picked_mod.zip, picked_save.sav)
+     *                     picked_rom.gb, picked_mod.zip, picked_save.sav, or
+     *                     picked_required_import.bin)
      */
     /** Legacy single-argument entry; resolves the save dir itself. */
     @Keep
@@ -510,6 +605,11 @@ public class GameActivity extends SDLActivity {
             Intent intent = new Intent(Intent.ACTION_OPEN_DOCUMENT);
             intent.addCategory(Intent.CATEGORY_OPENABLE);
             intent.setType("*/*");
+            // The Storage Access Framework grants the returned content URI
+            // directly to this activity. Request the read grant explicitly as
+            // well: Android 13's scoped storage deliberately does not expose
+            // arbitrary paths or require broad media/storage permissions.
+            intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
             try {
                 self.startActivityForResult(intent, FILE_PICKER_REQUEST_CODE);
                 return true;
@@ -522,6 +622,7 @@ public class GameActivity extends SDLActivity {
         Intent intent = new Intent(Intent.ACTION_GET_CONTENT);
         intent.addCategory(Intent.CATEGORY_OPENABLE);
         intent.setType("*/*");
+        intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
         try {
             self.startActivityForResult(
                 Intent.createChooser(intent, "Choose a file"),
@@ -549,6 +650,12 @@ public class GameActivity extends SDLActivity {
     @Keep
     public static boolean showSaveFilePicker() {
         return showFilePicker(PICKED_SAVE_FILENAME);
+    }
+
+    /** Required-mod-file wrapper used by love.system.pickFile("required_import"). */
+    @Keep
+    public static boolean showRequiredImportFilePicker() {
+        return showFilePicker(PICKED_REQUIRED_IMPORT_FILENAME);
     }
 
     /**
@@ -592,6 +699,192 @@ public class GameActivity extends SDLActivity {
     }
 
     /**
+     * Stages a verified release APK in cache and asks Android's Package
+     * Installer to update this package. This never silently installs an APK:
+     * the platform owns both the unknown-sources consent and final install
+     * confirmation. `updateRoot` comes from the native save directory and is
+     * checked before any file is read, so a Lua caller cannot turn this into a
+     * general-purpose local-file sharing bridge.
+     */
+    @Keep
+    public static boolean installApk(final String sourcePath, final String updateRoot) {
+        final GameActivity self = (GameActivity) mSingleton;
+        if (self == null || sourcePath == null || updateRoot == null) return false;
+        final File source;
+        try {
+            source = new File(sourcePath).getCanonicalFile();
+            File root = new File(updateRoot, "updates").getCanonicalFile();
+            String rootPath = root.getPath() + File.separator;
+            if (!source.getPath().startsWith(rootPath)
+                    || !source.isFile() || source.length() == 0
+                    || !source.getName().matches("gen1recomp-[0-9]+\\.[0-9]+\\.[0-9]+-android\\.apk")) {
+                return false;
+            }
+        } catch (IOException e) {
+            Log.d("GameActivity", "invalid update APK path: " + e.getMessage());
+            return false;
+        }
+
+        // Android 8+ lets the user decide whether this app is trusted to
+        // request package installs. Send them to the per-app setting first;
+        // they deliberately tap Install again after granting it.
+        if (android.os.Build.VERSION.SDK_INT >= 26
+                && !self.getPackageManager().canRequestPackageInstalls()) {
+            try {
+                Intent settings = new Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES,
+                    Uri.parse("package:" + self.getPackageName()));
+                self.startActivity(settings);
+                return true;
+            } catch (Exception e) {
+                Log.d("GameActivity", "could not open install-source settings: " + e.getMessage());
+                return false;
+            }
+        }
+
+        // Copying an APK can be large; keep both I/O and checksum-verified
+        // source access off the UI thread. The FileProvider exposes this cache
+        // child only after it has been fully written and renamed.
+        new Thread(new Runnable() {
+            @Override public void run() {
+                File stagedDir = new File(self.getCacheDir(), "full-update");
+                File partial = new File(stagedDir, "update.apk.part");
+                File staged = new File(stagedDir, "update.apk");
+                try {
+                    if (!stagedDir.exists() && !stagedDir.mkdirs()) return;
+                    copyFile(source, partial);
+                    if (staged.exists() && !staged.delete()) return;
+                    if (!partial.renameTo(staged)) return;
+                    self.runOnUiThread(new Runnable() {
+                        @Override public void run() { launchPackageInstaller(self, staged); }
+                    });
+                } catch (Exception e) {
+                    Log.d("GameActivity", "could not stage update APK: " + e.getMessage());
+                } finally {
+                    if (partial.exists()) partial.delete();
+                }
+            }
+        }, "gen1recomp-apk-stage").start();
+        return true;
+    }
+
+    private static void copyFile(File source, File destination) throws IOException {
+        InputStream in = new BufferedInputStream(new FileInputStream(source));
+        OutputStream out = new BufferedOutputStream(new FileOutputStream(destination));
+        try {
+            byte[] buffer = new byte[32768];
+            int count;
+            while ((count = in.read(buffer)) != -1) out.write(buffer, 0, count);
+        } finally {
+            try { out.close(); } catch (IOException ignored) {}
+            try { in.close(); } catch (IOException ignored) {}
+        }
+    }
+
+    private static void launchPackageInstaller(GameActivity activity, File apk) {
+        try {
+            Context context = activity.getApplicationContext();
+            Uri uri = FileProvider.getUriForFile(context,
+                context.getPackageName() + ".full_update_provider", apk);
+            Intent install = new Intent(Intent.ACTION_INSTALL_PACKAGE);
+            install.setData(uri);
+            install.setClipData(ClipData.newRawUri("apk", uri));
+            install.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+            activity.startActivity(install);
+        } catch (Exception e) {
+            Log.d("GameActivity", "could not open package installer: " + e.getMessage());
+        }
+    }
+
+    @Keep
+    public static String getLaunchGame() {
+        return initialGame != null ? initialGame : "";
+    }
+
+    @Keep
+    public static boolean updateAppShortcuts(String[] readyVersions) {
+        GameActivity self = (GameActivity) mSingleton;
+        if (self == null) return false;
+        if (android.os.Build.VERSION.SDK_INT < 25) return false;
+        try {
+            Context context = self.getApplicationContext();
+            ShortcutManager shortcutManager = context.getSystemService(ShortcutManager.class);
+            if (shortcutManager == null) return false;
+
+            if (readyVersions == null || readyVersions.length == 0) {
+                shortcutManager.removeAllDynamicShortcuts();
+                return true;
+            }
+
+            List<ShortcutInfo> shortcuts = new ArrayList<>();
+            int maxShortcuts = Math.min(readyVersions.length, 4);
+
+            for (int i = 0; i < maxShortcuts; i++) {
+                String ver = readyVersions[i];
+                if (ver == null || ver.isEmpty()) continue;
+                String lower = ver.toLowerCase();
+                String shortLabel;
+                String longLabel;
+                int iconResId;
+
+                switch (lower) {
+                    case "red":
+                        shortLabel = "Play Red";
+                        longLabel = "Play Red";
+                        iconResId = context.getResources().getIdentifier("ic_shortcut_red", "drawable", context.getPackageName());
+                        break;
+                    case "blue":
+                        shortLabel = "Play Blue";
+                        longLabel = "Play Blue";
+                        iconResId = context.getResources().getIdentifier("ic_shortcut_blue", "drawable", context.getPackageName());
+                        break;
+                    case "yellow":
+                        shortLabel = "Play Yellow";
+                        longLabel = "Play Yellow";
+                        iconResId = context.getResources().getIdentifier("ic_shortcut_yellow", "drawable", context.getPackageName());
+                        break;
+                    case "gold":
+                        shortLabel = "Play Gold";
+                        longLabel = "Play Gold";
+                        iconResId = context.getResources().getIdentifier("ic_shortcut_gold", "drawable", context.getPackageName());
+                        break;
+                    default:
+                        String capitalized = lower.substring(0, 1).toUpperCase() + lower.substring(1);
+                        shortLabel = "Play " + capitalized;
+                        longLabel = "Play " + capitalized;
+                        iconResId = context.getResources().getIdentifier("ic_shortcut_" + lower, "drawable", context.getPackageName());
+                        break;
+                }
+
+                if (iconResId == 0) {
+                    iconResId = context.getResources().getIdentifier("ic_launcher_foreground", "drawable", context.getPackageName());
+                }
+
+                Intent intent = new Intent(context, GameActivity.class);
+                intent.setAction(Intent.ACTION_VIEW);
+                intent.putExtra("game", lower);
+                intent.addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP);
+
+                ShortcutInfo.Builder builder = new ShortcutInfo.Builder(context, "shortcut_" + lower)
+                    .setShortLabel(shortLabel)
+                    .setLongLabel(longLabel)
+                    .setIntent(intent);
+
+                if (iconResId != 0) {
+                    builder.setIcon(Icon.createWithResource(context, iconResId));
+                }
+
+                shortcuts.add(builder.build());
+            }
+
+            shortcutManager.setDynamicShortcuts(shortcuts);
+            return true;
+        } catch (Exception e) {
+            Log.d("GameActivity", "could not update shortcuts: " + e.getMessage());
+            return false;
+        }
+    }
+
+    /**
      * Blocking HTTPS GET into destPath, exposed as love.system.httpDownload
      * and used by src/core/HostShell.lua. Android ships no curl binary, so
      * every remote fetch the desktop builds do with curl (mod index feeds,
@@ -606,6 +899,45 @@ public class GameActivity extends SDLActivity {
      * The body lands in a .part file and is renamed only once complete, so a
      * dropped connection can never leave a half file the caller trusts.
      */
+    /**
+     * TLS client sockets, exposed as love.system.tls* and used by the
+     * Archipelago mod for wss:// rooms. LuaSocket speaks TCP only, so without
+     * these a hosted room -- every one of which is TLS-only -- is unreachable
+     * from the game. The work is in TlsSocket; these are the static entry
+     * points, because the JNI side resolves methods on the activity's own
+     * class (see love/src/common/android.cpp) and cannot see other classes
+     * from a worker thread.
+     */
+    @Keep
+    public static int tlsOpen(String host, int port) {
+        return TlsSocket.open(host, port);
+    }
+
+    @Keep
+    public static int tlsStatus(int handle) {
+        return TlsSocket.status(handle);
+    }
+
+    @Keep
+    public static int tlsSend(int handle, byte[] data) {
+        return TlsSocket.send(handle, data);
+    }
+
+    @Keep
+    public static byte[] tlsReceive(int handle, int max) {
+        return TlsSocket.receive(handle, max);
+    }
+
+    @Keep
+    public static String tlsError(int handle) {
+        return TlsSocket.error(handle);
+    }
+
+    @Keep
+    public static void tlsClose(int handle) {
+        TlsSocket.close(handle);
+    }
+
     @Keep
     public static boolean httpDownload(String url, String destPath, String userAgent, String accept) {
         if (url == null || destPath == null) return false;
@@ -655,6 +987,219 @@ public class GameActivity extends SDLActivity {
         } finally {
             if (conn != null) conn.disconnect();
             if (tmp.exists()) tmp.delete();
+        }
+    }
+
+    /**
+     * Blocking HTTPS POST, exposed as love.system.httpPost and used by
+     * src/core/HostShell.lua for mod.postLog. The GET bridge above covers
+     * downloads; log sends need POST, and Android ships no curl, so this is
+     * the only POST transport the platform has. Strictly one-way, matching
+     * the curl branch it mirrors: the response body is drained and
+     * discarded, and only the 2xx verdict comes back.
+     *
+     * Same rules as httpDownload: https only, redirects followed by hand
+     * (re-POSTing the body on each hop, the way curl -X POST behaves), and
+     * the call is blocking on the Lua/worker thread -- never the UI thread.
+     * The body arrives as raw bytes (a jbyteArray across the JNI) because a
+     * log ring can carry arbitrary UTF-8; a String would risk modified-UTF-8
+     * corruption on characters outside the BMP.
+     */
+    @Keep
+    public static boolean httpPost(String url, byte[] body, String contentType, String userAgent) {
+        if (url == null || body == null) return false;
+        HttpURLConnection conn = null;
+        try {
+            String current = url;
+            for (int hop = 0; hop < 5; hop++) {
+                URL parsed = new URL(current);
+                if (!"https".equalsIgnoreCase(parsed.getProtocol())) return false;
+                conn = (HttpURLConnection) parsed.openConnection();
+                conn.setInstanceFollowRedirects(false);
+                conn.setConnectTimeout(15000);
+                conn.setReadTimeout(60000);
+                conn.setRequestMethod("POST");
+                conn.setDoOutput(true);
+                conn.setRequestProperty("User-Agent",
+                    userAgent == null ? "gen1recomp" : userAgent);
+                conn.setRequestProperty("Content-Type",
+                    contentType == null ? "text/plain" : contentType);
+                OutputStream out = new BufferedOutputStream(conn.getOutputStream());
+                try {
+                    out.write(body);
+                } finally {
+                    try { out.close(); } catch (IOException ignored) {}
+                }
+                int code = conn.getResponseCode();
+                if (code == 301 || code == 302 || code == 303 || code == 307 || code == 308) {
+                    String next = conn.getHeaderField("Location");
+                    conn.disconnect();
+                    conn = null;
+                    if (next == null) return false;
+                    current = new URL(parsed, next).toString();
+                    continue;
+                }
+                if (code < 200 || code > 299) return false;
+                // drain and discard, so a slow server cannot wedge the
+                // worker on a full socket buffer
+                InputStream in = new BufferedInputStream(conn.getInputStream());
+                try {
+                    byte[] buf = new byte[16384];
+                    while (in.read(buf) > 0) {}
+                } finally {
+                    try { in.close(); } catch (IOException ignored) {}
+                }
+                return true;
+            }
+            return false;
+        } catch (Exception e) {
+            Log.d("GameActivity", "httpPost failed: " + e.getMessage());
+            return false;
+        } finally {
+            if (conn != null) conn.disconnect();
+        }
+    }
+
+    /** Response ceiling for httpRequest; anything larger is refused, not buffered. */
+    private static final int HTTP_REQUEST_MAX_RESPONSE = 4 * 1024 * 1024;
+
+    /** Builds an httpRequest envelope: one head line, a newline, then the body. */
+    private static byte[] httpEnvelope(String head, byte[] payload) {
+        byte[] prefix;
+        try {
+            prefix = (head + "\n").getBytes("UTF-8");
+        } catch (Exception e) {
+            prefix = (head + "\n").getBytes();
+        }
+        if (payload == null || payload.length == 0) return prefix;
+        byte[] out = new byte[prefix.length + payload.length];
+        System.arraycopy(prefix, 0, out, 0, prefix.length);
+        System.arraycopy(payload, 0, out, prefix.length, payload.length);
+        return out;
+    }
+
+    /** One-line, CR/LF-free failure text, so an envelope head stays one line. */
+    private static String httpErrorText(Exception e) {
+        String text = e.getMessage();
+        if (text == null || text.length() == 0) text = e.getClass().getSimpleName();
+        text = text.replace('\r', ' ').replace('\n', ' ');
+        if (text.length() > 160) text = text.substring(0, 160);
+        return text;
+    }
+
+    /**
+     * Blocking HTTPS request with a chosen method, headers and byte body,
+     * exposed as love.system.httpRequest and used by src/core/HostShell.lua
+     * for save sync. Sync needs PUT, per-request auth headers and the response
+     * body of a 4xx as well as a 2xx (a conflict answers 409 with the save
+     * that won), none of which httpDownload or httpPost above can express.
+     *
+     * Same rules as those two: https only, redirects followed by hand
+     * (re-sending method and body on each hop), 15s connect / 60s read, and
+     * blocking on the Lua/worker thread -- never the UI thread. Headers arrive
+     * as a flat name, value array; a field carrying CR or LF is refused rather
+     * than sent, so a header value can never inject a second header.
+     *
+     * The reply is an envelope: a head line of "STATUS &lt;code&gt;" or
+     * "ERROR &lt;text&gt;", a newline, then the raw response bytes.
+     */
+    @Keep
+    public static byte[] httpRequest(String url, String method, String[] headerPairs,
+                                     byte[] body, String userAgent) {
+        if (url == null) return httpEnvelope("ERROR missing url", null);
+        String verb = method == null ? "GET" : method.toUpperCase(Locale.US);
+        if (!"GET".equals(verb) && !"POST".equals(verb)
+                && !"PUT".equals(verb) && !"DELETE".equals(verb)) {
+            return httpEnvelope("ERROR unsupported request method", null);
+        }
+        if (headerPairs != null) {
+            if ((headerPairs.length % 2) != 0) {
+                return httpEnvelope("ERROR bad request header", null);
+            }
+            for (int i = 0; i < headerPairs.length; i++) {
+                String field = headerPairs[i];
+                if (field == null) return httpEnvelope("ERROR bad request header", null);
+                if (field.indexOf('\r') >= 0 || field.indexOf('\n') >= 0) {
+                    return httpEnvelope("ERROR bad request header", null);
+                }
+                if ((i % 2) == 0 && field.length() == 0) {
+                    return httpEnvelope("ERROR bad request header", null);
+                }
+            }
+        }
+        HttpURLConnection conn = null;
+        try {
+            String current = url;
+            for (int hop = 0; hop < 5; hop++) {
+                URL parsed = new URL(current);
+                if (!"https".equalsIgnoreCase(parsed.getProtocol())) {
+                    return httpEnvelope("ERROR https only", null);
+                }
+                conn = (HttpURLConnection) parsed.openConnection();
+                conn.setInstanceFollowRedirects(false);
+                conn.setConnectTimeout(15000);
+                conn.setReadTimeout(60000);
+                conn.setRequestMethod(verb);
+                conn.setRequestProperty("User-Agent",
+                    userAgent == null ? "gen1recomp" : userAgent);
+                if (headerPairs != null) {
+                    for (int i = 0; i + 1 < headerPairs.length; i += 2) {
+                        conn.setRequestProperty(headerPairs[i], headerPairs[i + 1]);
+                    }
+                }
+                if (body != null && !"GET".equals(verb)) {
+                    conn.setDoOutput(true);
+                    conn.setFixedLengthStreamingMode(body.length);
+                    OutputStream out = new BufferedOutputStream(conn.getOutputStream());
+                    try {
+                        out.write(body);
+                    } finally {
+                        try { out.close(); } catch (IOException ignored) {}
+                    }
+                }
+                int code = conn.getResponseCode();
+                if (code == 301 || code == 302 || code == 303 || code == 307 || code == 308) {
+                    String next = conn.getHeaderField("Location");
+                    conn.disconnect();
+                    conn = null;
+                    if (next == null) {
+                        return httpEnvelope("ERROR redirect without a location", null);
+                    }
+                    current = new URL(parsed, next).toString();
+                    continue;
+                }
+                // A rejection's body is the diagnosis the caller wants, so 4xx
+                // and 5xx are read through getErrorStream rather than dropped.
+                InputStream in;
+                try {
+                    in = conn.getInputStream();
+                } catch (IOException e) {
+                    in = conn.getErrorStream();
+                }
+                ByteArrayOutputStream sink = new ByteArrayOutputStream();
+                if (in != null) {
+                    InputStream reader = new BufferedInputStream(in);
+                    try {
+                        byte[] buf = new byte[16384];
+                        int n;
+                        while ((n = reader.read(buf)) > 0) {
+                            if (sink.size() + n > HTTP_REQUEST_MAX_RESPONSE) {
+                                return httpEnvelope("ERROR the reply was too large", null);
+                            }
+                            sink.write(buf, 0, n);
+                        }
+                    } finally {
+                        try { reader.close(); } catch (IOException ignored) {}
+                    }
+                }
+                return httpEnvelope("STATUS " + code, sink.toByteArray());
+            }
+            return httpEnvelope("ERROR too many redirects", null);
+        } catch (Exception e) {
+            Log.d("GameActivity", "httpRequest failed: " + e.getMessage());
+            return httpEnvelope("ERROR " + httpErrorText(e), null);
+        } finally {
+            if (conn != null) conn.disconnect();
         }
     }
 
@@ -1287,6 +1832,163 @@ public class GameActivity extends SDLActivity {
         return freq;
     }
 
+    private void requestGameAudioFocus() {
+        AudioManager audioManager = (AudioManager) getSystemService(Context.AUDIO_SERVICE);
+
+        if (audioManager == null) {
+            return;
+        }
+
+        if (audioFocusListener == null) {
+            audioFocusListener = new AudioManager.OnAudioFocusChangeListener() {
+                @Override
+                public void onAudioFocusChange(int focusChange) {
+                    handleAudioFocusChange(focusChange);
+                }
+            };
+        }
+
+        int result;
+
+        if (android.os.Build.VERSION.SDK_INT >= 26) {
+            result = requestGameAudioFocusModern(audioManager);
+        } else {
+            result = audioManager.requestAudioFocus(audioFocusListener,
+                AudioManager.STREAM_MUSIC, AudioManager.AUDIOFOCUS_GAIN);
+        }
+
+        audioFocusHeld = result == AudioManager.AUDIOFOCUS_REQUEST_GRANTED;
+
+        if (!audioFocusHeld) {
+            Log.d("GameActivity", "audio focus request was not granted: " + result);
+        }
+    }
+
+    private int requestGameAudioFocusModern(AudioManager audioManager) {
+        if (audioFocusRequest == null) {
+            AudioAttributes attributes = new AudioAttributes.Builder()
+                .setUsage(AudioAttributes.USAGE_GAME)
+                .setContentType(AudioAttributes.CONTENT_TYPE_MUSIC)
+                .build();
+            audioFocusRequest = new AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN)
+                .setAudioAttributes(attributes)
+                .setWillPauseWhenDucked(true)
+                .setOnAudioFocusChangeListener(audioFocusListener)
+                .build();
+        }
+
+        return audioManager.requestAudioFocus((AudioFocusRequest) audioFocusRequest);
+    }
+
+    private void abandonAudioFocus() {
+        if (!audioFocusHeld) {
+            return;
+        }
+
+        audioFocusHeld = false;
+
+        AudioManager audioManager = (AudioManager) getSystemService(Context.AUDIO_SERVICE);
+
+        if (audioManager == null) {
+            return;
+        }
+
+        if (android.os.Build.VERSION.SDK_INT >= 26 && audioFocusRequest != null) {
+            abandonAudioFocusModern(audioManager);
+        } else if (audioFocusListener != null) {
+            audioManager.abandonAudioFocus(audioFocusListener);
+        }
+    }
+
+    private void abandonAudioFocusModern(AudioManager audioManager) {
+        audioManager.abandonAudioFocusRequest((AudioFocusRequest) audioFocusRequest);
+    }
+
+    private void handleAudioFocusChange(int focusChange) {
+        try {
+            switch (focusChange) {
+                case AudioManager.AUDIOFOCUS_LOSS:
+                    audioFocusHeld = false;
+                    nativeAudioFocusLost();
+                    break;
+                case AudioManager.AUDIOFOCUS_LOSS_TRANSIENT:
+                case AudioManager.AUDIOFOCUS_LOSS_TRANSIENT_CAN_DUCK:
+                    nativeAudioFocusLost();
+                    break;
+                case AudioManager.AUDIOFOCUS_GAIN:
+                case AudioManager.AUDIOFOCUS_GAIN_TRANSIENT:
+                case AudioManager.AUDIOFOCUS_GAIN_TRANSIENT_MAY_DUCK:
+                    audioFocusHeld = true;
+                    nativeAudioFocusGained();
+                    break;
+                default:
+                    break;
+            }
+        } catch (UnsatisfiedLinkError e) {
+            Log.d("GameActivity", "audio focus change before liblove was ready", e);
+        }
+    }
+
+    private void registerAudioDeviceCallback() {
+        if (android.os.Build.VERSION.SDK_INT < 23 || audioDeviceCallback != null) {
+            return;
+        }
+
+        AudioManager audioManager = (AudioManager) getSystemService(Context.AUDIO_SERVICE);
+
+        if (audioManager == null) {
+            return;
+        }
+
+        audioDeviceCallbackPrimed = false;
+        audioDeviceCallback = createAudioDeviceCallback(audioManager);
+    }
+
+    private Object createAudioDeviceCallback(AudioManager audioManager) {
+        AudioDeviceCallback callback = new AudioDeviceCallback() {
+            @Override
+            public void onAudioDevicesAdded(AudioDeviceInfo[] addedDevices) {
+                if (!audioDeviceCallbackPrimed) {
+                    audioDeviceCallbackPrimed = true;
+                    return;
+                }
+                notifyAudioDeviceChanged();
+            }
+
+            @Override
+            public void onAudioDevicesRemoved(AudioDeviceInfo[] removedDevices) {
+                audioDeviceCallbackPrimed = true;
+                notifyAudioDeviceChanged();
+            }
+        };
+
+        audioManager.registerAudioDeviceCallback(callback, new Handler(Looper.getMainLooper()));
+        return callback;
+    }
+
+    private void unregisterAudioDeviceCallback() {
+        if (android.os.Build.VERSION.SDK_INT < 23 || audioDeviceCallback == null) {
+            return;
+        }
+
+        AudioManager audioManager = (AudioManager) getSystemService(Context.AUDIO_SERVICE);
+
+        if (audioManager != null) {
+            audioManager.unregisterAudioDeviceCallback((AudioDeviceCallback) audioDeviceCallback);
+        }
+
+        audioDeviceCallback = null;
+        audioDeviceCallbackPrimed = false;
+    }
+
+    private void notifyAudioDeviceChanged() {
+        try {
+            nativeAudioDeviceChanged();
+        } catch (UnsatisfiedLinkError e) {
+            Log.d("GameActivity", "audio device change before liblove was ready", e);
+        }
+    }
+
     public boolean isNativeLibsExtracted() {
         ApplicationInfo appInfo = getApplicationInfo();
 
@@ -1323,8 +2025,39 @@ public class GameActivity extends SDLActivity {
     // Dual-screen: mirror the engine's bottom-screen canvas onto a secondary
     // physical display. Driven from the engine through love_android_secondary_*
     // in src/jni/love/src/common/android.cpp.
+    private static final int SECONDARY_TARGET_AUTO = 0;
+    private static final int SECONDARY_TARGET_HANDHELD = 1;
+    private static final int SECONDARY_TARGET_EXTERNAL = 2;
+    // AYN keeps disabled panels registered as ON. This optional setting is the
+    // usable-state signal: 0 = both, 1 = main only, 2 = second only.
+    private static final String DUAL_SCREEN_DISPLAY_MODE = "dual_screen_display_mode";
+    private static final String AYN_SECOND_SCREEN = "Screen-2";
     private static volatile SecondaryPresentation secondaryPresentation;
+    private static volatile SecondaryActivity secondaryActivity;
+    private static volatile boolean secondaryActivityPending;
+    private static volatile int secondaryActivityTarget = Display.INVALID_DISPLAY;
+    private static volatile long secondaryRetryAfter;
     private static volatile boolean secondaryEnabled = false;
+    private static volatile boolean secondaryHostResumed = false;
+    private static volatile int secondaryTarget = SECONDARY_TARGET_AUTO;
+    private static volatile int dualScreenDisplayMode = -1;
+    private static volatile byte[] secondaryFrame;
+    private static volatile int secondaryFrameWidth;
+    private static volatile int secondaryFrameHeight;
+    private static volatile int secondaryBackground;
+    private static volatile boolean secondaryFrameCover;
+    private static final Object secondaryFrameLock = new Object();
+    private static volatile long secondaryDetectionAt;
+    private static volatile boolean secondaryDetected;
+    private SecondaryDisplayMonitor secondaryDisplayMonitor;
+    private boolean dualScreenModeObserverRegistered;
+    private final android.database.ContentObserver dualScreenModeObserver =
+        new android.database.ContentObserver(new Handler(Looper.getMainLooper())) {
+            @Override public void onChange(boolean selfChange, Uri uri) {
+                refreshDualScreenDisplayMode();
+                rebindSecondaryDisplay();
+            }
+        };
     private static final int MAX_SECONDARY_TOUCHES = 32;
     private static final java.util.ArrayDeque<String> secondaryTouches =
         new java.util.ArrayDeque<>();
@@ -1336,66 +2069,315 @@ public class GameActivity extends SDLActivity {
         if (self == null) return;
         self.runOnUiThread(new Runnable() {
             @Override public void run() {
-                if (on) setupSecondaryDisplay(); else teardownSecondaryDisplay();
+                if (on && secondaryHostResumed) {
+                    self.refreshDualScreenDisplayMode();
+                    self.registerSecondaryDisplayListener();
+                    rebindSecondaryDisplay();
+                } else {
+                    self.unregisterSecondaryDisplayListener();
+                    teardownSecondaryDisplay();
+                    secondaryRetryAfter = 0;
+                    synchronized (secondaryFrameLock) { secondaryFrame = null; }
+                }
             }
+        });
+    }
+
+    @Keep
+    public static void setSecondaryDisplayTarget(int target) {
+        int normalized = target == SECONDARY_TARGET_HANDHELD
+            || target == SECONDARY_TARGET_EXTERNAL ? target : SECONDARY_TARGET_AUTO;
+        if (secondaryTarget == normalized) return;
+        secondaryTarget = normalized;
+        secondaryDetectionAt = 0;
+        rebindSecondaryDisplay();
+    }
+
+    private void refreshDualScreenDisplayMode() {
+        int mode = Settings.System.getInt(
+            getContentResolver(), DUAL_SCREEN_DISPLAY_MODE, -1);
+        if (dualScreenDisplayMode != mode) secondaryDetectionAt = 0;
+        dualScreenDisplayMode = mode;
+    }
+
+    private void registerSecondaryDisplayListener() {
+        if (secondaryDisplayMonitor == null && android.os.Build.VERSION.SDK_INT >= 17) {
+            SecondaryDisplayMonitor monitor = new SecondaryDisplayMonitor(this);
+            if (monitor.register()) secondaryDisplayMonitor = monitor;
+        }
+        if (dualScreenDisplayMode != -1 && !dualScreenModeObserverRegistered) {
+            getContentResolver().registerContentObserver(
+                Settings.System.getUriFor(DUAL_SCREEN_DISPLAY_MODE), false,
+                dualScreenModeObserver);
+            dualScreenModeObserverRegistered = true;
+        }
+    }
+
+    private void unregisterSecondaryDisplayListener() {
+        SecondaryDisplayMonitor monitor = secondaryDisplayMonitor;
+        secondaryDisplayMonitor = null;
+        if (monitor != null) monitor.unregister();
+        if (dualScreenModeObserverRegistered) {
+            getContentResolver().unregisterContentObserver(dualScreenModeObserver);
+            dualScreenModeObserverRegistered = false;
+        }
+    }
+
+    private static boolean secondaryOutputIsPreferred(GameActivity self) {
+        Display preferred = findSecondaryDisplay(self, false);
+        if (preferred == null) return false;
+        SecondaryPresentation presentation = secondaryPresentation;
+        Display display = presentation == null
+            ? null : presentation.getDisplay();
+        if (display == null) {
+            SecondaryActivity activity = secondaryActivity;
+            display = activity == null ? null : getActivityDisplay(activity);
+        }
+        SecondaryDisplayMonitor monitor = self.secondaryDisplayMonitor;
+        if (display == null || (monitor != null
+                && !monitor.hasDisplay(display.getDisplayId()))) return false;
+        return display.getDisplayId() == preferred.getDisplayId();
+    }
+
+    private static void rebindSecondaryDisplay() {
+        GameActivity self = (GameActivity) mSingleton;
+        if (self == null || !secondaryHostResumed || !secondaryEnabled
+                || secondaryOutputIsPreferred(self)) return;
+        self.runOnUiThread(() -> {
+            if (!secondaryHostResumed || !secondaryEnabled
+                    || secondaryOutputIsPreferred(self)) return;
+            teardownSecondaryDisplay();
+            setupSecondaryDisplay();
         });
     }
 
     private static void setupSecondaryDisplay() {
         GameActivity self = (GameActivity) mSingleton;
-        if (self == null || !secondaryEnabled || secondaryPresentation != null) return;
+        if (self == null || !secondaryHostResumed || !secondaryEnabled
+                || secondaryPresentation != null
+                || secondaryActivity != null || secondaryActivityPending
+                || android.os.SystemClock.elapsedRealtime() < secondaryRetryAfter) return;
         try {
-            android.hardware.display.DisplayManager dm =
-                (android.hardware.display.DisplayManager) self.getSystemService(Context.DISPLAY_SERVICE);
-            if (dm == null) return;
-            Display chosen = null;
-            for (Display d : dm.getDisplays()) {
-                android.graphics.Point size = new android.graphics.Point();
-                d.getRealSize(size);
-                Log.d("GameActivity", "display id=" + d.getDisplayId() + " name=" + d.getName()
-                    + " size=" + size.x + "x" + size.y);
-                if (chosen == null && d.getDisplayId() != Display.DEFAULT_DISPLAY) {
-                    chosen = d;
-                }
-            }
-            if (chosen == null) {
-                Display[] pres =
-                    dm.getDisplays(android.hardware.display.DisplayManager.DISPLAY_CATEGORY_PRESENTATION);
-                if (pres != null && pres.length > 0) chosen = pres[0];
-            }
+            Display chosen = findSecondaryDisplay(self, true);
             if (chosen == null) {
                 Log.d("GameActivity", "no secondary display found");
                 return;
             }
+            if (!isPresentationDisplay(chosen)) {
+                if (android.os.Build.VERSION.SDK_INT < 29) return;
+                secondaryActivityPending = true;
+                secondaryActivityTarget = chosen.getDisplayId();
+                Intent intent = new Intent(self, SecondaryActivity.class)
+                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_NO_ANIMATION);
+                android.app.ActivityOptions options = android.app.ActivityOptions.makeBasic();
+                options.setLaunchDisplayId(secondaryActivityTarget);
+                self.startActivity(intent, options.toBundle());
+                final int requestedDisplay = secondaryActivityTarget;
+                new Handler(Looper.getMainLooper()).postDelayed(() -> {
+                    if (secondaryActivityPending
+                            && secondaryActivityTarget == requestedDisplay) {
+                        secondaryActivityPending = false;
+                        secondaryRetryAfter = android.os.SystemClock.elapsedRealtime() + 1000;
+                    }
+                }, 1000);
+                return;
+            }
             SecondaryPresentation p = new SecondaryPresentation(self, chosen);
+            p.setOnDismissListener(dialog -> {
+                if (secondaryPresentation == p) {
+                    secondaryPresentation = null;
+                    rebindSecondaryDisplay();
+                }
+            });
             p.show();
             secondaryPresentation = p;
+            secondaryRetryAfter = 0;
+            synchronized (secondaryFrameLock) {
+                if (secondaryFrame != null) {
+                    p.setBackground(secondaryBackground);
+                    p.updateFrame(java.nio.ByteBuffer.wrap(secondaryFrame),
+                        secondaryFrameWidth, secondaryFrameHeight, secondaryFrameCover);
+                }
+            }
             Log.d("GameActivity", "secondary display presentation started on id=" + chosen.getDisplayId());
         } catch (Throwable t) {
             Log.d("GameActivity", "secondary display setup failed: " + t);
-            secondaryPresentation = null;
+            secondaryActivityPending = false;
+            secondaryActivityTarget = Display.INVALID_DISPLAY;
+            secondaryRetryAfter = android.os.SystemClock.elapsedRealtime() + 1000;
+            teardownSecondaryDisplay();
         }
+    }
+
+    private static Display findSecondaryDisplay(GameActivity self, boolean logDisplays) {
+        android.hardware.display.DisplayManager dm =
+            (android.hardware.display.DisplayManager) self.getSystemService(Context.DISPLAY_SERVICE);
+        if (dm == null || android.os.Build.VERSION.SDK_INT < 17) return null;
+        Display gameDisplay = getActivityDisplay(self);
+        int gameDisplayId = gameDisplay == null
+            ? Display.DEFAULT_DISPLAY : gameDisplay.getDisplayId();
+        Display handheld = dm.getDisplay(Display.DEFAULT_DISPLAY);
+        boolean handheldAvailable = android.os.Build.VERSION.SDK_INT >= 29
+            && gameDisplayId != Display.DEFAULT_DISPLAY && isDisplayUsable(handheld);
+        Display external = null;
+        Display[] presentations = dm.getDisplays(
+            android.hardware.display.DisplayManager.DISPLAY_CATEGORY_PRESENTATION);
+        for (Display d : presentations) {
+            if (logDisplays) {
+                android.graphics.Point size = new android.graphics.Point();
+                d.getRealSize(size);
+                Log.d("GameActivity", "display id=" + d.getDisplayId()
+                    + " name=" + d.getName() + " size=" + size.x + "x" + size.y);
+            }
+            if (external == null && d.getDisplayId() != gameDisplayId
+                    && isDisplayUsable(d)) external = d;
+        }
+        if (secondaryTarget == SECONDARY_TARGET_HANDHELD && handheldAvailable) return handheld;
+        if (secondaryTarget == SECONDARY_TARGET_EXTERNAL && external != null) return external;
+        return handheldAvailable ? handheld : external;
+    }
+
+    private static Display getActivityDisplay(android.app.Activity activity) {
+        return android.os.Build.VERSION.SDK_INT >= 30
+            ? activity.getDisplay() : activity.getWindowManager().getDefaultDisplay();
+    }
+
+    private static boolean isPresentationDisplay(Display display) {
+        if (display == null || display.getDisplayId() == Display.DEFAULT_DISPLAY) return false;
+        return android.os.Build.VERSION.SDK_INT < 20
+            || (display.getFlags() & Display.FLAG_PRESENTATION) != 0;
+    }
+
+    private static boolean isDisplayUsable(Display display) {
+        if (display == null) return false;
+        if (android.os.Build.VERSION.SDK_INT >= 20
+                && display.getState() == Display.STATE_OFF) return false;
+        if (dualScreenDisplayMode == 1 && AYN_SECOND_SCREEN.equals(display.getName())) {
+            return false;
+        }
+        return dualScreenDisplayMode != 2
+            || display.getDisplayId() != Display.DEFAULT_DISPLAY;
     }
 
     private static void teardownSecondaryDisplay() {
         SecondaryPresentation p = secondaryPresentation;
         secondaryPresentation = null;
+        SecondaryActivity a = secondaryActivity;
+        secondaryActivity = null;
+        secondaryActivityPending = false;
+        secondaryActivityTarget = Display.INVALID_DISPLAY;
         synchronized (secondaryTouches) { secondaryTouches.clear(); }
         if (p != null) {
             try { p.dismiss(); } catch (Throwable t) {}
         }
+        if (a != null) {
+            try { a.finish(); } catch (Throwable t) {}
+        }
+    }
+
+    @android.annotation.TargetApi(17)
+    private static class SecondaryDisplayMonitor
+        implements android.hardware.display.DisplayManager.DisplayListener {
+        private final android.hardware.display.DisplayManager manager;
+
+        SecondaryDisplayMonitor(GameActivity activity) {
+            manager = (android.hardware.display.DisplayManager)
+                activity.getSystemService(Context.DISPLAY_SERVICE);
+        }
+
+        boolean register() {
+            if (manager == null) return false;
+            manager.registerDisplayListener(this, new Handler(Looper.getMainLooper()));
+            return true;
+        }
+
+        void unregister() {
+            manager.unregisterDisplayListener(this);
+        }
+
+        boolean hasDisplay(int displayId) {
+            return manager.getDisplay(displayId) != null;
+        }
+
+        private void changed() {
+            secondaryDetectionAt = 0;
+            rebindSecondaryDisplay();
+        }
+
+        @Override public void onDisplayAdded(int displayId) { changed(); }
+        @Override public void onDisplayRemoved(int displayId) { changed(); }
+        @Override public void onDisplayChanged(int displayId) { changed(); }
     }
 
     @Keep
     public static boolean hasSecondaryDisplay() {
-        return secondaryPresentation != null;
+        return secondaryPresentation != null || secondaryActivity != null;
+    }
+
+    @Keep
+    public static boolean hasSecondaryDisplayCandidate() {
+        GameActivity self = (GameActivity) mSingleton;
+        if (self == null) return false;
+        if (secondaryPresentation != null || secondaryActivity != null) return true;
+        self.refreshDualScreenDisplayMode();
+        long now = android.os.SystemClock.uptimeMillis();
+        if (secondaryDetectionAt != 0 && now - secondaryDetectionAt < 500) {
+            return secondaryDetected;
+        }
+        secondaryDetected = findSecondaryDisplay(self, false) != null;
+        secondaryDetectionAt = now;
+        return secondaryDetected;
+    }
+
+    @Keep
+    public static boolean presentSecondaryFrame(
+            java.nio.ByteBuffer rgba, int width, int height,
+            int backgroundColor, boolean cover) {
+        long bytes = (long) width * height * 4;
+        if (rgba == null || width <= 0 || height <= 0
+                || bytes <= 0 || bytes > Integer.MAX_VALUE
+                || rgba.capacity() < bytes) return false;
+        synchronized (secondaryFrameLock) {
+            if (secondaryFrame == null || secondaryFrame.length != (int) bytes) {
+                secondaryFrame = new byte[(int) bytes];
+            }
+            rgba.rewind();
+            rgba.get(secondaryFrame, 0, (int) bytes);
+            rgba.rewind();
+            secondaryFrameWidth = width;
+            secondaryFrameHeight = height;
+            secondaryBackground = backgroundColor;
+            secondaryFrameCover = cover;
+            SecondaryPresentation p = secondaryPresentation;
+            SecondaryActivity a = secondaryActivity;
+            if (p == null && a == null) return false;
+            try {
+                if (p != null) {
+                    p.setBackground(backgroundColor);
+                    p.updateFrame(rgba, width, height, cover);
+                } else {
+                    a.setBackground(backgroundColor);
+                    a.updateFrame(rgba, width, height, cover);
+                }
+                return true;
+            } catch (Throwable t) {
+                GameActivity self = (GameActivity) mSingleton;
+                if (self != null) self.runOnUiThread(() -> {
+                    teardownSecondaryDisplay();
+                    setupSecondaryDisplay();
+                });
+                return false;
+            }
+        }
     }
 
     @Keep
     public static void updateSecondaryFrame(java.nio.ByteBuffer buf, int w, int h) {
         SecondaryPresentation p = secondaryPresentation;
-        if (p != null && buf != null && w > 0 && h > 0) {
-            p.updateFrame(buf, w, h);
+        SecondaryActivity a = secondaryActivity;
+        if ((p != null || a != null) && buf != null && w > 0 && h > 0) {
+            if (p != null) p.updateFrame(buf, w, h);
+            else a.updateFrame(buf, w, h);
         }
     }
 
@@ -1403,6 +2385,102 @@ public class GameActivity extends SDLActivity {
     public static String pollSecondaryDisplayTouch() {
         synchronized (secondaryTouches) {
             return secondaryTouches.pollFirst();
+        }
+    }
+
+    private static void applySecondaryImmersive(android.view.Window w) {
+        if (w == null) return;
+        if (android.os.Build.VERSION.SDK_INT >= 30) {
+            w.setDecorFitsSystemWindows(false);
+            android.view.WindowInsetsController c = w.getInsetsController();
+            if (c != null) {
+                c.hide(android.view.WindowInsets.Type.systemBars());
+                c.setSystemBarsBehavior(
+                    android.view.WindowInsetsController.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE);
+            }
+        } else {
+            w.getDecorView().setSystemUiVisibility(
+                android.view.View.SYSTEM_UI_FLAG_LAYOUT_STABLE
+                | android.view.View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION
+                | android.view.View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN
+                | android.view.View.SYSTEM_UI_FLAG_HIDE_NAVIGATION
+                | android.view.View.SYSTEM_UI_FLAG_FULLSCREEN
+                | android.view.View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY);
+        }
+    }
+
+    public static class SecondaryActivity extends android.app.Activity {
+        private FrameView frameView;
+
+        @Override
+        protected void onCreate(Bundle savedInstanceState) {
+            super.onCreate(savedInstanceState);
+            Display display = getActivityDisplay(this);
+            if (!secondaryEnabled || display == null
+                    || display.getDisplayId() != secondaryActivityTarget) {
+                secondaryActivityPending = false;
+                secondaryActivityTarget = Display.INVALID_DISPLAY;
+                secondaryRetryAfter = android.os.SystemClock.elapsedRealtime() + 1000;
+                finish();
+                return;
+            }
+            frameView = new FrameView(this);
+            android.view.Window w = getWindow();
+            w.setFlags(WindowManager.LayoutParams.FLAG_FULLSCREEN
+                | WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS,
+                WindowManager.LayoutParams.FLAG_FULLSCREEN
+                | WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS);
+            setContentView(frameView);
+            applySecondaryImmersive(w);
+            secondaryActivity = this;
+            secondaryActivityPending = false;
+            secondaryRetryAfter = 0;
+            synchronized (secondaryFrameLock) {
+                if (secondaryFrame != null) {
+                    setBackground(secondaryBackground);
+                    updateFrame(java.nio.ByteBuffer.wrap(secondaryFrame),
+                        secondaryFrameWidth, secondaryFrameHeight, secondaryFrameCover);
+                }
+            }
+        }
+
+        @Override
+        protected void onDestroy() {
+            if (secondaryActivity == this) secondaryActivity = null;
+            super.onDestroy();
+        }
+
+        @Override
+        public void onWindowFocusChanged(boolean hasFocus) {
+            super.onWindowFocusChanged(hasFocus);
+            if (hasFocus) applySecondaryImmersive(getWindow());
+        }
+
+        @Override
+        public boolean dispatchKeyEvent(android.view.KeyEvent event) {
+            GameActivity activity = (GameActivity) mSingleton;
+            return activity != null
+                ? activity.dispatchKeyEvent(event) : super.dispatchKeyEvent(event);
+        }
+
+        @Override
+        public boolean dispatchGenericMotionEvent(android.view.MotionEvent event) {
+            GameActivity activity = (GameActivity) mSingleton;
+            return activity != null
+                ? activity.dispatchGenericMotionEvent(event)
+                : super.dispatchGenericMotionEvent(event);
+        }
+
+        void updateFrame(java.nio.ByteBuffer buf, int w, int h) {
+            frameView.updateFrame(buf, w, h);
+        }
+
+        void updateFrame(java.nio.ByteBuffer buf, int w, int h, boolean cover) {
+            frameView.updateFrame(buf, w, h, cover);
+        }
+
+        void setBackground(int color) {
+            frameView.setFrameBackground(color);
         }
     }
 
@@ -1439,30 +2517,35 @@ public class GameActivity extends SDLActivity {
             if (hasFocus) applyImmersive();
         }
 
+        @Override
+        public boolean dispatchKeyEvent(android.view.KeyEvent event) {
+            GameActivity activity = (GameActivity) mSingleton;
+            return activity != null
+                ? activity.dispatchKeyEvent(event) : super.dispatchKeyEvent(event);
+        }
+
+        @Override
+        public boolean dispatchGenericMotionEvent(android.view.MotionEvent event) {
+            GameActivity activity = (GameActivity) mSingleton;
+            return activity != null
+                ? activity.dispatchGenericMotionEvent(event)
+                : super.dispatchGenericMotionEvent(event);
+        }
+
         private void applyImmersive() {
-            android.view.Window w = getWindow();
-            if (w == null) return;
-            if (android.os.Build.VERSION.SDK_INT >= 30) {
-                w.setDecorFitsSystemWindows(false);
-                android.view.WindowInsetsController c = w.getInsetsController();
-                if (c != null) {
-                    c.hide(android.view.WindowInsets.Type.systemBars());
-                    c.setSystemBarsBehavior(
-                        android.view.WindowInsetsController.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE);
-                }
-            } else {
-                w.getDecorView().setSystemUiVisibility(
-                    android.view.View.SYSTEM_UI_FLAG_LAYOUT_STABLE
-                    | android.view.View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION
-                    | android.view.View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN
-                    | android.view.View.SYSTEM_UI_FLAG_HIDE_NAVIGATION
-                    | android.view.View.SYSTEM_UI_FLAG_FULLSCREEN
-                    | android.view.View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY);
-            }
+            applySecondaryImmersive(getWindow());
         }
 
         void updateFrame(java.nio.ByteBuffer buf, int w, int h) {
             frameView.updateFrame(buf, w, h);
+        }
+
+        void updateFrame(java.nio.ByteBuffer buf, int w, int h, boolean cover) {
+            frameView.updateFrame(buf, w, h, cover);
+        }
+
+        void setBackground(int color) {
+            frameView.setFrameBackground(color);
         }
     }
 
@@ -1472,7 +2555,9 @@ public class GameActivity extends SDLActivity {
         private final android.graphics.Paint paint = new android.graphics.Paint();
         private final Object lock = new Object();
         private int fw, fh;
+        private int backgroundColor = 0xFF000000;
         private int activePointer = -1;
+        private boolean cover;
 
         FrameView(Context context) {
             super(context);
@@ -1482,7 +2567,12 @@ public class GameActivity extends SDLActivity {
         }
 
         void updateFrame(java.nio.ByteBuffer buf, int w, int h) {
+            updateFrame(buf, w, h, false);
+        }
+
+        void updateFrame(java.nio.ByteBuffer buf, int w, int h, boolean cover) {
             synchronized (lock) {
+                this.cover = cover;
                 if (bitmap == null || fw != w || fh != h) {
                     if (bitmap != null) bitmap.recycle();
                     bitmap = android.graphics.Bitmap.createBitmap(w, h, android.graphics.Bitmap.Config.ARGB_8888);
@@ -1490,6 +2580,13 @@ public class GameActivity extends SDLActivity {
                 }
                 buf.rewind();
                 bitmap.copyPixelsFromBuffer(buf);
+            }
+            postInvalidate();
+        }
+
+        void setFrameBackground(int color) {
+            synchronized (lock) {
+                backgroundColor = 0xFF000000 | (color & 0x00FFFFFF);
             }
             postInvalidate();
         }
@@ -1545,12 +2642,15 @@ public class GameActivity extends SDLActivity {
             synchronized (lock) {
                 if (bitmap == null || fw == 0 || fh == 0) return;
                 int vw = getWidth(), vh = getHeight();
-                int s = Math.min(vw / fw, vh / fh);
-                if (s < 1) s = 1;
-                int dw = fw * s, dh = fh * s;
+                float fit = Math.min((float) vw / fw, (float) vh / fh);
+                if (fit <= 0) return;
+                float scale = cover
+                    ? Math.max((float) vw / fw, (float) vh / fh)
+                    : fit >= 2f ? (float) Math.floor(fit) : fit;
+                int dw = Math.round(fw * scale), dh = Math.round(fh * scale);
                 int dx = (vw - dw) / 2, dy = (vh - dh) / 2;
                 dst.set(dx, dy, dx + dw, dy + dh);
-                canvas.drawColor(0xFF000000);
+                canvas.drawColor(backgroundColor);
                 canvas.drawBitmap(bitmap, null, dst, paint);
             }
         }

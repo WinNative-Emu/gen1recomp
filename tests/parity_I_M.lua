@@ -176,7 +176,8 @@ check(not onStack(pmSurf), "party menu closes after a successful SURF")
 check(sawText("got on"), "_SurfingGotOnText shown on a successful SURF")
 
 -- ===========================================================================
--- I: list-time badge filter,  CUT/SURF/STRENGTH absent without the badge
+-- I: GetMonFieldMoves is badge-blind -- CUT/SURF/STRENGTH are listed with or
+-- without the badge, and .outOfBattleMovePointers refuses on selection (#1022)
 -- ===========================================================================
 Game.save.party = { mkMon("SQUIRTLE", "CUT", "SURF", "STRENGTH") }
 Game.save.inventory = {}
@@ -185,8 +186,8 @@ local pmNoBadge = PartyMenu.new(Game)
 Game.stack:push(pmNoBadge)
 frame({ "a" })
 local actsOff = submenuActions(pmNoBadge)
-check(not actsOff.cut and not actsOff.surf and not actsOff.strength,
-      "no CUT/SURF/STRENGTH submenu entries without the required badges")
+check(actsOff.cut and actsOff.surf and actsOff.strength,
+      "CUT/SURF/STRENGTH submenu entries listed without the badges (#1022)")
 popToOW()
 Game.save.inventory = { CASCADEBADGE = true, SOULBADGE = true, RAINBOWBADGE = true }
 local pmBadge = PartyMenu.new(Game)
@@ -194,7 +195,7 @@ Game.stack:push(pmBadge)
 frame({ "a" })
 local actsOn = submenuActions(pmBadge)
 check(actsOn.cut and actsOn.surf and actsOn.strength,
-      "CUT/SURF/STRENGTH submenu entries appear once the badges are held")
+      "CUT/SURF/STRENGTH submenu entries still there once the badges are held")
 
 -- ===========================================================================
 -- I: CUT from the party menu. The Cerulean tree BLOCK (50, at block 9,14)
@@ -309,6 +310,46 @@ eq(Game.save.forcedBike, nil, "blackout/escape warps clear BIT_ALWAYS_ON_BIKE")
 ow.transitioning = false -- undo the queued warp transition
 Game.save.onBike = false
 Game.save.inventory.BICYCLE = nil
+
+-- home/overworld.asm:1224
+local function settle(o)
+  drainText()
+  for _ = 1, 60 do o:updateScriptMoves(); o.player:update() end
+end
+for _, c in ipairs({ { "ROUTE_16", 17, 10 }, { "ROUTE_16", 17, 11 },
+                     { "ROUTE_18", 33,  8 }, { "ROUTE_18", 33,  9 } }) do
+  Game.save.inventory.BICYCLE = nil
+  Game.save.onBike, Game.save.forcedBike = false, nil
+  pushOW(c[1], c[2], c[3], "left")
+  ow = OW
+  check(not ow.map:isWalkableCell(c[2] + 1, c[3]),
+        ("%s (%d,%d): the cell behind a left-facing arrival is the gate wall")
+        :format(c[1], c[2], c[3]))
+  settle(ow)
+  eq(#ow.scriptMoves, 0,
+     ("%s (%d,%d): the refusal shove settles"):format(c[1], c[2], c[3]))
+  check(ow.map:isWalkableCell(ow.player.cellX, ow.player.cellY),
+        ("%s (%d,%d): the bikeless Cycling Road refusal never shoves into the "
+         .. "gate wall"):format(c[1], c[2], c[3]))
+end
+
+Game.save.onBike, Game.save.forcedBike = false, nil
+pushOW("ROUTE_16", 17, 10, "right")
+ow = OW
+settle(ow)
+eq(ow.player.cellX, 16, "an unobstructed refusal shove still moves one cell")
+eq(ow.player.cellY, 10, "and only along the arrival axis")
+
+Game.save.onBike, Game.save.forcedBike = false, nil
+ow:setMap("ROUTE_16", 18, 10, "left", { via = "boot" })
+check(ow.map:isWalkableCell(ow.player.cellX, ow.player.cellY),
+      "a save parked inside the Route 16 gate wall is lifted out on load")
+eq(ow.player.cellY, 10, "the repair stays on the row it was saved on")
+settle(ow)
+check(ow.map:isWalkableCell(ow.player.cellX, ow.player.cellY),
+      "and the refusal it lands on cannot push it back in")
+popToOW()
+Game.save.onBike, Game.save.forcedBike = false, nil
 
 -- Seafoam B4F: only the stairs square (dbmapcoord 7,11) refuses, and only
 -- until BOTH boulders are down (CheckBothEventsSet)
@@ -471,8 +512,9 @@ local pmLobby = PartyMenu.new(Game)
 Game.stack:push(pmLobby)
 frame({ "a" })
 local actsLobby = submenuActions(pmLobby)
-check(not actsLobby.fly, "FLY omitted inside Indigo Plateau lobby")
-check(not actsLobby.escape, "TELEPORT omitted inside Indigo Plateau lobby")
+check(actsLobby.fly, "FLY still listed inside Indigo Plateau lobby (#1022)")
+check(actsLobby.escape,
+      "TELEPORT still listed inside Indigo Plateau lobby (#1022)")
 popToOW()
 
 -- restore fainted field-move mon for the STRENGTH/SURF cases below
@@ -486,8 +528,8 @@ Game.save.inventory = {
 ow = pushOW("SEAFOAM_ISLANDS_1F", 17, 10, "right")
 clearCaptured()
 local pmFaintStr = PartyMenu.new(Game)
--- Seafoam is not OVERWORLD, so FLY is omitted: CUT, STRENGTH, SURF, STATS, SWITCH
-selectSubItem(pmFaintStr, 2)
+-- move order on the mon: FLY, CUT, STRENGTH, SURF, then STATS, SWITCH
+selectSubItem(pmFaintStr, 3)
 eq(Game.overworld.strengthActive, true,
    "fainted mon can activate STRENGTH from the party menu")
 check(sawText("used") and sawText("STRENGTH"),

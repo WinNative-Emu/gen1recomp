@@ -134,9 +134,7 @@ love.graphics = {
 
 -- Fresh copies of the modules that cache a compiled shader or a page set
 -- at first use, so they see the recorder above -- and so the originals
--- every other suite holds never see it.  GBCFX is in the list because
--- Renderer:endFrame reaches it and parity_gbcfx asserts on its unset
--- shader cache.
+-- every other suite holds never see it.
 -- The tile/sprite renderers join them because they report trueColor rects
 -- to PaletteFX and resolve through Assets, and the loader because it holds
 -- Assets as an upvalue: an earlier suite's copy of any of the three would
@@ -144,7 +142,7 @@ love.graphics = {
 local savedLoaded = {}
 for _, name in ipairs({ "src.render.PaletteFX", "src.render.Renderer",
                         "src.render.Font", "src.render.Assets",
-                        "src.render.GBCFX", "src.render.SpriteRenderer",
+                        "src.render.SpriteRenderer",
                         "src.render.TileRenderer", "src.mods.Loader" }) do
   savedLoaded[name] = package.loaded[name]
   package.loaded[name] = nil
@@ -218,8 +216,12 @@ for name, module in pairs({ Assets = Assets, TileRenderer = TileRenderer,
 end
 check(type(require("src.world.MapLoader").invalidateAll) == "function",
       "MapLoader keeps its wave-1 invalidateAll")
+check(type(require("src.world.MapLoader").releaseAll) == "function",
+      "MapLoader exposes releaseAll for session end")
 check(type(require("src.core.Sound").invalidate) == "function",
       "Sound keeps its wave-1 invalidate")
+check(type(Assets.releaseSession) == "function",
+      "Assets exposes releaseSession for in-process session end")
 
 -- the central cache hands back one image per resolved path, and flush
 -- fans out to every registered downstream cache
@@ -239,6 +241,14 @@ Assets.register(function() error("boom") end)
 Assets.register(function() reached = true end)
 Assets.flush()
 check(reached, "a throwing invalidator does not stop the fan-out")
+
+-- flush/invalidate must not run release hooks (HotReload / live overworld safe)
+local releaseCalls = 0
+Assets.register({ release = function() releaseCalls = releaseCalls + 1 end })
+Assets.flush()
+check(releaseCalls == 0, "flush() does not call release hooks")
+Assets.releaseSession()
+check(releaseCalls == 1, "releaseSession() calls registered release hooks")
 
 -- ------- animated tiles as tileset data
 
@@ -364,11 +374,40 @@ local r, g, b = shaded.data:getPixel(0, 0)
 check(r == 0 and g == 0 and b == 1,
       "a 4-shade pic is palette-quantized onto its shade bucket")
 
+-- trainers.trueColor is the same opt-out on a class portrait
+BattleState.invalidate()
+local trainerPicData = {
+  trainers = {
+    SHADED = { pic = "assets/generated/battle/front/shaded.png" },
+    FULLCOLOR = { pic = "assets/generated/battle/front/full.png",
+                  trueColor = true },
+    REUSED = { basePic = "FULLCOLOR" },
+  },
+  palettes = { palettes = { MEWMON = monPalette }, pokemon = {} },
+}
+local shadedTrainer = BattleState.trainerSprite(trainerPicData,
+  trainerPicData.trainers.SHADED)
+r, g, b = shadedTrainer.data:getPixel(0, 0)
+check(r == 0 and g == 0 and b == 1,
+      "a 4-shade trainer pic is palette-quantized onto its shade bucket")
+
+local savedColors = PaletteFX.mode
+PaletteFX.setMode("redpp")
 local full = battle:speciesSprite("FULLCOLOR", false)
 r, g, b = full.data:getPixel(0, 0)
 check(math.abs(r - 0.4) < 1e-6 and math.abs(g - 0.7) < 1e-6
       and math.abs(b - 0.9) < 1e-6,
       "a trueColor pic keeps a pixel no 4-shade palette contains")
+local fullTrainer = BattleState.trainerSprite(trainerPicData,
+  trainerPicData.trainers.FULLCOLOR)
+r, g, b = fullTrainer.data:getPixel(0, 0)
+check(math.abs(r - 0.4) < 1e-6 and math.abs(g - 0.7) < 1e-6
+      and math.abs(b - 0.9) < 1e-6,
+      "a trueColor trainer pic keeps a pixel no 4-shade palette contains")
+check(BattleState.trainerTrueColor(trainerPicData,
+        trainerPicData.trainers.REUSED) == true,
+      "a basePic reuse inherits the base portrait's trueColor flag")
+PaletteFX.setMode(savedColors)
 
 -- ------- trueColor: the colors == false zone sentinel
 
@@ -408,6 +447,8 @@ check(bareDraw.shader == false,
 -- covered and endFrame splices it in.  Driven through the real draw path
 -- rather than by handing endFrame a hand-built zone.
 
+savedColors = PaletteFX.mode
+PaletteFX.setMode("redpp")
 local GRAYS = PaletteFX.GRAYS
 local function canvasDraws(canvas)
   local drawn = {}
@@ -428,16 +469,42 @@ local spriteReg = Registry.new("sprites", Schemas.REGISTRIES.sprites)
 spriteReg:register("SPRITE_TITLE_LOGO",
                    { image = "mods/logo/logo.png", frames = 1,
                      trueColor = true }, "logo_mod")
+spriteReg:register("SPRITE_LARGE_ACTOR",
+                   { image = "mods/actor/actor.png", frames = 6,
+                     walker = true, frameWidth = 32, frameHeight = 24,
+                     anchorX = 16, anchorY = 24, trueColor = true },
+                   "actor_mod")
 local logoDef = spriteReg:get("SPRITE_TITLE_LOGO")
 check(Schemas.check(Schemas.REGISTRIES.sprites, "sprites", "SPRITE_TITLE_LOGO",
                     logoDef, "register"),
       "a trueColor sprites record validates against the catalog schema")
 check(logoDef.trueColor == true, "and keeps the flag through the merge")
+local largeDef = spriteReg:get("SPRITE_LARGE_ACTOR")
+check(Schemas.check(Schemas.REGISTRIES.sprites, "sprites", "SPRITE_LARGE_ACTOR",
+                    largeDef, "register"),
+      "a variable-size sprites record validates against the catalog schema")
 
 Renderer:init()
 local plainSprite = SpriteRenderer.new(
   { image = "assets/generated/sprites/red.png", frames = 1 })
 local litSprite = SpriteRenderer.new(logoDef)
+local largeSprite = SpriteRenderer.new(largeDef)
+check(plainSprite.frameWidth == 16 and plainSprite.frameHeight == 16
+      and plainSprite.anchorX == 8 and plainSprite.anchorY == 16,
+      "legacy sprite definitions keep the vanilla frame geometry")
+local frameGeometry = largeSprite:getFrameGeometry(5)
+check(frameGeometry.frame == 5 and frameGeometry.x == 0
+      and frameGeometry.y == 120 and frameGeometry.width == 32
+      and frameGeometry.height == 24 and frameGeometry.anchorX == 16
+      and frameGeometry.anchorY == 24,
+      "frame geometry exposes a larger sheet rectangle and anchor")
+local poseGeometry = largeSprite:getPoseGeometry("right", 1, true)
+check(poseGeometry.frame == 5 and poseGeometry.mirror == true
+      and poseGeometry.quad == largeSprite.frames[5],
+      "pose geometry follows walker frame selection and right mirroring")
+local originX, originY = largeSprite:getScreenOrigin(32, 32, 0, 0)
+check(originX == 24 and originY == 20,
+      "a custom anchor keeps a larger sprite grounded at its cell")
 
 Renderer:beginFrame(true)
 check(#PaletteFX.trueColorRects("ui") == 0
@@ -470,6 +537,27 @@ worldDrawn = canvasDraws(Renderer.worldCanvas)
 check(#worldDrawn == 2, "the reported zone joins the world list endFrame blits")
 check(worldDrawn[1].shader and worldDrawn[2].shader == false,
       "the colorized pass runs first, then the sprite's rect with no shader")
+
+-- Larger true-color frames claim their actual extent, and fishing's top-half
+-- path reserves only the bottom 8-pixel tile for the overlay.
+Renderer:beginFrame(true)
+Renderer:beginWorldPass()
+largeSprite:draw(32, 32, 0, 0, "down", 0, false)
+local largeRects = PaletteFX.trueColorRects("world")
+check(#largeRects == 1 and largeRects[1].x == 24 and largeRects[1].y == 20
+      and largeRects[1].w == 32 and largeRects[1].h == 24,
+      "a larger trueColor sprite reports its full anchored extent")
+Renderer:endWorldPass()
+
+Renderer:beginFrame(true)
+Renderer:beginWorldPass()
+largeSprite:draw(32, 32, 0, 0, "down", 0, false, true)
+local topRects = PaletteFX.trueColorRects("world")
+check(#topRects == 1 and topRects[1].h == 16
+      and largeSprite.halfFrames[0].y == 0
+      and largeSprite.halfFrames[0].h == 16,
+      "the fishing overlay keeps a larger frame's bottom tile clear")
+Renderer:endWorldPass()
 
 -- the same path on the UI canvas, which is where a full-color title logo
 -- or menu portrait lands
@@ -552,6 +640,7 @@ check(#PaletteFX.trueColorRects("world") == 0,
       "the same tileset without the flag reports nothing")
 Renderer:endWorldPass()
 Renderer:endFrame({ PaletteFX.whole(GRAYS) }, fullWorldZones())
+PaletteFX.setMode(savedColors)
 
 -- ------- font pages and charmap ordering
 
@@ -939,6 +1028,33 @@ local fallback = BattleTransition.new({ stack = stack }, nil, {})
 check(fallback.style == "doublecircle",
       "a hook naming an unregistered style falls back to the vanilla bits")
 Runtime.install(Events.new(), Hooks.new(), {})
+
+-- ------- gated final-output ownership
+
+local outputHooks = Hooks.new()
+Runtime.install(Events.new(), outputHooks, {})
+local outputCalls, outputContext = 0, nil
+outputHooks:wrap("render.output", function(nextLink, context)
+  outputCalls, outputContext = outputCalls + 1, context
+  return true
+end, 0, "test")
+outputHooks:wrap("render.output_enabled", function() return false end, 0, "test")
+Renderer:init()
+Renderer.presentCanvas = nil
+Renderer:beginFrame(false)
+Renderer:endFrame(nil, nil)
+check(outputCalls == 0 and Renderer.presentCanvas == nil,
+      "a disabled output hook leaves the direct render path untouched")
+
+outputHooks:wrap("render.output_enabled", function() return true end, 10, "test")
+Renderer:init()
+Renderer.presentCanvas = nil
+Renderer:beginFrame(false)
+Renderer:endFrame(nil, nil)
+check(outputCalls == 1 and outputContext and outputContext.canvas,
+      "an enabled output hook receives the finished frame")
+check(outputContext and outputContext.generation == 1,
+      "the output context identifies the active generation")
 
 -- ------- asset transforms
 

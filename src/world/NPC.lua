@@ -8,7 +8,7 @@ local SpriteRenderer = require("src.render.SpriteRenderer")
 local NPC = {}
 NPC.__index = NPC
 
-local STEP_FRAMES = 16
+local STEP_FRAMES = 32
 
 local FACING_FROM_RANGE = {
   DOWN = "down", UP = "up", LEFT = "left", RIGHT = "right",
@@ -33,12 +33,30 @@ function NPC.new(data, mapId, objDef)
   self.facing = FACING_FROM_RANGE[objDef.range] or "down"
   self.moving = false
   self.progress = 0
+  self.animClock = 0
   self.stepFlip = false
   self.frozen = false -- scripts freeze NPCs while talking
   self.wanders = objDef.movement == "WALK"
   self.roamDirs = ROAM_DIRS[objDef.range] or ROAM_DIRS.ANY_DIR
   self.timer = love.math.random(30, 120)
   return self
+end
+
+-- LoadMapHeader .loadSpriteData zeroes the sprite state data and re-seeds
+-- MAPY/MAPX from the map header -- home/overworld.asm:2133
+function NPC:resetToSpawn()
+  local def = self.def
+  self.cellX, self.cellY = def.x, def.y
+  self.px, self.py = self.cellX * 16, self.cellY * 16
+  self.facing = FACING_FROM_RANGE[def.range] or "down"
+  self.targetX, self.targetY = nil, nil
+  self.moving = false
+  self.marching = false
+  self.hopStep = nil
+  self.progress = 0
+  self.animClock = 0
+  self.stepFlip = false
+  self.timer = love.math.random(30, 120)
 end
 
 function NPC:facePlayer(player)
@@ -52,22 +70,15 @@ function NPC:facePlayer(player)
 end
 
 function NPC:update(map, entities)
-  -- self.stepFrames overrides the shared 16-frame walk for an object whose
-  -- step has to stay in phase with something else: Yellow's follower
-  -- Pikachu takes the player's own step length, halved while it is more
-  -- than a cell behind (FastPikachuFollow, engine/pikachu/
-  -- pikachu_follow.asm).  self.hopStep is the same file's $5-$8 hop
-  -- command: two cells of travel inside one step's frames
-  -- (DoubleAddPikachuStepVectorToScreenPixelCoords), which is why the
-  -- pixel span doubles while the frame count does not.  Nothing else sets
-  -- either field, so every other object keeps the constant (#410, #409).
+  -- engine/overworld/movement.asm:301, 32 frames per NPC cell; stepFrames is
+  -- the follower's own step length (#410, #409).
   local stepLen = self.stepFrames or STEP_FRAMES
   local span = self.hopStep and 2 or 1
   if self.moving then
     self.progress = self.progress + 1
-    -- NPC_CHANGE_FACING: animate the walk cycle in place, no translation
-    -- (movement.asm ChangeFacingDirection zeroes the delta); px/py stay
-    -- pinned to the current cell while walkPhase() cycles.
+    self.animClock = (self.animClock or 0) + 1
+    -- NPC_CHANGE_FACING (movement.asm ChangeFacingDirection): walk cycle in
+    -- place, no translation.
     if self.marching then
       if self.progress >= stepLen then
         self.progress = 0
@@ -78,7 +89,7 @@ function NPC:update(map, entities)
       return
     end
     local d = Collision.DELTA[self.facing]
-    -- 1px per frame at the default length; a shortened step scales instead,
+    -- 1px per 2 frames at the default length; a shortened step scales instead,
     -- so the cell still lands on a 16px boundary (Player:update does the
     -- same for the bicycle)
     local moved = math.floor(self.progress * 16 * span / stepLen)
@@ -111,24 +122,36 @@ function NPC:update(map, entities)
   end
 end
 
+-- UpdateNPCSprite branches to NotYetMoving while BIT_FONT_LOADED is set
+-- -- engine/overworld/movement.asm:139
+local function textBoxUp()
+  local stack = require("src.core.Game").stack
+  local top = stack and stack.top and stack:top()
+  return top ~= nil and not top.isOverworld
+end
+
 function NPC:walkPhase()
-  if not self.moving then return 0 end
-  local p = self.progress % 16
+  if not self.moving or textBoxUp() then return 0 end
+  -- engine/overworld/movement.asm:301
+  local p = (self.animClock or 0) % 16
   return (p >= 4 and p < 12) and 1 or 0
 end
 
--- Same contract as Player:pose -- the sheet, position, facing and step
--- phase this frame renders to -- so a render pipeline can pose an NPC
--- without caring which kind of entity it is.  An NPC never hops, so the
--- trailing hop flag is always false.
+-- Same contract as Player:pose; an NPC never hops, so the trailing hop
+-- flag is always false.
 function NPC:pose()
+  local flip = self.stepFlip
+  if self.moving then
+    flip = math.floor((self.animClock or 0) / 16) % 2 == 1
+  end
   return self.sprite, self.px, self.py, self.facing,
-         self:walkPhase(), self.stepFlip, false
+         self:walkPhase(), flip, false
 end
 
 function NPC:draw(camX, camY)
   local sprite, px, py, facing, phase, flip = self:pose()
-  sprite:draw(px, py, camX, camY, facing, phase, flip)
+  sprite:draw(px, py, camX, camY, facing, phase, flip, nil, nil,
+              self.frameOverride)
 end
 
 return NPC

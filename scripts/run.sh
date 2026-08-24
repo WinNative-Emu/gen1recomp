@@ -17,7 +17,10 @@ fail() { printf '\033[1;31merror:\033[0m %s\n' "$*" >&2; exit 1; }
 
 if [ ! -f "$ROOT/data/generated/maps.lua" ] \
     && [ ! -f "$ROOT/blue/data/generated/maps.lua" ] \
-    && [ ! -f "$ROOT/yellow/data/generated/maps.lua" ]; then
+    && [ ! -f "$ROOT/yellow/data/generated/maps.lua" ] \
+    && [ ! -f "$ROOT/gold/data/generated/maps.lua" ] \
+    && [ ! -f "$ROOT/silver/data/generated/maps.lua" ] \
+    && [ ! -f "$ROOT/crystal/data/generated/maps.lua" ]; then
   fail "generated data missing,  run scripts/setup.sh first"
 fi
 
@@ -34,5 +37,11 @@ find_love() {
 
 LOVE_BIN="$(find_love)" \
   || fail "LÖVE not found,  run scripts/setup.sh (or install from https://love2d.org)"
+
+# SDL2 on Wayland crashes during desktop drag-and-drop in certain compositors;
+# default to X11/XWayland when available to ensure rock-solid drag-drop stability.
+if [ -n "${WAYLAND_DISPLAY:-}" ] && [ -z "${SDL_VIDEODRIVER:-}" ]; then
+  export SDL_VIDEODRIVER=x11
+fi
 
 exec "$LOVE_BIN" "$ROOT" "$@"

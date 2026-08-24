@@ -112,10 +112,12 @@ public:
 	 * love::android::showFilePicker and src/import/RomImporter.lua.
 	 *
 	 * @param kind Optional pick kind: nullptr/"rom" -> picked_rom.gb,
-	 *             "mod" -> picked_mod.zip, "sav"/"save" -> picked_save.sav.
+	 *             "mod" -> picked_mod.zip, "sav"/"save" -> picked_save.sav,
+	 *             "required_import" -> picked_required_import.bin.
 	 * @return Whether the picker was shown.
 	 **/
 	virtual bool pickFile(const char *kind = nullptr) const;
+	virtual const char *pickFileKinds() const;
 
 	/**
 	 * Shows the platform's native "create / save a file" UI (Android SAF
@@ -141,6 +143,12 @@ public:
 	 **/
 	virtual bool restartApp() const;
 
+	/** Starts Android's user-confirmed install flow for a verified APK. */
+	virtual bool installApk(const char *path) const;
+
+	virtual bool updateShortcuts(const std::vector<std::string> &versions) const;
+	virtual std::string getLaunchGame() const;
+
 	/**
 	 * Blocking HTTPS GET into an absolute host path (Android only; false
 	 * elsewhere). Android has no curl, which is what every other platform
@@ -148,6 +156,40 @@ public:
 	 **/
 	virtual bool httpDownload(const char *url, const char *destPath,
 		const char *userAgent = nullptr, const char *accept = nullptr) const;
+
+	/**
+	 * Blocking HTTPS POST of a raw byte body (Android only; false
+	 * elsewhere). The mirror of httpDownload for mod.postLog log sends,
+	 * which need POST and have no curl on Android (#597).
+	 **/
+	virtual bool httpPost(const char *url, const char *body, int bodyLen,
+		const char *contentType = nullptr, const char *userAgent = nullptr) const;
+
+	/**
+	 * Blocking HTTPS request with a method, headers and a byte body (Android
+	 * only; false elsewhere). Save sync needs PUT, auth headers and the body
+	 * of a 4xx, none of which the two bridges above can express. headerPairs
+	 * is a flat name, value array; `out` receives the response envelope
+	 * ("STATUS <code>" or "ERROR <text>", a newline, then the raw body).
+	 **/
+	virtual bool httpRequest(const char *url, const char *method,
+		const char *const *headerPairs, int headerPairCount,
+		const char *body, int bodyLen, const char *userAgent,
+		std::string &out) const;
+
+	/**
+	 * TLS client sockets (Android only; every call fails elsewhere, where
+	 * LuaSec or another provider is the answer). Non-blocking by contract:
+	 * tlsOpen returns a handle and connects on its own thread, tlsStatus
+	 * reports 0 connecting / 1 open / 2 closed / -1 unknown, and bytes sent
+	 * before the handshake completes are queued rather than refused.
+	 **/
+	virtual int tlsOpen(const char *host, int port) const;
+	virtual int tlsStatus(int handle) const;
+	virtual int tlsSend(int handle, const char *data, int length) const;
+	virtual int tlsReceive(int handle, char *buf, int max) const;
+	virtual bool tlsError(int handle, char *buf, int max) const;
+	virtual void tlsClose(int handle) const;
 
 	/**
 	 * Gets if the user is playing music on background.

@@ -110,6 +110,26 @@ function Player:turnWindow()
   return frames
 end
 
+-- the bicycle doubles walking speed (8 frames per step); movement.speed
+-- lets a mod multiply or replace that (running shoes, dash, etc.)
+-- DoBikeSpeedup is skipped mid-hop -- home/overworld.asm:283
+function Player:stepLength()
+  local Game = require("src.core.Game")
+  local save = Game.save
+  local onBike = (save and save.onBike and not self.ledgeHop) or false
+  local frames = onBike and self.bikeStepFrames or self.stepFrames or STEP_FRAMES
+  if Runtime.wantsHook("movement.speed") then
+    frames = Runtime.call("movement.speed", function(f) return f end, frames, {
+      onBike = onBike,
+      surfing = self.surfing and true or false,
+      player = self,
+      input = Game.input,
+      save = save,
+    })
+  end
+  return math.max(1, math.floor(tonumber(frames) or STEP_FRAMES))
+end
+
 -- Attempt to start a step; returns "moved"|"turned"|"blocked"|nil.
 function Player:tryMove(dir, map, entities)
   if self.moving or self.inputLocked then return nil end
@@ -145,22 +165,7 @@ function Player:tryMove(dir, map, entities)
   self.moving = true
   self.bumpFrames = nil -- a real step supersedes any in-place bonk
   self.progress = 0
-  -- the bicycle doubles walking speed (8 frames per step); movement.speed
-  -- lets a mod multiply or replace that (running shoes, dash, etc.)
-  local Game = require("src.core.Game")
-  local save = Game.save
-  local frames = (save and save.onBike) and self.bikeStepFrames
-                 or self.stepFrames or STEP_FRAMES
-  if Runtime.wantsHook("movement.speed") then
-    frames = Runtime.call("movement.speed", function(f) return f end, frames, {
-      onBike = save and save.onBike or false,
-      surfing = self.surfing and true or false,
-      player = self,
-      input = Game.input,
-      save = save,
-    })
-  end
-  self.stepFramesCur = math.max(1, math.floor(tonumber(frames) or STEP_FRAMES))
+  self.stepFramesCur = self:stepLength()
   return "moved"
 end
 
@@ -226,7 +231,16 @@ function Player:facingCell()
   return Collision.target(self.cellX, self.cellY, self.facing)
 end
 
+-- UpdatePlayerSprite jumps to .notMoving while BIT_FONT_LOADED is set
+-- -- engine/overworld/movement.asm:57
+local function textBoxUp()
+  local stack = require("src.core.Game").stack
+  local top = stack and stack.top and stack:top()
+  return top ~= nil and not top.isOverworld
+end
+
 function Player:walkPhase()
+  if textBoxUp() then return 0 end
   -- moving, the land-frame after a completed step, or an active wall-bonk
   -- (issue #230) animate; a standing sprite otherwise
   if not self.moving and not self.stepLanded
@@ -335,8 +349,13 @@ function Player:draw(camX, camY)
   local fishTile = self.fishing and self.fishTiles and self.fishTiles[facing]
   if fishTile then
     sprite:draw(px, py, camX, camY, facing, 0, false, true)
-    sprite:drawTile(fishTile, math.floor(px - camX),
-                    math.floor(py - camY) - 4 + 8, facing == "right")
+    -- The fishing pose replaces the bottom 8-pixel tile.  Use the sprite's
+    -- actual anchored frame origin so larger/custom sheets keep the pose at
+    -- their feet instead of falling back to the vanilla 16x16 top-left.
+    local sx, sy = sprite:getScreenOrigin(px, py, camX, camY)
+    sprite:drawTile(fishTile, sx,
+                    sy + math.max(0, sprite.frameHeight - 8),
+                    facing == "right")
     return
   end
   sprite:draw(px, py, camX, camY, facing, phase, flip)

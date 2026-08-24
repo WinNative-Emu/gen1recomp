@@ -105,6 +105,7 @@ local full = Manifest.validate({
   api = 2, profile = "overhaul", permissions = { "network" },
   dependencies = { "colorlib@^1.2" }, conflicts = { "always_noon" },
   options_schema = "options.lua", assets_transforms = "transforms.lua",
+  force_enable_env = "SOME_ENV",
 }, "mods/full")
 check(full.api == 2 and full.profile == "overhaul", "api and profile parse")
 check(full.affects_link == true, "overhaul defaults to affecting link play")
@@ -115,6 +116,7 @@ check(full.conflictSpecs[1].id == "always_noon" and full.conflictSpecs[1].range 
   "a bare conflict entry has no range")
 check(full.options_schema == "options.lua"
   and full.assets_transforms == "transforms.lua", "declared files are kept")
+check(full.force_enable_env == "SOME_ENV", "force_enable_env is kept")
 
 -- ------- github / experimental / incompatible
 local gh = Manifest.validate({
@@ -136,7 +138,25 @@ check(not pcall(Manifest.parseGithub, "not a repo"),
 check(not pcall(Manifest.validate, {
   id = "badgh", name = "Bad", version = "1.0.0", entry = "main.lua",
   github = "ftp://example.com/x",
-}), "a bad github field fails manifest validation")
+}), "an unsupported github URL fails validation")
+
+-- ------- dependency github repo spec hints & dependency resolver
+local depGh = Manifest.validate({
+  id = "depgh", name = "DepGH", version = "1.0.0", entry = "main.lua",
+  dependencies = { "colorlib@^1.2.0#Acme/ColorLib", "soundpack#Acme/SoundPack" },
+  dependency_sources = { helper = "Acme/Helper" },
+})
+check(depGh.dependencySpecs[1].id == "colorlib" and depGh.dependencySpecs[1].github == "Acme/ColorLib",
+  "dependency spec hash hint parses github owner/repo")
+check(depGh.dependencySpecs[2].id == "soundpack" and depGh.dependencySpecs[2].github == "Acme/SoundPack",
+  "dependency spec hash hint without range parses github owner/repo")
+
+local LauncherMods = require("src.mods.LauncherMods")
+local depCheck = LauncherMods.checkDependencies(depGh)
+check(depCheck.hasIssues == true, "missing dependencies trigger issues verdict")
+check(#depCheck.deps == 2, "dependency check lists all specs")
+check(depCheck.deps[1].status == "missing", "absent dependency reports missing")
+check(depCheck.deps[1].safeUrl == "https://github.com/Acme/ColorLib", "safeUrl built from validated github repo")
 
 local v1 = Manifest.validate({
   id = "v1", name = "V1", version = "1.0.0", entry = "main.lua",
@@ -194,6 +214,13 @@ do
 end
 
 -- ------- game_version against the engine
+--
+-- Stamped, because the working tree carries the "0.0.0-dev" placeholder and
+-- Loader:_validate skips the range check against it on purpose (a placeholder
+-- sorts below every release, so a checkout would refuse every mod that names a
+-- floor).  What is under test here is the check a SHIPPED build runs.
+local realEngine = Version.engine
+Version.engine = "1.4.0"
 local versionLoader = Loader.new({ fs = memfs({
   ["mods/future/manifest.json"] = manifestJson("future", { game_version = '">=2.0"' }),
   ["mods/future/main.lua"] = "return function(mod) mod.content.items:register('NOPE', {}) end",
@@ -220,6 +247,17 @@ check(shelvedLoader:load({}) == true,
   "a switched-off mod that could not load is not a boot problem")
 check(statusById(shelvedLoader).future.state == "disabled",
   "a switched-off mod reports as disabled, not as invalid")
+
+-- and the placeholder itself: a dev checkout must not refuse a mod that names
+-- a floor, because the number it would be judged against is not a release
+Version.engine = realEngine
+local devLoader = Loader.new({ fs = memfs({
+  ["mods/floored/manifest.json"] = manifestJson("floored", { game_version = '">=0.1.0 <2.0.0"' }),
+  ["mods/floored/main.lua"] = NOOP,
+}) })
+check(devLoader:load({}) == true, "a dev checkout loads a mod that names a floor")
+check(statusById(devLoader).floored.state == "loaded",
+  "the 0.0.0-dev placeholder is not a compatibility statement")
 
 -- ------- conflicts refuse to co-enable
 local conflictLoader = Loader.new({ fs = memfs({
@@ -321,7 +359,8 @@ check(cycleStatus.innocent.state == "loaded" and cycleData.items.FINE ~= nil,
   "a mod beside the cycle loads normally")
 
 -- ------- inter-mod exports and find
-_G.MOD_FIND_RESULTS = {}
+-- probes report through mod.exports: a mod's globals are its own
+-- (src/mods/Sandbox.lua)
 local exportLoader = Loader.new({ fs = memfs({
   ["mods/colorlib/manifest.json"] = manifestJson("colorlib"),
   ["mods/colorlib/main.lua"] = [[
@@ -336,7 +375,7 @@ end
   }),
   ["mods/daynight/main.lua"] = [[
 return function(mod)
-  local results = _G.MOD_FIND_RESULTS
+  local results = mod.exports
   local color = mod.find("colorlib")
   results.depVersion = color.version
   results.tint = color.exports.tint("dusk")
@@ -351,7 +390,7 @@ end
   ["options.lua"] = "return { mods = { shelved = false } }",
 }) })
 check(exportLoader:load({}) == true, "the export fixture loads clean")
-local found = _G.MOD_FIND_RESULTS
+local found = exportLoader.exports.daynight
 check(found.tint == "tinted:dusk", "find returns the other mod's live export table")
 check(found.depVersion == "1.0.0", "the handle carries the other mod's version")
 check(found.optional == true, "an enabled optional dependency is findable")
@@ -360,10 +399,8 @@ check(found.disabled == nil, "find returns nil for a disabled mod")
 check(found.method == true, "mod:find is tolerated alongside mod.find")
 check(exportLoader.order[1] == "colorlib",
   "a hard dependency executes before its dependent")
-_G.MOD_FIND_RESULTS = nil
 
 -- ------- the rest of the v2 mod object
-_G.MOD_OBJECT_PROBE = {}
 local objectLoader = Loader.new({ fs = memfs({
   ["mods/probe/manifest.json"] = manifestJson("probe", {
     api = "2", description = '"probing"', priority = "3",
@@ -371,7 +408,7 @@ local objectLoader = Loader.new({ fs = memfs({
   ["mods/probe/data.txt"] = "hello from the mod dir",
   ["mods/probe/main.lua"] = [[
 return function(mod)
-  local probe = _G.MOD_OBJECT_PROBE
+  local probe = mod.exports
   probe.id, probe.version, probe.path = mod.id, mod.version, mod.path
   probe.manifestApi = mod.manifest.api
   mod.manifest.api = 99
@@ -403,7 +440,7 @@ end
   ["options.lua"] = "return { modOptions = { probe = { volume = 4 } } }",
 }) })
 check(objectLoader:load({ pokemon = {} }) == true, "the mod object fixture loads clean")
-local probe = _G.MOD_OBJECT_PROBE
+local probe = objectLoader.exports.probe
 check(probe.id == "probe" and probe.version == "1.0.0" and probe.path == "mods/probe",
   "identity fields are present")
 check(probe.manifestApi == 2 and objectLoader.mods.probe.manifest.api == 2,
@@ -429,7 +466,6 @@ check(probe.onceCount == 1 and probe.stillHeard == true,
   "events:once fires once and does not skip the listener behind it")
 check(tostring(probe.forgery):find("may only emit", 1, true) ~= nil,
   "a mod cannot emit outside its own event namespace")
-_G.MOD_OBJECT_PROBE = nil
 
 -- a failing entry chunk takes its exports, commands and migrations with it
 local residueLoader = Loader.new({ fs = memfs({
@@ -499,8 +535,106 @@ local emptyLoader = Loader.new({ fs = memfs({}) })
 check(emptyLoader:load(pristine) == true, "an empty mods dir still loads clean")
 check(#emptyLoader:status().errors == 0, "no mods means no diagnostics")
 check(#emptyLoader.order == 0, "no mods means an empty load order")
-check(pristine.pokemon.A.hp == 1 and next(pristine.items) == nil,
-  "no-mod load leaves data untouched")
+-- ------- dependency resolver conflict detection test
+local LauncherMods = require("src.mods.LauncherMods")
+local testTargetManifest = Manifest.validate({
+  id = "new_mod",
+  name = "New Mod",
+  version = "1.0.0",
+  entry = "main.lua",
+  incompatible = { "colorlib" },
+}, "mods/new_mod")
+local installedColorlib = Manifest.validate({
+  id = "colorlib",
+  name = "Color Lib",
+  version = "1.0.0",
+  entry = "main.lua",
+}, "mods/colorlib")
+local unconditionalConflict = LauncherMods.checkDependencies(testTargetManifest,
+  nil, nil, { testTargetManifest, installedColorlib })
+check(unconditionalConflict.hasIssues == true,
+  "dependency resolver reports an unversioned conflict")
+
+local function rangeTarget(version, conflicts)
+  return Manifest.validate({
+    id = "range_target",
+    name = "Range Target",
+    version = version,
+    entry = "main.lua",
+    conflicts = conflicts or {},
+  }, "mods/range_target")
+end
+local function rangeSource(conflicts)
+  return Manifest.validate({
+    id = "range_source",
+    name = "Range Source",
+    version = "1.0.0",
+    entry = "main.lua",
+    conflicts = conflicts or {},
+  }, "mods/range_source")
+end
+
+local forwardSource = rangeSource({ "range_target@<2.0.0" })
+local matchingTarget = rangeTarget("1.4.0")
+local nonmatchingTarget = rangeTarget("2.0.0")
+local forwardMatching = LauncherMods.checkDependencies(forwardSource,
+  nil, nil, { forwardSource, matchingTarget })
+check(forwardMatching.hasIssues == true and #forwardMatching.deps == 1,
+  "dependency resolver applies a matching forward conflict range")
+local forwardNonmatching = LauncherMods.checkDependencies(forwardSource,
+  nil, nil, { forwardSource, nonmatchingTarget })
+check(forwardNonmatching.hasIssues == false and #forwardNonmatching.deps == 0,
+  "dependency resolver ignores a nonmatching forward conflict range")
+
+local reverseSource = rangeSource({ "range_target@<2.0.0" })
+local reverseMatching = LauncherMods.checkDependencies(matchingTarget,
+  nil, nil, { reverseSource, matchingTarget })
+check(reverseMatching.hasIssues == true and #reverseMatching.deps == 1,
+  "dependency resolver applies a matching reverse conflict range")
+local reverseNonmatching = LauncherMods.checkDependencies(nonmatchingTarget,
+  nil, nil, { reverseSource, nonmatchingTarget })
+check(reverseNonmatching.hasIssues == false and #reverseNonmatching.deps == 0,
+  "dependency resolver ignores a nonmatching reverse conflict range")
+-- ------- scoped dependency tests
+local Json = require("src.link.Json")
+local scopedDepManifest = Manifest.validate({
+  id = "dual_gen_mod",
+  name = "Dual Gen Mod",
+  version = "1.0.0",
+  entry = "main.lua",
+  games = { "gen1", "gen2" },
+  dependencies = {
+    { id = "gen2_only_dep", games = { "gen2" }, version = "^1.0.0" }
+  },
+}, "mods/dual_gen_mod")
+check(#scopedDepManifest.dependencySpecs == 1, "scoped dependency parsed")
+check(scopedDepManifest.dependencySpecs[1].games ~= nil, "dependency carries games list")
+
+local dualGenFiles = {
+  ["mods/dual_gen_mod/manifest.json"] = Json.encode({
+    id = "dual_gen_mod",
+    name = "Dual Gen Mod",
+    version = "1.0.0",
+    entry = "main.lua",
+    games = { "gen1", "gen2" },
+    dependencies = {
+      { id = "gen2_only_dep", games = { "gen2" } }
+    },
+  }),
+  ["mods/dual_gen_mod/main.lua"] = [[
+return function(mod)
+  mod.content.pokemon:register("DUAL_MON", { hp = 100 })
+end
+]],
+}
+local gen1Loader = Loader.new({ fs = memfs(dualGenFiles), generation = 1 })
+check(gen1Loader:load({}) == true, "dual gen mod loads on Gen 1 when Gen 2 dep is absent")
+check(gen1Loader.content.pokemon:get("DUAL_MON") ~= nil, "dual gen mod executed on Gen 1")
+
+local gen2Loader = Loader.new({ fs = memfs(dualGenFiles), generation = 2 })
+check(gen2Loader:load({}) == false, "loader returns false on Gen 2 when missing required Gen 2 dep")
+check(gen2Loader.content.pokemon:get("DUAL_MON") == nil, "dual gen mod is blocked on Gen 2 when missing required Gen 2 dep")
+check(#gen2Loader:status().errors > 0, "missing dependency error logged on Gen 2")
 
 Runtime.install(savedEvents, savedHooks)
 

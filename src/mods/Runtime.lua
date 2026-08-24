@@ -28,9 +28,24 @@ Runtime.errors = nil
 -- permissions tripwire knows there is nobody to attribute to
 Runtime.currentMod = nil
 
+-- set by the sandbox's require for the duration of one mod-initiated require,
+-- so the loader's gate can still attribute a lazy one made long after
+-- currentMod went back to nil (src/mods/Sandbox.lua)
+Runtime.modRequire = nil
+
+Runtime.safeMode = false
+
 function Runtime.install(events, hooks, errors)
   Runtime.events, Runtime.hooks = events, hooks
   Runtime.errors = errors
+end
+
+function Runtime.reset()
+  Runtime.events = NullEvents
+  Runtime.hooks = NullHooks
+  Runtime.errors = nil
+  Runtime.currentMod = nil
+  Runtime.modRequire = nil
 end
 
 -- attribute a runtime failure to the mod that owns the offending record.

@@ -1,19 +1,31 @@
 #!/usr/bin/env bash
 # Packages the LÖVE2D Pokémon Red port into an Android APK via love-android 11.5a.
 #
-# Usage: scripts/build_android.sh [--version X.Y.Z] [--package-only]
+# Usage: scripts/build_android.sh [--version X.Y.Z] [--release] [--package-only]
+#                                 [--test-application-id ID]
 #
-#   --version X.Y.Z  set app.version_name / app.version_code (else left as-is)
-#   --package-only   zip game.love + apply branding; skip gradle
+#   --version X.Y.Z          set app.version_name / app.version_code (else left as-is)
+#   --release                build the production-signed release APK (requires the
+#                            GEN1RECOMP_ANDROID_* signing environment variables)
+#   --package-only           zip game.love + apply branding; skip gradle
+#   --test-application-id ID install under a distinct application id (e.g.
+#                             com.theboisclub.pokemonred.shaderfxtest) so a
+#                             test build installs side by side with a real
+#                             played copy instead of overwriting it. App name
+#                             gets a " (test)" suffix so it's distinguishable
+#                             in the launcher too. Without this flag,
+#                             apply_android_branding always writes back the
+#                             real shipping identity, which previously had to
+#                             be restored by hand in gradle.properties after
+#                             every test build.
 #
 # Prerequisites:
 #   - mobile/android vendored love-android tree at tag 11.5a (in-repo; see mobile/ANDROID.md)
-#   - Android SDK + NDK (SDK API 34, NDK 25.2.9519653)
+#   - Android SDK + NDK (SDK API 36, NDK 25.2.9519653)
 #   - JDK 17
 #
 # Output (after gradle):
-#   dist/android/debug/*.apk (convenience copy)
-#   mobile/android/app/build/outputs/apk/embedNoRecord/debug/*.apk
+#   dist/android/debug/*.apk (normal local build) or dist/android/release/*.apk
 
 set -euo pipefail
 
@@ -26,14 +38,20 @@ APP_NAME="gen1recomp"
 APPLICATION_ID="com.theboisclub.pokemonred"
 LOVE_ANDROID_VERSION="11.5a"
 NDK_VERSION="25.2.9519653"
+ANDROID_API="36"
 YELLOW_MANIFEST_RELATIVE="tools/rom_manifest_yellow.json"
-# A fresh source checkout normally supplies this through Git.  This URL is
-# deliberately only a last resort for incomplete source exports: the manifest
-# contains extraction metadata, never a ROM or extracted game data.
 YELLOW_MANIFEST_URL="${YELLOW_MANIFEST_URL:-https://raw.githubusercontent.com/bryanthaboi/gen1recomp/main/tools/rom_manifest_yellow.json}"
+GOLD_MANIFEST_RELATIVE="tools/rom_manifest_gold.json"
+GOLD_MANIFEST_URL="${GOLD_MANIFEST_URL:-https://raw.githubusercontent.com/bryanthaboi/gen1recomp/main/tools/rom_manifest_gold.json}"
+SILVER_MANIFEST_RELATIVE="tools/rom_manifest_silver.json"
+SILVER_MANIFEST_URL="${SILVER_MANIFEST_URL:-https://raw.githubusercontent.com/bryanthaboi/gen1recomp/main/tools/rom_manifest_silver.json}"
+CRYSTAL_MANIFEST_RELATIVE="tools/rom_manifest_crystal.json"
+CRYSTAL_MANIFEST_URL="${CRYSTAL_MANIFEST_URL:-https://raw.githubusercontent.com/bryanthaboi/gen1recomp/main/tools/rom_manifest_crystal.json}"
 
 VERSION=""
 PACKAGE_ONLY=false
+RELEASE=false
+TEST_APPLICATION_ID=""
 
 say()  { printf '\033[1;32m==>\033[0m %s\n' "$*"; }
 warn() { printf '\033[1;33mwarn:\033[0m %s\n' "$*" >&2; }
@@ -43,11 +61,13 @@ while [ $# -gt 0 ]; do
   case "$1" in
     --version) VERSION="$2"; shift ;;
     --package-only) PACKAGE_ONLY=true ;;
+    --release) RELEASE=true ;;
+    --test-application-id) TEST_APPLICATION_ID="$2"; shift ;;
     -h|--help)
-      sed -n '2,20p' "$0"
+      sed -n '2,28p' "$0"
       exit 0
       ;;
-    *) fail "unknown argument: $1 (try --version X.Y.Z or --package-only)" ;;
+    *) fail "unknown argument: $1 (try --version X.Y.Z, --release, --package-only, or --test-application-id ID)" ;;
   esac
   shift
 done
@@ -61,7 +81,30 @@ if [ -n "$VERSION" ]; then
   rest="${VERSION#*.}"
   minor="${rest%%.*}"
   patch="${rest##*.}"
-  VERSION_CODE=$((major * 10000 + minor * 100 + patch))
+  # Reserve three digits for each lower component. This stays monotonic across
+  # 1.0.100 -> 1.1.0, unlike the old two-digit encoding, and remains inside
+  # Android's signed 32-bit versionCode range for normal release versions.
+  if [ "$minor" -gt 999 ] || [ "$patch" -gt 999 ] || [ "$major" -gt 2099 ]; then
+    fail "--version components exceed Android versionCode limits"
+  fi
+  VERSION_CODE=$((major * 1000000 + minor * 1000 + patch))
+fi
+
+if $RELEASE; then
+  for var in GEN1RECOMP_ANDROID_KEYSTORE GEN1RECOMP_ANDROID_KEYSTORE_PASSWORD \
+    GEN1RECOMP_ANDROID_KEY_ALIAS GEN1RECOMP_ANDROID_KEY_PASSWORD; do
+    [ -n "${!var:-}" ] || fail "--release requires $var"
+  done
+  [ -f "$GEN1RECOMP_ANDROID_KEYSTORE" ] \
+    || fail "Android signing keystore does not exist: $GEN1RECOMP_ANDROID_KEYSTORE"
+fi
+
+if [ -n "$TEST_APPLICATION_ID" ]; then
+  if ! printf '%s' "$TEST_APPLICATION_ID" | grep -Eq '^[A-Za-z][A-Za-z0-9_]*(\.[A-Za-z][A-Za-z0-9_]*)+$'; then
+    fail "invalid --test-application-id '$TEST_APPLICATION_ID' (expected a dotted package id, e.g. com.theboisclub.pokemonred.shaderfxtest)"
+  fi
+  APPLICATION_ID="$TEST_APPLICATION_ID"
+  APP_NAME="$APP_NAME (test)"
 fi
 
 # --------------------------------------------------------------- preconditions
@@ -130,6 +173,150 @@ ensure_yellow_manifest() {
   fail "Yellow import manifest is unavailable. Git recovery failed and could not download $YELLOW_MANIFEST_URL"
 }
 
+gold_manifest_is_valid() {
+  local path="$1"
+  python3 - "$path" <<'PY'
+import json, pathlib, sys
+
+try:
+    manifest = json.loads(pathlib.Path(sys.argv[1]).read_text())
+except (OSError, ValueError):
+    raise SystemExit(1)
+
+raise SystemExit(0 if manifest.get("romSha1") ==
+                 "d8b8a3600a465308c9953dfa04f0081c05bdcb94" else 1)
+PY
+}
+
+ensure_gold_manifest() {
+  local manifest="$ROOT/$GOLD_MANIFEST_RELATIVE"
+  local staged
+  staged="$(mktemp)"
+
+  if gold_manifest_is_valid "$manifest"; then
+    rm -f "$staged"
+    return
+  fi
+
+  warn "Gold import manifest is missing or invalid; recovering it before packaging"
+  if git -C "$ROOT" show "HEAD:$GOLD_MANIFEST_RELATIVE" > "$staged" 2>/dev/null \
+      && gold_manifest_is_valid "$staged"; then
+    mkdir -p "$(dirname "$manifest")"
+    mv "$staged" "$manifest"
+    say "restored Gold import manifest from this checkout's Git data"
+    return
+  fi
+
+  if command -v curl >/dev/null 2>&1 \
+      && curl --fail --location --retry 2 --connect-timeout 15 \
+          --output "$staged" "$GOLD_MANIFEST_URL" \
+      && gold_manifest_is_valid "$staged"; then
+    mkdir -p "$(dirname "$manifest")"
+    mv "$staged" "$manifest"
+    say "downloaded Gold import manifest from the project repository"
+    return
+  fi
+
+  rm -f "$staged"
+  fail "Gold import manifest is unavailable. Git recovery failed and could not download $GOLD_MANIFEST_URL"
+}
+
+silver_manifest_is_valid() {
+  local path="$1"
+  python3 - "$path" <<'PY'
+import json, pathlib, sys
+
+try:
+    manifest = json.loads(pathlib.Path(sys.argv[1]).read_text())
+except (OSError, ValueError):
+    raise SystemExit(1)
+
+raise SystemExit(0 if manifest.get("romSha1") ==
+                 "49b163f7e57702bc939d642a18f591de55d92dae" else 1)
+PY
+}
+
+ensure_silver_manifest() {
+  local manifest="$ROOT/$SILVER_MANIFEST_RELATIVE"
+  local staged
+  staged="$(mktemp)"
+
+  if silver_manifest_is_valid "$manifest"; then
+    rm -f "$staged"
+    return
+  fi
+
+  warn "Silver import manifest is missing or invalid; recovering it before packaging"
+  if git -C "$ROOT" show "HEAD:$SILVER_MANIFEST_RELATIVE" > "$staged" 2>/dev/null \
+      && silver_manifest_is_valid "$staged"; then
+    mkdir -p "$(dirname "$manifest")"
+    mv "$staged" "$manifest"
+    say "restored Silver import manifest from this checkout's Git data"
+    return
+  fi
+
+  if command -v curl >/dev/null 2>&1 \
+      && curl --fail --location --retry 2 --connect-timeout 15 \
+          --output "$staged" "$SILVER_MANIFEST_URL" \
+      && silver_manifest_is_valid "$staged"; then
+    mkdir -p "$(dirname "$manifest")"
+    mv "$staged" "$manifest"
+    say "downloaded Silver import manifest from the project repository"
+    return
+  fi
+
+  rm -f "$staged"
+  fail "Silver import manifest is unavailable. Git recovery failed and could not download $SILVER_MANIFEST_URL"
+}
+
+crystal_manifest_is_valid() {
+  local path="$1"
+  python3 - "$path" <<'PY'
+import json, pathlib, sys
+
+try:
+    manifest = json.loads(pathlib.Path(sys.argv[1]).read_text())
+except (OSError, ValueError):
+    raise SystemExit(1)
+
+raise SystemExit(0 if manifest.get("romSha1") ==
+                 "f4cd194bdee0d04ca4eac29e09b8e4e9d818c133" else 1)
+PY
+}
+
+ensure_crystal_manifest() {
+  local manifest="$ROOT/$CRYSTAL_MANIFEST_RELATIVE"
+  local staged
+  staged="$(mktemp)"
+
+  if crystal_manifest_is_valid "$manifest"; then
+    rm -f "$staged"
+    return
+  fi
+
+  warn "Crystal import manifest is missing or invalid; recovering it before packaging"
+  if git -C "$ROOT" show "HEAD:$CRYSTAL_MANIFEST_RELATIVE" > "$staged" 2>/dev/null \
+      && crystal_manifest_is_valid "$staged"; then
+    mkdir -p "$(dirname "$manifest")"
+    mv "$staged" "$manifest"
+    say "restored Crystal import manifest from this checkout's Git data"
+    return
+  fi
+
+  if command -v curl >/dev/null 2>&1 \
+      && curl --fail --location --retry 2 --connect-timeout 15 \
+          --output "$staged" "$CRYSTAL_MANIFEST_URL" \
+      && crystal_manifest_is_valid "$staged"; then
+    mkdir -p "$(dirname "$manifest")"
+    mv "$staged" "$manifest"
+    say "downloaded Crystal import manifest from the project repository"
+    return
+  fi
+
+  rm -f "$staged"
+  fail "Crystal import manifest is unavailable. Git recovery failed and could not download $CRYSTAL_MANIFEST_URL"
+}
+
 # --------------------------------------------------------------- branding
 # love-android 11.5+ reads app id / name / orientation from gradle.properties.
 # Manifest still gets permission trims. Re-applied every build so refreshing
@@ -194,6 +381,9 @@ PY
 pack_game_love() {
   say "packing game.love for love-android embed flavor"
   ensure_yellow_manifest
+  ensure_gold_manifest
+  ensure_silver_manifest
+  ensure_crystal_manifest
   mkdir -p "$EMBED_ASSETS"
   rm -f "$LOVE_FILE"
   # tools/save-editor ships with the app: the launcher's Edit button on a save
@@ -207,7 +397,8 @@ pack_game_love() {
   (cd "$ROOT" && zip -q -9 -r "$LOVE_FILE" \
     main.lua conf.lua src data assets tools/save-editor \
     tools/rom_manifest.json tools/rom_manifest_blue.json \
-    tools/rom_manifest_yellow.json \
+    tools/rom_manifest_yellow.json tools/rom_manifest_gold.json \
+    tools/rom_manifest_silver.json tools/rom_manifest_crystal.json \
     -x '*.DS_Store' -x '*/.git/*' -x '*/.DS_Store' \
     -x 'data/generated/*' -x 'assets/generated/*')
   # List once and match against the captured text: piping unzip straight into
@@ -227,6 +418,12 @@ pack_game_love() {
     || fail "game.love is missing the save editor (Edit on a save row would crash)"
   grep -qx "$YELLOW_MANIFEST_RELATIVE" <<< "$archive_entries" \
     || fail "game.love is missing the Yellow ROM import manifest"
+  grep -qx 'tools/rom_manifest_gold.json' <<< "$archive_entries" \
+    || fail "game.love is missing the Gold ROM import manifest"
+  grep -qx 'tools/rom_manifest_silver.json' <<< "$archive_entries" \
+    || fail "game.love is missing the Silver ROM import manifest"
+  grep -qx 'tools/rom_manifest_crystal.json' <<< "$archive_entries" \
+    || fail "game.love is missing the Crystal ROM import manifest"
   # This gate exists because the launcher's UI toolkit once lived outside
   # src/ (libs/flexlove) and was added to scripts/build.sh's payload and to
   # no other packager, so Android and iOS built an APK/IPA whose launcher
@@ -285,12 +482,17 @@ require_android_sdk() {
     export ANDROID_SDK_ROOT=\$HOME/Library/Android/sdk
   or create mobile/android/local.properties with:
     sdk.dir=/path/to/Android/sdk
-  love-android $LOVE_ANDROID_VERSION expects SDK API 34 and NDK $NDK_VERSION
+  love-android $LOVE_ANDROID_VERSION expects SDK API $ANDROID_API and NDK $NDK_VERSION
   (see mobile/ANDROID.md)."
   fi
 
   export ANDROID_SDK_ROOT="$sdk"
   export ANDROID_HOME="$sdk"
+
+  if [ ! -d "$sdk/platforms/android-$ANDROID_API" ]; then
+    fail "Android SDK platform android-$ANDROID_API is not installed.
+  Install Android $ANDROID_API (and the latest 36.x Build-Tools) in SDK Manager."
+  fi
 
   local props="$ANDROID_DIR/local.properties"
   # Always rewrite so a leftover Docker sdk.dir=/opt/android-sdk cannot stick.
@@ -308,7 +510,12 @@ require_android_sdk() {
 
 # --------------------------------------------------------------- gradle
 run_gradle() {
-  local task="assembleEmbedNoRecordDebug"
+  local variant="debug"
+  $RELEASE && variant="release"
+  # Keep this compatible with macOS's bundled Bash 3.2 (no ${var^}).
+  local variant_title="Debug"
+  $RELEASE && variant_title="Release"
+  local task="assembleEmbedNoRecord$variant_title"
   local build_dir="$ANDROID_DIR"
 
   # ndk-build is GNU make underneath and cannot cope with spaces anywhere in
@@ -343,12 +550,12 @@ run_gradle() {
   You can still iterate on the .love payload with: scripts/build_android.sh --package-only"
   fi
 
-  local out_dir="$build_dir/app/build/outputs/apk/embedNoRecord/debug"
+  local out_dir="$build_dir/app/build/outputs/apk/embedNoRecord/$variant"
   if [ -d "$out_dir" ]; then
     say "APK output:"
     find "$out_dir" -name '*.apk' -exec ls -lh {} \;
 
-    local dist_dir="$DIST/debug"
+    local dist_dir="$DIST/$variant"
     rm -rf "$dist_dir"
     mkdir -p "$dist_dir"
     find "$out_dir" -name '*.apk' -exec cp {} "$dist_dir/" \;

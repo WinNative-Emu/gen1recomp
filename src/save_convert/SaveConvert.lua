@@ -21,6 +21,7 @@
 -- require alone cannot see them there (#420).
 
 local GenSave = require("src.save_convert.GenSave")
+local GameVersion = require("src.core.GameVersion")
 
 local SaveConvert = {}
 
@@ -49,6 +50,7 @@ local DATA_MODULES = {
   charmap    = { "src.save_convert.data.charmap",   "src/save_convert/data/charmap.lua" },
   eventFlags = { "src.save_convert.data.event_flags", "src/save_convert/data/event_flags.lua" },
   toggleObjects = { "src.save_convert.data.toggle_objects", "src/save_convert/data/toggle_objects.lua" },
+  hiddenItems = { "src.save_convert.data.hidden_items", "src/save_convert/data/hidden_items.lua" },
 }
 
 local OPTIONAL_MODULES = { tilesets = true, audio = true }
@@ -63,6 +65,10 @@ local OPTIONAL_MODULES = { tilesets = true, audio = true }
 local YELLOW_EVENT_FLAGS = {
   "src.save_convert.data.event_flags_yellow",
   "src/save_convert/data/event_flags_yellow.lua",
+}
+local YELLOW_HIDDEN_ITEMS = {
+  "src.save_convert.data.hidden_items_yellow",
+  "src/save_convert/data/hidden_items_yellow.lua",
 }
 
 local function loadTable(requirePath, filePath)
@@ -133,6 +139,8 @@ local function ensureData(gameVersion)
       if name ~= "charmap" then
         if name == "eventFlags" and gameVersion == "yellow" then
           spec = YELLOW_EVENT_FLAGS -- Yellow's bit numbering differs (#838)
+        elseif name == "hiddenItems" and gameVersion == "yellow" then
+          spec = YELLOW_HIDDEN_ITEMS
         end
         local mod = loadCacheTable(gameVersion, spec[2])
         if not mod then
@@ -185,7 +193,7 @@ local function defaultsSave()
       battleLayout = "og",
       ruleset = "gen1_faithful", musicVol = 7, sfxVol = 7, pikaVol = 7,
       musicFilter = 0,
-      speed = 1, colors = "gbc", tilt = 0, gbcfx = 0,
+      speed = 1, colors = "gbc", tilt = 0,
       videoMode = "windowed", mods = {},
     },
   }
@@ -214,6 +222,19 @@ SaveConvert.mergeDefaults = mergeDefaults
 -- Public API
 -- ------------------------------------------------------------------
 
+-- GenSave models Gen 1 SRAM and nothing else: a Gen 2 cart save is a
+-- different bank map, party struct and checksum scheme (pokegold
+-- ram/sram.asm sOptions/sCheckValue1/sPlayerData/sBox1-sBox14 vs
+-- pokered's single sPlayerName..sMainDataCheckSum window), and no Gen 2
+-- codec exists yet.  Both directions answer with a plain message the
+-- launcher's save card renders as-is, instead of pushing a Gen 2 save
+-- table through Gen 1 offsets and surfacing a codec traceback.
+local function gen2CartName(gameVersion)
+  if not GameVersion.VERSIONS[gameVersion] then return nil end
+  if GameVersion.generation(gameVersion) ~= 2 then return nil end
+  return GameVersion.info(gameVersion).displayName
+end
+
 -- importSav(bytes, version, gameVersion) -> saveTable, err
 -- bytes: the raw 32768-byte SRAM string. Validates size and the main-data
 -- checksum, decodes through GenSave, and returns a save table fully merged
@@ -225,6 +246,10 @@ SaveConvert.mergeDefaults = mergeDefaults
 function SaveConvert.importSav(bytes, version, gameVersion)
   if type(bytes) ~= "string" then
     return nil, "expected raw save bytes as a string"
+  end
+  local gen2Name = gen2CartName(gameVersion)
+  if gen2Name then
+    return nil, gen2Name .. " uses a Gen 2 cart save; importing one is not supported yet."
   end
   if #bytes ~= GenSave.SAVE_SIZE then
     return nil, ("save must be %d bytes, got %d"):format(GenSave.SAVE_SIZE, #bytes)
@@ -257,6 +282,10 @@ end
 function SaveConvert.exportSav(saveTable, gameVersion)
   if type(saveTable) ~= "table" then
     return nil, "expected a save table"
+  end
+  local gen2Name = gen2CartName(gameVersion)
+  if gen2Name then
+    return nil, gen2Name .. " uses a Gen 2 cart save; exporting one is not supported yet."
   end
   local data, derr = ensureData(gameVersion)
   if not data then return nil, derr end

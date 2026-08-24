@@ -6,11 +6,14 @@ local HostShell = {}
 -- spawn tries to link against the libraries we're shipping instead of the
 -- system ones. We want to unset the var so that any system tools can find
 -- their proper libraries. Only needed when running in an AppImage.
+-- LD_PRELOAD is Steam's overlay (#1470): its 32-bit half cannot load into a
+-- 64-bit child, so ld.so prints an error into that child's output.
 function HostShell.envPrefix()
-  if os.getenv("APPIMAGE") then
-    return "env -u LD_LIBRARY_PATH "
-  end
-  return ""
+  local unset = ""
+  if os.getenv("APPIMAGE") then unset = unset .. "-u LD_LIBRARY_PATH " end
+  if os.getenv("LD_PRELOAD") then unset = unset .. "-u LD_PRELOAD " end
+  if unset == "" then return "" end
+  return "env " .. unset
 end
 
 -- Windows: every host tool we shell out to (curl for the update and mod-index
@@ -222,11 +225,20 @@ end
 local HTTP_MARK = "\n__gen1recomp_http__"
 local HTTP_MARK_FMT = "\\n__gen1recomp_http__%{http_code}"
 
+local function stripLoaderNoise(out)
+  while out:find("^ERROR: ld%.so:") do
+    local nl = out:find("\n", 1, true)
+    if not nl then return "" end
+    out = out:sub(nl + 1)
+  end
+  return out
+end
+
 -- Split a curl pipe's output into (body, status, noise).  `status` is nil
 -- when curl never got far enough to have one (DNS failure, no route, a
 -- timeout), in which case `noise` carries curl's own complaint.
 local function splitCurlOutput(out)
-  out = tostring(out or "")
+  out = stripLoaderNoise(tostring(out or ""))
   local at = nil
   local from = 1
   while true do
@@ -272,6 +284,38 @@ function HostShell.quote(s)
   return "'" .. s:gsub("'", "'\\''") .. "'"
 end
 
+-- Launch another instance of this packaged app without waiting for it.  The
+-- same path works on all process-capable desktop hosts; only the shell's
+-- background spelling differs.  Source checkouts include their game folder,
+-- while fused releases and AppImages already carry it in the executable.
+function HostShell.spawnSelfDetached(args)
+  if not require("src.core.Platform").canSpawnProcess() then return false end
+  local fs = love and love.filesystem
+  if not (fs and fs.getExecutablePath) then return false end
+  local executable = os.getenv("APPIMAGE") or fs.getExecutablePath()
+  if type(executable) ~= "string" or executable == "" then return false end
+
+  local argv = {}
+  local fused = fs.isFused and fs.isFused()
+  if not os.getenv("APPIMAGE") and not fused and fs.getSource then
+    argv[#argv + 1] = fs.getSource()
+  end
+  for _, value in ipairs(args or {}) do argv[#argv + 1] = tostring(value) end
+
+  local command = HostShell.quote(executable)
+  for _, value in ipairs(argv) do
+    command = command .. " " .. HostShell.quote(value)
+  end
+  local osName = love.system and love.system.getOS and love.system.getOS()
+  if osName == "Windows" then
+    command = 'start "" /b ' .. command .. " >NUL 2>&1"
+  else
+    command = HostShell.envPrefix() .. command .. " >/dev/null 2>&1 &"
+  end
+  local ok, _, code = os.execute(command)
+  return ok == true or ok == 0 or code == 0
+end
+
 -- MEMOISED per Lua state (so once per thread).  This used to spawn a whole
 -- `curl --version` process on every single fetch -- twice for a GET through
 -- the Android-bridge fallback -- which doubled the number of spawns the lock
@@ -306,9 +350,21 @@ local function haveBridge()
   return osName == "Android" or osName == "iOS" or osName == "UWP"
 end
 
+local function haveRequestBridge()
+  if not (love and love.system and type(love.system.httpRequest) == "function") then
+    return false
+  end
+  local osName = love.system.getOS and love.system.getOS()
+  return osName == "Android" or osName == "iOS" or osName == "UWP"
+end
+
 -- Is any transport available at all?  Callers gate on this, never on curl.
 function HostShell.canFetch()
   return HostShell.haveCurl() or haveBridge()
+end
+
+function HostShell.canHttpRequest()
+  return (HostShell.haveCurl() or haveRequestBridge()) and true or false
 end
 
 -- Download url to an absolute host path.  Returns true, or nil plus an error.
@@ -320,16 +376,33 @@ end
 -- notice a quit command until curl returns.  With the launcher's default 300s
 -- ceiling, closing the window during a mod download hung the process for
 -- minutes.  Callers on the interactive fetch pool pass something short.
-function HostShell.httpDownload(url, absPath, userAgent, accept, maxTime)
+--
+-- `etagPath` (optional, absolute host path) turns this into a conditional
+-- GET: curl sends `If-None-Match` from whatever ETag is already saved there
+-- (`--etag-compare`) and overwrites it with the response's own ETag on
+-- success (`--etag-save`), same file for both so a first call with no prior
+-- ETag degrades to a plain unconditional download. A server that replies 304
+-- Not Modified is reported as a third return value (`notModified`), and --
+-- confirmed empirically against the real buildbot.libretro.com endpoint
+-- (TrueFX/etag-cache-repro/) before this was wired in here -- curl does NOT
+-- write `absPath` at all in that case (not even an empty file), matching
+-- HTTP: a 304 carries no body. A caller must not treat a missing file as an
+-- error when `notModified` comes back true.
+function HostShell.httpDownload(url, absPath, userAgent, accept, maxTime, etagPath)
   if type(url) ~= "string" or url == "" then return nil, "missing url" end
   if type(absPath) ~= "string" or absPath == "" then return nil, "missing path" end
   userAgent = userAgent or "gen1recomp"
   if HostShell.haveCurl() then
-    local cmd = ("curl -fsSL --connect-timeout 15 --max-time %d ")
+    local cmd = ("curl -fsSL --proto =http,https --proto-redir =http,https "
+      .. "--connect-timeout 15 --max-time %d ")
       :format(tonumber(maxTime) or 300)
       .. "-H " .. HostShell.quote("User-Agent: " .. userAgent) .. " "
     if accept then
       cmd = cmd .. "-H " .. HostShell.quote("Accept: " .. accept) .. " "
+    end
+    if type(etagPath) == "string" and etagPath ~= "" then
+      cmd = cmd .. "--etag-compare " .. HostShell.quote(etagPath) .. " "
+        .. "--etag-save " .. HostShell.quote(etagPath) .. " "
     end
     cmd = cmd .. "-o " .. HostShell.quote(absPath) .. " "
       .. "-w " .. HostShell.quote(HTTP_MARK_FMT) .. " "
@@ -343,6 +416,9 @@ function HostShell.httpDownload(url, absPath, userAgent, accept, maxTime)
     -- status is here purely so the failure can NAME itself: "download failed"
     -- with no URL and no code is the report this whole change exists to fix.
     local body, status, noise = splitCurlOutput(readOk and out or "")
+    if status == 304 then
+      return true, nil, true
+    end
     if status and (status < 200 or status >= 300) then
       return nil, fetchError(url, status, body)
     end
@@ -354,6 +430,10 @@ function HostShell.httpDownload(url, absPath, userAgent, accept, maxTime)
   if not haveBridge() then
     return nil, "no network transport on this platform"
   end
+  -- The Android/iOS bridge has no conditional-GET support -- etagPath is
+  -- silently ignored here, so a downloaded preset re-fetches in full every
+  -- time on those platforms.  No transport-level ETag/If-None-Match hook
+  -- exists on the bridge to hang one off, and it's low-priority for now.
   local ok, done = pcall(love.system.httpDownload, url, absPath, userAgent, accept)
   if ok and done then return true end
   return nil, "download failed for " .. url
@@ -370,7 +450,8 @@ function HostShell.httpGet(url, userAgent, accept, maxTime)
     -- BODY, and on the two services this talks to that body is the whole
     -- diagnosis: GitHub's 403 says "API rate limit exceeded for <ip>", which
     -- tells a user to wait rather than to go hunting for a broken index.
-    local cmd = ("curl -sSL --connect-timeout 10 --max-time %d ")
+    local cmd = ("curl -sSL --proto =http,https --proto-redir =http,https "
+      .. "--connect-timeout 10 --max-time %d ")
       :format(tonumber(maxTime) or 40)
       .. "-H " .. HostShell.quote("User-Agent: " .. userAgent) .. " "
     if accept then
@@ -413,6 +494,271 @@ function HostShell.httpGet(url, userAgent, accept, maxTime)
     return nil, "empty response from " .. url
   end
   return body
+end
+
+-- POST returning success/failure.  Strictly one-way: the response body is
+-- discarded, only the HTTP status class is surfaced (postLog callers never
+-- trust the reply).  curl --data-binary reads the payload from a pipe, so a
+-- large body never lands in the command line; where curl is absent (Android
+-- and the other bridge-only platforms) the POST rides the JNI bridge --
+-- love.system.httpPost, the dedicated POST arm added beside httpDownload --
+-- instead of half-working through httpDownload (a GET round-trip to a POST
+-- endpoint would be a lie).
+function HostShell.httpPost(url, body, contentType, userAgent, maxTime)
+  if type(url) ~= "string" or url == "" then return nil, "missing url" end
+  if type(body) ~= "string" then return nil, "missing body" end
+  userAgent = userAgent or "gen1recomp"
+  if HostShell.haveCurl() then
+    -- io.popen is one-way on Lua/LuaJIT: its mode is "r" or "w", never
+    -- "rw".  Stage the request body so the response can stay on a read
+    -- pipe.  The staging directory comes from the OS temp contract, never
+    -- tmpnam(): the CRT's tmpnam() can return a name relative to the process
+    -- working directory, and a game installed under Program Files has no
+    -- writable CWD -- io.open would fail before curl ever runs and postLog
+    -- would silently drop the send.  TEMP/TMP are per-user writable on
+    -- Windows; TMPDIR (with /tmp fallback) covers POSIX.  No love.filesystem:
+    -- the sandbox-era transport stays on plain io/os.
+    local function stagingPath()
+      local dir = os.getenv("TEMP") or os.getenv("TMP")
+      if not dir or dir == "" then dir = os.getenv("TMPDIR") or "/tmp" end
+      local sep = dir:find("\\") and "\\" or "/"
+      return dir .. sep .. ("gen1recomp-post-%d.tmp"):format(
+        (os.time() % 1000000) * 100 + math.random(0, 99))
+    end
+    local bodyPath = stagingPath()
+    local bodyFile, bodyOpenErr = io.open(bodyPath, "wb")
+    if not bodyFile then
+      pcall(os.remove, bodyPath)
+      return nil, "could not create request body: " .. tostring(bodyOpenErr)
+    end
+    local bodyOk, bodyErr = pcall(function()
+      assert(bodyFile:write(body))
+      assert(bodyFile:close())
+    end)
+    if not bodyOk then
+      pcall(function() bodyFile:close() end)
+      pcall(os.remove, bodyPath)
+      return nil, "could not write body: " .. tostring(bodyErr)
+    end
+
+    -- --data-binary @<file> keeps the payload out of argv (command-line length
+    -- limits on Windows) and preserves every byte including trailing
+    -- newlines.  The body is staged above because io.popen cannot be opened
+    -- for both writing and reading.  No -f, matching httpGet: the response
+    -- body is discarded anyway, and curl's stderr carries the diagnosis.
+    local cmd = ("curl -sSL --proto =http,https --proto-redir =http,https "
+      .. "--connect-timeout 10 --max-time %d ")
+      :format(tonumber(maxTime) or 40)
+      .. "-X POST "
+      .. "-H " .. HostShell.quote("User-Agent: " .. userAgent) .. " "
+    if contentType then
+      cmd = cmd .. "-H " .. HostShell.quote("Content-Type: " .. contentType) .. " "
+    end
+    cmd = cmd .. "-H " .. HostShell.quote("Content-Length: " .. tostring(#body)) .. " "
+      .. "--data-binary " .. HostShell.quote("@" .. bodyPath) .. " "
+      .. "-w " .. HostShell.quote(HTTP_MARK_FMT) .. " "
+      .. HostShell.quote(url) .. " 2>&1"
+    local pipe = HostShell.popen(cmd)
+    if not pipe then
+      pcall(os.remove, bodyPath)
+      return nil, "could not run curl"
+    end
+    local readOk, out = pcall(function() return pipe:read("*a") end)
+    HostShell.pclose(pipe)
+    pcall(os.remove, bodyPath)
+    if not readOk then
+      return nil, fetchError(url, nil, tostring(out))
+    end
+    local _, status, noise = splitCurlOutput(out)
+    if not status then return nil, fetchError(url, nil, noise) end
+    if status < 200 or status >= 300 then
+      return nil, fetchError(url, status, "log post rejected")
+    end
+    return true
+  end
+  if not haveBridge() then
+    return nil, "no network transport on this platform"
+  end
+  -- The GET bridge has no POST; the dedicated love.system.httpPost arm
+  -- (GameActivity.httpPost) is the transport where curl is missing. A
+  -- build without it reports the same "no POST transport" a missing curl
+  -- would -- the old-APK skew path in the JNI bridge returns false.
+  if love.system and type(love.system.httpPost) == "function" then
+    local ok, sent = pcall(love.system.httpPost, url, body, contentType,
+                           userAgent)
+    if ok and sent then return true end
+    return nil, "log post rejected"
+  end
+  return nil, "no POST transport on this platform"
+end
+
+local function requestHeaderList(headers)
+  local out = {}
+  if type(headers) == "table" then
+    if #headers > 0 then
+      for _, line in ipairs(headers) do
+        if type(line) == "string" then out[#out + 1] = line end
+      end
+    else
+      local names = {}
+      for name in pairs(headers) do names[#names + 1] = tostring(name) end
+      table.sort(names)
+      for _, name in ipairs(names) do
+        out[#out + 1] = name .. ": " .. tostring(headers[name])
+      end
+    end
+  end
+  for _, line in ipairs(out) do
+    if line:find("[\r\n]") or not line:find(":", 1, true) then return nil end
+  end
+  return out
+end
+
+local BRIDGE_METHODS = { GET = true, POST = true, PUT = true, DELETE = true }
+
+local function requestHeaderPairs(lines)
+  local out = {}
+  for _, line in ipairs(lines) do
+    local name, value = line:match("^%s*([^:]-)%s*:%s*(.-)%s*$")
+    if not name or name == "" then return nil end
+    if name:find("[\r\n]") or value:find("[\r\n]") then return nil end
+    out[#out + 1] = name
+    out[#out + 1] = value
+  end
+  return out
+end
+
+local function bridgeRequest(url, method, headers, body, userAgent)
+  if not BRIDGE_METHODS[method] then
+    return nil, "no request transport for " .. method .. " on this platform"
+  end
+  local fields = requestHeaderPairs(headers)
+  if not fields then return nil, "bad request header" end
+  local ok, envelope = pcall(love.system.httpRequest, url, method, fields,
+                             body, userAgent)
+  if not ok or type(envelope) ~= "string" or envelope == "" then
+    return nil, "this app build cannot make signed requests: update the app to use save sync"
+  end
+  local head, rest = envelope:match("^([^\n]*)\n(.*)$")
+  if not head then
+    return nil, fetchError(url, nil, "unreadable reply from the network bridge")
+  end
+  local status = tonumber(head:match("^STATUS (%d+)$"))
+  if status then return rest or "", nil, status end
+  return nil, fetchError(url, nil, head:match("^ERROR (.*)$") or head)
+end
+
+local requestSeq = 0
+
+local function requestStagingPath(kind)
+  local dir
+  if love and love.filesystem and love.filesystem.getSaveDirectory then
+    local ok, saveDir = pcall(love.filesystem.getSaveDirectory)
+    if ok and type(saveDir) == "string" and saveDir ~= "" then dir = saveDir end
+  end
+  if not dir then
+    dir = os.getenv("TEMP") or os.getenv("TMP")
+    if not dir or dir == "" then dir = os.getenv("TMPDIR") or "/tmp" end
+  end
+  local sep = dir:find("\\") and "\\" or "/"
+  requestSeq = requestSeq + 1
+  return dir .. sep .. ("gen1recomp-req-%s-%d-%d-%d.tmp"):format(
+    kind, os.time() % 1000000, requestSeq, math.random(0, 999999))
+end
+
+local function writeStagingFile(kind, text)
+  local path = requestStagingPath(kind)
+  local file, openErr = io.open(path, "wb")
+  if not file then
+    return nil, "could not create the request " .. kind .. ": " .. tostring(openErr)
+  end
+  local wrote, writeErr = pcall(function()
+    assert(file:write(text))
+    assert(file:close())
+  end)
+  if not wrote then
+    pcall(function() file:close() end)
+    pcall(os.remove, path)
+    return nil, "could not write the request " .. kind .. ": " .. tostring(writeErr)
+  end
+  return path
+end
+
+function HostShell.httpRequest(url, opts)
+  opts = type(opts) == "table" and opts or {}
+  if type(url) ~= "string" or url == "" then return nil, "missing url" end
+  local method = tostring(opts.method or "GET"):upper()
+  if not method:match("^%u+$") then return nil, "bad request method" end
+  local headers = requestHeaderList(opts.headers)
+  if not headers then return nil, "bad request header" end
+  local body = opts.body
+  if body ~= nil and type(body) ~= "string" then return nil, "bad request body" end
+  local userAgent = opts.userAgent or "gen1recomp"
+  local maxTime = tonumber(opts.maxTime) or 30
+
+  if not HostShell.haveCurl() then
+    if haveRequestBridge() then
+      return bridgeRequest(url, method, headers, body, userAgent)
+    end
+    if method == "GET" and #headers == 0 then
+      local got, err = HostShell.httpGet(url, userAgent, opts.accept, maxTime)
+      if not got then return nil, err end
+      return got, nil, 200
+    end
+    if haveBridge() then
+      return nil, "this app build cannot make signed requests: update the app to use save sync"
+    end
+    return nil, "no request transport on this platform"
+  end
+
+  local bodyPath, stageErr
+  if body then
+    bodyPath, stageErr = writeStagingFile("body", body)
+    if not bodyPath then return nil, stageErr end
+  end
+
+  local lines = { "User-Agent: " .. userAgent }
+  for _, line in ipairs(headers) do lines[#lines + 1] = line end
+  if body then
+    lines[#lines + 1] = "Content-Length: " .. tostring(#body)
+  end
+  local headerPath
+  headerPath, stageErr = writeStagingFile("head",
+    table.concat(lines, "\n") .. "\n")
+  if not headerPath then
+    if bodyPath then pcall(os.remove, bodyPath) end
+    return nil, stageErr
+  end
+
+  local function cleanup()
+    if bodyPath then pcall(os.remove, bodyPath) end
+    pcall(os.remove, headerPath)
+  end
+
+  local cmd = ("curl -sSL --proto =http,https --proto-redir =http,https "
+    .. "--connect-timeout 10 --max-time %d "):format(maxTime)
+    .. "-X " .. HostShell.quote(method) .. " "
+    .. "-H " .. HostShell.quote("@" .. headerPath) .. " "
+  if body then
+    cmd = cmd .. "--data-binary " .. HostShell.quote("@" .. bodyPath) .. " "
+  end
+  cmd = cmd .. "-w " .. HostShell.quote(HTTP_MARK_FMT) .. " "
+    .. HostShell.quote(url) .. " 2>&1"
+
+  local pipe = HostShell.popen(cmd)
+  if not pipe then
+    cleanup()
+    return nil, "could not run curl"
+  end
+  local readOk, out = pcall(function() return pipe:read("*a") end)
+  HostShell.pclose(pipe)
+  cleanup()
+  if not readOk then
+    return nil, fetchError(url, nil, tostring(out))
+  end
+  local respBody, status, noise = splitCurlOutput(out)
+  if not status then return nil, fetchError(url, nil, noise) end
+  return respBody or "", nil, status
 end
 
 return HostShell

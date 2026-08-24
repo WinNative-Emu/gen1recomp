@@ -119,13 +119,9 @@ PaletteFX.GBC_OBJ_BLUE = {
   { 255, 255, 255 }, { 255, 132, 132 }, { 148, 58, 58 }, { 0, 0, 0 },
 }
 
--- The active game's OG boot-ROM background palette: blue for a Blue
--- playthrough, red for Red.  White (index 1) and black (index 4) are
--- identical across Red/Blue, so callers that only touch the endpoints
--- (e.g. BattleState's zone white/black snap) need no version branch there.
--- Yellow is CGB-enhanced (pokeyellow CGBBasePalettes): named zones go through
--- pal() / usesYellowCgb(), and ogBg() falls back to CGBBase PAL_ROUTE for any
--- remaining whole-screen callers -- never Blue's GBC_BG_BLUE.
+-- The active game's OG boot-ROM background palette: blue for Blue, red for Red.
+-- Yellow is CGB-enhanced (pokeyellow CGBBasePalettes), so ogBg() falls back to
+-- CGBBase PAL_ROUTE there, never Blue's GBC_BG_BLUE.
 function PaletteFX.ogBg()
   if GameVersion.isBlue() then return PaletteFX.GBC_BG_BLUE end
   if GameVersion.isYellow() then
@@ -309,6 +305,13 @@ function PaletteFX.usesGbcPack(mode)
   return mode == "redpp"
 end
 
+function PaletteFX.honorsTrueColor()
+  if GameVersion.generation() >= 2 then
+    return require("src.render.GbcPalette").mode == "gbc"
+  end
+  return PaletteFX.mode == "redpp"
+end
+
 -- Yellow's authentic GBC look is CGBBasePalettes (per-map), not a boot-ROM
 -- auto-palette.  The shared `ogred` save id wears that table on a Yellow
 -- playthrough and labels itself "OG YELLOW".
@@ -354,23 +357,14 @@ function PaletteFX.usesSpriteObp(mode)
   return mode == "ogred" and not GameVersion.isYellow()
 end
 
--- ------- post-zone sprite redraw (OG RED)
---
--- In OG RED the world canvas still runs through the whole-screen zone
--- shade-remap shader, which would corrupt an OBP-baked sprite's true-color
--- pixels.  (SGB used to come through here too; it no longer bakes an object
--- palette at all, so its characters are colorized by the zone like the ground
--- they stand on and never queue a replay -- see usesSpriteObp, #301.)  So SpriteRenderer draws the baked sprite into the canvas (its
--- pixels come out zone-tinted there) AND records the draw here;
--- Renderer:endFrame replays the list on top of the finished zone pass,
--- scaled into screen space -- the GBC's OBJ-over-BG compositing, one draw
--- late.  Entries carrying `colors` are re-colorized draws (the tall-grass
--- feet overdraw, which must keep hiding sprite feet) issued through the
--- color-0-keyed shade-remap shader.  World pass only; cleared per frame.
+-- ------- post-zone sprite redraw (OG RED): OBP-baked draws recorded here and
+-- replayed by Renderer:endFrame on top of the zone pass (usesSpriteObp, #301)
 local spriteRedraws = {}
+local uiSpriteRedraws = {}
 
 function PaletteFX.clearSpriteRedraws()
   for i = #spriteRedraws, 1, -1 do spriteRedraws[i] = nil end
+  for i = #uiSpriteRedraws, 1, -1 do uiSpriteRedraws[i] = nil end
 end
 
 function PaletteFX.markSpriteRedraw(image, quad, x, y, sx, colors, keyed)
@@ -392,10 +386,23 @@ function PaletteFX.spriteRedraws()
   return spriteRedraws
 end
 
+function PaletteFX.markUiSpriteRedraw(image, quad, x, y)
+  if currentPass ~= "ui" then return end
+  uiSpriteRedraws[#uiSpriteRedraws + 1] =
+    { image = image, quad = quad, x = x + markOffsetX, y = y }
+end
+
+function PaletteFX.uiSpriteRedraws()
+  return uiSpriteRedraws
+end
+
 -- Active named-palette table for COLORS: RED++ uses data/palettes_gbc.lua,
--- everything else uses the ROM-imported data.palettes.
+-- Yellow uses data/palettes_yellow.lua, everything else uses the ROM-imported data.palettes.
 function PaletteFX.pack(data)
-  if PaletteFX.usesGbcPack() then
+  if GameVersion.isYellow() then
+    local y = PaletteFX.yellowPack()
+    if y then return y end
+  elseif PaletteFX.usesGbcPack() then
     local g = PaletteFX.gbcPack()
     if g then return g end
   end
@@ -445,23 +452,26 @@ function PaletteFX.pal(data, name)
     local fromRom = romNamedPal(data, name)
     if fromRom then return fromRom end
   end
-  if PaletteFX.usesYellowCgb() then
-    local fromCgb = yellowCgbNamedPal(data, name)
-    if fromCgb then return fromCgb end
-  end
-  local p = PaletteFX.pack(data)
-  local c = p and p.palettes[name]
-  if c then return c end
   if GameVersion.isYellow() then
+    if PaletteFX.usesYellowCgb() then
+      local fromCgb = yellowCgbNamedPal(data, name)
+      if fromCgb then return fromCgb end
+    end
     local y = PaletteFX.yellowPack()
     local yc = y and y.palettes and y.palettes[name]
     if yc then return yc end
+    local fromRom = romNamedPal(data, name)
+    if fromRom then return fromRom end
   end
+  local p = PaletteFX.pack(data)
+  local c = p and p.palettes and p.palettes[name]
+  if c then return c end
   if PaletteFX.usesGbcPack() then
     return romNamedPal(data, name)
   end
   return nil
 end
+
 
 -- the species' palette (data/pokemon/palettes.asm), MEWMON for unknowns.
 -- transformed forces PAL_GRAYMON (Ditto's palette) regardless of species
@@ -691,10 +701,12 @@ function PaletteFX.spriteObp(spriteDef, seed)
   return PaletteFX.darkObp(w.spritePalettes[group], group)
 end
 
--- GetHealthBarColor (home/palettes.asm) on the standard 48px bar
-function PaletteFX.barPalName(hp, maxHp)
-  local px = maxHp > 0 and math.floor(hp * 48 / maxHp) or 0
-  if hp > 0 and px < 1 then px = 1 end
+-- GetHealthBarColor (home/palettes.asm) on the standard 48px bar.  It reads
+-- the bar's own length, so a caller mid-drain passes the animated `pixels`
+-- rather than let it be re-derived from hp.
+function PaletteFX.barPalName(hp, maxHp, pixels)
+  local px = pixels or (maxHp > 0 and math.floor(hp * 48 / maxHp) or 0)
+  if not pixels and hp > 0 and px < 1 then px = 1 end
   return px >= 27 and "GREENBAR" or px >= 10 and "YELLOWBAR" or "REDBAR"
 end
 

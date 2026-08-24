@@ -26,7 +26,7 @@ JSON parsing, and sha256 verification run on a background `love.thread`
 
 ## Version.lua fields
 
-`src/core/Version.lua` carries three fields the updater reads directly (the
+`src/core/Version.lua` carries four fields the updater reads directly (the
 existing `modApi`, `linkProtocol`, `saveFormat`, and `cache` fields are
 untouched):
 
@@ -37,6 +37,11 @@ untouched):
   as a valid payload to chainload).
 - `shell` - the native-shell contract this build's fused executable
   implements.
+- `payloadHost` - the native host family an in-place payload targets. Ordinary
+  LÖVE packages use `"love"`. A specialized native package uses a distinct,
+  stable identifier and accepts only payloads carrying that same identifier.
+  A missing field defaults to `"love"`, preserving compatibility with payloads
+  released before this field existed.
 - `minShell` - the lowest shell contract required to *run* this payload.
 
 Bump `minShell` only when a payload needs something the currently-shipped
@@ -49,11 +54,18 @@ rather than deleting it, in case a future shell upgrade can run it, and
 installer instead. Do not bump `minShell` for an ordinary Lua/data release;
 that is exactly the case the updater exists to avoid a reinstall for.
 
+Change `payloadHost` only when the packaged Lua depends on a different native
+host family. This is separate from `minShell`: the host name answers *which*
+native integration the payload targets, while the shell number answers *which
+revision* of that integration it requires. A mismatched-host payload is never
+mounted or deleted as stale; the launcher directs the player to a full package.
+
 ## Release assets
 
 Each tagged release `vX.Y.Z` carries the existing per-platform archives
 (`gen1recomp-X.Y.Z-macos.zip`, `-windows.zip`, `-linux.zip`,
-`-android.apk`) plus two assets the updater itself consumes:
+`-linux-arm64.AppImage`, `-android.apk`, `-ios.ipa`, `-switch.zip`, Xbox and
+PortMaster archives) plus two assets the updater itself consumes:
 
 - `gen1recomp-X.Y.Z.love` - the payload, matched by the exact pattern
   `gen1recomp-<version>.love` (see `isPayloadName` in `Boot.lua` and
@@ -64,8 +76,9 @@ Each tagged release `vX.Y.Z` carries the existing per-platform archives
   filename otherwise to match the asset name exactly.
 
 A release missing either asset is treated as "no in-place update available":
-`Check` reports `needs_full` and sends the player to `Check.releaseUrl()`
-(`https://github.com/bryanthaboi/gen1recomp/releases/latest`).
+`Check` reports `needs_full`. It also selects the exact current platform asset
+from the same release and persists the requirement, so it is visible again on
+every launch, including offline launches.
 
 ## Save-directory layout
 
@@ -74,6 +87,7 @@ Under the save directory (identity `pokemon-love2d`):
 ```
 updates/gen1recomp-<X.Y.Z>.love   downloaded payload(s)
 updates/pending.txt                crash-guard marker
+updates/full-update.json           persistent native-package requirement
 ```
 
 `pending.txt` holds the filename of the payload currently being chainloaded.
@@ -95,7 +109,8 @@ bundled game, in that case.
    against the GitHub releases API; safe to call every frame, it is a no-op
    once a check is in flight or has reached a terminal state. `Check.state()`
    reports `idle | checking | uptodate | available | downloading | ready |
-   needs_full | error` plus the latest version and download progress.
+   needs_full | full_downloading | full_ready | error` plus the latest version,
+   download progress, and (when applicable) the selected full-package asset.
 3. **Download + verify**: on `available`, `Check.download()` tells the
    worker to fetch the payload, polling the growing `.part` file for
    progress. On completion the worker re-fetches `sha256sums.txt`, verifies
@@ -106,8 +121,20 @@ bundled game, in that case.
 4. **Restart to apply**: a `ready` payload just sits in `updates/` until the
    player relaunches; the next launch's Boot step (1) is what actually
    mounts and runs it. There is no in-session hot-swap.
+5. **Native-package requirement**: when `minShell` or `payloadHost` is
+   incompatible, the worker writes `full-update.json` and surfaces a
+   persistent launcher control. Android downloads the release APK, verifies
+   its SHA-256 entry from `sha256sums.txt`, then invokes Android's Package
+   Installer. The installer asks the user for consent and enforces package,
+   version-code, and signing-certificate compatibility. A legacy APK without
+   the installer bridge links its full package for one manual bootstrap
+   update, including when its downloaded payload already reports the latest
+   engine version. iOS links the sideload repository for a re-sideload; Xbox,
+   desktop, and PortMaster builds link their correctly named full package.
+   Switch keeps its native OTA flow.
 
 ## Known limitations
+
 
 - **`love.run` persists across handoff.** By the time `chainload` runs, the
   bundled `love.run` has already returned its stepper to LOVE; redefining the
@@ -115,11 +142,26 @@ bundled game, in that case.
   already driving the frame. A payload that must change `love.run` itself
   needs a `minShell` bump so an older shell refuses to chainload it rather
   than running with half its intended behavior.
-- **Android has no in-app download transport yet.** `check_worker.lua`
-  shells out to curl for both the release check and the download; curl is
-  absent on Android, so `Check` degrades to `status = "error"` there (the
-  launcher UI hides on that status) and the player is directed to the
-  releases page via `Check.releaseUrl()` instead.
+- **Android and iOS use the native download bridge, not curl.** Neither
+  platform ships curl, so the old `check_worker.lua` path (shell out to curl)
+  always landed on `error` and the launcher chip's "Check for updates" tap
+  was a no-op. The worker now talks through `HostShell`, the same transport
+  as the mod catalog: curl on desktop, `love.system.httpDownload` on mobile.
+  On Android that is the GameActivity JNI/`HttpsURLConnection` bridge; on
+  iOS it is `GRPickerBridge.httpDownload` (`URLSession`). A fused sideloaded
+  APK or IPA can therefore check GitHub and fetch the `.love` payload
+  in-app. If neither transport exists, the worker reports `needs_full` and
+  the launcher chip opens `Check.releaseUrl()`. Native package-only changes
+  still need a full reinstall (`minShell` / `payloadHost` gate →
+  `needs_full`). Applying a downloaded payload on Android relaunches via
+  `love.system.restartApp`; iOS still uses in-process `quit("restart")`.
+- **Android full updates are user-confirmed and certificate-bound.** The app
+  uses a private `FileProvider` cache path plus
+  `Intent.ACTION_INSTALL_PACKAGE`, checks Android 8+'s per-app
+  "install unknown apps" setting, and never requests a silent install. The
+  release job must use the original long-lived Android signing key; a new key
+  causes Android to reject an in-place update and requires a one-time manual
+  reinstall. See [mobile/ANDROID.md](../mobile/ANDROID.md).
 - **Dev/source runs never self-update.** `Boot.run` returns immediately when
   `love.filesystem.isFused()` is false, and a working tree's `engine` is the
   `"0.0.0-dev"` placeholder that always reports up to date, so a source

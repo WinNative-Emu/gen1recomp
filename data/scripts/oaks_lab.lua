@@ -22,10 +22,10 @@ local function starterBall(askText, species, choseFlag, ownBall,
                            rivalBallX, rivalBall)
   return {
     { "check_flag", "EVENT_GOT_STARTER" },        -- 1
-    { "jump_if_true", 22 },                       -- 2
+    { "jump_if_true", 23 },                       -- 2
     -- no picking until Oak has walked you in (OaksLabScript gating)
     { "check_flag", "EVENT_FOLLOWED_OAK_INTO_LAB" }, -- 3
-    { "jump_if_false", 25 },                      -- 4
+    { "jump_if_false", 26 },                      -- 4
     -- the Pokédex "new species" entry shows before the ask (predef
     -- StarterDex ahead of OaksLabYouWant...Text).  StarterDex temporarily
     -- sets the owned bits so ShowPokedexData prints height/weight/text;
@@ -34,44 +34,38 @@ local function starterBall(askText, species, choseFlag, ownBall,
       { species = species, forceOwned = true } }, -- 5
     { "ask", askText },                           -- 6
     { "jump_if_false", "end" },                   -- 7
-    -- OaksLab.asm prints ReceivedMon then AddPartyMon (AskName lives
-    -- inside give_pokemon).  Show the received text first so the
-    -- nickname prompt follows "you got X", matching Gen1.
-    -- The received text carries sound_get_key_item (OaksLab.asm
-    -- OaksLabReceivedMonText); the jingle plays as the box opens
-    -- (same beat as the Yellow port's starter, #668).
-    { "play_sound", "Get_Key_Item" },                              -- 8
-    { "show_text", "_OaksLabReceivedMonText", { RAM = species } }, -- 9
-    { "give_pokemon", species, 5 },               -- 10
-    { "set_flag", "EVENT_GOT_STARTER" },          -- 11
-    { "set_flag", choseFlag },                    -- 12
-    -- POKé BALLs are not handed out here in the original -- Oak gives
-    -- them later, at OaksLabOak1Text's .give_poke_balls beat once the
-    -- player has beaten the Route 22 rival (see TEXT_OAKSLAB_OAK1 below)
-    { "hide_object", "OAKS_LAB", ownBall },       -- 13
+    -- scripts/OaksLab.asm:919
+    { "show_text", "_OaksLabMonEnergeticText" },  -- 8
+    -- OaksLab.asm: ReceivedMon (sound_get_key_item) then AddPartyMon; the
+    -- jingle fires once the box has typed and holds it (#668)
+    { "text_sound", "Get_Key_Item" },                              -- 9
+    { "show_text", "_OaksLabReceivedMonText", { RAM = species } }, -- 10
+    { "give_pokemon", species, 5 },               -- 11
+    { "set_flag", "EVENT_GOT_STARTER" },          -- 12
+    { "set_flag", choseFlag },                    -- 13
+    -- POKé BALLs come later, at OaksLabOak1Text's .give_poke_balls beat
+    -- once the Route 22 rival is beaten (see TEXT_OAKSLAB_OAK1 below)
+    { "hide_object", "OAKS_LAB", ownBall },       -- 14
     -- the rival walks to the countering ball (around the furniture)
-    { "move_npc_to", 1, rivalBallX, 4 },          -- 14
-    { "face_object", 1, "up" },                   -- 15
-    { "show_text", "_OaksLabRivalIllTakeThisOneText" },            -- 16
-    { "hide_object", "OAKS_LAB", rivalBall },     -- 17
-    { "play_sound", "Get_Key_Item" },             -- 18 (sound_get_key_item)
+    { "move_npc_to", 1, rivalBallX, 4 },          -- 15
+    { "face_object", 1, "up" },                   -- 16
+    { "show_text", "_OaksLabRivalIllTakeThisOneText" },            -- 17
+    { "hide_object", "OAKS_LAB", rivalBall },     -- 18
+    { "text_sound", "Get_Key_Item" },             -- 19 (sound_get_key_item)
     { "show_text", "_OaksLabRivalReceivedMonText",
       { RAM = rivalBall == "OAKSLAB_CHARMANDER_POKE_BALL" and "CHARMANDER"
               or rivalBall == "OAKSLAB_SQUIRTLE_POKE_BALL" and "SQUIRTLE"
-              or "BULBASAUR" } },                 -- 19
-    { "jump", "end" },                            -- 20
-    { "jump", "end" },                            -- 21 (spacer)
-    -- a leftover ball after the player's pick: Oak turns to face the
-    -- player and reads the last-mon line instead of re-offering the
-    -- starter (scripts/OaksLab.asm OaksLabSelectedPokeBallScript ->
-    -- OaksLabLastMonScript; #601).  The ROM's "#MON" ligature is spelled
-    -- out as Pokémon here.
-    { "face_object", 5, "down" },                 -- 22
-    { "show_text", "That's PROF.OAK's\nlast Pokémon!" }, -- 23
+              or "BULBASAUR" } },                 -- 20
+    { "jump", "end" },                            -- 21
+    { "jump", "end" },                            -- 22 (spacer)
+    -- leftover ball: Oak reads the last-mon line (scripts/OaksLab.asm
+    -- OaksLabSelectedPokeBallScript -> OaksLabLastMonScript, #601)
+    { "face_object", 5, "down" },                 -- 23
+    { "show_text", "That's PROF.OAK's\nlast Pokémon!" }, -- 24
     -- OaksLabLastMonScript ends at TextScriptEnd; the port used to fall
     -- through into the pre-pick line below (#601 remnant, reported on #600)
-    { "jump", "end" },                            -- 24
-    { "show_text", "_OaksLabThoseArePokeBallsText" }, -- 25
+    { "jump", "end" },                            -- 25
+    { "show_text", "_OaksLabThoseArePokeBallsText" }, -- 26
   }
 end
 
@@ -106,8 +100,8 @@ return {
       { "check_item", "OAKS_PARCEL" },
       { "jump_if_false", "raise_young" },
       -- OaksLabOak1Text.got_parcel → RivalArrives + OakGivesPokedex
+      { "text_sound", "Get_Key_Item" },
       { "show_text", "_OaksLabOak1DeliverParcelText" },
-      { "play_sound", "Get_Key_Item" },
       { "show_text", "_OaksLabOak1ParcelThanksText" },
       { "take_item", "OAKS_PARCEL", 1 },
       { "stop_music" },
@@ -128,8 +122,8 @@ return {
       { "face_object", 1, "up" },
       { "face_object", 5, "down" },
       { "show_text", "_OaksLabOakMyInventionPokedexText" },
+      { "text_sound", "Get_Key_Item" },
       { "show_text", "_OaksLabOakGotPokedexText" },
-      { "play_sound", "Get_Key_Item" },
       { "hide_object", "OAKS_LAB", "OAKSLAB_POKEDEX1" },
       { "hide_object", "OAKS_LAB", "OAKSLAB_POKEDEX2" },
       { "face_object", 1, "up" },
@@ -174,6 +168,7 @@ return {
       { "jump_if_true", "come_see" },
       { "set_flag", "EVENT_GOT_POKEBALLS_FROM_OAK" },
       { "give_item", "POKE_BALL", 5, false },
+      { "text_sound", "Get_Key_Item" },  -- OaksLab.asm:1060
       { "show_text", "_OaksLabOak1ReceivedPokeballsText" },
       { "show_text", "_OaksLabGivePokeballsExplanationText" },
       { "jump", "end" },
@@ -246,9 +241,17 @@ return {
   -- the table sprites; re-entering the lab applies the same HideObject
   -- the gift script now does (OaksLab.asm OakGivesPokedex).
   onEnter = function(game, ow)
-    if not (game.save.flags and game.save.flags.EVENT_GOT_POKEDEX) then
-      return
+    local flags = game.save.flags or {}
+    if flags.EVENT_GOT_STARTER and not flags.EVENT_BATTLED_RIVAL_IN_OAKS_LAB then
+      local rival = ow:npcByIndex(1)
+      if rival then
+        rival.cellX = flags.EVENT_CHOSE_CHARMANDER and 7
+          or flags.EVENT_CHOSE_SQUIRTLE and 8 or 6
+        rival.cellY = 4
+        rival.px, rival.py = rival.cellX * 16, rival.cellY * 16
+      end
     end
+    if not flags.EVENT_GOT_POKEDEX then return end
     local Commands = require("src.script.Commands")
     local ctx = { save = game.save, game = game, overworld = ow }
     Commands.hide_object(ctx, "OAKS_LAB", "OAKSLAB_POKEDEX1")
@@ -286,6 +289,8 @@ return {
       -- fanfare for the taunt/challenge exchange, same as the Yellow port
       -- (oaks_lab_yellow.lua); it was silently dropped here (#596).
       local rows = {
+        { "face_object", 1, "down" },  -- scripts/OaksLab.asm:347-351
+        { "face_player_dir", "up" },
         { "stop_music" },
         { "play_music", "Music_MeetRival" },
         { "show_text", "_OaksLabRivalIllTakeYouOnText" },         -- 1
@@ -309,28 +314,19 @@ return {
       local base = #rows
       local party = flags.EVENT_CHOSE_BULBASAUR and 3
                     or flags.EVENT_CHOSE_SQUIRTLE and 2 or 1
+      table.insert(rows, { "save_end_battle_text", "_OaksLabRivalIPickedTheWrongPokemonText" })
       table.insert(rows, { "start_battle", "trainer", "OPP_RIVAL1", party })
       -- OaksLabRivalEndBattleScript: heal + flag on win or loss; no blackout
       table.insert(rows, { "heal_party" })
       table.insert(rows, { "set_flag", "EVENT_BATTLED_RIVAL_IN_OAKS_LAB" })
-      -- OaksLabRivalEndBattleScript: on WIN, print the "picked the wrong
-      -- POKéMON!" gloat, then BOTH win and loss print the shared exit line
-      -- _OaksLabRivalSmellYouLaterText ("OK! I'll make my POKéMON fight to
-      -- toughen it up!\012<PLAYER>! Gramps! Smell you later!") before Blue
-      -- marches out.  A loss skips only the gloat (that taunt was already
-      -- shown in-battle via Rival1WinText), never the exit line (#231).  The
-      -- jump_if_false convergence point is the exit line: base+6 indexes the
-      -- SmellYouLater row below, so WIN falls IPicked -> SmellYouLater and
-      -- LOSS jumps straight to SmellYouLater (both then walk-out + hide).
       table.insert(rows, { "jump_if_false", base + 6 })
-      table.insert(rows, { "show_text", "_OaksLabRivalIPickedTheWrongPokemonText" })
       table.insert(rows, { "show_text", "_OaksLabRivalSmellYouLaterText" })
       -- OaksLabRivalStartsExitScript: parting shot, rival exit fanfare, then
       -- walk out past the player.  The fanfare was dropped here (#683) -- the
       -- parcel scene above already plays Music_MeetRival on both arrival and
       -- departure (lines 144-146), and this exit should match (#596).
       table.insert(rows, { "stop_music" })
-      table.insert(rows, { "play_music", "Music_MeetRival" })
+      table.insert(rows, { "play_music", "Music_MeetRival", { start = "rival" } })
       table.insert(rows, { "move_npc_to", 1, 4, 11 })
       table.insert(rows, { "hide_object", "OAKS_LAB", "OAKSLAB_RIVAL" })
       table.insert(rows, { "play_music", "Music_OaksLab" })

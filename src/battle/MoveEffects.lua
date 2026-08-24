@@ -281,11 +281,11 @@ MoveEffects.primary = {
                failed = true }
     end
     local cost = math.floor(user.mon.stats.hp / 4)
-    -- substitute.asm only fails on subtraction underflow (current HP
-    -- strictly below maxHP/4); at equality the substitute is built and
-    -- the user is left standing on exactly 0 HP (it faints only when
-    -- the engine next checks HP, not here)
-    if user.mon.hp < cost then
+    -- A Substitute costs one quarter of max HP, rounded down. Do not let
+    -- the cost consume the user's last HP: the move must fail at the exact
+    -- boundary as well as below it, or the next turn's HP guard can leave a
+    -- trainer battle unable to progress.
+    if user.mon.hp <= cost then
       return { romText(battle.data, "_TooWeakSubstituteText", "Too weak to make\na SUBSTITUTE!"),
                failed = true }
     end
@@ -348,8 +348,9 @@ MoveEffects.primary = {
     target.disabledTurns = battle.rng(1, 8)
     local id = target.curMoves[slot].id
     -- _MoveWasDisabledText: "X's / MOVE was / disabled!"
-    return { romText(battle.data, "_MoveWasDisabledText", "%s's\n%s was\ndisabled!", displayName(target),
-                                                battle.data.moves[id].name) }
+    return { romText(battle.data, "_MoveWasDisabledText", "%s's\n%s was\ndisabled!",
+      { TARGET = displayName(target),
+        ["RAM:wNameBuffer"] = battle.data.moves[id].name }) }
   end,
 
   SPLASH_EFFECT = function(battle)
@@ -441,11 +442,10 @@ local function hitsFrom(dist, ctx)
   return dist[r + 1]
 end
 
--- drain_hp.asm halves the RAW wDamage IN PLACE (minimum 1) and heals
--- that amount, so Counter would see the halved value
+-- engine/battle/core.asm ApplyDamageToEnemyPokemon
 local function drainHalf(label, text)
   return function(ctx)
-    local heal = math.max(1, math.floor(ctx.rawDamage / 2))
+    local heal = math.max(1, math.floor(ctx.totalDealt / 2))
     ctx.battle.lastDamage = heal
     local mon = ctx.user.mon
     mon.hp = math.min(mon.stats.hp, mon.hp + heal)
@@ -529,9 +529,8 @@ MoveEffects.full = {
 
   RECOIL_EFFECT = {
     afterDamage = function(ctx)
-      -- recoil.asm reads the RAW computed wDamage (not the HP actually
-      -- removed): overkill and substitute hits recoil at full strength
-      local recoil = math.max(1, math.floor(ctx.rawDamage
+      -- engine/battle/move_effects/recoil.asm
+      local recoil = math.max(1, math.floor(ctx.totalDealt
                                             / (ctx.moveInst.struggle and 2 or 4)))
       ctx.say(romText(ctx.battle.data, "_HitWithRecoilText", "%s's\nhit with recoil!", displayName(ctx.user)))
       ctx.battle:applyDamage(ctx.user, recoil)
@@ -575,6 +574,8 @@ MoveEffects.full = {
         local r = ctx.rng(0, 7)
         user.trappingTurns = ({ 1, 1, 1, 2, 2, 2, 3, 4 })[r + 1]
         user.trapDamage = ctx.rawDamage
+        -- PlayApplyingAttackSound (animations.asm:2639) replays it each turn
+        user.trapHitSfx = ctx.hitSfx
         -- remember the move so its animation can replay on each locked
         -- continuation (core.asm:3554-3566 -> GetPlayerAnimationType)
         user.trapMove = ctx.move.id
@@ -582,22 +583,16 @@ MoveEffects.full = {
     end,
   },
   THRASH_PETAL_DANCE_EFFECT = {
-    afterDamage = function(ctx)
+    -- ThrashPetalDanceEffect (effects.asm:791-808) runs before damage
+    -- (data/battle/special_effects.asm:22, core.asm:3531-3552)
+    beforeAccuracy = function(ctx)
       local user = ctx.user
-      if not user.thrashTurns then
-        user.thrashTurns = ctx.rng(2, 3) -- 3-4 attacks total, then confusion
-        user.thrashMove = ctx.moveInst
-        user.thrashAnnounced = true
-      else
-        user.thrashTurns = user.thrashTurns - 1
-        if user.thrashTurns <= 0 then
-          user.thrashTurns, user.thrashMove, user.thrashAnnounced = nil, nil, nil
-          if not user.confusedTurns then
-            user.confusedTurns = ctx.rng(2, 5)
-            ctx.say(romText(ctx.battle.data, "_BecameConfusedText", "%s\nbecame confused!", displayName(user)))
-          end
-        end
-      end
+      if ctx.thrashing or user.thrashTurns then return end
+      user.thrashTurns = ctx.rng(2, 3) -- 3-4 attacks total, then confusion
+      user.thrashMove = ctx.moveInst
+      user.thrashAnnounced = true
+      ctx.battle:animBeforeMove(
+        user.isPlayer and "SHRINKING_SQUARE_ANIM" or "ANIM_B1", user.isPlayer)
     end,
   },
   JUMP_KICK_EFFECT = {
@@ -652,7 +647,9 @@ MoveEffects.full = {
       user.bideTurns = ctx.rng(2, 3)
       user.bideDamage = 0
       ctx.battle:cancelMoveAnim()
-      ctx.anim(user.isPlayer and "XSTATITEM_ANIM" or "XSTATITEM_DUPLICATE_ANIM")
+      ctx.battle:animBeforeMove(
+        user.isPlayer and "XSTATITEM_ANIM" or "XSTATITEM_DUPLICATE_ANIM",
+        user.isPlayer)
       ctx.say(Strings("%s\nis storing energy!", displayName(user)))
     end,
   },

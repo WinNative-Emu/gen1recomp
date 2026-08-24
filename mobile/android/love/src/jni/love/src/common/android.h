@@ -91,12 +91,72 @@ bool syncHealthSteps();
 bool restartApp();
 
 /**
+ * Stages a checksum-verified APK from the current save directory and starts
+ * Android's user-confirmed Package Installer flow. Android-only.
+ **/
+bool installApk(const char *path);
+
+/**
+ * Dynamic App Shortcuts: updates Android ShortcutManager with ready game versions.
+ **/
+bool updateAppShortcuts(const std::vector<std::string> &versions);
+
+/**
+ * Returns the game version requested via initial launch Intent (if any).
+ **/
+std::string getLaunchGame();
+
+/**
  * Blocking HTTPS GET into destPath (GameActivity.httpDownload). Android has
  * no curl binary, so this is the transport src/core/HostShell.lua uses there
  * for the mod index and mod updates (#597). userAgent / accept may be null.
  * Returns whether a complete file was written.
  **/
 bool httpDownload(const char *url, const char *destPath, const char *userAgent, const char *accept);
+
+/**
+ * Blocking HTTPS POST of a raw byte body (GameActivity.httpPost). The
+ * mirror of httpDownload for mod.postLog log sends, which need POST and
+ * have no curl on Android. contentType / userAgent may be null. Returns
+ * whether the server accepted the send (2xx).
+ **/
+bool httpPost(const char *url, const char *body, int bodyLen, const char *contentType, const char *userAgent);
+
+/**
+ * Blocking HTTPS request with a method, headers and a byte body
+ * (GameActivity.httpRequest). What save sync needs and neither of the two
+ * above can give it: PUT, per-request auth headers, and the response body of
+ * a 4xx as well as a 2xx. headerPairs is a flat name, value array of
+ * headerPairCount entries; body/userAgent may be null. `out` receives the
+ * Java side's envelope -- a head line of "STATUS <code>" or "ERROR <text>",
+ * a newline, then the raw response bytes. False means the platform has no
+ * such bridge at all (an old APK under a newer liblove), which the Lua side
+ * reports as "update the app" rather than as a failed request.
+ **/
+bool httpRequest(const char *url, const char *method,
+	const char *const *headerPairs, int headerPairCount,
+	const char *body, int bodyLen, const char *userAgent, std::string &out);
+
+/**
+ * TLS client sockets (GameActivity.tls*, implemented by TlsSocket.java).
+ * LuaSocket, which is what LOVE ships, does TCP only, so wss:// is otherwise
+ * unreachable -- and an Archipelago room hosted on archipelago.gg accepts a
+ * plain connection only to drop it. The platform has both a TLS stack and the
+ * system trust store, so this borrows them rather than vendoring mbedTLS.
+ *
+ * tlsOpen returns a handle immediately and connects on its own thread: poll
+ * tlsStatus for 0 connecting / 1 open / 2 closed, and -1 for a handle that
+ * does not exist. Bytes given to tlsSend before the handshake finishes are
+ * queued rather than refused. tlsReceive fills buf and returns how much it
+ * took, 0 when nothing is waiting. A closed connection keeps both its reason
+ * (tlsError) and whatever arrived before it closed until tlsClose.
+ **/
+int tlsOpen(const char *host, int port);
+int tlsStatus(int handle);
+int tlsSend(int handle, const char *data, int length);
+int tlsReceive(int handle, char *buf, int max);
+bool tlsError(int handle, char *buf, int max);
+void tlsClose(int handle);
 
 /*
  * Helper functions for the filesystem module

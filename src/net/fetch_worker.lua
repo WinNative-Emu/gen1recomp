@@ -73,6 +73,12 @@ end
 -- inside the call.  Where the caller knows the expected size we poll the
 -- growing file from a second pass instead; where it does not, the job simply
 -- reports indeterminate progress and the UI shows a spinner.
+--
+-- job.etagRel (optional, relative to saveDir like job.dest) turns this into
+-- a conditional GET -- see HostShell.httpDownload's own comment for the
+-- 304/notModified contract. A notModified result never writes `rel` at all
+-- (confirmed empirically, not assumed -- see TrueFX/etag-cache-repro/), so
+-- the usual "did a file actually land" check below is skipped for it.
 local function doDownload(job)
   if not HostShell then
     post({ id = job.id, ok = false, err = "no transport" })
@@ -84,10 +90,15 @@ local function doDownload(job)
   if dir then love.filesystem.createDirectory(dir) end
   love.filesystem.remove(rel)
 
-  local ok, err = HostShell.httpDownload(job.url, abs, job.userAgent,
-    job.accept, tonumber(job.maxSeconds) or DOWNLOAD_MAX_SECONDS)
+  local etagAbs = job.etagRel and (saveDir .. "/" .. job.etagRel) or nil
+  local ok, err, notModified = HostShell.httpDownload(job.url, abs, job.userAgent,
+    job.accept, tonumber(job.maxSeconds) or DOWNLOAD_MAX_SECONDS, etagAbs)
   if not ok then
     post({ id = job.id, ok = false, err = err or "download failed" })
+    return
+  end
+  if notModified then
+    post({ id = job.id, ok = true, path = rel, done = true, notModified = true })
     return
   end
   local info = love.filesystem.getInfo(rel)
@@ -97,6 +108,36 @@ local function doDownload(job)
     return
   end
   post({ id = job.id, ok = true, path = rel, done = true })
+end
+
+local function doPost(job)
+  if not HostShell then
+    post({ id = job.id, ok = false, err = "no transport" })
+    return
+  end
+  local ok, err = HostShell.httpPost(job.url, job.body, job.contentType,
+    job.userAgent, tonumber(job.maxSeconds) or GET_MAX_SECONDS)
+  if not ok then
+    post({ id = job.id, ok = false, err = err or "post failed" })
+    return
+  end
+  post({ id = job.id, ok = true, done = true })
+end
+
+local function doRequest(job)
+  if not HostShell then
+    post({ id = job.id, ok = false, err = "no transport" })
+    return
+  end
+  local body, err, code = HostShell.httpRequest(job.url, {
+    method = job.method, body = job.body, headers = job.headers,
+    userAgent = job.userAgent,
+    maxTime = tonumber(job.maxSeconds) or GET_MAX_SECONDS })
+  if not code then
+    post({ id = job.id, ok = false, err = err or "request failed" })
+    return
+  end
+  post({ id = job.id, ok = true, body = body or "", code = code, done = true })
 end
 
 while true do
@@ -113,6 +154,12 @@ while true do
       break
     elseif job.kind == "get" then
       local ok, err = pcall(doGet, job)
+      if not ok then post({ id = job.id, ok = false, err = tostring(err) }) end
+    elseif job.kind == "post" then
+      local ok, err = pcall(doPost, job)
+      if not ok then post({ id = job.id, ok = false, err = tostring(err) }) end
+    elseif job.kind == "request" then
+      local ok, err = pcall(doRequest, job)
       if not ok then post({ id = job.id, ok = false, err = tostring(err) }) end
     elseif job.kind == "download" then
       local ok, err = pcall(doDownload, job)

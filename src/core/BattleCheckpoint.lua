@@ -4,6 +4,7 @@
 
 local BattleCheckpoint = {}
 local BattleState = require("src.battle.BattleState")
+local ScriptRunner = require("src.script.ScriptRunner")
 local BUILTIN_RULESETS = {
   gen1_faithful = require("src.battle.rulesets.gen1_faithful"),
   modern_clean = require("src.battle.rulesets.modern_clean"),
@@ -43,6 +44,7 @@ local BATTLE_FIELDS = {
   "sideToxic", "isGymLeader", "musicKind", "lastBall", "lockedBall",
   "lowHealthAlarmDisabled", "lowHealthAlarmOn", "victoryMusicPlayed",
   "endBattleText",
+  "playerPartyIndices",
 }
 
 local function partyIndex(party, mon)
@@ -88,6 +90,23 @@ end
 local function integer(value, min, max)
   return type(value) == "number" and value % 1 == 0
     and value >= (min or -math.huge) and value <= (max or math.huge)
+end
+
+local function exactIndexSet(indices, maxIndex, requireMember)
+  if type(indices) ~= "table" then return nil end
+  local count, keys = #indices, 0
+  for key in pairs(indices) do
+    keys = keys + 1
+    if not integer(key, 1, count) then return nil end
+  end
+  if keys ~= count or (requireMember and count == 0) then return nil end
+  local seen = {}
+  for i = 1, count do
+    local index = indices[i]
+    if not integer(index, 1, maxIndex) or seen[index] then return nil end
+    seen[index] = true
+  end
+  return seen
 end
 
 local function validateMoveList(data, moves)
@@ -158,7 +177,9 @@ function BattleCheckpoint.validate(game, checkpoint)
   end
   local expectedOrigin = model.kind == "wild" and "wild_encounter"
     or model.kind == "trainer" and "trainer_encounter" or nil
-  if not expectedOrigin or model.origin.kind ~= expectedOrigin
+  local scripted = model.origin.kind == "script_battle"
+  if not expectedOrigin
+      or (model.origin.kind ~= expectedOrigin and not scripted)
       or model.origin.map ~= checkpoint.runtime.overworld.map then
     return nil, "battle_origin_unsupported",
       "Battle continuation data is unsupported or inconsistent."
@@ -167,7 +188,27 @@ function BattleCheckpoint.validate(game, checkpoint)
       or type(rulesets(game)[model.rulesetId]) ~= "table" then
     return nil, "invalid_content", "Battle ruleset is unavailable."
   end
-  if model.kind == "trainer" and (type(model.origin.npcId) ~= "string"
+  if scripted then
+    local origin = model.origin
+    local row = type(origin.script) == "table" and origin.script[origin.pc]
+    local allowed = { start_battle = true, static_battle = true, rival_battle = true }
+    if type(origin.pc) ~= "number" or origin.pc % 1 ~= 0
+        or type(row) ~= "table" or row[1] ~= origin.command
+        or not allowed[origin.command] or origin.battleKind ~= model.kind
+        or (model.kind == "trainer" and (origin.trainerClass ~= model.oppClass
+          or origin.partyIndex ~= (model.partyIndex or 1)))
+        or (model.kind == "wild" and (origin.wildSpecies ~= model.enemyMon.species
+          or origin.wildLevel ~= model.enemyMon.level))
+        or (origin.npcId ~= nil and type(origin.npcId) ~= "string") then
+      return nil, "battle_origin_unsupported",
+        "Script battle continuation data is incomplete or inconsistent."
+    end
+    local problems = ScriptRunner.validate(origin.script)
+    if #problems > 0 then
+      return nil, "battle_origin_unsupported",
+        "Script battle continuation commands are unavailable."
+    end
+  elseif model.kind == "trainer" and (type(model.origin.npcId) ~= "string"
       or model.origin.trainerClass ~= model.oppClass
       or model.origin.partyIndex ~= (model.partyIndex or 1)) then
     return nil, "battle_origin_unsupported",
@@ -176,6 +217,16 @@ function BattleCheckpoint.validate(game, checkpoint)
   local party = checkpoint.save.party
   if type(party) ~= "table" or not validateBattler(game.data, model.player, #party) then
     return nil, "invalid_content", "Player battle state is invalid."
+  end
+  local scopedIndices
+  if model.playerPartyIndices ~= nil then
+    if model.kind ~= "trainer" then
+      return nil, "invalid_checkpoint", "Battle party scope is invalid."
+    end
+    scopedIndices = exactIndexSet(model.playerPartyIndices, #party, true)
+    if not scopedIndices or not scopedIndices[model.player.index] then
+      return nil, "invalid_checkpoint", "Battle party scope is invalid."
+    end
   end
   if model.kind == "wild" then
     if not validateMon(game.data, model.enemyMon)
@@ -197,12 +248,15 @@ function BattleCheckpoint.validate(game, checkpoint)
     end
   end
   for _, indices in ipairs({ model.participants, model.leveledUp }) do
-    if type(indices) ~= "table" then
+    local referenced = exactIndexSet(indices, #party, false)
+    if not referenced then
       return nil, "invalid_checkpoint", "Battle party reference set is missing."
     end
-    for _, index in ipairs(indices) do
-      if not integer(index, 1, #party) then
-        return nil, "invalid_checkpoint", "Battle party reference is invalid."
+    if scopedIndices then
+      for index in pairs(referenced) do
+        if not scopedIndices[index] then
+          return nil, "invalid_checkpoint", "Battle party reference is invalid."
+        end
       end
     end
   end
@@ -253,7 +307,9 @@ function BattleCheckpoint.restore(game, checkpoint, copy)
   local model = checkpoint.runtime.battle
   local battle
   if model.kind == "trainer" then
-    battle = BattleState.newTrainer(game, model.oppClass, model.partyIndex)
+    battle = BattleState.newTrainer(game, model.oppClass, model.partyIndex, {
+      playerPartyIndices = model.playerPartyIndices,
+    })
     battle.enemyParty = assert(copy(model.enemyParty))
     battle.enemyIndex = model.enemyIndex
   else
@@ -311,6 +367,12 @@ function BattleCheckpoint.restore(game, checkpoint, copy)
     battle.player.mon.hp, battle.player.mon.status
   battle.enemy.shownHP, battle.enemy.shownStatus =
     battle.enemy.mon.hp, battle.enemy.mon.status
+  -- the bar's own pixel length is derived HUD state, not captured: it
+  -- settles with shownHP above (UpdateHPBar_AnimateHPBar's end position)
+  local Timing = require("src.core.Timing")
+  for _, b in ipairs({ battle.player, battle.enemy }) do
+    b.shownPx = Timing.hpBarPixels(b.mon.hp, math.max(1, b.mon.stats.hp))
+  end
 
   local ow = game.overworld
   if not ow or type(ow.restoreBattleContinuation) ~= "function"
