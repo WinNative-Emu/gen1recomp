@@ -94,7 +94,6 @@ for name, breaks in [
 # which is a regression a player would notice long before CI did.
 LADDERS = [
     ("src/render/Tilt.lua",         r"^Tilt\.ANGLE_LABELS\s*=",      "Tilt.ANGLE_LABELS",      "TILT"),
-    ("src/render/GBCFX.lua",        r"^GBCFX\.LABELS\s*=",           "GBCFX.LABELS",           "GBC FX"),
     ("src/render/PaletteFX.lua",    r"^PaletteFX\.MODES\s*=",        "PaletteFX.MODES",        "COLORS"),
     ("src/render/PaletteFX.lua",    r"^function PaletteFX\.modeLabel", "PaletteFX.modeLabel",  "COLORS"),
     ("src/render/TileRenderer.lua", r"^TileRenderer\.VOID_FILLS\s*=", "TileRenderer.VOID_FILLS","VOID FILL"),
@@ -115,6 +114,16 @@ LADDERS = [
 for path, pattern, what, row in LADDERS:
     check(path, pattern, what, f"the {row} dropdown degrades to arrows")
 
+# The speed rows are the one ladder the bridge does not name: there is one row
+# per category and their ids come from GameSpeed.optionKey, so the bridge reads
+# these two to find its own rows. Losing either costs more than a dropdown --
+# nothing matches the speed rows any more, so they degrade to arrows AND the
+# host's fast-forward button writes nothing at all.
+check("src/core/GameSpeed.lua", r"^GameSpeed\.CATEGORIES\s*=", "GameSpeed.CATEGORIES",
+      "the speed dropdowns degrade to arrows and fast-forward stops working")
+check("src/core/GameSpeed.lua", r"^function GameSpeed\.optionKey", "GameSpeed.optionKey",
+      "the speed dropdowns degrade to arrows and fast-forward stops working")
+
 # ------------------------------------------------------------------- the rows
 # The host sorts rows onto panes by id. An id that disappears is not fatal --
 # unknown ids fall through to System on purpose -- but a RENAMED id lands on
@@ -124,7 +133,14 @@ for rid, pane in [
     ("musicVol", "Sound"), ("sfxVol", "Sound"), ("musicFilter", "Sound"),
     ("colors", "Display"), ("tilt", "Display"), ("zoom", "Display"),
     ("voidFill", "Display"), ("videoMode", "Display"), ("animations", "Display"),
-    ("fpsCap", "Performance"), ("speed", "Performance"),
+    # SHADER FX replaced GBC FX upstream. Both slots are activate rows that open
+    # the engine's own preset picker, so there is no ladder to pin -- only that
+    # the rows are still called this, or they land on the wrong pane.
+    ("shaderfx", "Display"), ("shaderfx2", "Display"),
+    ("fpsCap", "Performance"),
+    # One speed row per GameSpeed category, replacing the single "speed" row.
+    ("speedOverworld", "Performance"), ("speedBattle", "Performance"),
+    ("speedMenu", "Performance"),
     ("textSpeed", "System"), ("battleStyle", "System"), ("battleLayout", "System"),
     ("ruleset", "System"), ("mods", "System"), ("controls", "Controls"),
 ]:

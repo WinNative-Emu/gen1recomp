@@ -19,7 +19,7 @@ love = {
 
 local stepped = {}          -- id -> accumulated direction
 local activated = {}
-local optionValues = { voxel = "ON", tilt = "OFF", speed = "1X" }
+local optionValues = { voxel = "ON", tilt = "OFF" }
 DAY_LABELS = { "SYNC", "DAY", "NIGHT", "DUSK", "DAWN" }
 dayIndex = 1
 
@@ -59,6 +59,20 @@ package.loaded["src.ui.OptionsMenu"] = {
         step = function(g, dir)
           local o = g.save.options
           o.musicVol = math.max(0, math.min(7, (o.musicVol or 7) + dir))
+        end },
+      -- A speed row. These are the ladder the bridge does not name: it finds
+      -- them by asking GameSpeed which categories exist and what option key
+      -- each stores under, so this row proves that lookup, not a table entry.
+      { id = "speedBattle", label = "BATTLE SPEED",
+        value = function(g) return tostring(g.save.options.speedBattle or 1) .. "X" end,
+        step = function(g, dir)
+          local o = g.save.options
+          local levels = { 1, 2, 4, 10 }
+          local cur = 1
+          for i, level in ipairs(levels) do
+            if level == (o.speedBattle or 1) then cur = i break end
+          end
+          o.speedBattle = levels[(cur - 1 + dir) % #levels + 1]
         end },
     }
   end,
@@ -121,12 +135,34 @@ package.loaded["src.mods.Runtime"] = {
 }
 
 package.loaded["src.core.GameVersion"] = { get = function() return "red" end }
-package.loaded["src.core.GameSpeed"] = { LEVELS = { 1, 2, 4, 10 }, DEFAULT = 1 }
+-- Speed is per category upstream: CATEGORIES names them and optionKey maps one
+-- onto its save.options field, which is how the bridge finds the speed rows and
+-- how fast-forward knows what to write.
+local SPEED_LEVELS = { 1, 2, 4, 10 }
+package.loaded["src.core.GameSpeed"] = {
+  LEVELS = SPEED_LEVELS,
+  DEFAULT = 1,
+  CATEGORIES = { "overworld", "battle", "menu" },
+  optionKey = function(category)
+    return "speed" .. category:sub(1, 1):upper() .. category:sub(2)
+  end,
+  allowed = function() return SPEED_LEVELS end,
+  levelLabel = function(v) return tostring(v) .. "X" end,
+  clamp = function(v)
+    local best = SPEED_LEVELS[1]
+    for _, level in ipairs(SPEED_LEVELS) do
+      if math.abs(level - (tonumber(v) or 1)) < math.abs(best - (tonumber(v) or 1)) then
+        best = level
+      end
+    end
+    return best
+  end,
+}
 
 local saved, loaded, optionsFlushed = 0, 0, 0
 local restored, titled = nil, 0
 local game = {
-  save = { options = { speed = 2 } },
+  save = { options = { speedOverworld = 2, speedBattle = 2, speedMenu = 4 } },
   writeSave = function() saved = saved + 1 end,
   -- The engine's BOOT path. Nothing the host menu does should reach it: it
   -- rebuilds every subsystem and starts a new game.
@@ -370,16 +406,43 @@ end)(), "could not unpause -- the poll stopped")
 check("state reports resumed", state():match("paused\t0") ~= nil)
 
 print("fast forward")
-check("speed starts at the player's setting", game.save.options.speed == 2)
+local function speeds()
+  local o = game.save.options
+  return o.speedOverworld, o.speedBattle, o.speedMenu
+end
+local ow0, bat0, menu0 = speeds()
+check("speeds start at the player's settings", ow0 == 2 and bat0 == 2 and menu0 == 4,
+      table.concat({ tostring(ow0), tostring(bat0), tostring(menu0) }, "/"))
 send("ff\t1")
 tick()
-check("speed raised", game.save.options.speed == 4, tostring(game.save.options.speed))
+local ow, bat, menu = speeds()
+-- Every category, not just one: the host has a single fast-forward button and
+-- the engine reads a different key depending on what the player is in.
+check("every category raised", ow == 4 and bat == 4 and menu == 4,
+      table.concat({ tostring(ow), tostring(bat), tostring(menu) }, "/"))
 check("state reports ff on", state():match("ff\t1") ~= nil)
 send("ff\t0")
 tick()
-check("previous speed restored, not reset to 1x", game.save.options.speed == 2,
-      tostring(game.save.options.speed))
+ow, bat, menu = speeds()
+-- Per category, so a player who had set MENU SPEED apart from the others gets
+-- that back rather than all three flattened to one value.
+check("previous speeds restored, each its own", ow == 2 and bat == 2 and menu == 4,
+      table.concat({ tostring(ow), tostring(bat), tostring(menu) }, "/"))
 check("state reports ff off", state():match("ff\t0") ~= nil)
+
+print("speed rows")
+-- The bridge carries no entry for these ids; it resolves them through
+-- GameSpeed.CATEGORIES / optionKey, which is what upstream's per-category
+-- split broke.
+local speedIdx, speedLabels = vals("speedBattle")
+check("speed row is enumerable", speedLabels ~= nil and #speedLabels == 4,
+      speedLabels and table.concat(speedLabels, ",") or "no ladder")
+check("speed ladder is positioned on the stored value", speedIdx == 1,
+      tostring(speedIdx))
+send("set\tspeedBattle\t3")
+tick()
+check("host can pick a speed out of the dropdown", game.save.options.speedBattle == 10,
+      tostring(game.save.options.speedBattle))
 
 print("batching and robustness")
 stepped.tilt = 0

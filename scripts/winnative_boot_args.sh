@@ -35,7 +35,7 @@ if grep -q 'WINNATIVE_BOOT_ARGS' "$MAIN"; then
 else
 
 python3 - "$MAIN" <<'PY'
-import pathlib, sys
+import pathlib, re, sys
 
 path = pathlib.Path(sys.argv[1])
 src = path.read_text()
@@ -73,15 +73,23 @@ patch = '''  -- WINNATIVE_BOOT_ARGS: accept the scripted-boot inputs on the comm
 
 src = src.replace(anchor, patch, 1)
 
-# The version has its own reader a couple of lines down.
-ver_anchor = '  local scriptedVersion = os.getenv("POKEPORT_VERSION") or "red"\n'
-if ver_anchor not in src:
+# The version has its own reader a couple of lines down. Upstream has already
+# grown that fallback once -- it used to be `os.getenv("POKEPORT_VERSION") or
+# "red"` on one line and is now a three-line chain through
+# LaunchOptions.resolve(arg) -- so anchor on the environment read itself and
+# splice wnArgVersion in directly behind it, rather than on one exact spelling
+# of the whole chain. Still a real anchor: renaming scriptedVersion or dropping
+# POKEPORT_VERSION fails here as loudly as before.
+#
+# Position matters. The environment keeps winning, as everywhere else in this
+# patch. Below it goes the host's flag, because --game-version is WinNative
+# stating which game it is hosting, and it must outrank whatever
+# LaunchOptions.resolve would infer from a stray --game= or POKEPORT_GAME.
+ver_anchor = re.compile(
+    r'^([ \t]*local scriptedVersion = os\.getenv\("POKEPORT_VERSION"\))', re.M)
+src, n = ver_anchor.subn(r'\1\n    or wnArgVersion', src, count=1)
+if n != 1:
     raise SystemExit("version anchor not found in main.lua; upstream layout changed")
-src = src.replace(
-    ver_anchor,
-    '  local scriptedVersion = os.getenv("POKEPORT_VERSION") or wnArgVersion or "red"\n',
-    1,
-)
 
 path.write_text(src)
 PY

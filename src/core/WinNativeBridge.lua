@@ -50,7 +50,9 @@ local enabled = nil
 -- engine's own speed setting, so both live here rather than in save.options.
 -- Neither is persisted -- a game should not come back paused.
 local paused = false
-local ffPrevSpeed = nil   -- the speed to restore when fast-forward turns off
+-- option key -> the speed to restore when fast-forward turns off, or nil when
+-- fast-forward is off. One entry per speed category (see speedOptionKeys).
+local ffPrevSpeeds = nil
 
 -- What fast-forward runs at. GameSpeed.LEVELS goes far higher, but those
 -- levels exist for the automated route-running bots; 4x is the "hold to skip
@@ -194,6 +196,30 @@ local function options(game)
   return game and game.save and game.save.options or {}
 end
 
+-- The engine's speed categories as save.options keys, plus the module itself,
+-- or nil when GameSpeed will not load.
+--
+-- Upstream replaced the single GAME SPEED row with one row per category --
+-- overworld walking, battle turns and menu navigation each carry their own
+-- multiplier, and options.speed no longer exists. GameSpeed.CATEGORIES is the
+-- engine's own list of which categories there are and GameSpeed.optionKey
+-- names the field each one stores under, so both are read here rather than
+-- spelled out: a category added upstream arrives with its row instead of
+-- degrading to arrows, and the key spelling can never drift from the engine's.
+local function speedOptionKeys()
+  local ok, GameSpeed = pcall(require, "src.core.GameSpeed")
+  if not ok or type(GameSpeed) ~= "table" then return nil end
+  if type(GameSpeed.CATEGORIES) ~= "table"
+      or type(GameSpeed.optionKey) ~= "function" then return nil end
+  local keys = {}
+  for _, category in ipairs(GameSpeed.CATEGORIES) do
+    local okKey, key = pcall(GameSpeed.optionKey, category)
+    if okKey and type(key) == "string" then keys[#keys + 1] = key end
+  end
+  if not keys[1] then return nil end
+  return keys, GameSpeed
+end
+
 -- 0 = OFF, then 1..7, the way OptionsMenu's volLabel renders them.
 local function volumeLadder(current)
   local labels = { "OFF" }
@@ -271,11 +297,10 @@ local ENUMERATORS = {
     return levelLadder(Tilt.ANGLE_LABELS, options(game).tilt or 0)
   end,
 
-  gbcfx = function(game)
-    local ok, GBCFX = pcall(require, "src.render.GBCFX")
-    if not ok then return nil end
-    return levelLadder(GBCFX.LABELS, options(game).gbcfx or 0)
-  end,
+  -- GBC FX is gone: upstream deleted src/render/GBCFX.lua and its fixed level
+  -- ladder in favour of the SHADER FX preset picker, whose rows are activate
+  -- rows rather than cyclers -- the host opens the engine's own picker screen
+  -- through the generic activate command, so there is nothing to enumerate.
 
   zoom = function(game)
     local okZoom, Zoom = pcall(require, "src.render.Zoom")
@@ -319,14 +344,24 @@ local ENUMERATORS = {
     return labels, indexOf(FrameCap.STEPS, FrameCap.normalize(options(game).fpsCap))
   end,
 
-  speed = function(game)
-    local ok, GameSpeed = pcall(require, "src.core.GameSpeed")
-    if not ok then return nil end
-    local labels = {}
-    for i, level in ipairs(GameSpeed.LEVELS) do labels[i] = GameSpeed.levelLabel(level) end
-    return labels, indexOf(GameSpeed.LEVELS, GameSpeed.clamp(options(game).speed))
-  end,
+  -- The speed rows are not here: there is one per category and their ids come
+  -- from GameSpeed.optionKey, so ladderFor resolves them by asking the engine
+  -- rather than by this table carrying a copy of the category list.
 }
+
+-- One multiplier row, for whichever speed category `key` names.
+--
+-- The ladder is GameSpeed.allowed(), not GameSpeed.LEVELS: a cart manifest may
+-- narrow which levels a player can reach, and the row's own step cycles the
+-- narrowed list. Offering the full list here would show values the step can
+-- never land on, and the walk in `set` would give up part way there.
+local function speedLadder(game, key, GameSpeed)
+  local levels = GameSpeed.allowed and GameSpeed.allowed() or GameSpeed.LEVELS
+  if type(levels) ~= "table" or levels[1] == nil then return nil end
+  local labels = {}
+  for i, level in ipairs(levels) do labels[i] = GameSpeed.levelLabel(level) end
+  return labels, indexOf(levels, GameSpeed.clamp(options(game)[key]))
+end
 
 -- Labels and the current position for one row, or nil when the row is not
 -- enumerable (an activate row, or a cycler nothing here knows the shape of).
@@ -347,6 +382,16 @@ local function ladderFor(game, row)
     local ok, Pipelines = pcall(require, "src.render.Pipelines")
     if not ok then return nil end
     return levelLadder(Pipelines.levelLabels(pipelineId), Pipelines.level(pipelineId))
+  end
+
+  -- A speed row, resolved the same way: its id is whatever GameSpeed.optionKey
+  -- returns for one of the engine's categories, so the match is made against
+  -- the engine's list instead of against ids copied into this file.
+  local speedKeys, GameSpeed = speedOptionKeys()
+  if speedKeys then
+    for _, key in ipairs(speedKeys) do
+      if row.id == key then return speedLadder(game, key, GameSpeed) end
+    end
   end
 
   local enumerate = ENUMERATORS[row.id]
@@ -392,7 +437,7 @@ local function buildState(game, importer)
   -- Run state the host owns but cannot see from its side, so its menu can
   -- show Pause and Fast Forward in the right position instead of guessing.
   out[#out + 1] = "paused\t" .. (paused and "1" or "0")
-  out[#out + 1] = "ff\t" .. ((ffPrevSpeed ~= nil) and "1" or "0")
+  out[#out + 1] = "ff\t" .. ((ffPrevSpeeds ~= nil) and "1" or "0")
 
   -- First-boot ROM import. The host covers the screen with its own loading
   -- screen while this runs, so it needs the stage text and how far along it is;
@@ -719,16 +764,26 @@ local function applyCommand(game, parts)
     local want = parts[2] == "1"
     local opts = game and game.save and game.save.options
     if not opts then return end
-    local ok, GameSpeed = pcall(require, "src.core.GameSpeed")
-    if not ok then return end
+    -- Every category at once. Fast-forward is one button on the host's pad and
+    -- it means "run the game fast", so holding it has to speed up whatever the
+    -- player is currently in -- walking, a battle, or a menu -- and the engine
+    -- reads a different key for each of those.
+    local keys, GameSpeed = speedOptionKeys()
+    if not keys then return end
     if want then
-      -- Remembered so turning fast-forward off restores whatever the player
-      -- had chosen on the Performance pane, rather than snapping to 1x.
-      if ffPrevSpeed == nil then ffPrevSpeed = opts.speed or GameSpeed.DEFAULT end
-      opts.speed = FF_LEVEL
-    elseif ffPrevSpeed ~= nil then
-      opts.speed = ffPrevSpeed
-      ffPrevSpeed = nil
+      -- Remembered per category so turning fast-forward off restores whatever
+      -- the player had chosen on the Performance pane, rather than snapping to
+      -- 1x -- and rather than flattening three separate settings into one.
+      if ffPrevSpeeds == nil then
+        ffPrevSpeeds = {}
+        for _, key in ipairs(keys) do
+          ffPrevSpeeds[key] = opts[key] or GameSpeed.DEFAULT
+        end
+      end
+      for _, key in ipairs(keys) do opts[key] = FF_LEVEL end
+    elseif ffPrevSpeeds ~= nil then
+      for key, level in pairs(ffPrevSpeeds) do opts[key] = level end
+      ffPrevSpeeds = nil
     end
     return
   end
