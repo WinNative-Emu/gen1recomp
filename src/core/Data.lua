@@ -82,8 +82,9 @@ local function copy(value)
   return out
 end
 
-function Data:applyVersionedFieldData()
-  if require("src.core.GameVersion").isYellow() then
+function Data:applyVersionedFieldData(version)
+  version = version or require("src.core.GameVersion").get()
+  if version == "yellow" then
     self.field.trades = copy(YELLOW_TRADES)
     -- The old man's catch demo is a RATTATA in Yellow
     -- (scripts/ViridianCity.asm ViridianCityOldManStartCatchTrainingScript
@@ -106,7 +107,8 @@ end
 
 -- Fills only what the cache is missing, so an importer that learns to
 -- stamp one of these keys silently takes over from the engine.
-function Data:seedDefaults()
+function Data:seedDefaults(version)
+  version = version or require("src.core.GameVersion").get()
   local constants = self.constants or {}
   self.constants = constants
   self.field = self.field or {}
@@ -131,7 +133,7 @@ function Data:seedDefaults()
   if constants.dexDigits == nil then
     constants.dexDigits = math.max(3, #tostring(constants.dexSize))
   end
-  self:applyVersionedFieldData()
+  Data.applyVersionedFieldData(self, version)
   local boot = self.field.boot
   if boot == nil then
     boot = {}
@@ -144,7 +146,7 @@ function Data:seedDefaults()
   -- only the un-overridden default flips, so a total conversion that set
   -- field.boot.screens.splash keeps its choice on any version.
   if boot.screens.splash == BOOT_DEFAULTS.screens.splash
-     and require("src.core.GameVersion").isYellow() then
+     and version == "yellow" then
     boot.screens.splash = "YellowIntro"
   end
   -- the naming screen presets the importer already extracts but nothing
@@ -163,11 +165,15 @@ function Data:seedDefaults()
   -- extractor never writes headers for them.  Seed the EVENT_BEAT_* /
   -- after-battle rows so Blaine's SetEventRange deactivation and talk
   -- after-text work like the other gyms (scripts/CinnabarGym.asm).
-  self:seedCinnabarGymTrainerHeaders()
+  Data.seedCinnabarGymTrainerHeaders(self)
   -- #197: the Fighting Dojo Karate Master is text_asm, so the extractor
   -- writes no header for him -- seed one so he engages on sight and has
   -- his defeat / re-talk lines (same idea as the Cinnabar seed above).
-  self:seedFightingDojoKarateMaster()
+  Data.seedFightingDojoKarateMaster(self)
+  -- #1743: Mt. Moon B2F Super Nerd is text_asm (no def_trainers), so Yellow's
+  -- extractor never writes his header -- seed one so engageTrainer finds
+  -- battle/won/after text instead of the "I like shorts!" fallback.
+  Data.seedMtMoonB2FSuperNerd(self)
   -- #189: 1F cabin door order vs rooms map (survey zoom)
   require("src.world.SsAnneLayout").apply(self.maps)
 end
@@ -196,6 +202,25 @@ function Data:seedFightingDojoKarateMaster()
     battle = "_FightingDojoKarateMasterText",
     won = "_FightingDojoKarateMasterDefeatedText",
     after = "_FightingDojoKarateMasterStayAndTrainWithUsText",
+  }
+end
+
+-- Mt. Moon B2F Super Nerd (object index 1) is text_asm with no def_trainers
+-- row, so Yellow never gets a trainerHeaders.MtMoonB2F[1] entry (Red/Blue
+-- pin one in make_rom_manifest.py). Without it, engageTrainer falls through
+-- to the hard-coded "I like shorts!" fallback (#1743). trainerDefeated still
+-- tracks him via defeatedTrainers[npc.id]; the fabricated event name matches
+-- the shipped Red/Blue manifest pin for consistency with fossil drivers.
+function Data:seedMtMoonB2FSuperNerd()
+  local headers = self.trainer_headers
+  if not headers then return end
+  headers.MtMoonB2F = headers.MtMoonB2F or {}
+  if headers.MtMoonB2F[1] then return end
+  headers.MtMoonB2F[1] = {
+    battle = "_MtMoonB2FSuperNerdTheyreBothMineText",
+    won = "_MtMoonB2FSuperNerdOkIllShareText",
+    after = "_MtMoonB2FSuperNerdTheresAPokemonLabText",
+    event = "EVENT_BEAT_MT_MOON_3_SUPER_NERD",
   }
 end
 
