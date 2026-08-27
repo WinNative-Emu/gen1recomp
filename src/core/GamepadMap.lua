@@ -40,8 +40,10 @@ GamepadMap.NX_RAW_BUTTON_BINDINGS = {
 
 -- Raw index -> gamepad button *name* for RomImporter (then NX face swap applies).
 GamepadMap.RAW_TO_GAMEPAD_BUTTON = {
-  [1] = "a", [2] = "b",
+  [1] = "a", [2] = "b", [3] = "x", [4] = "y",
+  [5] = "leftshoulder", [6] = "rightshoulder",
   [7] = "back", [8] = "start", [9] = "back", [10] = "start",
+  [11] = "triggerleft", [12] = "triggerright",
 }
 
 GamepadMap.NX_RAW_TO_GAMEPAD_BUTTON = {
@@ -57,7 +59,10 @@ function GamepadMap._setForceNXForTests(v)
 end
 
 local function nxActive()
-  if GamepadMap._forceNXForTests then return true end
+  if GamepadMap._forceNXForTests == true then return true end
+  if GamepadMap._forceNXForTests == false and love and (love._os ~= "NX" and (not love.system or love.system.getOS() ~= "NX")) then
+    return false
+  end
   if love and love._os == "NX" then return true end
   if love and love.system and love.system.getOS() == "NX" then return true end
   return false
@@ -76,6 +81,20 @@ end
 
 function GamepadMap.mapGamepadButton(button)
   return GamepadMap.gamepadBindings()[button]
+end
+
+function GamepadMap.mapLauncherButton(button)
+  if nxActive() then
+    if button == "a" then return "b"
+    elseif button == "b" then return "a"
+    elseif button == "x" then return "y"
+    elseif button == "y" then return "x"
+    elseif button == "back" then return "select"
+    end
+  elseif button == "back" then
+    return "select"
+  end
+  return button
 end
 
 -- Select+face display chords (docs / Nintendo UX):
