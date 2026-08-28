@@ -16,6 +16,7 @@ local Damage = require("src.battle.Damage")
 local EffectRegistry = require("src.battle.EffectRegistry")
 local Experience = require("src.battle.Experience")
 local Font = require("src.render.Font")
+local LevelDisplay = require("src.ui.LevelDisplay")
 local Logger = require("src.core.Logger")
 local MoveEffects = require("src.battle.MoveEffects")
 local Party = require("src.pokemon.Party")
@@ -338,6 +339,22 @@ local function monPalette(data, species)
   -- prefix so GBC vs RED++ cache keys don't collide on shared names
   if PaletteFX.usesGbcPack() then name = "redpp:" .. name end
   return { name = name, colors = colors }
+end
+
+-- MarowakAnim OBJ pics under OAM_PAL1:
+-- engine/battle/ghost_marowak_anim.asm:3-5,77
+local function objPicPalette()
+  local PaletteFX = require("src.render.PaletteFX")
+  if not PaletteFX.usesSpriteObp() then return nil end
+  local colors, group = PaletteFX.ogObj()
+  if not colors then return nil end
+  return { name = "obp1:" .. tostring(group), colors = colors }
+end
+
+local function objPic(path, trueColor)
+  local pal = objPicPalette()
+  if not pal then return nil end
+  return getImage(path, pal, trueColor)
 end
 
 -- a named palette from the active COLORS pack as a getImage pal
@@ -897,7 +914,8 @@ local function disguiseAsGhost(self)
   self.enemy.name = "GHOST"
   self.enemy.sprite = getImage("assets/generated/battle/front/ghost.png",
                                monPalette(self.data, self.enemy.mon.species))
-  self.introText = Strings("The GHOST\nappeared!")
+  -- _EnemyAppearedText (data/text/text_2.asm:1251-1255) has no article
+  self.introText = self:romText("_EnemyAppearedText", "%s\nappeared!", self.enemy.name)
 end
 
 -- Pokémon Tower ghosts (engine/battle/core.asm): without the Silph Scope
@@ -941,7 +959,11 @@ function BattleState:queueScopeReveal()
   local unveiled = self.data.text and self.data.text._UnveiledGhostText
   self:say(unveiled
            or Strings("SILPH SCOPE\nunveiled the\vGHOST's identity!"))
-  self:act(function() self.ghostReveal = { t = 0 } end)
+  self:act(function()
+    self.ghostReveal = { t = 0 }
+    local ghostObj = objPic("assets/generated/battle/front/ghost.png")
+    if ghostObj then self.enemy.sprite = ghostObj end
+  end)
   table.insert(self.queue, { wait = BattleState.GHOST_REVEAL_FRAMES })
   self:say(self:romText("_WildMonAppearedText", "Wild %s\nappeared!",
                    self.ghostReal and self.ghostReal.name or self.enemy.name))
@@ -3264,9 +3286,9 @@ function BattleState:applyAnimEffect(ev)
     end
     fx.hudShakeProg = prog
   elseif e == "SE_WAVY_SCREEN" then
-    -- AnimationWavyScreen: 255 frames of per-scanline SCX offsets
-    -- walking WavyScreenLineOffsets
-    fx.wavy = { left = 255, phase = 0 }
+    -- AnimationWavyScreen: 255 outer passes, two per displayed frame
+    -- (animations.asm:1884-1903), walking WavyScreenLineOffsets
+    fx.wavy = { left = 128, phase = 0 }
 
   -- ---------------------------------------------- mon pic effects
   elseif e == "SE_SLIDE_MON_OFF" then
@@ -3650,7 +3672,7 @@ function BattleState:updateFx()
     end
     if fx.wavy then
       fx.wavy.left = fx.wavy.left - 1
-      fx.wavy.phase = fx.wavy.phase + 1
+      fx.wavy.phase = fx.wavy.phase + 2
       if fx.wavy.left <= 0 then fx.wavy = nil end
     end
   end
@@ -3704,12 +3726,22 @@ function BattleState:updateFx()
         local real = self.ghostReal
         if real then
           self.enemy.name = real.name or self.enemy.name
-          self.enemy.sprite = real.sprite or self.enemy.sprite
+          gr.bgSprite = real.sprite or self.enemy.sprite
+          local objReal
+          if objPicPalette() then
+            local Sprites = require("src.pokemon.Sprites")
+            local path, tc = Sprites.path(self.data, self.enemy.mon.species,
+              "front", { mon = self.enemy.mon, kind = "battle" })
+            objReal = path and objPic(path, tc)
+          end
+          self.enemy.sprite = objReal or gr.bgSprite
         end
       end
       pf.fade = math.min(1, math.ceil((gr.t - outEnd) / 10) / 4)
     end
     if gr.t >= BattleState.GHOST_REVEAL_FRAMES then
+      -- home/clear_sprites.asm:1
+      if gr.bgSprite then self.enemy.sprite = gr.bgSprite end
       self.ghostReveal, self.scopeReveal, pf.fade = nil, nil, nil
     end
   end
@@ -3825,6 +3857,9 @@ function BattleState:executeAction(user, target, action)
       -- EnemySendOutFirstMon (core.asm:1314-1315): clears player's trap
       clearTrapping(self.player)
       self:syncSides()
+      -- EnemySendOut (core.asm:1276-1289): only the mon on the field stays flagged
+      self.participants = {}
+      self:markParticipant()
       Runtime.emit("battle.battler_switched", {
         battle = self, side = self.sides[2], battler = self.enemy,
         previous = previous,
@@ -5950,8 +5985,7 @@ local WAVY_OFFSETS = { 0, 0, 0, 0, 0, 1, 1, 1, 2, 2, 2, 2, 2, 1, 1, 1,
                        0, 0, 0, 0, 0, -1, -1, -1, -2, -2, -2, -2, -2,
                        -1, -1, -1 }
 
--- wave the BG canvas one scanline at a time; the offset table walks
--- one entry per frame like the asm's advancing pointer
+-- WavyScreen_SetSCX: animations.asm:1916-1927
 function BattleState:applyWavy(src)
   local wavy = self.fx and self.fx.wavy
   if not wavy then return src end
@@ -5964,7 +5998,7 @@ function BattleState:applyWavy(src)
   for line = 0, 143 do
     self.waveQuad:setViewport(0, line, 160, 1)
     g.draw(src, self.waveQuad,
-           WAVY_OFFSETS[(line + wavy.phase) % 32 + 1], line)
+           WAVY_OFFSETS[(line * 2 + wavy.phase) % 32 + 1], line)
   end
   g.setCanvas(prev)
   return self.waveCanvas
@@ -6304,7 +6338,7 @@ function BattleState:drawHUDs(slide)
     end
     if self.enemy.shownStatus then
       Font.draw(self:statusLabel({ status = self.enemy.shownStatus }), 40, 8)
-    else
+    elseif LevelDisplay.visible(self.enemy.mon, "battle.enemy", self.game) then
       hudTile(0x6E, 32, 8) -- <LV>
       Font.draw(tostring(self.enemy.mon.level), 40, 8)
     end
@@ -6388,7 +6422,7 @@ function BattleState:drawHUDs(slide)
     Font.draw(self.player.name, nameX(10, self.player.name), 56)
     if self.player.shownStatus then
       Font.draw(self:statusLabel({ status = self.player.shownStatus }), 120, 64)
-    else
+    elseif LevelDisplay.visible(self.player.mon, "battle.player", self.game) then
       hudTile(0x6E, 112, 64) -- <LV>
       Font.draw(tostring(self.player.mon.level), 120, 64)
     end

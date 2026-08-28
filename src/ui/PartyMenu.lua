@@ -11,6 +11,7 @@
 
 local Assets = require("src.render.Assets")
 local Font = require("src.render.Font")
+local LevelDisplay = require("src.ui.LevelDisplay")
 local Logger = require("src.core.Logger")
 local Runtime = require("src.mods.Runtime")
 local Screens = require("src.ui.Screens")
@@ -70,6 +71,12 @@ function PartyMenu:sgbPalettes(game)
   end
   return zones
 end
+
+-- data/moves/field_moves.asm: leftmost tile per field move name
+local FIELD_MOVE_X = {
+  cut = 12, fly = 12, surf = 12, flash = 12, DIG = 12,
+  strength = 10, TELEPORT = 10, softboiled = 8,
+}
 
 local function sameItems(_, items) return items end
 
@@ -706,6 +713,9 @@ function PartyMenu:update(dt)
         -- (text_box.asm .donePrintingNames). #768
         items[#items + 1] = { label = Strings("STATS"), action = "stats" }
         items[#items + 1] = { label = Strings("SWITCH"), action = "switch" }
+        -- CANCEL closes the whole party menu (start_sub_menus.asm:71-75
+        -- .exitMenu), where B returns to the party list. #1833
+        items[#items + 1] = { label = Strings("CANCEL"), action = "cancel" }
       end
       local ctx = { battle = self.battle, overworld = ow }
       local hooked = Runtime.call("ui.party.submenu", sameItems,
@@ -785,7 +795,11 @@ function PartyMenu:draw()
     -- level at column 13 (<LV> tile + digits, PrintLevel) AND the
     -- status/FNT text at column 17 (PrintStatusCondition), like the
     -- original rows -- statused mons keep their level display
-    if mon.level < 100 then
+    if not LevelDisplay.visible(mon, "party", self.game) then -- RFC 0019
+      -- the level column is simply empty; the status/FNT column at 17 is a
+      -- separate field and still prints, exactly as it does for a mon whose
+      -- level is on screen
+    elseif mon.level < 100 then
       HudTiles.tile(0x6E, 104, y) -- <LV>
       Font.draw(tostring(mon.level), 112, y)
     else
@@ -873,12 +887,19 @@ function PartyMenu:draw()
   end
   if self.submenu then
     local n = #self.subItems
-    Font.drawBox(9, 17 - n * 2 - 1, 11, n * 2 + 1)
-    local y0 = (17 - n * 2) * 8
-    for si, entry in ipairs(self.subItems) do
-      Font.draw(entry.label, 88, y0 + (si - 1) * 16)
+    -- engine/menus/text_box.asm:397-440, data/text_boxes.asm:33 #1819
+    local lx = 12
+    for _, entry in ipairs(self.subItems) do
+      local mx = FIELD_MOVE_X[entry.move or entry.action]
+      if mx and mx < lx then lx = mx end
     end
-    Font.drawCode(Theme.cursor, 80, y0 + (self.subIndex - 1) * 16)
+    local top = n > 3 and math.max(0, 16 - n * 2) or 11
+    Font.drawBox(lx - 1, top, 21 - lx, 18 - top)
+    local y0 = (18 - n * 2) * 8
+    for si, entry in ipairs(self.subItems) do
+      Font.draw(entry.label, (lx + 1) * 8, y0 + (si - 1) * 16)
+    end
+    Font.drawCode(Theme.cursor, lx * 8, y0 + (self.subIndex - 1) * 16)
   end
   love.graphics.setColor(1, 1, 1, 1)
 end
