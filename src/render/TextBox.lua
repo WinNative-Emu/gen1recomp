@@ -338,6 +338,17 @@ function TextBox:sfxHeld()
   return false
 end
 
+-- TextCommand_PROMPT_BUTTON's LoadBlinkingCursor (home/text.asm:749)
+function TextBox:arrowVisible()
+  if self.sfxWait then return false end
+  if self.waiting then return true end
+  return not not (self.done and not self.choice
+    and (not self.auto
+         or (self.auto.promptFirst and not self.autoPrompted))
+    and (not self.stay
+         or (self.stay.prompt and not self.stayShown)))
+end
+
 function TextBox:update(dt)
   local input = self.game.input
   self.blink = (self.blink + 1) % 60
@@ -463,7 +474,8 @@ function TextBox:update(dt)
     end
     if self:sfxHeld() then return end
     if input:wasPressed("a") or input:wasPressed("b") then
-      require("src.core.Sound").play(self.game.data, "Press_AB")
+      -- home/joypad.asm:292
+      require("src.core.Sound").playPress(self.game.data)
       self.game.stack:pop()
       if self.onDone then self.onDone() end
     end
@@ -632,12 +644,7 @@ function TextBox:draw()
       pen = pen + Font.advanceOf(code)
     end
   end
-  if (self.waiting or (self.done and not self.choice
-                       and (not self.auto
-                            or (self.auto.promptFirst and not self.autoPrompted))
-                       and (not self.stay
-                            or (self.stay.prompt and not self.stayShown))))
-     and self.blink < 30 then
+  if self:arrowVisible() and self.blink < 30 then
     -- page-advance cursor: glyph $EE by default, the blinking down arrow
     -- the original prints via `ld a, "▼"` (home/text.asm)
     drawGlyph(Theme.moreArrow or 0xEE,

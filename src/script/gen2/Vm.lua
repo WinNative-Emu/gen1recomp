@@ -1041,6 +1041,11 @@ local function runCmd(self, cmd, op)
       wild = self.wildMon })
     self.wildMon = nil
     self.trainer = nil
+    -- engine/overworld/scripting.asm Script_startbattle
+    if outcome == nil then
+      self.aborted = true
+      return "end"
+    end
     self.justBattled = true
     self.battleOutcome = outcome
     self.scriptVar = BATTLE_RESULTS[outcome] or BATTLE_RESULTS.win
@@ -1943,6 +1948,7 @@ function Vm.new(scripts, text, events, hooks)
     playMusicFn = hooks.playMusic,
     specialSoundFn = hooks.specialSound,
     waitSfxFn = hooks.waitSfx,
+    waitSfxCapFn = hooks.waitSfxCap,
     -- StartAutoInput, by script pointer (`autoinput`) and by stream name
     -- (CatchTutorial), plus StopAutoInput.  See src/core/gen2/AutoInput.lua.
     autoInputFn = hooks.autoInput,
@@ -2348,7 +2354,17 @@ end
 function Vm:lookupTrainer(class, member)
   if not (class and member) then return nil end
   if not self.lookupTrainerFn then return { class = class, member = member } end
-  return self.lookupTrainerFn(class, member)
+  local record = self.lookupTrainerFn(class, member)
+  if not record then
+    local key = tostring(class) .. "/" .. tostring(member)
+    self.missingTrainers = self.missingTrainers or {}
+    if not self.missingTrainers[key] then
+      self.missingTrainers[key] = true
+      Logger.warn("gen2 trainer class %s member %s is not in the roster",
+        tostring(class), tostring(member))
+    end
+  end
+  return record
 end
 
 -- `special` handlers.  The script command carries an index into
@@ -2666,8 +2682,10 @@ function Vm:resume(resumeValue)
       self:resume()
     end)
   elseif req and req.kind == "waitsfx" then
+    -- home/audio.asm:225
     self.waitSfx = true
-    self.waitSfxLeft = 180 -- safety cap (~3s) if a source never ends
+    local cap = self.waitSfxCapFn and self.waitSfxCapFn()
+    self.waitSfxLeft = math.max(cap or 180, 1)
   elseif req and req.kind == "battle" then
     if self.startBattleFn then
       self.startBattleFn(req.trainer, req.wild, function(outcome)
