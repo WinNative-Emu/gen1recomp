@@ -398,11 +398,13 @@ function Game:update(dt)
   -- Give the accumulator room for one full frame at the current speed,
   -- or the anti-spiral clamp quietly caps every level above ~15X.
   local speed = self:logicSpeed()
-  FixedStep.maxAccum = math.max(0.25, speed * FixedStep.STEP * 1.5)
-  FixedStep:update(dt * speed)
+  FixedStep.maxAccum = FixedStep.catchupLimit(speed)
+  FixedStep:update(dt, speed)
   -- Audio runs off real time at a fixed 60Hz regardless of game speed or
   -- display refresh, so fades and chip synthesis keep their intended tempo
-  -- whether we are at 1X, 10X, or running with vsync disabled.
+  -- whether we are at 1X, 10X, or running with vsync disabled.  One-shot
+  -- SFX stay at natural pitch too (#1990/#1991/#1997); WaitForSoundToFinish
+  -- gates still release early at high speed via their logic-frame budget.
   local step = FixedStep.STEP
   self.audioAccum = math.min((self.audioAccum or 0) + dt, 0.25)
   while self.audioAccum >= step do
@@ -1311,10 +1313,8 @@ function Game:applyOptions(opts)
   require("src.core.FaithfulRes").applyOptions(opts)
   require("src.core.ScreenPosition").applyOptions(opts)
   require("src.core.VSync").applyOptions(opts)
-  FixedStep.refreshPeriod = require("src.core.RefreshRate").period()
-  -- normalizes a nil/garbage cap to the 60 default, so old saves with no
-  -- fpsCap key pace at the standard rate (issue #88)
   require("src.core.FrameCap").applyOptions(opts)
+  require("src.core.PresentSync").applyFixedStepPeriod()
   -- Scale the optional presentation extras to the device's performance
   -- tier.  Every heavy feature was just applied from the stored options
   -- above; here we clamp the *live* state down for a weaker device without
