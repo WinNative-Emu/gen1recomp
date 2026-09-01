@@ -1098,7 +1098,11 @@ R.encounters = {
     trees = f.map(f.str, f.str),
     rocks = f.map(f.str, f.str),
     treeSets = f.map(f.str, f.rec{ common = f.list(gen2TreeSlot),
-                                   rare = f.list(gen2TreeSlot) }),
+                                   rare = f.opt(f.list(gen2TreeSlot)) }),
+    -- ../pokecrystal/data/wild/treemons_asleep.asm:3 AsleepTreeMonsNite
+    treeMonsAsleep = f.opt(f.rec{ MORN = f.list(f.id("pokemon")),
+                                  DAY = f.list(f.id("pokemon")),
+                                  NITE = f.list(f.id("pokemon")) }),
     -- the Bug-Catching Contest pool (min/max level, not one level per slot)
     bugContest = f.list(f.rec{ species = f.id("pokemon"),
                                min = f.int(1), max = f.int(1),
@@ -1129,8 +1133,10 @@ R.trainers = {
     -- Reuse a base trainer class's portrait without redistributing its asset.
     basePic = f.opt(f.id("trainers")),
     baseMoney = f.opt(f.int(0)),
+    -- data/trainers/special_moves.asm:5
     parties = f.list(f.list(f.rec{ level = f.int(1),
-                                   species = f.id("pokemon") })),
+                                   species = f.id("pokemon"),
+                                   moves = f.opt(f.list(f.id("moves"))) })),
     partyNames = f.opt(f.map(f.int(1), f.str)),
     aiMods = f.opt(f.any),
     aiClass = f.opt(f.id("ai_classes")),

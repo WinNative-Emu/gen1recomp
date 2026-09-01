@@ -551,14 +551,16 @@ end
 local StatBox = {}
 StatBox.__index = StatBox
 
-function StatBox.new(game, mon, onDone)
-  return setmetatable({ game = game, mon = mon, onDone = onDone }, StatBox)
+-- ../pokered/engine/items/item_effects.asm:1403-1411
+function StatBox.new(game, mon, onDone, keepOpen)
+  return setmetatable({ game = game, mon = mon, onDone = onDone,
+                        keepOpen = keepOpen or nil }, StatBox)
 end
 
 function StatBox:update()
   local input = self.game.input
   if input:wasPressed("a") or input:wasPressed("b") then
-    self.game.stack:pop()
+    if not self.keepOpen then self.game.stack:pop() end
     if self.onDone then self.onDone() end
   end
 end
@@ -1088,6 +1090,17 @@ function BattleState:animBeforeMove(name, isPlayer)
   table.insert(self.queue, at or self.nextInsert,
                { anim = name, attackerIsPlayer = isPlayer, animDelayed = true,
                  hit = { animType = isPlayer and 6 or 3 } })
+end
+
+-- ../pokered/engine/battle/move_effects/substitute.asm:2-3
+function BattleState:waitBeforeMoveAnim(frames)
+  if not frames or frames <= 0 then return end
+  local at
+  for i, item in ipairs(self.queue) do
+    if item == self.moveAnimRow then at = i break end
+  end
+  self.nextInsert = (self.nextInsert or 0) + 1
+  table.insert(self.queue, at or self.nextInsert, { wait = frames })
 end
 
 -- insert an act right after the current queue item
@@ -2651,7 +2664,7 @@ function BattleState:oldManThrow()
     self:ballChain("TOSS_ANIM", true, 3, "POKE_BALL")
     -- ItemUseBallText05: text_far, sound_caught_mon, text_promptbutton --
     -- the fanfare follows the caught text and holds the prompt
-    self:sayNextWaitSfx(Strings("All right!\n%s was\ncaught!", self.enemy.name),
+    self:sayNextWaitSfx(self:caughtText(),
       function() return require("src.core.Sound").play(self.data, "Caught_Mon") end)
   end)
 end
@@ -3399,7 +3412,6 @@ function BattleState:applyAnimEffect(ev)
     if pf then pf.kind, pf.hidden, pf.minimized = nil, nil, nil end
   elseif e == "SE_TRANSFORM_MON" then
     -- AnimationTransformMon redraws the user as the opposing species
-    -- (MoveEffects.TRANSFORM_EFFECT swaps the rest when it applies)
     local user = self:animFxBattler(false)
     local target = self:animFxBattler(true)
     if user and target and self.speciesSprite then
@@ -3408,9 +3420,15 @@ function BattleState:applyAnimEffect(ev)
       local pf = self:picFxFor(user)
       if pf then pf.minimized = nil end
     end
+  elseif e == "SE_SUBSTITUTE_MON" then
+    -- ../pokered/engine/battle/animations.asm:1936-1973
+    local b = self:animFxBattler(false)
+    if b then
+      b.substitutePending = nil
+      local pf = self:picFxFor(b)
+      if pf then pf.kind, pf.hidden, pf.ox, pf.oy = nil, nil, 0, 0 end
+    end
   end
-  -- SE_SUBSTITUTE_MON needs no visual here: the doll is drawn while
-  -- battler.substituteHP is set (MoveEffects raises it with the move)
 end
 
 -- engine/battle/animations.asm:2639 PlayApplyingAttackSound
@@ -4392,6 +4410,7 @@ end
 -- amount that counts as dealt (for recoil/drain).
 function BattleState:applyDamage(target, dmg)
   if target.substituteHP then
+    target.substitutePending = nil
     target.substituteHP = target.substituteHP - dmg
     if target.substituteHP <= 0 then
       target.substituteHP = nil
@@ -5057,7 +5076,7 @@ function BattleState:safariAction(choice)
       if caught then
         -- ItemUseBallText05: text_far, sound_caught_mon, text_promptbutton --
         -- the fanfare follows the caught text and holds the prompt
-        self:sayNextWaitSfx(Strings("All right!\n%s was\ncaught!", self.enemy.name),
+        self:sayNextWaitSfx(self:caughtText(),
           function() return require("src.core.Sound").play(self.data, "Caught_Mon") end)
         -- same ItemUseBall .captured flow as a regular ball
         self:act(function() self:storeCaughtMon() end)
@@ -5233,6 +5252,12 @@ function BattleState:itemUsed(messages, opts)
   self:act(function() self:endOfTurn() end)
 end
 
+-- data/text/text_6.asm:29-35
+function BattleState:caughtText()
+  return self:romText("_ItemUseBallText05", "All right!\n%s was\vcaught!",
+    self.enemy.name)
+end
+
 -- Wobble messages by shake count (ItemUseBallText01..04)
 function BattleState:ballMissMessage(shakes)
   local t = self.data.text
@@ -5375,6 +5400,8 @@ function BattleState:storeCaughtMon()
     self:uiNext(function()
       return self:buildScreen("DexEntryMenu", species)
     end)
+    -- engine/menus/pokedex.asm:581-582
+    self:actNext(function() self.fieldCleared = true end)
   end
   local function askCaughtNickname()
     self:offerNickname(self.enemy.mon, self.enemy.name)
@@ -5534,7 +5561,7 @@ function BattleState:throwBall(ball)
       -- ItemUseBallText05 carries sound_caught_mon (item_effects.asm:
       -- 608-614): text_far, sound_caught_mon, text_promptbutton -- the
       -- fanfare follows the caught message and holds the prompt
-      self:sayNextWaitSfx(Strings("All right!\n%s was\ncaught!", self.enemy.name),
+      self:sayNextWaitSfx(self:caughtText(),
         function() return require("src.core.Sound").play(self.data, "Caught_Mon") end)
       self:act(function() self:storeCaughtMon() end)
     else
@@ -5876,7 +5903,7 @@ end
 function BattleState:faintPicKind(battler)
   local pf = self.picFx and self.picFx[battler]
   if pf and pf.minimized then return "blob" end
-  if battler.substituteHP then return "doll" end
+  if battler.substituteHP and not battler.substitutePending then return "doll" end
   return "pic"
 end
 
@@ -5890,7 +5917,8 @@ end
 function BattleState:drawBattlerPic(battler, x, y, scale, shakeX, shakeY)
   local img = self:picImage(battler.sprite)
   shakeX, shakeY = shakeX or 0, shakeY or 0
-  if battler.substituteHP and not self:fxFaintActive(battler)
+  if battler.substituteHP and not battler.substitutePending
+     and not self:fxFaintActive(battler)
      and not battler.fainted then
     self:drawSubstituteDoll(battler, shakeX, shakeY)
     return
@@ -6254,6 +6282,8 @@ end
 
 -- the OAM anim layer (subanimation sprites / the resting caught ball)
 function BattleState:drawAnimLayer(colorized)
+  -- engine/items/item_effects.asm:543
+  if self.fieldCleared then return end
   local colorFn
   if colorized then
     colorFn = function(s, px, py) return self:animSpriteColors(s, px, py) end
@@ -6349,6 +6379,8 @@ end
 -- composites each side into its own region of a taller battlefield, where
 -- neither the other side's pixels nor the classic menu rows apply.
 function BattleState:drawPicsLayer(slide, sx, sy, onlySide, skipMenuClip)
+  -- engine/menus/pokedex.asm:581-582
+  if self.fieldCleared then return end
   -- The move-select boxes are BG tiles on the GB, so they REPLACE the
   -- player pic's rows: the TYPE/PP box at (0,8) (PrintMenuItem) wipes
   -- pic rows 8+, and Mimic's copy menu at (0,7) (MoveSelectionMenu
@@ -6465,6 +6497,8 @@ end
 -- the BG-tile UI: HUDs, pokeball rows, safari ball count.  Grayscale;
 -- the zone pass colors it in colorized mode.
 function BattleState:drawHUDs(slide)
+  -- engine/menus/pokedex.asm:581-582
+  if self.fieldCleared then return end
   -- the HUD clears with the send-out text (ClearScreenArea,
   -- core.asm:1414-1417) and DrawEnemyHUDAndHPBar (1435) only redraws
   -- it after the grow-in + cry

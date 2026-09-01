@@ -33,14 +33,27 @@ local function mkseq(vals)
 end
 
 -- (1) TRANSFORM: user.sprite morphs into the target species pic AND the
--- target's stat stages are copied (not cleared).  transform.asm:31-53
+-- target's stat stages are copied (not cleared).  transform.asm:37-45
 -- (AnimationTransformMon) + :57-132 (copies wEnemyMonStatMods).
+local function seenRows(tb)
+  local seen = {}
+  for _, item in ipairs(tb.queue) do seen[item] = true end
+  return seen
+end
+local function runNewFns(tb, seen)
+  for _, item in ipairs(tb.queue) do
+    if item.fn and not seen[item] then item.fn() end
+  end
+end
 do
   local tb = freshBattle()
+  local seen = seenRows(tb)
   local preSprite = tb.player.sprite
   tb.enemy.stages.attack = 2
   tb.enemy.stages.speed = -1
   MoveEffects.primary.TRANSFORM_EFFECT(tb, tb.player, tb.enemy)
+  eq(tb.player.sprite, preSprite, "transform does not swap the pic eagerly")
+  runNewFns(tb, seen)
   check(tb.player.sprite ~= preSprite, "transform swaps the user's sprite")
   eq(tb.player.sprite.path, Data.pokemon.PIDGEY.spriteBack,
      "player-side transform uses the target species BACK pic")
@@ -51,7 +64,9 @@ do
   eq(tb.player.stages.attack, 2, "transform stages are a deep copy")
   -- enemy-side transform uses the FRONT pic
   local tb2 = freshBattle()
+  local seen2 = seenRows(tb2)
   MoveEffects.primary.TRANSFORM_EFFECT(tb2, tb2.enemy, tb2.player)
+  runNewFns(tb2, seen2)
   eq(tb2.enemy.sprite.path, Data.pokemon.BULBASAUR.spriteFront,
      "enemy-side transform uses the target species FRONT pic")
 end
@@ -372,9 +387,13 @@ do
   local finished = false
   demo.onFinish = function() finished = true end
   local origStart = demo.startMessage
+  local caughtCont = false
   demo.startMessage = function(self, item)
     table.insert(seen, item.text)
     origStart(self, item)
+    if (item.text or ""):find("caught!", 1, true) then
+      caughtCont = self.lines[#self.lines].cont == true
+    end
   end
   stack:push(demo)
   demo:enter()
@@ -446,7 +465,9 @@ do
     return false
   end
   check(sawText("OLD MAN used\nPOKé BALL!"), "the throw is credited to OLD MAN")
-  check(sawText("All right!\nWEEDLE was\ncaught!"), "the ball always catches (_ItemUseBallText05)")
+  check(sawText("All right!\nWEEDLE was\vcaught!"), "the ball always catches (_ItemUseBallText05)")
+  -- data/text/text_6.asm:29-35
+  check(caughtCont, "the 'caught!' line holds on CONT (ManualTextScroll)")
   eq(demo.enemy.mon.hp, enemyHP, "the old man never attacks (Weedle at full HP)")
   eq(#fg.save.party, 1, "the caught Weedle is NOT added to the party")
   check(not (fg.save.pokedex and fg.save.pokedex.owned and fg.save.pokedex.owned.WEEDLE),
