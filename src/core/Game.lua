@@ -21,6 +21,12 @@ local function renderVisible(stack, state)
   return state and (not stack.renderVisible or stack:renderVisible(state))
 end
 
+-- Vanilla defaults for ModRuntime.call, hoisted to module level: called from
+-- the 60Hz logic step / per-frame speed resolution, an inline closure here
+-- allocated a fresh function every tick for no behavioral gain.
+local function noop() end
+local function resolveLogicSpeedVanilla(g) return g:_resolveLogicSpeed() end
+
 -- dev-mode gate for the F5/backtick hotkeys; false keeps every src/dev
 -- module unloaded, so a player boot never touches a byte of dev code
 local devMode = os.getenv("POKEPORT_DEV") == "1" or _G.POKEPORT_DEV_MODE == true
@@ -304,7 +310,7 @@ function Game:step(dt)
   -- the same fixed-step boundary as a physical controller.  Run them before
   -- Input:step promotes queued edges so a button chosen here is visible to
   -- this logic tick, not one tick later.  With no wrapper this is a no-op.
-  ModRuntime.call("input.step", function() end, self, dt)
+  ModRuntime.call("input.step", noop, self, dt)
   self.input:step()
   -- A+B+SELECT+START held for 16 steps: SoftReset (home/init.asm) stops the
   -- audio, whites the palettes out and falls through into Init, i.e. the
@@ -390,7 +396,7 @@ function Game:logicSpeed()
   -- returns a bad value, so an unclamped result would flow straight into
   -- the FixedStep accumulator math below and freeze or destabilize logic.
   return GameSpeed.clamp(ModRuntime.call("core.logic_speed",
-    function(g) return g:_resolveLogicSpeed() end, self))
+    resolveLogicSpeedVanilla, self))
 end
 
 function Game:update(dt)
@@ -420,12 +426,15 @@ function Game:update(dt)
   pcall(function() require("src.core.DiscordPresence").update(dt) end)
   self:updateSync(dt)
   -- Steady-state memory backstop: advance the incremental collector one
-  -- small step every rendered frame.  The heavy GPU objects are now freed
-  -- explicitly (map eviction, battle exit, canvas/renderer swaps), so this
-  -- only has to keep ordinary Lua-heap garbage (per-frame tables/closures)
-  -- from drifting upward over a long session, and to spread collection out
-  -- so the default lazy schedule never batches it into a visible pause.
-  if collectgarbage then collectgarbage("step", 1) end
+  -- small step every few rendered frames.  The heavy GPU objects are now
+  -- freed explicitly (map eviction, battle exit, canvas/renderer swaps), so
+  -- this only has to keep ordinary Lua-heap garbage (per-frame tables) from
+  -- drifting upward over a long session, and to spread collection out so the
+  -- default lazy schedule never batches it into a visible pause.  Every 4th
+  -- frame (not every frame) so the stepping itself does not compete with
+  -- the frame budget on weak single-core handhelds.
+  self.gcStepFrame = (self.gcStepFrame or 0) + 1
+  if collectgarbage and self.gcStepFrame % 4 == 0 then collectgarbage("step", 1) end
 end
 
 -- render.zones' identity default: unhooked, the zone list reaches the blit
@@ -1276,14 +1285,25 @@ function Game:updateSync(dt)
   local eng = self:syncEngine()
   if not eng then return end
   if not (eng.state.enabled and eng:linked()) and not eng:busy() then return end
+  local wasBusy = eng:busy()
   pcall(eng.update, eng, dt)
+  if wasBusy and not eng:busy() then self:adoptPlaythroughId() end
+end
+
+function Game:adoptPlaythroughId()
+  local save = self.save
+  local meta = type(save) == "table" and save.meta
+  if type(meta) ~= "table" or meta.savedAt == nil then return end
+  if type(meta.playthroughId) == "string" and meta.playthroughId ~= "" then return end
+  local id = SaveData.selectedPlaythroughId(save)
+  if type(id) == "string" and id ~= "" then meta.playthroughId = id end
 end
 
 -- Persist options.lua only (Options menu / hotkeys 2-5).  Keeps settings
 -- across New Game without touching the progress save.
 function Game:writeOptions()
   if not (self.save and self.save.options) then return end
-  SaveData.saveOptions(self.save.options)
+  SaveData.saveLiveOptions(self.save)
 end
 
 -- Push the live options table into audio + display subsystems.
@@ -1329,11 +1349,7 @@ function Game:applyOptions(opts)
   Zoom.allowSurvey = caps.survey
   if not caps.survey and Zoom.offset < 0 then Zoom.offset = 0 end
   if caps.fpsMax then
-    local FrameCap = require("src.core.FrameCap")
-    if FrameCap.current == FrameCap.DISPLAY
-       or FrameCap.current > caps.fpsMax then
-      FrameCap.apply(caps.fpsMax)
-    end
+    require("src.core.FrameCap").clampToPerformance(caps.fpsMax)
   end
   Input:applyBindings(opts.bindings)
   TouchControls:applyOptions(opts)
@@ -1412,12 +1428,20 @@ function Game:restoreCheckpointSave(loaded)
   self.save = loaded
   self:adoptSave(loaded)
   while self.stack:top() do self.stack:pop() end
-  -- freshBoot unconditionally: Checkpoint.resume (src/core/Checkpoint.lua)
-  -- is this method's only caller, and it is itself gated to the title
-  -- session (isTitleSession).
+  -- setMap zeroes poisonSteps on every non-seamless map entry, mirroring
+  -- ClearVariablesOnEnterMap.  Re-entering the map is how a restore installs
+  -- the world, but it is not a map entry from the player's point of view, and
+  -- Checkpoint.restore verifies the applied state against the checkpoint --
+  -- so the discarded counter failed the comparison and rolled the whole
+  -- restore back three steps out of four (#1971).
+  local poisonSteps = loaded.poisonSteps
+  -- freshBoot unconditionally: both callers arrive through Checkpoint.apply
+  -- (src/core/Checkpoint.lua), which serves Checkpoint.resume from the title
+  -- session and Checkpoint.restore from a settled runtime.
   self.stack:push(self.overworld, loaded.player.map,
                   loaded.player.x, loaded.player.y, loaded.player.facing,
                   { via = "checkpoint", checkpoint = true, freshBoot = true })
+  self.save.poisonSteps = poisonSteps
 end
 
 -- Install a reconstructed battle without calling BattleState:enter(), whose

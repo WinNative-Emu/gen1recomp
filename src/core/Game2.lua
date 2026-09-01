@@ -1244,6 +1244,12 @@ function Game2:inFillBoot()
   return self.phase == "boot" and self.stack:top() ~= nil
 end
 
+function Game2:logicSpeed()
+  return math.max(1,
+    tonumber(self.speedOverride) or tonumber(self.options and self.options.speed)
+    or 1)
+end
+
 function Game2:update(dt)
   -- _UpdateSound is a VBlank job, so it runs at 60Hz off real time whatever the
   -- logic multiplier is (audio/engine.asm:84, home/vblank.asm:141-143).
@@ -1266,9 +1272,7 @@ function Game2:update(dt)
   -- tempo at every multiplier (#1990/#1991/#1997).  speedOverride is the
   -- driver/CLI hook and wins over the saved option.
   -- pokegold engine/menus/intro_menu.asm:848 IntroSequence: boot cinema runs on the same clock as the overworld
-  local speed = math.max(1,
-    tonumber(self.speedOverride) or tonumber(self.options and self.options.speed)
-    or 1)
+  local speed = self:logicSpeed()
   if self.phase == "boot" then
     FixedStep.maxAccum = FixedStep.catchupLimit(speed)
     FixedStep:update(dt, speed)
@@ -2202,11 +2206,7 @@ function Game2:applyOptions()
   Zoom.allowSurvey = caps.survey
   if not caps.survey and Zoom.offset < 0 then Zoom.offset = 0 end
   if caps.fpsMax then
-    local FrameCap = require("src.core.FrameCap")
-    if FrameCap.current == FrameCap.DISPLAY
-       or FrameCap.current > caps.fpsMax then
-      FrameCap.apply(caps.fpsMax)
-    end
+    require("src.core.FrameCap").clampToPerformance(caps.fpsMax)
   end
   if shaderfxCleared and self.save then
     -- applyOptions returns true when it had to clear an unresolved preset.
