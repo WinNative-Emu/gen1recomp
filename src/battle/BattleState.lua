@@ -1375,7 +1375,10 @@ function BattleState:updateQueue()
       local Sound = require("src.core.Sound")
       self.waitSoundLeft = Sound.waitFrames and Sound.waitFrames(src) or 180
     end
-    self.waitSoundLeft = self.waitSoundLeft - 1
+    local game = self.game
+    local speed = game and game.logicSpeed and game:logicSpeed() or 1
+    if type(speed) ~= "number" or speed ~= speed or speed < 1 then speed = 1 end
+    self.waitSoundLeft = self.waitSoundLeft - 1 / speed
     local playing = src and src.isPlaying and src:isPlaying()
     if playing and self.waitSoundLeft > 0 then return true end
     if playing then pcall(src.stop, src) end
@@ -2609,11 +2612,11 @@ function BattleState:openOldManBag()
     -- inventory) differs by version: pokered's OldManItemList has 50
     -- POKé BALLs; pokeyellow's SimulatedInputBattleItemList, shared by
     -- the Viridian tutorial and Oak's catch, has one.
-    local qty = require("src.core.GameVersion").isYellow() and "x1" or "x50"
+    local qty = require("src.core.GameVersion").isYellow() and 1 or 50
     -- the tutorial bag rides DisplayBagMenu's LIST_MENU_BOX over the battle
     -- screen (engine/battle/core.asm:2210)
     list = ListMenu.new(game, "ITEMS", {
-      { value = "POKE_BALL", label = Strings("POKé BALL"), right = qty },
+      { value = "POKE_BALL", label = Strings("POKé BALL"), count = qty },
     }, {
       itemBox = true,
       script = function(l)
@@ -2751,13 +2754,21 @@ function BattleState:markParticipant()
   end
 end
 
--- the whole choke point is hooked (battle.enemy_action), so a mod can
 -- rewrite any trainer's choice without registering brains
+-- engine/battle/core.asm:339 (SelectEnemyMove)
 function BattleState:enemyAction()
+  self.enemyActionForced = nil
   if Runtime.wantsHook("battle.enemy_action") then
-    return Runtime.call("battle.enemy_action", function(battle)
-      return battle:vanillaEnemyAction()
+    local vanilla, sawVanilla = nil, false
+    local hooked = Runtime.call("battle.enemy_action", function(battle)
+      vanilla = battle:vanillaEnemyAction()
+      sawVanilla = true
+      return vanilla
     end, self)
+    if not sawVanilla or hooked ~= vanilla then
+      self.enemyActionForced = true
+    end
+    return hooked
   end
   return self:vanillaEnemyAction()
 end
@@ -2772,10 +2783,13 @@ function BattleState:vanillaEnemyAction()
     local brain = self.trainer.brain or (class and class.brain)
     if brain then return brain(self) end
   end
-  -- class AI may spend the turn on an item or a switch
-  local classAct = TrainerAI.classAction(self)
-  if classAct then return classAct end
   return TrainerAI.chooseMove(self.enemy, self.rng, self)
+end
+
+-- engine/battle/core.asm:416,454 (callfar TrainerAI)
+-- engine/battle/trainer_ai.asm:290-320, 453-456
+function BattleState:trainerAIAction()
+  return TrainerAI.classAction(self)
 end
 
 local function orderMove(action, data)
@@ -3902,6 +3916,13 @@ function BattleState:executeAction(user, target, action)
   -- faint cases are already covered by the HP guard below (#441)
   if self.result then return end
   if user.mon.hp <= 0 or target.mon.hp <= 0 then return end
+  -- engine/battle/core.asm:416,454
+  -- engine/battle/trainer_ai.asm:453-456
+  if user == self.enemy and not user.isPlayer then
+    local forced = self.enemyActionForced
+    self.enemyActionForced = nil
+    if not forced then action = self:trainerAIAction() or action end
+  end
   if not action then return end
 
   local function run()
@@ -6779,8 +6800,12 @@ function BattleState:drawTextArea()
       elseif def then
         Font.draw(Strings("TYPE/"), 8, 72)
         -- the type record's display name (a mod type shows its name, and
-        -- PSYCHIC_TYPE prints PSYCHIC like the original)
-        Font.draw(def.type and TypeChart.displayName(def.type) or "", 16, 80)
+        -- PSYCHIC_TYPE prints PSYCHIC like the original). self.data is
+        -- game.data by reference (set above TypeChart.load(game.data)), so
+        -- this is a no-op against TypeChart's own cache today -- kept for
+        -- the same call convention as the pre-battle screens (SummaryMenu,
+        -- HallOfFame) that genuinely need the explicit data.
+        Font.draw(def.type and TypeChart.displayName(def.type, self.data) or "", 16, 80)
         local maxPP = def.pp + (sel.ppUps or 0) * math.floor(def.pp / 5)
         Font.draw(("%2d/%2d"):format(sel.pp, maxPP), 40, 88)
       end

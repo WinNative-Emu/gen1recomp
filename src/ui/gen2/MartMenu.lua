@@ -68,6 +68,7 @@ local CommonText = require("src.core.gen2.CommonText")
 local Save = require("src.core.gen2.Save")
 local Screens = require("src.ui.Screens")
 local Sound = require("src.core.Sound")
+local Strings = require("src.core.Strings")
 local Typer = require("src.ui.gen2.Typer")
 
 -- PlayTransactionSound (engine/items/mart.asm): `call WaitSFX` then
@@ -528,7 +529,9 @@ function MartMenu:updateConfirm(input)
 end
 
 -- ---------------------------------------------------------------- top menu
-local TOP_ITEMS = { "BUY", "SELL", "QUIT" }
+local TOP_ITEMS = {
+  Strings.source("BUY"), Strings.source("SELL"), Strings.source("QUIT"),
+}
 
 -- .TopMenu copies MenuHeader_BuySell fresh every pass, and its `db 1 ; default
 -- option` means the cursor is back on BUY each time the loop returns here.
@@ -885,7 +888,7 @@ function MartMenu:drawTopMenu()
   for i, label in ipairs(TOP_ITEMS) do
     local ty = TOP_LABEL_Y + (i - 1) * TOP_SPACING
     if i == self.topIndex then Chrome.cursor(TOP_LABEL_X - 1, ty) end
-    Chrome.print(label, TOP_LABEL_X, ty)
+    Chrome.print(Strings(label), TOP_LABEL_X, ty)
   end
 end
 
@@ -931,7 +934,7 @@ function MartMenu:drawBuyList()
       printPriceOpaque(entry.price, ty + 1)
     elseif i == self:total() then
       if i == self.index then Chrome.cursor(LIST_X - 1, ty) end
-      Chrome.print("CANCEL", LIST_X, ty)
+      Chrome.print(Strings("CANCEL"), LIST_X, ty)
     end
   end
   -- SCROLLINGMENU_DISPLAY_ARROWS: the ▲ only appears once the list has been
@@ -968,9 +971,16 @@ end
 
 function MartMenu:drawYesNo(choice)
   Chrome.box(YESNO_X, YESNO_Y, YESNO_W, YESNO_H)
-  Chrome.print("YES", YESNO_X + 2, YESNO_Y + 1)
-  Chrome.print("NO", YESNO_X + 2, YESNO_Y + 3)
+  Chrome.print(Strings("YES"), YESNO_X + 2, YESNO_Y + 1)
+  Chrome.print(Strings("NO"), YESNO_X + 2, YESNO_Y + 3)
   Chrome.cursor(YESNO_X + 1, YESNO_Y + (choice == 1 and 1 or 3))
+end
+
+-- ../pokecrystal/engine/items/mart.asm:517 MartConfirmPurchase
+function MartMenu:yesNoVisible()
+  local confirm = self.confirm
+  if not confirm or confirm.page < #confirm.pages then return false end
+  return not Typer.typing(self)
 end
 
 -- Whatever the overlays sit on top of.
@@ -1012,12 +1022,13 @@ function MartMenu:drawPanel()
     self:drawTextBox(Typer.text(self, self.message.pages[self.message.page]))
     -- LoadBlinkingCursor puts the ▼ at hlcoord 18, 17 while a `para` waits.
     if self.message.page < #self.message.pages
-      and (self.typer == nil or self.typer:done()) then
+      and (self.typer == nil or self.typer:done())
+      and Typer.arrowOn(self) then
       Chrome.print(DOWN_ARROW, 18, 17)
     end
   elseif self.confirm then
     self:drawTextBox(Typer.text(self, self.confirm.pages[self.confirm.page]))
-    if self.confirm.page >= #self.confirm.pages then
+    if self:yesNoVisible() then
       self:drawYesNo(self.confirm.choice)
     end
   end

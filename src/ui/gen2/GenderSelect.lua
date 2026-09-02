@@ -2,6 +2,7 @@
 -- PlayerProfileSetup runs before OakSpeech (engine/menus/intro_menu.asm:61-83).
 
 local Chrome = require("src.ui.gen2.Chrome")
+local CommonText = require("src.core.gen2.CommonText")
 local Music = require("src.core.Music")
 local RomText = require("src.core.RomText")
 local Sound = require("src.core.Sound")
@@ -14,8 +15,8 @@ GenderSelect.isOpaque = true
 -- .MenuData's two items (../pokecrystal/engine/menus/init_gender.asm:50-53),
 -- and the wPlayerGender byte each writes (`ld a, [wMenuCursorY] / dec a`).
 GenderSelect.OPTIONS = {
-  { label = "Boy", gender = "male" },
-  { label = "Girl", gender = "female" },
+  { label = Strings.source("Boy"), gender = "male" },
+  { label = Strings.source("Girl"), gender = "female" },
 }
 
 -- menu_coords 6, 4, 12, 9 -- inclusive, so 7 columns by 6 rows.
@@ -56,8 +57,8 @@ function GenderSelect.new(game, opts)
   -- `db 1 ; default option`: the cursor opens on Boy.
   self.cursor = 1
   self.exit = nil
-  self.text = RomText(self.data, "_AreYouABoyOrAreYouAGirlText",
-    FALLBACK)
+  self.text = CommonText.plain(RomText(self.data,
+    "_AreYouABoyOrAreYouAGirlText", FALLBACK))
   return self
 end
 
@@ -114,7 +115,7 @@ function GenderSelect:drawPanel()
   Chrome.box(BOX_X, BOX_Y, BOX_W, BOX_H)
   for i, option in ipairs(GenderSelect.OPTIONS) do
     local row = TEXT_Y + (i - 1) * ROW_STEP
-    Chrome.print(option.label, TEXT_X, row)
+    Chrome.print(Strings(option.label), TEXT_X, row)
     if i == self.cursor then Chrome.cursor(CURSOR_X, row) end
   end
 end

@@ -24,7 +24,7 @@ local function buildItems(game)
     table.insert(items, {
       value = id,
       label = def and def.name or id,
-      right = (not unsellable) and ("x" .. game.save.inventory[id]) or nil,
+      count = (not unsellable) and game.save.inventory[id] or nil,
     })
   end
   -- the $ff terminator's row: CANCEL is selectable and exits like B
@@ -346,7 +346,7 @@ local function vanillaUseOn(game, battle, id, target, list, moveIndex, picker)
     for i, it in ipairs(list.items) do
       if it.value == id then
         local left = game.save.inventory[id]
-        if left then it.right = "x" .. left else table.remove(list.items, i) end
+        if left then it.count = left else table.remove(list.items, i) end
         break
       end
     end
@@ -506,7 +506,7 @@ local function pickTargetAndUse(game, battle, id, list)
           right = ("%d"):format(mv.pp),
         })
       end
-      game.stack:push(ListMenu.new(game, "Which move?", rows, {
+      game.stack:push(ListMenu.new(game, Strings.source("Which move?"), rows, {
         onChoose = function(row, l)
           l:close()
           useOn(game, battle, id, mon, list, row.value)
@@ -563,7 +563,7 @@ function BagMenu.new(game, opts)
   opts = opts or {}
   local battle = opts.battle
   local list
-  list = ListMenu.new(game, "ITEMS", buildItems(game), {
+  list = ListMenu.new(game, Strings.source("ITEMS"), buildItems(game), {
     kind = "bag",
     -- StartMenu_Item zeroes wPrintItemPrices and draws no money box: the
     -- LIST_MENU_BOX floats over the map (engine/menus/start_sub_menus.asm)

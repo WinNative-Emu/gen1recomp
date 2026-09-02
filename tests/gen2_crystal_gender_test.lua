@@ -23,6 +23,7 @@ local Pokegear = require("src.ui.gen2.Pokegear")
 local Save = require("src.core.gen2.Save")
 local Screens = require("src.ui.Screens")
 local TrainerCard = require("src.ui.gen2.TrainerCard")
+local Strings = require("src.core.Strings")
 
 local priorVersion = GameVersion.get()
 
@@ -165,6 +166,51 @@ eq(save.player.gender, "female", "A on Girl writes PLAYERGENDER_FEMALE")
 
 check(type(screen.text) == "string" and screen.text:find("boy"),
   "the prompt is _AreYouABoyOrAreYouAGirlText")
+
+-- The ROM prompt remains the source of truth while the two finite menu rows
+-- go through the translation catalog.
+do
+  local Chrome = require("src.ui.gen2.Chrome")
+  local priorPrint = Chrome.print
+  local printed = {}
+  Chrome.print = function(text) printed[#printed + 1] = text end
+  Strings.load({ strings = { Boy = "Garçon", Girl = "Fille" } })
+  local translated = GenderSelect.new({ data = { text = {
+    _AreYouABoyOrAreYouAGirlText = "ROM prompt stays intact",
+  } } })
+  eq(translated.text, "ROM prompt stays intact",
+    "the extracted RomText prompt is not replaced by a catalog fallback")
+  translated.text = ""
+  translated:drawPanel()
+  check(table.concat(printed, "|"):find("Garçon", 1, true) ~= nil,
+    "Boy is translated when drawn")
+  check(table.concat(printed, "|"):find("Fille", 1, true) ~= nil,
+    "Girl is translated when drawn")
+  Strings.load({})
+  Chrome.print = priorPrint
+end
+
+-- home/text.asm:566
+do
+  local Chrome = require("src.ui.gen2.Chrome")
+  local priorPrint, priorWrapped = Chrome.print, Chrome.printWrapped
+  local printed = {}
+  Chrome.print = function(text) printed[#printed + 1] = text end
+  Chrome.printWrapped = function(text) printed[#printed + 1] = text end
+  local done = GenderSelect.new({ data = { text = {
+    _AreYouABoyOrAreYouAGirlText = "Are you a boy?\nOr are you a girl?{DONE}",
+  } } })
+  eq(done.text, "Are you a boy?\nOr are you a girl?",
+    "the {DONE} terminator is stripped from the prompt")
+  done:drawPanel()
+  check(not table.concat(printed, "|"):find("DONE", 1, true),
+    "and never reaches the tile grid")
+  local prompt = GenderSelect.new({ data = { text = {
+    _AreYouABoyOrAreYouAGirlText = "Are you a boy?{PROMPT}",
+  } } })
+  eq(prompt.text, "Are you a boy?", "nor is {PROMPT}")
+  Chrome.print, Chrome.printWrapped = priorPrint, priorWrapped
+end
 
 -- ------------------------------------------------- the beat in Oak's speech
 

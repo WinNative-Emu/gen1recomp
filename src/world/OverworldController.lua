@@ -3289,8 +3289,10 @@ function OverworldState:openPC(onDone)
   -- PC session (#695); the sub-PC screens (BoxMenu, PlayerPC) already
   -- use keepOpen for their own rows, matching the original ROM's flow
   -- where the main menu stays underneath.
+  local boxPcLabel = metBill and Strings.source("BILL'S PC")
+                              or Strings.source("SOMEONE'S PC")
   table.insert(items, {
-    label = metBill and "BILL'S PC" or Strings("SOMEONE'S PC"),
+    label = boxPcLabel,
     keepOpen = true,
     onSelect = function()
       require("src.core.Sound").play(Game.data, "Enter_PC")
@@ -3308,8 +3310,10 @@ function OverworldState:openPC(onDone)
   })
 
   -- the player's item storage is always available
+  local playerName = Game.save.player.name or "RED"
+  local playerPcLabel = Strings.source("%s's PC"):format(playerName)
   table.insert(items, {
-    label = (Game.save.player.name or "RED") .. "'s PC",
+    label = playerPcLabel,
     keepOpen = true,
     onSelect = function()
       -- pc.asm .playersPC plays SFX_ENTER_PC then prints AccessedMyPCText
@@ -3326,7 +3330,7 @@ function OverworldState:openPC(onDone)
   -- Prof. Oak's dex rating only appears once you have the Pokédex
   if flags.EVENT_GOT_POKEDEX then
     table.insert(items, {
-      label = Strings("PROF.OAK's PC"),
+      label = Strings.source("PROF.OAK's PC"),
       keepOpen = true,
       onSelect = function()
         -- pc.asm OaksPC plays SFX_ENTER_PC before the farcall (#960)
@@ -3338,7 +3342,7 @@ function OverworldState:openPC(onDone)
     -- engine/pokemon/bills_pc.asm:48-60 PKMN LEAGUE row (#1566)
     if #(Game.save.hallOfFame or {}) > 0 then
       table.insert(items, {
-        label = Strings("<PK><MN>LEAGUE"),
+        label = Strings.source("<PK><MN>LEAGUE"),
         keepOpen = true,
         onSelect = function()
           -- pc.asm PKMNLeague plays SFX_ENTER_PC, then PKMNLeaguePC prints
@@ -3360,6 +3364,22 @@ function OverworldState:openPC(onDone)
   else
     Logger.error("ui.pc.items returned %s; keeping the vanilla items",
                  type(hooked))
+  end
+
+  -- Hooks identify the vanilla rows by their English source labels.  Delay
+  -- localization until after ui.pc.items has inspected/reordered/replaced
+  -- them, then translate any source labels it chose to retain.
+  local translatedLabels = {
+    [boxPcLabel] = function()
+      return metBill and Strings("BILL'S PC") or Strings("SOMEONE'S PC")
+    end,
+    [playerPcLabel] = function() return Strings("%s's PC", playerName) end,
+    ["PROF.OAK's PC"] = function() return Strings("PROF.OAK's PC") end,
+    ["<PK><MN>LEAGUE"] = function() return Strings("<PK><MN>LEAGUE") end,
+  }
+  for _, item in ipairs(items) do
+    local translate = translatedLabels[item.label]
+    if translate then item.label = translate() end
   end
 
   local logOff = function()
@@ -3545,7 +3565,8 @@ function OverworldState:nurseHeal(onDone, npc)
         end
       end))
     end)
-  end, choiceLabels = { "HEAL", "CANCEL" }, choiceBox = Theme.healCancelBox }))
+  end, choiceLabels = { Strings("HEAL"), Strings("CANCEL") },
+    choiceBox = Theme.healCancelBox }))
 end
 
 -- pokecenter.asm bows the nurse between the two PrintText calls (#995)
@@ -4203,9 +4224,11 @@ function OverworldState:applyFieldPoison()
         for _, mon in ipairs(save.party) do Pokemon.heal(mon) end
         save.money = math.floor(save.money
           / (FieldDefaults.world(Game.data, "blackoutMoneyDivisor") or 2))
+        local lm, lx, ly = self:escapeWarpTarget()
+        local landing = { map = lm, x = lx, y = ly }
         Runtime.emit("world.blacked_out",
-          { save = save, healTarget = self:healPoint() })
-        self:warpToHealPoint()
+          { save = save, healTarget = self:healPoint(), landing = landing })
+        self:warpToHealPoint(nil, { landing = landing })
       end))
     end
   end
@@ -4785,9 +4808,11 @@ function OverworldState:afterBattle(result, battle)
     end
     Game.save.money = math.floor(Game.save.money
       / (FieldDefaults.world(Game.data, "blackoutMoneyDivisor") or 2))
+    local lm, lx, ly = self:escapeWarpTarget()
+    local landing = { map = lm, x = lx, y = ly }
     Runtime.emit("world.blacked_out",
-      { save = Game.save, healTarget = self:healPoint() })
-    self:warpToHealPoint()
+      { save = Game.save, healTarget = self:healPoint(), landing = landing })
+    self:warpToHealPoint(nil, { landing = landing })
   else
     -- EndTrainerBattle sets BIT_CUR_MAP_LOADED_1 (home/trainers.asm), which
     -- re-runs the floor's door callback: beating the last Rocket Hideout guard
@@ -4917,71 +4942,43 @@ function OverworldState:rememberOutdoor(id, x, y)
   Game.save.lastOutdoor = self.lastOutdoor
 end
 
--- Warp to the last heal point (blackout, ESCAPE ROPE, DIG/TELEPORT).
--- The heal point is usually an interior, so LAST_MAP exits are re-pointed
--- at its remembered town door rather than wherever the player left from.
---
--- opts.arrive = "teleport" for Dig/Teleport/Escape Rope (LeaveMapAnim /
--- EnterMapAnim).  Blackouts omit it: pret HandleBlackOut only
--- GBFadeOutToBlack + PrepareForSpecialWarp + SpecialEnterMap, and never
--- sets BIT_FLY_WARP / BIT_DUNGEON_WARP, so EnterMap never runs EnterMapAnim.
-function OverworldState:warpToHealPoint(onDone, opts)
+-- engine/events/black_out.asm:39-43, engine/overworld/special_warps.asm:71-129
+function OverworldState:escapeWarpTarget()
   local heal = self:healPoint()
+  local out = heal.outdoor or { id = heal.map, x = heal.x, y = heal.y }
+  local fw = (Game.data.field.flyWarps or {})[out.id]
+  local outX = fw and fw.x or out.x
+  local outY = fw and fw.y or out.y
+  local outDef = Game.data.maps[out.id]
+  if not (outDef and outX and outY
+          and Map.isOutside(outDef,
+                FieldDefaults.field(Game.data, "outsideTilesets"))) then
+    local zeroFill = require("src.core.SaveData")
+                     .defaultHeal(Game.data.field.boot)
+    return zeroFill.map, zeroFill.x, zeroFill.y
+  end
+  return out.id, outX, outY
+end
+
+-- Warp to the last heal point (blackout, ESCAPE ROPE, DIG/TELEPORT).
+-- engine/events/black_out.asm:42, home/overworld.asm:23-30 (#96)
+function OverworldState:warpToHealPoint(onDone, opts)
   self.player.surfing = false
   self:syncSurfingPikachu()
   -- HandleFlyWarpOrDungeonWarp + DisplayPlayerBlackedOutText both clear
   -- BIT_ALWAYS_ON_BIKE (home/overworld.asm / home/text_script.asm)
   Game.save.forcedBike = nil
-  local map, x, y = heal.map, heal.x, heal.y
-  local teleport = opts and opts.arrive == "teleport"
-  if teleport then
-    self.arriveWarp = "teleport"
-    -- Dig/Teleport/Escape Rope land OUTSIDE at the last Pokemon Center TOWN
-    -- door, like Fly (#196) -- NOT the interior heal cell a blackout returns
-    -- to.  pret routes escape-warp and blackout both through wLastBlackoutMap
-    -- (LoadSpecialWarpData .usedFlyWarp, engine/overworld/special_warps.asm),
-    -- and that map is ALWAYS an outdoor one: SetLastBlackoutMap copies
-    -- wLastMap (engine/events/set_blackout_map.asm) and WarpFound2 only
-    -- writes wLastMap on outside maps (home/overworld.asm), with the landing
-    -- cell read from FlyWarpDataPtr.  Prefer the canonical Fly landing
-    -- (field.flyWarps, one tile south of the PC door warp), else the
-    -- remembered outdoor door cell.
-    --
-    -- A heal record naming no outdoor town, or naming a map that is not
-    -- outdoors at all, is never a legal escape-warp destination: a .sav
-    -- import stamps lastHeal from wherever the cartridge was saved
-    -- (SaveConvert mergeDefaults), so ESCAPE ROPE was dropping the player
-    -- into the dungeon that save sat in, whose LAST_MAP exits then still
-    -- pointed at the door they had walked in through (#805).  Vanilla's
-    -- zero-filled wLastBlackoutMap is map 0, so an unusable record falls
-    -- back to the boot heal town exactly as a never-healed game does.
-    local out = heal.outdoor or { id = heal.map, x = heal.x, y = heal.y }
-    local fw = (Game.data.field.flyWarps or {})[out.id]
-    local outX = fw and fw.x or out.x
-    local outY = fw and fw.y or out.y
-    local outDef = Game.data.maps[out.id]
-    if not (outDef and outX and outY
-            and Map.isOutside(outDef,
-                  FieldDefaults.field(Game.data, "outsideTilesets"))) then
-      local zeroFill = require("src.core.SaveData")
-                       .defaultHeal(Game.data.field.boot)
-      out, outX, outY = { id = zeroFill.map }, zeroFill.x, zeroFill.y
-    end
-    map, x, y = out.id, outX, outY
+  if opts and opts.arrive == "teleport" then self.arriveWarp = "teleport" end
+  local landing = opts and opts.landing
+  local map, x, y
+  if landing and landing.map then
+    map, x, y = landing.map, landing.x, landing.y
+  else
+    map, x, y = self:escapeWarpTarget()
   end
   self:startWarpTo(map, x, y, "down", onDone)
-  -- Blackouts land at the interior heal cell, so re-point LAST_MAP exits at
-  -- the remembered town door.  The teleport branch re-points at the town it
-  -- just landed on: PrepareForSpecialWarp (engine/overworld/special_warps.asm)
-  -- writes the special-warp destination straight back into wLastMap for every
-  -- fly/escape warp that is not a dungeon warp, so the next LAST_MAP exit
-  -- resolves against that town instead of the dungeon door the player walked
-  -- in through before using the rope (#805).
-  if teleport then
-    self:rememberOutdoor(map, x, y)
-  elseif heal.outdoor then
-    self:rememberOutdoor(heal.outdoor.id, heal.outdoor.x, heal.outdoor.y)
-  end
+  -- PrepareForSpecialWarp (engine/overworld/special_warps.asm:1-29) writes the
+  self:rememberOutdoor(map, x, y)
 end
 
 -- opts.keepMusic: scripted warps mid-cutscene keep the current song

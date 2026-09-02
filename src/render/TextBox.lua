@@ -28,6 +28,12 @@ local function sfxWaitFrames(src)
   return Sound.waitFrames(src)
 end
 
+local function sfxWaitStep(game)
+  local speed = game and game.logicSpeed and game:logicSpeed() or 1
+  if type(speed) ~= "number" or speed ~= speed or speed < 1 then speed = 1 end
+  return 1 / speed
+end
+
 -- theme-free fallbacks; geometry resolves against Theme.textBox at
 -- construction time, so an unthemed boot stays byte-identical
 local BOX_TX, BOX_TY, BOX_TW, BOX_TH = 0, 12, 20, 6
@@ -388,7 +394,7 @@ end
 
 function TextBox:update(dt)
   local input = self.game.input
-  self.blink = (self.blink + 1) % 60
+  self.blink = (self.blink + 1) % 480
   -- home/text.asm:506
   if self.preSound then
     if not self.preStarted then
@@ -396,7 +402,7 @@ function TextBox:update(dt)
       self.preSrc = self.preSound()
       self.preSrcLeft = sfxWaitFrames(self.preSrc)
     end
-    self.preSrcLeft = (self.preSrcLeft or 0) - 1
+    self.preSrcLeft = (self.preSrcLeft or 0) - sfxWaitStep(self.game)
     local playing = self.preSrc and self.preSrc.isPlaying and self.preSrc:isPlaying()
     if playing and self.preSrcLeft > 0 then return end
     if playing then pcall(self.preSrc.stop, self.preSrc) end
@@ -466,7 +472,7 @@ function TextBox:update(dt)
       if self.auto.tick then self.auto.tick() end
       -- home/delay.asm:14
       if self.autoSrc then
-        self.autoSrcLeft = (self.autoSrcLeft or 0) - 1
+        self.autoSrcLeft = (self.autoSrcLeft or 0) - sfxWaitStep(self.game)
         if self.autoSrc.isPlaying and self.autoSrc:isPlaying() then
           if self.autoSrcLeft > 0 then return end
           pcall(self.autoSrc.stop, self.autoSrc)
@@ -691,12 +697,16 @@ function TextBox:draw()
       pen = pen + Font.advanceOf(code)
     end
   end
-  if self:arrowVisible() and self.blink < 30 then
+  -- pokegold home/joypad.asm:430
+  local arrowOn = self.blink % 60 < 30
+  if gold then arrowOn = self.blink % 32 < 16 end
+  if self:arrowVisible() and arrowOn then
     -- page-advance cursor: glyph $EE by default, the blinking down arrow
     -- the original prints via `ld a, "▼"` (home/text.asm)
+    -- pokegold home/text.asm:549
     drawGlyph(Theme.moreArrow or 0xEE,
               (self.boxTx + self.boxTw - 2) * 8,
-              (self.boxTy + self.boxTh - 1) * 8 - 4)
+              (self.boxTy + self.boxTh - 1) * 8 - (gold and 0 or 4))
   end
   if finishGlyph then finishGlyph() end
   love.graphics.setColor(1, 1, 1, 1)

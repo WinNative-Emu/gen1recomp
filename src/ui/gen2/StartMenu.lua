@@ -19,10 +19,12 @@
 -- hook name and the same (game, items) payload: Gold's POKEGEAR row is simply
 -- one more entry in the list the hook receives.
 
+local BugContest = require("src.core.gen2.BugContest")
 local Chrome = require("src.ui.gen2.Chrome")
 local Logger = require("src.core.Logger")
 local Runtime = require("src.mods.Runtime")
 local Sound = require("src.core.Sound")
+local Strings = require("src.core.Strings")
 
 local StartMenu = {}
 StartMenu.__index = StartMenu
@@ -46,48 +48,48 @@ StartMenu.isOpaque = false
 -- exactly what kept POKéGEAR hanging off the menu box's right edge.
 local ITEMS = {
   {
-    id = "pokedex", label = "POKéDEX", need = "pokedex",
-    desc = { "POKéMON", "database" },
+    id = "pokedex", label = Strings.source("POKéDEX"), need = "pokedex",
+    desc = Strings.source("POKéMON\ndatabase"),
   },
   {
-    id = "pokemon", label = "POKéMON", need = "party",
-    desc = { "Party <PK><MN>", "status" },
+    id = "pokemon", label = Strings.source("POKéMON"), need = "party",
+    desc = Strings.source("Party <PK><MN>\nstatus"),
   },
   {
-    id = "pack", label = "PACK", need = "pack",
-    desc = { "Contains", "items" },
+    id = "pack", label = Strings.source("PACK"), need = "pack",
+    desc = Strings.source("Contains\nitems"),
   },
   {
-    id = "pokegear", label = "<PO><KE>GEAR", need = "pokegear",
-    desc = { "Trainer's", "key device" },
+    id = "pokegear", label = Strings.source("<PO><KE>GEAR"), need = "pokegear",
+    desc = Strings.source("Trainer's\nkey device"),
   },
   {
     -- The player's own name is the label (.StatusString is "<PLAYER>").
     id = "status", label = nil,
-    desc = { "Your own", "status" },
+    desc = Strings.source("Your own\nstatus"),
   },
   {
-    id = "save", label = "SAVE",
-    desc = { "Save your", "progress" },
+    id = "save", label = Strings.source("SAVE"),
+    desc = Strings.source("Save your\nprogress"),
   },
   {
-    id = "option", label = "OPTION",
-    desc = { "Change", "settings" },
+    id = "option", label = Strings.source("OPTION"),
+    desc = Strings.source("Change\nsettings"),
   },
   {
     -- The mod manager's discoverable home, exactly as the Gen 1 start menu
     -- carries it: the row only appears once at least one mod has been
     -- discovered, so a vanilla install's menu is the cart's.
-    id = "mods", label = "MODS", need = "mods",
-    desc = { "Installed", "add-ons" },
+    id = "mods", label = Strings.source("MODS"), need = "mods",
+    desc = Strings.source("Installed\nadd-ons"),
   },
   {
     -- The cart's EXIT just closed the menu (CloseStartMenu).  A window with a
     -- close button already covers that, so -- exactly as the Gen 1 port does
     -- (src/ui/StartMenu.lua) -- this row is QUIT and power-cycles back to the
     -- title after a confirmation that defaults to NO.
-    id = "quit", label = "QUIT",
-    desc = { "Return to", "the title" },
+    id = "quit", label = Strings.source("QUIT"),
+    desc = Strings.source("Return to\nthe title"),
   },
 }
 
@@ -126,6 +128,18 @@ function StartMenu.new(game, opts)
     Logger.error("ui.start_menu.items returned %s; keeping the vanilla items",
                  type(hooked))
   end
+  -- Let hooks inspect the cart's stable source labels. Translate only the
+  -- built-in rows afterwards; mod-supplied labels are content and stay raw.
+  for _, item in ipairs(items) do
+    if item.translateLabel then item.label = Strings(item.label) end
+    if item.translateDesc then
+      local translated = Strings(item.desc)
+      item.desc = {}
+      for line in (translated .. "\n"):gmatch("(.-)\n") do
+        item.desc[#item.desc + 1] = line
+      end
+    end
+  end
   self.items = items
   local options = (self.save and self.save.options) or {}
   self.showDescription = options.menuAccount ~= false
@@ -136,7 +150,8 @@ function StartMenu.new(game, opts)
     -- one more for the cursor column (STATICMENU_CURSOR) and one more for the
     -- top spacing this menu does not opt out of -- so (10,0) becomes (12,2),
     -- and Chrome.List puts the cursor at x - 1 = 11.
-    x = 12, y = 2, spacing = 2,
+    -- pokecrystal engine/menus/start_menu.asm:164
+    x = 12, y = self.contest and 4 or 2, spacing = 2,
     -- Two rows per entry inside an 18-row screen leaves room for eight, which
     -- is exactly the vanilla count.  A mod that adds a row scrolls rather than
     -- drawing off the bottom of the frame; Chrome.List puts the ▼ hint on.
@@ -180,16 +195,34 @@ end
 
 function StartMenu:visibleItems()
   local available = self:availability()
+  local contest = BugContest.isActive(self.save)
+  self.contest = contest
   local playerName = (self.save and self.save.player and self.save.player.name)
     or "GOLD"
   local out = {}
   for _, item in ipairs(ITEMS) do
-    if not item.need or available[item.need] then
-      out[#out + 1] = {
-        label = item.label or playerName,
-        value = item.id,
-        desc = item.desc,
-      }
+    local id = item.id
+    -- pokecrystal engine/menus/start_menu.asm:309
+    local hidden = contest and (id == "pack" or id == "quit")
+    if not hidden and (not item.need or available[item.need]) then
+      if contest and id == "save" then
+        -- pokecrystal engine/menus/start_menu.asm:330
+        out[#out + 1] = {
+          label = Strings.source("QUIT"), value = "quitContest",
+          -- pokecrystal engine/menus/start_menu.asm:231
+          desc = Strings.source("Quit and\nbe judged."),
+          translateLabel = true,
+          translateDesc = true,
+        }
+      else
+        out[#out + 1] = {
+          label = item.label or playerName,
+          value = id,
+          desc = item.desc,
+          translateLabel = item.label ~= nil,
+          translateDesc = item.desc ~= nil,
+        }
+      end
     end
   end
   return out
@@ -226,6 +259,12 @@ function StartMenu:choose(id, index)
     self.confirmChoice = 2
     return
   end
+  if id == "quitContest" then
+    -- pokecrystal engine/menus/start_menu.asm:411
+    self.phase = "confirmContest"
+    self.confirmChoice = 1
+    return
+  end
   if self.onChoose then self.onChoose(id) end
 end
 
@@ -238,6 +277,14 @@ function StartMenu:confirmQuit()
   end
 end
 
+-- pokecrystal engine/events/bug_contest/contest.asm:31
+function StartMenu:confirmQuitContest()
+  self.phase = nil
+  self:close()
+  local world = self.game and self.game.world
+  if world and world.bugContestResults then world:bugContestResults() end
+end
+
 function StartMenu:close()
   StartMenu.lastIndex = self.list.index
   if self.onClose then self.onClose() end
@@ -246,14 +293,16 @@ end
 function StartMenu:update(_dt)
   local input = self.game and self.game.input
   if not input then return end
-  if self.phase == "confirm" then
+  if self.phase == "confirm" or self.phase == "confirmContest" then
     if input:wasPressed("up") or input:wasPressed("down") then
       self.confirmChoice = self.confirmChoice == 1 and 2 or 1
     elseif input:wasPressed("a") then
-      if self.confirmChoice == 1 then
-        self:confirmQuit()
-      else
+      if self.confirmChoice ~= 1 then
         self.phase = nil
+      elseif self.phase == "confirmContest" then
+        self:confirmQuitContest()
+      else
+        self:confirmQuit()
       end
     elseif input:wasPressed("b") or input:wasPressed("start") then
       self.phase = nil
@@ -268,22 +317,54 @@ function StartMenu:update(_dt)
   self.list:update(input)
 end
 
+-- pokecrystal engine/menus/menu_2.asm:145
+function StartMenu:drawContestStatus()
+  Chrome.textbox(0, 0, 17, 5)
+  Chrome.print("CAUGHT", 1, 1)
+  local mon = BugContest.caughtMon(self.save)
+  Chrome.print(mon and (mon.nickname or mon.name or mon.species) or "None",
+    8, 1)
+  if mon then
+    Chrome.print("LEVEL", 1, 3)
+    Chrome.print(tostring(mon.level or 1), 7, 3)
+  end
+  Chrome.print("BALLS:", 1, 5)
+  Chrome.print(tostring(BugContest.ballsLeft(self.save)), 8, 5)
+end
+
 function StartMenu:draw()
   -- AutomaticGetMenuBottomCoord: bottom = top + 2 * items + 1, so the box is
   -- two rows per entry plus its two border rows.  A menu that a mod has grown
   -- past the screen scrolls instead of overflowing (Chrome.List draws the ▼
   -- hint when there is more below).
-  local height = math.min(#self.items * 2 + 2, Chrome.SCREEN_H)
-  Chrome.box(10, 0, 10, height)
+  local top = self.contest and 2 or 0
+  local height = math.min(#self.items * 2 + 2, Chrome.SCREEN_H - top)
+  if self.contest then self:drawContestStatus() end
+  Chrome.box(10, top, 10, height)
   self.list:draw()
+
+  if self.phase == "confirmContest" then
+    -- pokecrystal data/text/common_2.asm:1381
+    Chrome.textbox(0, 12, 18, 4)
+    Chrome.print("Would you like to", 1, 14)
+    Chrome.print("end the Contest?", 1, 16)
+    -- pokecrystal home/menu.asm:418
+    Chrome.box(14, 7, 6, 5)
+    Chrome.print("YES", 16, 8)
+    Chrome.print("NO", 16, 10)
+    Chrome.cursor(15, self.confirmChoice == 1 and 8 or 10)
+    return
+  end
 
   if self.phase == "confirm" then
     Chrome.textbox(0, 12, 18, 4)
-    Chrome.print("Return to the", 1, 14)
-    Chrome.print("title screen?", 1, 16)
+    local prompt = Strings(Strings.source("Return to the\ntitle screen?"))
+    local first, second = prompt:match("^([^\n]*)\n?(.*)$")
+    Chrome.print(first or "", 1, 14)
+    Chrome.print(second or "", 1, 16)
     Chrome.box(YESNO_X, YESNO_Y, YESNO_W, YESNO_H)
-    Chrome.print("YES", YESNO_X + 2, YESNO_Y + 1)
-    Chrome.print("NO", YESNO_X + 2, YESNO_Y + 3)
+    Chrome.print(Strings("YES"), YESNO_X + 2, YESNO_Y + 1)
+    Chrome.print(Strings("NO"), YESNO_X + 2, YESNO_Y + 3)
     Chrome.cursor(YESNO_X + 1,
       YESNO_Y + (self.confirmChoice == 1 and 1 or 3))
     return

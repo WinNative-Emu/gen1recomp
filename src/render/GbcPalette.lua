@@ -66,6 +66,30 @@ vec4 effect(vec4 tint, Image tex, vec2 uv, vec2 screen) {
 }
 ]]
 
+-- BG drawn over OBJ with OAM priority: palette index 0 is transparent to the
+-- sprite underneath (hardware OBJ-behind-BG rule), colours 1-3 are opaque.
+local KEYED_SHADER_SOURCE = [[
+extern vec3 pal0;
+extern vec3 pal1;
+extern vec3 pal2;
+extern vec3 pal3;
+
+vec4 effect(vec4 tint, Image tex, vec2 uv, vec2 screen) {
+  vec4 px = Texel(tex, uv);
+  float shade = floor((1.0 - px.r) * 3.0 + 0.5);
+  vec3 rgb = pal0;
+  if (shade > 2.5) {
+    rgb = pal3;
+  } else if (shade > 1.5) {
+    rgb = pal2;
+  } else if (shade > 0.5) {
+    rgb = pal1;
+  }
+  float alpha = shade < 0.5 ? 0.0 : px.a;
+  return vec4(rgb, alpha) * tint;
+}
+]]
+
 -- rBGP, the DMG background palette register, as a remap of an ALREADY DRAWN
 -- texture.
 --
@@ -85,14 +109,14 @@ vec4 effect(vec4 tint, Image tex, vec2 uv, vec2 screen) {
 local REMAP_SOURCE = [[
 extern int remapCount;
 extern float remapTol;
-extern vec3 remapSrc[32];
-extern vec3 remapDst[32];
+extern vec3 remapSrc[64];
+extern vec3 remapDst[64];
 
 vec4 effect(vec4 tint, Image tex, vec2 uv, vec2 screen) {
   vec4 px = Texel(tex, uv);
   vec3 mapped = px.rgb;
   float best = remapTol;
-  for (int i = 0; i < 32; i++) {
+  for (int i = 0; i < 64; i++) {
     if (i >= remapCount) { break; }
     vec3 d = px.rgb - remapSrc[i];
     float dist = dot(d, d);
@@ -108,14 +132,17 @@ vec4 effect(vec4 tint, Image tex, vec2 uv, vec2 screen) {
 }
 ]]
 
--- The compiled-in array length above.  A map's eight BG palettes are 32
--- colours before dedupe, which is the worst case this has to hold.
-GbcPalette.REMAP_MAX = 32
+-- The compiled-in array length above.  A map's eight BG palettes plus its
+-- eight OBJ palettes are 64 colours before dedupe, which is the worst case
+-- this has to hold (home/fade.asm:32-38).
+GbcPalette.REMAP_MAX = 64
 -- Squared RGB distance, in 0..1 units: three 8-bit steps.
 GbcPalette.REMAP_TOLERANCE = (3 / 255) ^ 2
 
 local shader = nil
 local failed = false
+local keyedShader = nil
+local keyedFailed = false
 local remapShader = nil
 local remapFailed = false
 
@@ -134,6 +161,21 @@ function GbcPalette.shader()
   end
   shader = result
   return shader
+end
+
+function GbcPalette.keyedShader()
+  if keyedShader or keyedFailed then return keyedShader end
+  if not (love and love.graphics and love.graphics.newShader) then
+    keyedFailed = true
+    return nil
+  end
+  local ok, result = pcall(love.graphics.newShader, KEYED_SHADER_SOURCE)
+  if not ok then
+    keyedFailed = true
+    return nil
+  end
+  keyedShader = result
+  return keyedShader
 end
 
 -- The same contract as GbcPalette.shader for the backwards pass: nil rather
@@ -330,6 +372,18 @@ function GbcPalette.useRaw(colors)
   return true
 end
 
+function GbcPalette.useKeyed(colors)
+  local sh = GbcPalette.keyedShader()
+  if not sh then return false end
+  local resolved = GbcPalette.remap(GbcPalette.resolve(colors), GbcPalette.bgp)
+  for i = 0, 3 do
+    local r, g, b = channel(resolved, i + 1)
+    sh:send("pal" .. i, { r, g, b })
+  end
+  love.graphics.setShader(sh)
+  return true
+end
+
 function GbcPalette.clear()
   if love and love.graphics then love.graphics.setShader() end
 end
@@ -362,10 +416,9 @@ end
 -- order -- the reading that matches "the whole picture flashes".  Nothing here
 -- is approximate when `ambiguous` is 0.
 --
--- A map's eight BG palettes are 32 entries, which is REMAP_MAX exactly, so a
--- map whose palettes share nothing at all fills the array and the OBJ list is
--- dropped.  BG is walked first for that reason too: losing the sprite guard
--- costs a few sprite pixels, losing a BG palette would cost the effect.
+-- BG and OBJ together are 64 entries before dedupe, which is REMAP_MAX.  BG
+-- is walked first anyway: losing the sprite guard costs a few sprite pixels,
+-- losing a BG palette would cost the effect.
 function GbcPalette.remapTable(bgPalettes, byte, objPalettes, ramp, objRamped)
   local src, dst = {}, {}
   local seen = {}
@@ -447,7 +500,7 @@ end
 function GbcPalette.useRemapUniforms(uniforms)
   local sh = GbcPalette.remapShader()
   if not (sh and uniforms) then return false end
-  -- pcall rather than an assert: a driver that will not take a 32-entry vec3
+  -- pcall rather than an assert: a driver that will not take a 64-entry vec3
   -- array should drop the effect, not take the battle down with it.
   local ok = pcall(function()
     sh:send("remapCount", uniforms.count)
@@ -470,6 +523,16 @@ function GbcPalette.with(colors, body)
   local previous = love and love.graphics and love.graphics.getShader
     and love.graphics.getShader() or nil
   local applied = GbcPalette.use(colors)
+  local ok, err = pcall(body)
+  if love and love.graphics then love.graphics.setShader(previous) end
+  if not ok then error(err, 0) end
+  return applied
+end
+
+function GbcPalette.keyedWith(colors, body)
+  local previous = love and love.graphics and love.graphics.getShader
+    and love.graphics.getShader() or nil
+  local applied = GbcPalette.useKeyed(colors)
   local ok, err = pcall(body)
   if love and love.graphics then love.graphics.setShader(previous) end
   if not ok then error(err, 0) end
