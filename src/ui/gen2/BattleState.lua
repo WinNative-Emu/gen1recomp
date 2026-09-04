@@ -3909,7 +3909,7 @@ function BattleState:useItem(itemId)
     if not ok then
       -- _ItemWontHaveEffectText's own `line` break, the same one
       -- ItemEffects.TEXT_NO_EFFECT carries (data/text/common_3.asm).
-      self.message = ItemEffects.TEXT_NO_EFFECT
+      self.message = Strings(ItemEffects.TEXT_NO_EFFECT)
       self.messageTimer = MESSAGE_FRAMES
       self.phase = "resolving"
       return
@@ -4014,7 +4014,7 @@ function BattleState:cureBattleConfusion(itemId)
   local mon = self.battle.player
   local state = mon and self.battle:volatile(mon)
   if not (state and state.confuseCount) then
-    self.message = oneLine(ItemEffects.TEXT_NO_EFFECT)
+    self.message = oneLine(Strings(ItemEffects.TEXT_NO_EFFECT))
     self.messageTimer = MESSAGE_FRAMES
     self.phase = "resolving"
     return
