@@ -1136,9 +1136,14 @@ do
     { rng = mkseq({}) }, pb.player, pb.enemy, Data.moves.THUNDER_WAVE)
   eq(parMsgs[1], "Enemy RATTATA's\nparalyzed! It may\nnot attack!",
      "_ParalyzedMayNotAttackText wording + prefix")
+  -- move_effects/paralyze.asm:12
   local failMsgs = MoveFx.primary.PARALYZE_EFFECT(
     { rng = mkseq({}) }, pb.player, pb.enemy, Data.moves.THUNDER_WAVE)
-  eq(failMsgs[1], "But, it failed!", "_ButItFailedText has the comma")
+  eq(failMsgs[1], "It didn't affect\nEnemy RATTATA!",
+     "an already-statused target is DidntAffect, not ButItFailed")
+  local TextBox = require("src.render.TextBox")
+  eq(TextBox.strip(Data.text._ButItFailedText):gsub("%s+$", ""),
+     "But, it failed!", "_ButItFailedText has the comma")
 
   -- send-out shout buckets (PrintSendOutMonMessage thresholds)
   pb.enemy.mon.stats = { hp = 20 }

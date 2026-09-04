@@ -104,10 +104,19 @@ end
 local function statusMove(status)
   return function(battle, user, target, move)
     if target.mon.status then
-      return { romText(battle.data, "_ButItFailedText", "But, it failed!") }
+      -- engine/battle/effects.asm:44-47
+      if status == "SLP" and target.mon.status == "SLP" then
+        return { romText(battle.data, "_AlreadyAsleepText",
+                         "%s's\nalready asleep!", displayName(target)) }
+      end
+      -- effects.asm:51, move_effects/paralyze.asm:12
+      return { romText(battle.data, "_DidntAffectText",
+                       "It didn't affect\n%s!", displayName(target)) }
     end
     if status == "PSN" and target.substituteHP then
-      return { romText(battle.data, "_ButItFailedText", "But, it failed!") }
+      -- effects.asm:88 .noEffect falls into .didntAffect for POISON_EFFECT
+      return { romText(battle.data, "_DidntAffectText",
+                       "It didn't affect\n%s!", displayName(target)) }
     end
     local msgs = inflictStatus(battle, target, status, {
       toxic = move and move.id == "TOXIC",
