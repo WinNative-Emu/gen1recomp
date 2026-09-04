@@ -52,10 +52,10 @@ eq(armed.mapSetup.phase, "out",
 eq(armed.fade, nil, "and its sheet untouched")
 
 -- home/init.asm:149-153
-check(World.MAP_LOAD_WHITE_FRAMES >= 10,
-  "the door LCD-off window is held ten frames or more")
-check(World.WARP_LOAD_WHITE_FRAMES >= World.MAP_LOAD_WHITE_FRAMES,
-  "a Warp/ReloadMap load runs longer still: LoadBlockData is under the LCD too")
+eq(World.MAP_LOAD_WHITE_FRAMES, 13,
+  "a door holds white for the 13 frames measured on the cart (11 LCD-off + 2)")
+eq(World.WARP_LOAD_WHITE_FRAMES, 15,
+  "a Warp/Teleport/Fly holds 15: LoadBlockData and LoadMapObjects are under the LCD too")
 eq(w.fadeHold, World.WARP_LOAD_WHITE_FRAMES,
   "the battle return opens holding pure white for that window")
 eq(w.fadeWhiten, nil, "with LoadMapPalettes' plain set already back")

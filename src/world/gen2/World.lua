@@ -246,9 +246,9 @@ local MAPSETUP_ROAM_JUMP = { [MAPSETUP.TELEPORT] = true }
 local FADE_STEPS = 4
 local FADE_STEP_FRAMES = 2
 -- data/maps/setup_scripts.asm:102-125, home/init.asm:149-153
-local MAP_LOAD_WHITE_FRAMES = 11
+local MAP_LOAD_WHITE_FRAMES = 13
 -- data/maps/setup_scripts.asm:32-55
-local WARP_LOAD_WHITE_FRAMES = 13
+local WARP_LOAD_WHITE_FRAMES = 15
 
 -- home/map.asm:1927-1940 over home/tilemap.asm:12-25
 local MENU_EXIT_RELOAD_FRAMES = 9

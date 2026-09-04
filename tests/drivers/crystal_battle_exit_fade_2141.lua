@@ -27,10 +27,10 @@ return function(game)
   assert(world and world.map, "the crystal world did not boot")
   local save, data = game.save, game.data
   save.party = { Mon.new(data, "CYNDAQUIL", 12) }
-  -- POKEPORT_FADE_NIGHT=1 pins the clock so the colour-0 plane that brackets
+  -- home/time.asm GetTimeOfDay, engine/tilesets/timeofday_pals.asm:160-187
   local night = os.getenv("POKEPORT_FADE_NIGHT") == "1"
   if night then
-    world.daytime = "NITE"
+    world.clockHour = 23
     world:applyPalettes()
   end
 
@@ -197,6 +197,36 @@ return function(game)
   ok(world.map.id ~= lossMap, "and the player is at the spawn point")
   U.wait(5)
   shot("whiteout_done")
+
+  -- engine/tilesets/timeofday_pals.asm:160-187 on a PALETTE_AUTO map
+  if night then
+    world:warpToMapId("NEW_BARK_TOWN", 13, 7, "up")
+    for _ = 1, 200 do
+      if not world:busy() then break end
+      U.wait(1)
+    end
+    U.wait(10)
+    ok(world.map.id == "NEW_BARK_TOWN" and world.daytime == "NITE",
+      ("outdoors at night (map=%s daytime=%s)")
+        :format(tostring(world.map.id), tostring(world.daytime)))
+    world:battleReturnFade()
+    local nightHold, nightPlane = 0, 0
+    for _ = 1, 200 do
+      if not world.mapSetup then break end
+      if world.fadeHold then
+        nightHold = nightHold + 1
+      else
+        nightPlane = nightPlane + 1
+        shot("night_outdoor_in")
+      end
+      U.wait(1)
+    end
+    ok(nightHold == warpHold,
+      ("night: pure white held %d ticks (want %d)"):format(nightHold, warpHold))
+    ok(nightPlane == World.FADE_STEPS * World.FADE_STEP_FRAMES,
+      ("night: %d ramp ticks through the palette remap (want %d)")
+        :format(nightPlane, World.FADE_STEPS * World.FADE_STEP_FRAMES))
+  end
 
   print("[exit-fade-2141] " .. (fails == 0 and "PASS all claims" or
     (fails .. " claims failed")) .. " -- " .. shotN .. " shots in " .. out)
