@@ -424,9 +424,12 @@ end
 -- (pikachu_follow.asm keeps it one walk step behind)
 function PikachuFollower.update(game, ow)
   if ow.pikaHop then return end -- the counter hop owns the follower (#417)
-  if ow.pikachuBillsScene or ow.pikachuFanClubScene
-      or ow.pikachuPewterSleepScene then return end
   local npc = findFollower(ow)
+  -- home/overworld.asm:1238-1240
+  if npc then
+    npc.passable = not PikachuFollower.isFollowingDisabled(ow)
+  end
+  if PikachuFollower.isFollowingDisabled(ow) then return end
   if not npc then
     if shouldSpawn(game, ow) then PikachuFollower.onMapEntered(game, ow) end
     return
@@ -816,9 +819,8 @@ end
 -- disabled following state.
 -- (engine/overworld/emotion_bubbles.asm:60)
 -- engine/pikachu/pikachu_emotions.asm:14
-local function billsHouseEmotion(game, ow, npc, bubble, emotion, done, beforeAnim)
+local function billsHouseEmotion(game, ow, npc, bubble, emotion, done)
   local function anim()
-    if beforeAnim then beforeAnim() end
     playEmotion(game, ow, npc, emotion, { onDone = done })
   end
   if not bubble then return anim() end
@@ -895,10 +897,7 @@ function PikachuFollower.onBillsHouseEnter(game, ow)
   ow.pikachuBillsScene = true
   movePikachu(ow, npc, { { "right", 3 }, { "up", 1 } }, function()
     -- BillsHouse_CheckPikachuEmotion SCRIPT0 -- scripts/BillsHouse_2.asm:88
-    billsHouseEmotion(game, ow, npc, "QUESTION_BUBBLE", 23, nil, function()
-      -- scripts/BillsHouse_2.asm:121, home/overworld.asm:1238-1240
-      npc.passable = false
-    end)
+    billsHouseEmotion(game, ow, npc, "QUESTION_BUBBLE", 23)
   end)
 end
 

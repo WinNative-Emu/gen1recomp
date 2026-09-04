@@ -78,14 +78,10 @@ check(ow.emote and ow.emote.bubble == 1 and ow.emote.frames == 60
 -- emotion 23 -- engine/pikachu/pikachu_emotions.asm:14
 check(npc.stepFrames == 16,
   "the scripted walk runs at the Pikachu movement step length")
-check(npc.passable, "Pikachu is walked through while it is still following")
 ow.emote.onDone()
 check(ow.emote and ow.emote.pikaPic and ow.emote.frames > 0
       and not ow.emote.skippable,
   "and the bubble hands off to the unskippable emotion animation")
--- scripts/BillsHouse_2.asm:121, home/overworld.asm:1238-1240
-check(not npc.passable,
-  "DisablePikachuFollowingPlayer makes the parked companion solid")
 
 -- BillsHouseScript3 seeds hl with ..._EnterCellSeparatorDown and only swaps
 -- in ..._EnterCellSeparatorNotDown on the facing-down fallthrough, so the
@@ -233,6 +229,24 @@ check(cry == 19, "the map check still wins over a statused starter")
 yellowGame.save.party = nil
 yellowGame.save.flags.EVENT_MET_BILL_2 = nil
 Sound.playPikaCry = realPikaCry
+
+-- CheckPikachuFollowingPlayer is one flag, and CollisionCheckOnLand blocks
+-- the player outright while it is set (home/overworld.asm:1238-1240).  All
+-- three scenes that call DisablePikachuFollowingPlayer must park a solid
+-- companion: scripts/BillsHouse_2.asm:121, PokemonFanClub.asm:60,
+-- PewterPokecenter_2.asm:67.
+for _, scene in ipairs({ "pikachuBillsScene", "pikachuFanClubScene",
+                         "pikachuPewterSleepScene" }) do
+  -- update() drops the follower once shouldSpawn goes false, so re-seed it
+  ow.npcs, ow.entities = { npc }, { npc }
+  npc.passable = true
+  ow[scene] = true
+  PikachuFollower.update(yellowGame, ow)
+  check(not npc.passable, scene .. " parks a solid companion")
+  ow[scene] = nil
+  PikachuFollower.update(yellowGame, ow)
+  check(npc.passable, scene .. " ending lets the player walk through again")
+end
 
 GameVersion.set("red")
 S.finish()
