@@ -4199,13 +4199,14 @@ local function primaryEffectFailed(msgs)
   if not msgs or #msgs == 0 then return true end
   if msgs.failed then return true end
   -- the extracted lines keep the ROM's own trailing blank ("But, it
-  -- failed! "), so match with it trimmed or a refused status animates
-  local m = msgs[1]:gsub("%s+$", "")
+  -- failed! ") and its terminator, so strip both or a refused status animates
+  local m = require("src.render.TextBox").strip(msgs[1]):gsub("%s+$", "")
   if m == "But, it failed!" or m == "Nothing happened!" then return true end
   if m:find("didn't affect", 1, true) then return true end
   if m:find("is unaffected", 1, true) then return true end
   if m:find("protected by MIST", 1, true) then return true end
-  if m:find("Already", 1, true) then return true end
+  -- engine/battle/effects.asm:46-47
+  if m:lower():find("already asleep", 1, true) then return true end
   return false
 end
 
