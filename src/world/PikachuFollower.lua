@@ -420,15 +420,69 @@ function PikachuFollower.rebase(ow, dx, dy)
   if trail then trail.x, trail.y = trail.x + dx, trail.y + dy end
 end
 
+local DIRS = { "up", "down", "left", "right" }
+
+-- wPikachuCollisionCounter: 8 on a direction change (home/overworld.asm:189),
+-- cleared with no d-pad held (:130) and once a step commits (:242)
+local function tickCollisionCounter(game, ow, npc)
+  local input = game.input
+  local p = ow.player
+  local dir
+  if input then
+    for _, d in ipairs(DIRS) do
+      if input:isDown(d) then dir = d break end
+    end
+  end
+  if not dir then
+    ow.pikachuCollisionCounter = 0
+    if ow.pikachuMovingDir then
+      ow.pikachuLastStopDir = ow.pikachuMovingDir
+      ow.pikachuMovingDir = nil
+    end
+    ow.pikachuTurnArmed = true
+    return
+  end
+  if ow.pikachuTurnArmed and dir ~= ow.pikachuLastStopDir then
+    ow.pikachuCollisionCounter = 8
+    ow.pikachuTurnArmed = false
+    ow.pikachuMovingDir = dir
+    return
+  end
+  ow.pikachuMovingDir = dir
+  if p.moving then
+    ow.pikachuCollisionCounter = 0
+    return
+  end
+  local n = ow.pikachuCollisionCounter or 0
+  if n <= 0 then return end
+  local tx, ty = Collision.target(p.cellX, p.cellY, dir)
+  if p.facing == dir and npc.cellX == tx and npc.cellY == ty then
+    ow.pikachuCollisionCounter = n - 1
+  end
+end
+
+-- CollisionCheckOnLand's Pikachu branch -- home/overworld.asm:1234-1252
+local function updatePassable(game, ow, npc)
+  if PikachuFollower.isFollowingDisabled(ow) then
+    npc.passable = false
+    ow.pikachuCollisionCounter = 0
+    return
+  end
+  tickCollisionCounter(game, ow, npc)
+  if game.input and game.input:isDown("b") then
+    npc.passable = true
+    return
+  end
+  npc.passable = (ow.pikachuCollisionCounter or 0) <= 0
+end
+
 -- one follow step per frame: chase the cell the player last vacated
 -- (pikachu_follow.asm keeps it one walk step behind)
 function PikachuFollower.update(game, ow)
   if ow.pikaHop then return end -- the counter hop owns the follower (#417)
   local npc = findFollower(ow)
   -- home/overworld.asm:1238-1240
-  if npc then
-    npc.passable = not PikachuFollower.isFollowingDisabled(ow)
-  end
+  if npc then updatePassable(game, ow, npc) end
   if PikachuFollower.isFollowingDisabled(ow) then return end
   if not npc then
     if shouldSpawn(game, ow) then PikachuFollower.onMapEntered(game, ow) end
@@ -895,7 +949,13 @@ function PikachuFollower.onBillsHouseEnter(game, ow)
   local npc = findFollower(ow)
   if not npc then return end
   ow.pikachuBillsScene = true
-  movePikachu(ow, npc, { { "right", 3 }, { "up", 1 } }, function()
+  local steps = { { "right", 3 }, { "up", 1 } }
+  -- engine/pikachu/pikachu_follow.asm:59
+  if npc.cellX == ow.player.cellX and npc.cellY == ow.player.cellY
+     and Collision.canMove(ow.map, ow.entities, npc, "right") then
+    table.insert(steps, 1, { "right", 1 })
+  end
+  movePikachu(ow, npc, steps, function()
     -- BillsHouse_CheckPikachuEmotion SCRIPT0 -- scripts/BillsHouse_2.asm:88
     billsHouseEmotion(game, ow, npc, "QUESTION_BUBBLE", 23)
   end)

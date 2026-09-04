@@ -248,5 +248,104 @@ for _, scene in ipairs({ "pikachuBillsScene", "pikachuFanClubScene",
   check(npc.passable, scene .. " ending lets the player walk through again")
 end
 
+-- The other two states of CollisionCheckOnLand's Pikachu branch
+-- (home/overworld.asm:1234-1252): B held walks straight through, and
+-- wPikachuCollisionCounter is a soft 8-count bump seeded on a direction
+-- change (:189) and cleared with no d-pad held (:130) or once a step
+-- commits (:242).
+local held = {}
+yellowGame.input = { isDown = function(_, b) return held[b] == true end }
+local cp = ow.player
+cp.cellX, cp.cellY, cp.facing, cp.moving = 3, 7, "up", false
+npc.cellX, npc.cellY = 3, 6
+
+local function tick()
+  ow.npcs, ow.entities = { npc }, { npc }
+  PikachuFollower.update(yellowGame, ow)
+end
+
+held = {}
+tick()
+check(npc.passable and ow.pikachuCollisionCounter == 0,
+  "no d-pad held clears the counter and the companion is walk-through")
+
+held = { up = true }
+tick()
+check(ow.pikachuCollisionCounter == 8 and not npc.passable,
+  "turning to a new direction seeds the 8-count bump")
+
+local blocked = 0
+for _ = 1, 8 do
+  tick()
+  if not npc.passable then blocked = blocked + 1 end
+end
+check(blocked == 7,
+  "the bump blocks seven pushes and then yields, like dec [hl] / jr nz")
+check(npc.passable and ow.pikachuCollisionCounter == 0,
+  "the drained counter leaves the companion passable")
+
+held = {}
+tick()
+held = { up = true }
+tick()
+check(ow.pikachuCollisionCounter == 0,
+  "re-pressing the same direction after a release does not re-seed")
+
+held = {}
+tick()
+held = { left = true }
+tick()
+check(ow.pikachuCollisionCounter == 8, "a new direction seeds again")
+held = { left = true, b = true }
+tick()
+check(npc.passable, "holding B walks straight through the bump")
+
+held = { left = true }
+cp.moving = true
+tick()
+check(ow.pikachuCollisionCounter == 0 and npc.passable,
+  "a committed step clears the counter")
+cp.moving = false
+held = {}
+tick()
+yellowGame.input = nil
+
+-- CalculatePikachuPlacementCoords never leaves the companion on the
+-- player's own cell (engine/pikachu/pikachu_follow.asm:59), so
+-- BillsHousePikachuConfused's three STEP_RIGHTs start one cell east of the
+-- door and land it directly below Bill.
+local emergeMoves = {}
+local emergeOw = {
+  map = {
+    id = "BILLS_HOUSE",
+    def = { tileset = "INTERIOR" },
+    inBounds = function() return true end,
+    isWalkableCell = function() return true end,
+    isWaterCell = function() return false end,
+    cellTile = function() return 0 end,
+  },
+  npcs = {}, entities = {},
+  player = { cellX = 2, cellY = 7, facing = "up" },
+  scriptMove = function(_, entity, dir, tiles, onDone)
+    emergeMoves[#emergeMoves + 1] = { dir = dir, tiles = tiles, onDone = onDone }
+  end,
+}
+local emergeNpc = {
+  pikachuFollower = true, cellX = 2, cellY = 7, px = 32, py = 112,
+  facing = "up", passable = true,
+}
+emergeOw.npcs[1], emergeOw.entities[1] = emergeNpc, emergeNpc
+yellowGame.save.flags = {}
+yellowGame.save.pikachuMapScriptActive = nil
+PikachuFollower.onBillsHouseEnter(yellowGame, emergeOw)
+check(#emergeMoves == 1 and emergeMoves[1].dir == "right"
+      and emergeMoves[1].tiles == 1,
+  "a companion still stacked on the player steps off before the walk")
+emergeNpc.cellX = 3
+emergeMoves[1].onDone()
+check(#emergeMoves == 2 and emergeMoves[2].dir == "right"
+      and emergeMoves[2].tiles == 3,
+  "then runs PikachuMovement_Confused's three STEP_RIGHTs")
+
 GameVersion.set("red")
 S.finish()
