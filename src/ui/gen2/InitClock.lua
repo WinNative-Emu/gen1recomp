@@ -25,6 +25,7 @@
 
 local Chrome = require("src.ui.gen2.Chrome")
 local Clock = require("src.core.gen2.Clock")
+local IntroFade = require("src.ui.gen2.IntroFade")
 local Strings = require("src.core.Strings")
 local Typer = require("src.ui.gen2.Typer")
 
@@ -151,6 +152,20 @@ function InitClock.new(game, opts)
     instant = self.autoConfirm or self.mode == "day",
   })
   self:startText()
+  self.fades = opts.fades and self.mode ~= "day" and not self.autoConfirm
+  if self.fades then
+    -- ../pokecrystal/engine/rtc/timeset.asm:22, :42
+    if opts.faded then
+      IntroFade.run(self, { "inBlack" })
+    else
+      -- ../pokecrystal/engine/menus/intro_menu.asm:42-49, :65
+      self.blank = true
+      IntroFade.run(self, { "outBlack" }, function()
+        self.blank = false
+        IntroFade.run(self, { "inBlack" })
+      end)
+    end
+  end
   return self
 end
 
@@ -253,7 +268,12 @@ function InitClock:finish()
     return
   end
   Clock.setTime(self.save, self.hour, self.minute)
-  if self.onDone then self.onDone(self.hour, self.minute) end
+  local function done()
+    if self.onDone then self.onDone(self.hour, self.minute) end
+  end
+  -- ../pokecrystal/engine/menus/intro_menu.asm:628
+  if self.fades then return IntroFade.run(self, { "outBlack" }, done) end
+  done()
 end
 
 -- A on a picker confirms it, YES on a confirmation takes it, NO drops back to
@@ -277,11 +297,12 @@ function InitClock:accept()
   elseif self.phase == "confirm-minute" then
     self.phase = "response"
   elseif self.phase == "response" then
-    self:finish()
+    -- ../pokecrystal/engine/menus/intro_menu.asm:628
+    return self:finish()
   elseif self.phase == "day" then
     self.phase = "confirm-day"
   elseif self.phase == "confirm-day" then
-    self:finish()
+    return self:finish()
   end
   self:startText()
 end
@@ -298,6 +319,8 @@ function InitClock:decline()
 end
 
 function InitClock:update(_dt)
+  -- ../pokecrystal/home/fade.asm:22-101
+  if IntroFade.advance(self) then return end
   -- The driver path: no screen this new may be allowed to stall a scripted
   -- run, so it walks itself to the end taking every default.
   if self.autoConfirm then
@@ -368,6 +391,13 @@ local function arrow(tx, ty, up)
 end
 
 function InitClock:drawPanel()
+  -- ../pokecrystal/engine/menus/intro_menu.asm:42-49
+  if self.blank then
+    local G = love.graphics
+    G.setColor(1, 1, 1, 1)
+    G.rectangle("fill", 0, 0, Chrome.SCREEN_W * 8, Chrome.SCREEN_H * 8)
+    return
+  end
   -- ../pokecrystal/engine/rtc/timeset.asm:22-32
   if self.mode ~= "day" then
     local G = love.graphics
@@ -400,14 +430,21 @@ function InitClock:drawPanel()
   end
 end
 
+function InitClock:drawBody()
+  self:drawPanel()
+  IntroFade.paint(self, Chrome.SCREEN_W * 8, Chrome.SCREEN_H * 8)
+end
+
 function InitClock:draw()
-  Chrome.withClip(function() self:drawPanel() end)
+  Chrome.withClip(function() self:drawBody() end)
 end
 
 function InitClock:drawWidescreen(winW, winH)
   local ground = InitClock.GROUND
-  Chrome.withPanel(winW, winH, ground[1] / 255, ground[2] / 255,
-    ground[3] / 255, function() self:drawPanel() end)
+  local r, g, b = ground[1] / 255, ground[2] / 255, ground[3] / 255
+  if self.blank then r, g, b = 1, 1, 1 end
+  r, g, b = IntroFade.surround(self, r, g, b)
+  Chrome.withPanel(winW, winH, r, g, b, function() self:drawBody() end)
 end
 
 return InitClock
