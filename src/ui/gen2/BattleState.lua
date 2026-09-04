@@ -4140,7 +4140,9 @@ end
 -- above it, not inside a border.
 function BattleState:drawFrame(tx, ty, width, stubRight)
   local G = love.graphics
-  G.setColor(0, 0, 0, 1)
+  -- home/fade.asm:35 (RotateThreePalettesRight)
+  local ink = GbcPalette.color(GbcPalette.DMG_SHADES, 4) or { 0, 0, 0 }
+  G.setColor(ink[1] / 255, ink[2] / 255, ink[3] / 255, 1)
   -- The bottom rule ($76 repeated, capped by $74/$78 or $6f/$77) sits at the
   -- top of its own tile row, immediately under the bar above it.
   G.rectangle("fill", tx * 8, ty * 8, width * 8, 2)
@@ -4148,6 +4150,7 @@ function BattleState:drawFrame(tx, ty, width, stubRight)
   -- climbs from the rule past the bar row.
   local stubX = stubRight and ((tx + width - 2) * 8 + 6) or (tx * 8)
   G.rectangle("fill", stubX, ty * 8 - 8, 2, 10)
+  G.setColor(1, 1, 1, 1)
 end
 
 -- LoadBattleFontsHPBar puts FontBattleExtra in the $60 slot for the whole

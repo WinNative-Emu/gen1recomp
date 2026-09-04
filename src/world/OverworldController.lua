@@ -2891,22 +2891,29 @@ function OverworldState:billsHousePC()
       or romText(Game.data, "_BillsHouseMonitorText", "TELEPORTER is\ndisplayed on the\nPC monitor.")))
     return
   end
-  require("src.core.Music").stop()
   Game.stack:push(TextBox.new(Game, t._BillsHouseInitiatedText
     or Strings("{PLAYER} initiated\nTELEPORTER's Cell\nSeparator!"), function()
-    flags.EVENT_USED_CELL_SEPARATOR_ON_BILL = true
-    require("src.core.Sound").play(Game.data, "Switch")
+    -- BillsHouseInitiatedText's text_asm stops the music only after the
+    -- prompt button -- bills_house_pc.asm:55
+    require("src.core.Music").stop()
     self:queueScript({
+      { "wait", 16 },
+      { "play_sound", "Switch" }, { "wait_sound" },
+      { "wait", 60 },
+      -- .doCellSeparator -- bills_house_pc.asm:18
       { "wait", 32 },
-      { "play_sound", "Tink" },
+      { "play_sound", "Tink" }, { "wait_sound" },
       { "wait", 80 },
-      { "play_sound", "Shrink" },
+      { "play_sound", "Shrink" }, { "wait_sound" },
       { "wait", 48 },
-      { "play_sound", "Tink" },
+      { "play_sound", "Tink" }, { "wait_sound" },
       { "wait", 32 },
-      { "play_sound", "Get_Item1" },
-      { "wait", 30 },
-    }, { onDone = function() self:billsHouseBillExits() end })
+      { "play_sound", "Get_Item1" }, { "wait_sound" },
+    }, { onDone = function()
+      -- bills_house_pc.asm:39
+      flags.EVENT_USED_CELL_SEPARATOR_ON_BILL = true
+      self:billsHouseBillExits()
+    end })
   end))
 end
 
