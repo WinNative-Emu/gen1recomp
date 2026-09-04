@@ -774,9 +774,12 @@ function OakSpeech:drawPanel()
   self:drawPic()
   self:drawPlayerIcon()
   if self.shrinkText and self.fontOk then
-    G.setColor(0, 0, 0, 1)
-    for i, line in ipairs(self.shrinkText) do
-      Font.draw(line, 16, 104 + (i - 1) * 16)
+    -- home/text.asm:142 PrintText -> SetUpTextbox -> SpeechTextbox
+    Chrome.textbox(0, 12, 18, 4)
+    local row = 14
+    for _, line in ipairs(self.shrinkText) do
+      if row <= 16 then Chrome.print(line, 1, row) end
+      row = row + 2
     end
     G.setColor(1, 1, 1, 1)
   end
