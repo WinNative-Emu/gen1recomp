@@ -34,7 +34,14 @@ GameVersion.set("yellow")
 local npc = {
   pikachuFollower = true, cellX = 3, cellY = 8, px = 48, py = 128,
   facing = "up",
+  -- pokeyellow engine/pikachu/pikachu_follow.asm:26
+  passable = true,
 }
+local Sound = require("src.core.Sound")
+local realPikaCry = Sound.playPikaCry
+local cry
+Sound.playPikaCry = function(_, index) cry = index return true end
+
 local moves = {}
 local yellowGame = {
   save = { flags = {} },
@@ -65,8 +72,20 @@ moves[1].onDone()
 check(#moves == 2 and moves[2].dir == "up" and moves[2].tiles == 1,
   "Pikachu finishes its cartridge entry route beside Bill")
 moves[2].onDone()
-check(ow.emote and ow.emote.bubble == 1,
+check(ow.emote and ow.emote.bubble == 1 and ow.emote.frames == 60
+      and not ow.emote.pikaPic,
   "Pikachu shows its confused reaction after reaching Bill")
+-- emotion 23 -- engine/pikachu/pikachu_emotions.asm:14
+check(npc.stepFrames == 16,
+  "the scripted walk runs at the Pikachu movement step length")
+check(npc.passable, "Pikachu is walked through while it is still following")
+ow.emote.onDone()
+check(ow.emote and ow.emote.pikaPic and ow.emote.frames > 0
+      and not ow.emote.skippable,
+  "and the bubble hands off to the unskippable emotion animation")
+-- scripts/BillsHouse_2.asm:121, home/overworld.asm:1238-1240
+check(not npc.passable,
+  "DisablePikachuFollowingPlayer makes the parked companion solid")
 
 -- BillsHouseScript3 seeds hl with ..._EnterCellSeparatorDown and only swaps
 -- in ..._EnterCellSeparatorNotDown on the facing-down fallthrough, so the
@@ -87,8 +106,10 @@ moves[5].onDone()
 check(#moves == 6 and moves[6].dir == "right" and moves[6].tiles == 1,
   "the detour steps back in beside it")
 moves[6].onDone()
-check(ow.emote and ow.emote.bubble == 1 and npc.facing == "up",
-  "Pikachu looks up and wonders at the cell separator")
+-- InitializePikachuTextID -- scripts/BillsHouse.asm:100
+check(ow.emote and ow.emote.bubble == false and ow.emote.pikaPic
+      and npc.facing == "up",
+  "Pikachu looks up at the cell separator with no bubble, just the emotion")
 
 -- the other branch: any non-down facing takes the straight three-step route
 local before = #moves
@@ -105,8 +126,12 @@ check(npc.goalX == 9 and npc.goalY == 9,
   "Pikachu stays parked in Bill's House during the scene")
 
 PikachuFollower.onBillExitedMachine(yellowGame, ow)
-check(ow.emote and ow.emote.bubble == 2 and npc.facing == "left",
+check(ow.emote and ow.emote.bubble == 2 and ow.emote.frames == 60
+      and npc.facing == "left",
   "Pikachu reacts when Bill comes back out")
+ow.emote.onDone()
+check(ow.emote and ow.emote.pikaPic,
+  "and emotion 27 plays behind that bubble")
 
 -- BillsHousePikachuWatchPlayer (scripts/BillsHouse_2.asm:133-156) is the
 -- other side of BillsHouseScript2: it only runs while Pikachu still follows
@@ -185,6 +210,29 @@ PikachuFollower.onBillsHouseEnter(yellowGame, ow)
 check(not ow.pikachuBillsScene and #moves == 0,
   "a statused starter keeps following instead of walking over to Bill")
 yellowGame.save.party = nil
+
+-- of the starter-status and mood fallbacks -- scripts/BillsHouse_2.asm:88
+npc.facePlayer = function(self) self.facing = "up" end
+ow.player.facing = "down"
+
+ow.pikachuBillsScene = true
+PikachuFollower.talk(yellowGame, ow, npc)
+check(cry == 19, "talking during the confused beat picks emotion 23")
+
+ow.pikachuBillsScene = nil
+PikachuFollower.talk(yellowGame, ow, npc)
+check(cry == 26, "before Bill is met again it is emotion 32")
+
+yellowGame.save.flags.EVENT_MET_BILL_2 = true
+PikachuFollower.talk(yellowGame, ow, npc)
+check(cry == 19, "and emotion 31 once EVENT_MET_BILL_2 is set")
+
+yellowGame.save.party = { { species = "PIKACHU", hp = 12, status = "SLP" } }
+PikachuFollower.talk(yellowGame, ow, npc)
+check(cry == 19, "the map check still wins over a statused starter")
+yellowGame.save.party = nil
+yellowGame.save.flags.EVENT_MET_BILL_2 = nil
+Sound.playPikaCry = realPikaCry
 
 GameVersion.set("red")
 S.finish()

@@ -7,6 +7,7 @@ local Music = require("src.core.Music")
 local RomText = require("src.core.RomText")
 local Sound = require("src.core.Sound")
 local Strings = require("src.core.Strings")
+local Typer = require("src.ui.gen2.Typer")
 
 local GenderSelect = {}
 GenderSelect.__index = GenderSelect
@@ -59,6 +60,9 @@ function GenderSelect.new(game, opts)
   self.exit = nil
   self.text = CommonText.plain(RomText(self.data,
     "_AreYouABoyOrAreYouAGirlText", FALLBACK))
+  -- ../pokecrystal/home/print_text.asm:5, ../pokecrystal/engine/menus/init_gender.asm:30-34
+  self.typer = Typer.new(game, {})
+  self.typer:start(self.text)
   return self
 end
 
@@ -83,6 +87,7 @@ function GenderSelect:choose(index)
 end
 
 function GenderSelect:update(_dt)
+  if self.typer then self.typer:tick() end
   if self.exit then
     self.exit = self.exit - 1
     if self.exit > 0 then return end
@@ -112,7 +117,8 @@ function GenderSelect:drawPanel()
   G.setColor(1, 1, 1, 1)
   Chrome.textbox(SAY_X, SAY_Y, SAY_W, SAY_H)
   -- ../pokecrystal/home/text.asm:473
-  Chrome.printWrapped(self.text, SAY_TEXT_X, SAY_TEXT_Y, SAY_W, 2, 2)
+  Chrome.printWrapped(table.concat(Typer.text(self, {}), "\n"),
+    SAY_TEXT_X, SAY_TEXT_Y, SAY_W, 2, 2)
   Chrome.box(BOX_X, BOX_Y, BOX_W, BOX_H)
   for i, option in ipairs(GenderSelect.OPTIONS) do
     local row = TEXT_Y + (i - 1) * ROW_STEP
@@ -122,19 +128,11 @@ function GenderSelect:drawPanel()
 end
 
 function GenderSelect:draw()
-  self:drawPanel()
+  Chrome.withClip(function() self:drawPanel() end)
 end
 
 function GenderSelect:drawWidescreen(winW, winH)
-  local G = love.graphics
-  Chrome.letterbox(winW, winH, 1, 1, 1)
-  local scale = Chrome.fitScale(winW, winH)
-  local ox, oy = Chrome.fitOrigin(winW, winH, scale)
-  G.push()
-  G.translate(ox, oy)
-  G.scale(scale, scale)
-  self:drawPanel()
-  G.pop()
+  Chrome.withPanel(winW, winH, 1, 1, 1, function() self:drawPanel() end)
 end
 
 return GenderSelect

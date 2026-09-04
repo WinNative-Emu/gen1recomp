@@ -13,6 +13,7 @@
 
 local Damage = require("src.battle.Damage")
 local Logger = require("src.core.Logger")
+local Status = require("src.battle.Status")
 local StatusRegistry = require("src.battle.StatusRegistry")
 local TurnOrder = require("src.battle.TurnOrder")
 local TypeChart = require("src.battle.TypeChart")
@@ -55,9 +56,10 @@ local function changeStage(battle, who, stat, delta, fromEnemy)
     return { romText(battle.data, "_NothingHappenedText", "Nothing happened!") }
   end
   who.stages[stat] = new
-  -- effects.asm:505-506: after any stat-stage change, modified stats are
-  -- recomputed and QuarterSpeedDueToParalysis/HalveAttackDueToBurn re-run,
-  -- re-baking the burn/para penalty and ending Haze's temporary lift.
+  -- effects.asm:414-415
+  local foe = (who == battle.player) and battle.enemy or battle.player
+  Status.afterStatChange(battle, who, stat, fromEnemy and who or foe)
+  -- pokered engine/battle/effects.asm:505-506
   who.hazeStatReset = nil
   if battle.ruleset and battle.ruleset.badgeBoostReapplyBug
      and battle.kind ~= "link" and who == battle.player then
@@ -265,6 +267,7 @@ MoveEffects.primary = {
       -- Attack-halving and paralysis Speed-quartering on BOTH battlers
       -- until the next stat recompute (a stage change or switch-in).
       b.hazeStatReset = true
+      if b.statusPenaltyStacks then b.statusPenaltyStacks = {} end
       b.badgeExtraBoosts = nil
     end
     -- Gen 1 also removes the enemy's major status; if that cured sleep

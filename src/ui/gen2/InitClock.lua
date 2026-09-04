@@ -26,6 +26,7 @@
 local Chrome = require("src.ui.gen2.Chrome")
 local Clock = require("src.core.gen2.Clock")
 local Strings = require("src.core.Strings")
+local Typer = require("src.ui.gen2.Typer")
 
 local InitClock = {}
 InitClock.__index = InitClock
@@ -59,6 +60,9 @@ InitClock.TEXT = TEXT
 -- it in the plain "I overslept!" arm.  src/world/gen2/Palettes.lua carries the
 -- same three and has always had them right.
 local MORN_HOUR, DAY_HOUR, NITE_HOUR = 4, 10, 18
+
+-- ../pokecrystal/engine/rtc/timeset.asm:24
+InitClock.GROUND = { 0, 0, 0 }
 
 -- Clock.DAY_NAMES / Clock.weekdayName is the single translated home for this
 -- table: MainMenu's clock box and the Pokegear's clock card read the same
@@ -142,7 +146,16 @@ function InitClock.new(game, opts)
   -- (a \f here) on a button press like any other text box, and Oak's opening
   -- is three lines long over two of them.
   self.page = 1
+  -- ../pokecrystal/home/print_text.asm:5
+  self.typer = Typer.new(game, {
+    instant = self.autoConfirm or self.mode == "day",
+  })
+  self:startText()
   return self
+end
+
+function InitClock:startText()
+  if self.typer then self.typer:start(self:pageText()) end
 end
 
 -- The current question, split into its pages.
@@ -249,6 +262,7 @@ function InitClock:accept()
   -- A on a page that has more behind it turns the page, the way `para` does.
   if self:morePages() then
     self.page = self.page + 1
+    self:startText()
     return
   end
   self.page = 1
@@ -269,6 +283,7 @@ function InitClock:accept()
   elseif self.phase == "confirm-day" then
     self:finish()
   end
+  self:startText()
 end
 
 function InitClock:decline()
@@ -279,6 +294,7 @@ function InitClock:decline()
   elseif self.phase == "confirm-day" then
     self.phase = "day"
   end
+  self:startText()
 end
 
 function InitClock:update(_dt)
@@ -289,6 +305,13 @@ function InitClock:update(_dt)
     return
   end
   local input = self.game and self.game.input
+  -- ../pokecrystal/home/print_text.asm:5, ../pokecrystal/home/text.asm:473
+  if self.typer and not self.typer:tick() then
+    if input and (input:wasPressed("a") or input:wasPressed("b")) then
+      self.typer.shown = self.typer.total
+    end
+    return
+  end
   if not input then return end
   if self:confirming() and not self:morePages() then
     -- YesNoBox: the cursor walks two rows and B is NO.
@@ -345,8 +368,14 @@ local function arrow(tx, ty, up)
 end
 
 function InitClock:drawPanel()
-  -- ../pokecrystal/engine/rtc/timeset.asm:22
-  if self.mode ~= "day" then Chrome.clear() end
+  -- ../pokecrystal/engine/rtc/timeset.asm:22-32
+  if self.mode ~= "day" then
+    local G = love.graphics
+    local ground = InitClock.GROUND
+    G.setColor(ground[1] / 255, ground[2] / 255, ground[3] / 255, 1)
+    G.rectangle("fill", 0, 0, Chrome.SCREEN_W * 8, Chrome.SCREEN_H * 8)
+    G.setColor(1, 1, 1, 1)
+  end
   local value = self:display()
   if value then
     local bx, by, bw, bh, arrowX, tx, ty = self:pickerBox()
@@ -361,7 +390,7 @@ function InitClock:drawPanel()
   -- Gold prompt uses.
   Chrome.textbox(0, 12, 18, 4)
   -- ../pokecrystal/home/text.asm:473
-  Chrome.printWrapped(self:pageText(), 1, 14, 18, 2, 2)
+  Chrome.printWrapped(table.concat(Typer.text(self, {}), "\n"), 1, 14, 18, 2, 2)
   if self:confirming() then
     -- ../pokecrystal/home/menu.asm:418
     Chrome.box(14, 7, 6, 5)
@@ -372,19 +401,13 @@ function InitClock:drawPanel()
 end
 
 function InitClock:draw()
-  self:drawPanel()
+  Chrome.withClip(function() self:drawPanel() end)
 end
 
 function InitClock:drawWidescreen(winW, winH)
-  local G = love.graphics
-  Chrome.letterbox(winW, winH, 1, 1, 1)
-  local scale = Chrome.fitScale(winW, winH)
-  local ox, oy = Chrome.fitOrigin(winW, winH, scale)
-  G.push()
-  G.translate(ox, oy)
-  G.scale(scale, scale)
-  self:drawPanel()
-  G.pop()
+  local ground = InitClock.GROUND
+  Chrome.withPanel(winW, winH, ground[1] / 255, ground[2] / 255,
+    ground[3] / 255, function() self:drawPanel() end)
 end
 
 return InitClock

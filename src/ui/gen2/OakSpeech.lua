@@ -714,20 +714,13 @@ function OakSpeech:drawPanel()
   end
 end
 
+-- ../pokecrystal/engine/menus/intro_menu.asm:875
 function OakSpeech:draw()
-  self:drawPanel()
+  Chrome.withClip(function() self:drawPanel() end)
 end
 
 function OakSpeech:drawWidescreen(winW, winH)
-  local G = love.graphics
-  Chrome.letterbox(winW, winH, 1, 1, 1)
-  local scale = Chrome.fitScale(winW, winH)
-  local ox, oy = Chrome.fitOrigin(winW, winH, scale)
-  G.push()
-  G.translate(ox, oy)
-  G.scale(scale, scale)
-  self:drawPanel()
-  G.pop()
+  Chrome.withPanel(winW, winH, 1, 1, 1, function() self:drawPanel() end)
 end
 
 return OakSpeech

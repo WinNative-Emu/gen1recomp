@@ -299,9 +299,9 @@ end
 -- and battle music.
 function Commands.pushBattle(ctx, battle, keepNpc)
   if ctx.overworld and ctx.overworld.pushBattle then
-    -- home/text_script.asm:8
-    -- engine/battle/battle_transitions.asm:14
-    ctx.overworld:pushBattle(battle, keepNpc or ctx.npc or nil)
+    -- hSpriteIndex -- pokered home/text_script.asm:2
+    -- pokered engine/battle/battle_transitions.asm:14
+    ctx.overworld:pushBattle(battle, keepNpc or ctx.npc or ctx.scriptSprite or nil)
   else
     Logger.warn("pushBattle: no overworld:pushBattle, skipping the transition wipe")
     ctx.game.stack:push(battle)
@@ -439,10 +439,17 @@ local function bfsPath(map, sx, sy, tx, ty, entities, mover)
   return nil
 end
 
+-- hSpriteIndex (pokered home/text_script.asm:2)
+-- OAM block over the wipe (pokered engine/battle/battle_transitions.asm:14)
+local function stampSpriteIndex(ctx, npc)
+  ctx.scriptSprite = npc
+  return npc
+end
+
 function Commands.move_npc_to(ctx, objIndex, tx, ty)
   local ow = ctx.overworld
   if not ow then return end
-  local npc = ow:npcByIndex(objIndex)
+  local npc = stampSpriteIndex(ctx, ow:npcByIndex(objIndex))
   if not npc then return end
   local path = bfsPath(ow.map, npc.cellX, npc.cellY, tx, ty, ow.entities, npc)
   if not path then
@@ -469,7 +476,8 @@ end
 
 -- face an arbitrary map object (by object_event index)
 function Commands.face_object(ctx, objIndex, dir)
-  local npc = ctx.overworld and ctx.overworld:npcByIndex(objIndex)
+  local npc = stampSpriteIndex(ctx,
+    ctx.overworld and ctx.overworld:npcByIndex(objIndex))
   if npc then npc.facing = dir end
 end
 
@@ -478,7 +486,7 @@ end
 function Commands.place_npc(ctx, objIndex, x, y, facing)
   local ow = ctx.overworld
   if not ow then return end
-  local npc = ow:npcByIndex(objIndex)
+  local npc = stampSpriteIndex(ctx, ow:npcByIndex(objIndex))
   if not npc then return end
   npc.cellX, npc.cellY = x, y
   npc.px, npc.py = x * 16, y * 16
@@ -1149,7 +1157,8 @@ end
 function Commands.walk_npc(ctx, objIndex, dirs, opts)
   local ow = ctx.overworld
   if not ow then return end
-  local entity = objIndex == "player" and ow.player or ow:npcByIndex(objIndex)
+  local entity = objIndex == "player" and ow.player
+    or stampSpriteIndex(ctx, ow:npcByIndex(objIndex))
   if not entity then return end
   claimMove(ctx, entity)
   local runner = ctx.runner
