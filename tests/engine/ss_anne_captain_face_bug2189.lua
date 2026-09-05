@@ -59,23 +59,37 @@ eq(entered("red", { EVENT_RUBBED_CAPTAINS_BACK = true }), nil,
 GameVersion.set(saved)
 
 local rows = room.talk.TEXT_SSANNECAPTAINSROOM_CAPTAIN
-local rubAt, optsAt, clearAt, rubbedAt
+local rubAt, optsAt, clearAt, rubbedAt, giveAt, rearmAt, gotAt, finalClearAt
 for i, row in ipairs(rows) do
   check(row[1] ~= "play_once",
         "no bare play_once row survives -- the jingle rides the box")
   if row[1] == "show_text"
      and row[2] == "_SSAnneCaptainsRoomRubCaptainsBackText" then rubAt = i end
   if row[1] == "text_opts" then optsAt = i end
-  if row[1] == "no_npc_face_player" then clearAt = i end
+  if row[1] == "no_npc_face_player" then
+    if row[2] == true then rearmAt = i
+    elseif clearAt then finalClearAt = i
+    else clearAt = i end
+  end
   if row[1] == "set_flag" and row[2] == "EVENT_RUBBED_CAPTAINS_BACK" then
     rubbedAt = i
   end
+  if row[1] == "set_flag" and row[2] == "EVENT_GOT_HM01" then gotAt = i end
+  if row[1] == "give_item" then giveAt = i end
 end
 check(rubAt, "the rub text is still shown")
 eq(optsAt, rubAt - 1, "a text_opts row arms the rub box")
 check(rubbedAt and rubbedAt > rubAt, "EVENT_RUBBED_CAPTAINS_BACK is set after the rub")
 check(clearAt, "a no_npc_face_player row clears the bit")
 eq(rows[clearAt][2], false, "that row clears rather than sets")
+eq(clearAt, rubbedAt + 1, "the rub tail clears the bit before the gift (SSAnneCaptainsRoom.asm:64-66)")
+check(finalClearAt and gotAt and finalClearAt == gotAt + 1,
+      "the success path clears it again after EVENT_GOT_HM01 (:31-33)")
+if require("src.core.GameVersion").isYellow() then
+  eq(rearmAt, nil, "Yellow never re-arms the bit: a full bag still turns the captain")
+else
+  eq(rearmAt, giveAt - 1, "Red re-arms the bit right before GiveItem so a full bag halts with him back-turned (pokered :34-37)")
+end
 
 local auto = rows[optsAt][2].auto
 eq(auto.wait, false, "the rub box never waits for A (bare text terminator)")

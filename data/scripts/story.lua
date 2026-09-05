@@ -459,24 +459,39 @@ M.SS_ANNE_CAPTAINS_ROOM = {
   talk = {
     TEXT_SSANNECAPTAINSROOM_CAPTAIN = {
       { "check_flag", "EVENT_GOT_HM01" },                                 -- 1
-      { "jump_if_true", 12 },
+      { "jump_if_true", 0 },
       { "text_opts", captainRubOpts() },
       { "show_text", "_SSAnneCaptainsRoomRubCaptainsBackText" },
-      -- pokeyellow scripts/SSAnneCaptainsRoom.asm:64; pokered scripts/SSAnneCaptainsRoom.asm:66
+      -- pokeyellow scripts/SSAnneCaptainsRoom.asm:64-66; pokered scripts/SSAnneCaptainsRoom.asm:66-68
       { "set_flag", "EVENT_RUBBED_CAPTAINS_BACK" },
+      { "no_npc_face_player", false },
       { "show_text", "_SSAnneCaptainsRoomCaptainIFeelMuchBetterText" },
       -- give-then-print like scripts/SSAnneCaptainsRoom.asm (GiveItem
       -- fills wStringBuffer; the received text reads it)
       { "give_item", "HM_CUT", 1, false },
       { "show_text", "_SSAnneCaptainsRoomCaptainReceivedHM01Text" },
       { "set_flag", "EVENT_GOT_HM01" },
-      -- scripts/SSAnneCaptainsRoom.asm:32-33
+      -- pokeyellow scripts/SSAnneCaptainsRoom.asm:32-33
       { "no_npc_face_player", false },
       { "jump", "end" },
       { "show_text", "_SSAnneCaptainsRoomCaptainNotSickAnymoreText" },
     },
   },
 }
+
+do
+  local rows = M.SS_ANNE_CAPTAINS_ROOM.talk.TEXT_SSANNECAPTAINSROOM_CAPTAIN
+  if not require("src.core.GameVersion").isYellow() then
+    for i, row in ipairs(rows) do
+      if row[1] == "give_item" then
+        -- pokered scripts/SSAnneCaptainsRoom.asm:34-37
+        table.insert(rows, i, { "no_npc_face_player", true })
+        break
+      end
+    end
+  end
+  rows[2][2] = #rows
+end
 
 -- -------------------------------------------------------------------
 -- Pokémon Tower / Poké Flute (scripts/PokemonTower7F.asm,
