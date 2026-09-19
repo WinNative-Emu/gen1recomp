@@ -103,6 +103,79 @@ do
   check(RegionMap.isOpen() == false, "RegionMap closed cleanly")
 end
 
+print("=== [TEST 4] Start Snapping & Dungeon Guide Modal ===")
+do
+  local session = { map = "VIRIDIAN_CITY", gender = 0 }
+  RegionMap.show({ session = session })
+
+  local function press(btn)
+    local inp = {
+      wasPressed = function(_, k) return k == btn end,
+      isDown = function() return false end,
+    }
+    RegionMap.handleInput(inp)
+  end
+
+  check(RegionMap.cursorX == 4 and RegionMap.cursorY == 8, "cursor at Viridian City (4, 8)")
+
+  -- Press START: Snaps to Cancel Button (21, 13)
+  press("start")
+  check(RegionMap.cursorX == 21 and RegionMap.cursorY == 13, "START snapped to Cancel button (21, 13)")
+
+  -- Press START again: Snaps back to Player Icon (4, 8)
+  press("start")
+  check(RegionMap.cursorX == 4 and RegionMap.cursorY == 8, "START snapped back to Player Icon (4, 8)")
+
+  -- Move UP to (4, 6) (Viridian Forest dungeon)
+  press("up")
+  press("up")
+  check(RegionMap.cursorX == 4 and RegionMap.cursorY == 6, "cursor at Viridian Forest (4, 6)")
+  check(RegionMap.currentDungeonName() == "VIRIDIAN FOREST", "current dungeon is VIRIDIAN FOREST")
+
+  -- Press A on dungeon: Opens Dungeon Preview Modal
+  press("a")
+  check(RegionMap.previewDungeon == "MAPSEC_VIRIDIAN_FOREST", "Dungeon Preview Modal opened for Viridian Forest")
+
+  -- Press B on modal: Closes Dungeon Preview Modal
+  press("b")
+  check(RegionMap.previewDungeon == nil, "Dungeon Preview Modal closed on B")
+  check(RegionMap.isOpen() == true, "RegionMap still open after closing modal")
+
+  -- Press B on map: Closes RegionMap
+  press("b")
+  check(RegionMap.isOpen() == false, "RegionMap closed on B")
+end
+
+print("=== [TEST 5] Wall Town Map Metatile & Script Execution ===")
+do
+  local Interaction = require("src.core.game3.scripting.interaction_scripts")
+  local Std = require("src.core.game3.scripting.stdscripts")
+  local CollisionStd = require("src.core.game3.scripting.collision_std")
+
+  local scriptKey = Interaction.scriptFor(0x85, "up")
+  check(scriptKey == "EventScript_WallTownMap", "Behavior 0x85 (MB_TOWN_MAP) maps to EventScript_WallTownMap")
+
+  local collScript = CollisionStd.scriptFor(0x95)
+  check(collScript == "EventScript_WallTownMap", "COLL_TOWN_MAP (0x95) maps to EventScript_WallTownMap")
+
+  local script = Std.SCRIPTS.EventScript_WallTownMap
+  check(script ~= nil, "EventScript_WallTownMap is defined in Std.SCRIPTS")
+  check(script[1].op == "lockall", "WallTownMap step 1 is lockall")
+  check(script[4].op == "fadescreen", "WallTownMap step 4 is fadescreen")
+  check(script[5].op == "special" and script[5].id == Std.SPECIAL.FieldShowRegionMap, "WallTownMap step 5 is special FieldShowRegionMap")
+
+  local Adapters = require("src.core.game3.scripting.adapters")
+  local hostAdapters = Adapters.host(nil, { session = { map = "VIRIDIAN_CITY" } }, nil)
+  local mapOpened = false
+  hostAdapters.showTownMap(function()
+    mapOpened = true
+  end)
+  check(RegionMap.isOpen() == true, "adapters.showTownMap opens RegionMap")
+  RegionMap.close()
+  check(RegionMap.isOpen() == false, "RegionMap closed cleanly")
+  check(mapOpened == true, "showTownMap callback was executed")
+end
+
 if failed > 0 then
   print(string.format("\n[FAILED] %d test(s) failed", failed))
   os.exit(1)

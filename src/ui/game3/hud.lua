@@ -22,19 +22,25 @@ local function log(msg)
   print("[game3] " .. tostring(msg))
 end
 
-function Hud.busy()
-  local Battle = package.loaded["src.core.game3.battle"]
-  if Battle and Battle.isActive and Battle.isActive() then return true end
+function Hud.isMenuOpen()
   local Naming = package.loaded["src.ui.game3.naming"]
-  local Fade = package.loaded["src.ui.game3.fade"]
-  return Message.isOpen() or Choice.active or Stack.busy()
-    or (Naming and Naming.isOpen and Naming.isOpen())
-    or (Fade and Fade.isActive and Fade.isActive())
+  local EasyChat = package.loaded["src.ui.game3.easy_chat"]
+  return Stack.busy()
     or StartMenu.isOpen() or BagMenu.isOpen() or RegionMap.isOpen()
     or PartyMenu.isOpen() or SummaryMenu.isOpen() or Pokedex.isOpen()
     or OptionMenu.isOpen() or SaveMenu.isOpen()
     or TrainerCard.isOpen() or PcMenu.isOpen()
     or ShopMenu.isOpen()
+    or (Naming and Naming.isOpen and Naming.isOpen())
+    or (EasyChat and EasyChat.isOpen and EasyChat.isOpen())
+end
+
+function Hud.busy()
+  local Battle = package.loaded["src.core.game3.battle"]
+  if Battle and Battle.isActive and Battle.isActive() then return true end
+  local Fade = package.loaded["src.ui.game3.fade"]
+  return Message.isOpen() or Choice.active or Hud.isMenuOpen()
+    or (Fade and Fade.isActive and Fade.isActive())
     or Hud._waitButton ~= nil
 end
 
@@ -94,11 +100,10 @@ local function update_top_menu(input)
     return true
   end
   if RegionMap.isOpen() then
-    if input:wasPressed("left") then RegionMap.togglePage(-1)
-    elseif input:wasPressed("right") then RegionMap.togglePage(1)
-    elseif input:wasPressed("up") then RegionMap.moveCursor(-1)
-    elseif input:wasPressed("down") then RegionMap.moveCursor(1)
-    elseif input:wasPressed("b") or input:wasPressed("start") then RegionMap.close()
+    if RegionMap.handleInput then
+      RegionMap.handleInput(input)
+    else
+      if input:wasPressed("b") or input:wasPressed("start") then RegionMap.close() end
     end
     return true
   end
@@ -153,6 +158,12 @@ function Hud.update(game, _dt)
     MapNamePopup.update(dt)
   end
 
+  -- Tick location preview screen (map_preview_screen.c Task_RunMapPreviewScreenForest)
+  local okPrev, MapPreviewScreen = pcall(require, "src.ui.game3.map_preview_screen")
+  if okPrev and MapPreviewScreen and MapPreviewScreen.update then
+    MapPreviewScreen.update(dt)
+  end
+
   local input = game and game.input
   if not input then return end
 
@@ -166,20 +177,28 @@ function Hud.update(game, _dt)
     if okPop and MapNamePopup and MapNamePopup.dismiss then
       MapNamePopup.dismiss()
     end
+    if okPrev and MapPreviewScreen and MapPreviewScreen.dismiss then
+      MapPreviewScreen.dismiss()
+    end
   end
 
-  -- Active stack modal menu input takes top precedence when NOT in battle.
-  -- When battle is active, Battle.update is the sole dispatcher for battle menus.
-  if not inBattle and Stack.busy() then
-    if update_top_menu(input) then
-      return
+  -- Active stack modal menu input takes top precedence.
+  -- When battle is active, overlays like EvolutionScene or modal stack menus still receive input.
+  if Stack.busy() then
+    local top = Stack.top()
+    if (not inBattle) or (top and (top.id == "evolution_scene" or top.id == "naming" or top.id == "summary_menu")) then
+      if update_top_menu(input) then
+        return
+      end
     end
   end
 
   -- Choice in field/scripting (in battle, Choice is driven by Battle.update).
   if not inBattle and Choice.active then
-    if input:wasPressed("up") then Choice.move(-1)
-    elseif input:wasPressed("down") then Choice.move(1)
+    if input:wasPressed("up") then Choice.move(-1, 0)
+    elseif input:wasPressed("down") then Choice.move(1, 0)
+    elseif input:wasPressed("left") then Choice.move(0, -1)
+    elseif input:wasPressed("right") then Choice.move(0, 1)
     elseif input:wasPressed("a") then Choice.confirm()
     elseif input:wasPressed("b") then Choice.cancel()
     end
@@ -271,9 +290,12 @@ function Hud.openStartMenu(game, session)
       or require("src.core.game3.scripting.flags")
     local store = Space and Space.store
     if store and Flags.IDS and Flags.IDS.OPENED_START_MENU then
-      Flags.setFlag(store, nil, Flags.IDS.OPENED_START_MENU, true)
-      if Space.persistSession then
-        pcall(Space.persistSession)
+      local scene = Flags.getVar(store, nil, 0x4070)
+      if scene >= 1 then
+        Flags.setFlag(store, nil, Flags.IDS.OPENED_START_MENU, true)
+        if Space.persistSession then
+          pcall(Space.persistSession)
+        end
       end
     end
   end

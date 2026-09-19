@@ -108,8 +108,23 @@ function Gfx.drawUi()
   end
 
   -- Location change overlay / signpost popup banner (pokefirered/src/map_name_popup.c)
+  -- A running FOREST preview screen owns BG0, so it replaces the popup entirely.
+  local okPrev, MapPreviewScreen = pcall(require, "src.ui.game3.map_preview_screen")
+  local previewActive = okPrev and MapPreviewScreen and MapPreviewScreen.isActive
+    and MapPreviewScreen.isActive()
+  if previewActive then
+    local top = Stack.top()
+    local suppress = top and top.hideBelow
+    if not suppress and not Message.isOpen() then
+      tryDraw(MapPreviewScreen)
+    else
+      previewActive = false
+    end
+  end
+
   local okPop, MapNamePopup = pcall(require, "src.ui.game3.map_name_popup")
-  if okPop and MapNamePopup and MapNamePopup.isActive and MapNamePopup.isActive() then
+  if okPop and MapNamePopup and MapNamePopup.isActive and MapNamePopup.isActive()
+      and not previewActive then
     local top = Stack.top()
     local suppress = top and top.hideBelow
     if not suppress and not Message.isOpen() then
@@ -146,7 +161,12 @@ function Gfx.drawUi()
   end
 
   local okF, Fade = pcall(require, "src.ui.game3.fade")
-  if okF and Fade.draw then
+  local isNamingOpen = okN and Naming.isOpen and Naming.isOpen()
+  local okR, RegionMap = pcall(require, "src.ui.game3.region_map")
+  local isRegionMapOpen = okR and RegionMap.isOpen and RegionMap.isOpen()
+  local okEC, EasyChat = pcall(require, "src.ui.game3.easy_chat")
+  local isEasyChatOpen = okEC and EasyChat.isOpen and EasyChat.isOpen()
+  if okF and Fade.draw and not isNamingOpen and not isRegionMapOpen and not isEasyChatOpen then
     Fade.draw()
   end
 

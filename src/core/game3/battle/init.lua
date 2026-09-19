@@ -15,6 +15,7 @@ local EvoSeq = require("src.core.game3.battle.evo_seq")
 local IntroSeq = require("src.core.game3.battle.intro_seq")
 local CatchSeq = require("src.core.game3.battle.catch_seq")
 local Experience = require("src.core.game3.battle.experience")
+local Pokemon = require("src.core.game3.pokemon")
 local Evolution = require("src.core.game3.evolution")
 local LearnMove = require("src.core.game3.battle.learn_move")
 local Task = require("src.core.game3.task")
@@ -42,6 +43,21 @@ Battle._residualIndex = 1
 Battle._residualStepState = nil
 
 local D = {}
+
+-- Phases in which the level-up stat window can still be dismissed by the
+-- player.  Input routing and drawing both key off this, so the window can never
+-- linger somewhere it can no longer be dismissed (#2324).
+local STAT_WINDOW_PHASES = {
+  awarding = true,
+  evolving = true,
+  switching = true,
+  shift_prompt = true,
+  catch_nickname_prompt = true,
+}
+
+function Battle.statWindowPhase()
+  return STAT_WINDOW_PHASES[Battle._phase] == true
+end
 
 -- pokefirered/src/battle_interface.c:2168
 local function hp_bar_red(hp, maxHp)
@@ -128,22 +144,54 @@ local function foe_mon_from(foe)
   if gender ~= "M" and gender ~= "F" and gender ~= "U" then
     gender = Pokemon.gender and Pokemon.gender(species, personality) or "U"
   end
+  local ivs = foe.ivs
+  if ivs == nil then
+    local iv1 = Rng.Random()
+    local iv2 = Rng.Random()
+    ivs = {
+      hp  = iv1 % 32,
+      atk = math.floor(iv1 / 32) % 32,
+      def = math.floor(iv1 / 1024) % 32,
+      spe = iv2 % 32,
+      spa = math.floor(iv2 / 32) % 32,
+      spd = math.floor(iv2 / 1024) % 32,
+    }
+  end
+  local item = foe.item
+  if item == nil then
+    local meta = Pokemon.speciesMeta and Pokemon.speciesMeta(species)
+    if meta then
+      local common = tonumber(meta.itemCommon) or 0
+      local rare = tonumber(meta.itemRare) or 0
+      if common ~= 0 or rare ~= 0 then
+        local r = Rng.Random() % 100
+        if common ~= 0 and rare ~= 0 then
+          if r < 50 then item = common
+          elseif r < 55 then item = rare end
+        elseif common ~= 0 then
+          if r < 50 then item = common end
+        elseif rare ~= 0 then
+          if r < 5 then item = rare end
+        end
+      end
+    end
+  end
   local mon = {
     species = species,
     level = foe.level or 5,
     hp = foe.hp,
     maxHp = foe.maxHp,
-    moves = foe.moves or { 33 },
-    pp = foe.pp or { 35, 40, 0, 0 },
+    moves = foe.moves,
+    pp = foe.pp,
     status = foe.status,
     attack = foe.attack or foe.atk,
     defense = foe.defense or foe.def,
     spAtk = foe.spAtk or foe.spa,
     spDef = foe.spDef or foe.spd,
     speed = foe.speed or foe.spe,
-    item = foe.item,
+    item = item,
     gender = gender,
-    ivs = foe.ivs,
+    ivs = ivs,
     evs = foe.evs,
     personality = personality,
     nature = foe.nature or (Pokemon.natureId and Pokemon.natureId(personality)) or 0,
@@ -159,6 +207,23 @@ local function foe_mon_from(foe)
         mon.pp = pp
         mon.maxPp = maxPp
       end
+    end
+  end
+  if not mon.moves or #mon.moves == 0 then
+    mon.moves = { 33 }
+    mon.pp = { 35 }
+    mon.maxPp = { 35 }
+  end
+  if not mon.maxPp or #mon.maxPp == 0 then
+    mon.maxPp = {}
+    for i, m in ipairs(mon.moves) do
+      mon.maxPp[i] = Pokemon.movePp and Pokemon.movePp(m) or 35
+    end
+  end
+  if not mon.pp or #mon.pp == 0 then
+    mon.pp = {}
+    for i, m in ipairs(mon.moves) do
+      mon.pp[i] = mon.maxPp[i] or 35
     end
   end
   return Damage.ensureStats(mon, mon.level)
@@ -341,6 +406,8 @@ function Battle.start(opts)
     local Runtime = package.loaded["src.core.game3.runtime"]
     local session = opts.session
       or (Runtime and Runtime.getSession and Runtime.getSession())
+    st.session = session
+    st.dex = opts.dex or (session and session.dex)
     Ui.bindState(st, session)
     st.playerName = session and session.name or "PLAYER"
     -- pokefirered/src/battle_main.c:2618
@@ -410,8 +477,19 @@ function Battle.start(opts)
   st.trainerPartySize = trainerInfo and trainerInfo.partySize
   st.defeatText = opts.defeatText
   st.victoryText = opts.victoryText
+  st.wildScripted = opts.wildScripted or (opts.foe and opts.foe.wildScripted) or false
+  st.legendary = opts.legendary or (opts.foe and opts.foe.legendary) or false
+  st.safari = opts.safari or (opts.foe and opts.foe.safari) or false
+  st.roamer = opts.roamer or (opts.foe and opts.foe.roamer) or false
+  st.firstBattle = opts.firstBattle or (opts.foe and opts.foe.firstBattle) or false
+  st.oldManTutorial = opts.oldManTutorial or (opts.foe and opts.foe.oldManTutorial) or false
   -- pret gTrainers[].aiFlags / items[4] — drive battle AI scripts + item use.
   st.aiFlags = opts.aiFlags
+    or (st.safari and 0x40000000)
+    or (st.roamer and 0x20000000)
+    or (st.firstBattle and 0x80000000)
+    or (st.legendary and 7) -- CHECK_BAD_MOVE | TRY_TO_FAINT | CHECK_VIABILITY
+    or (st.wildScripted and 1) -- CHECK_BAD_MOVE
     or (trainerInfo and trainerInfo.aiFlags)
     or (st.wild and 0 or 1) -- wild: no scripts; fallback trainer: CHECK_BAD_MOVE
   st.trainerItems = opts.trainerItems
@@ -1554,6 +1632,9 @@ function D.commandUpdate(input)
     if input then party_menu_input(PartyMenu, input) end
     return
   end
+  if Ui._mode == "bag" or Ui._mode == "party" then
+    Ui._mode = "menu"
+  end
   if Ui.selectionPump() then
     local scmd = Ui.takeCommand()
     if scmd then D.onCommand(scmd) end
@@ -2018,13 +2099,113 @@ function D.run(act)
   return D.afterEach()
 end
 
+local function finish_catch_flow(catchRes, ename)
+  if catchRes and catchRes.location == "pc" then
+    Battle._phase = "catch_pc_msg"
+    local name = (catchRes.mon and (catchRes.mon.nickname ~= "" and catchRes.mon.nickname or catchRes.mon.name))
+      or ename or "POKéMON"
+    Ui.push(name .. " was transferred\nto the PC.")
+    return
+  end
+  Battle._actions = {}
+  Battle._pendingEnd = "catch"
+  Battle._phase = "ending"
+end
+
+local function start_post_catch_flow(catchRes)
+  if Battle._headless then
+    Battle._actions = {}
+    Battle._pendingEnd = "catch"
+    Battle._phase = "ending"
+    return
+  end
+
+  local enemy = Battle._st and Battle._st.enemy
+  local mon = (catchRes and catchRes.mon) or (enemy and enemy.mon)
+  local sp = (enemy and enemy.mon and (enemy.mon.species or enemy.mon.speciesId))
+    or (catchRes and catchRes.mon and (catchRes.mon.species or catchRes.mon.speciesId))
+    or (enemy and enemy.species) or 1
+  local ename = (mon and (mon.nickname ~= "" and mon.nickname or mon.name))
+    or Pokemon.name(sp) or "POKéMON"
+  local gender = (mon and (mon.gender or (mon.isFemale and 1))) or (enemy and enemy.gender) or 0
+  local personality = (mon and mon.personality) or 0
+
+  local function prompt_nickname()
+    Battle._phase = "catch_nickname_prompt"
+    -- pokefirered/src/battle_message.c:477
+    Ui.askYesNo("Give a nickname to the\ncaptured " .. ename .. "?", function(yes)
+      if yes then
+        local okN, Naming = pcall(require, "src.ui.game3.naming")
+        if okN and Naming and Naming.open then
+          Battle._phase = "catch_naming"
+          Naming.open({
+            template = "CAUGHT_MON",
+            maxLen = 10,
+            species = sp,
+            gender = gender,
+            personality = personality,
+            seed = ename,
+            -- pret naming_screen.c:1712 DrawMonTextEntryBox: gSpeciesNames[mon]
+            -- + gText_PkmnsNickname. The hand-written "YOUR POKEMON'S NICKNAME?"
+            -- was 141px wide and spilled over the frame's right edge.
+            title = Naming.monTitle(Pokemon.name(sp)),
+            onDone = function(nick)
+              if nick and nick ~= "" and nick ~= ename then
+                if mon then mon.nickname = nick end
+              end
+              finish_catch_flow(catchRes, ename)
+            end,
+          })
+          return
+        end
+      end
+      finish_catch_flow(catchRes, ename)
+    end)
+  end
+
+  if catchRes and catchRes.firstTimeCaught and sp then
+    local okP, Pokedex = pcall(require, "src.ui.game3.pokedex")
+    if okP and Pokedex and Pokedex.showRegistration then
+      Battle._phase = "pokedex_reg"
+      local Runtime = package.loaded["src.core.game3.runtime"]
+      local session = Runtime and Runtime.getSession and Runtime.getSession()
+      Pokedex.showRegistration(sp, {
+        session = session,
+        onDone = function()
+          prompt_nickname()
+        end,
+      })
+      return
+    end
+  end
+
+  prompt_nickname()
+end
+
+Battle.startPostCatchFlow = start_post_catch_flow
+Battle.finishCatchFlow = finish_catch_flow
+
 function Battle.update(dt, game)
   if not Battle._active then return end
+
+  -- A stat window whose phase can no longer dismiss it must not linger (#2324).
+  if not Battle.statWindowPhase() then
+    local StatGrowth = package.loaded["src.ui.game3.stat_growth"]
+    if StatGrowth and StatGrowth.isOpen and StatGrowth.isOpen() then
+      StatGrowth.close({ silent = true })
+    end
+  end
 
   local input = game and game.input
   local Pokedex = package.loaded["src.ui.game3.pokedex"]
   if Pokedex and Pokedex.isOpen and Pokedex.isOpen() then
     if input then Pokedex.handleInput(input) end
+    return
+  end
+
+  local Naming = package.loaded["src.ui.game3.naming"]
+  if Naming and Naming.isOpen and Naming.isOpen() then
+    if input then Naming.update(input, dt or (1 / 60)) end
     return
   end
 
@@ -2055,6 +2236,9 @@ function Battle.update(dt, game)
       if input then party_menu_input(PartyMenu, input) end
       return
     end
+    if Ui._mode == "bag" or Ui._mode == "party" then
+      Ui._mode = "menu"
+    end
     if Ui.selectionPump() then
       local scmd = Ui.takeCommand()
       if scmd then begin_turn_with(scmd) end
@@ -2077,9 +2261,14 @@ function Battle.update(dt, game)
     return
   end
 
-  -- Choice input during award / shift prompt / evolution learn-move prompts
-  if (Battle._phase == "awarding" or Battle._phase == "evolving" or Battle._phase == "switching" or Battle._phase == "shift_prompt")
+  -- Choice input during award / shift prompt / evolution learn-move prompts / catch nickname prompt / evolving
+  if Battle.statWindowPhase()
       and not Battle._auto and game and game.input then
+    local EvolutionScene = package.loaded["src.ui.game3.evolution_scene"]
+    if EvolutionScene and EvolutionScene.isOpen and EvolutionScene.isOpen() then
+      EvolutionScene.handleInput(game.input)
+      return
+    end
     local StatGrowth = package.loaded["src.ui.game3.stat_growth"]
     if StatGrowth and StatGrowth.isOpen and StatGrowth.isOpen() then
       if StatGrowth.handleInput(game.input) then
@@ -2118,12 +2307,34 @@ function Battle.update(dt, game)
   if Battle._phase == "startfx" then
     if Anim.busy() then return end
     if not Ui.pump() then return end
-    if not AnimSeq.update() then return end
-    Battle._phase = "command"
-    if Battle._auto then
-      begin_turn_with(Commands.playerAction(Battle._st, 1, 1))
-    else
-      Ui.openMenu()
+    if AnimSeq.update() then
+      Battle._phase = "command"
+      if Battle._auto then
+        begin_turn_with(Commands.playerAction(Battle._st, 1, 1))
+      else
+        Ui.openMenu()
+      end
+    end
+    return
+  end
+
+  -- Mid-turn switch-in during faint / pursuit
+  if Battle._phase == "faint_switch" then
+    local PartyMenu = package.loaded["src.ui.game3.party_menu"]
+    if PartyMenu and PartyMenu.isOpen and PartyMenu.isOpen() then
+      if input then party_menu_input(PartyMenu, input) end
+      return
+    end
+    if Anim.busy() then return end
+    if Ui.choiceActive and Ui.choiceActive() then
+      return
+    end
+    if not Ui.pump() then return end
+    if SwitchSeq.update() then
+      Battle._phase = "actions"
+      if not Battle._actions or not Battle._actions[Battle._actionI] then
+        after_actions()
+      end
     end
     return
   end
@@ -2220,28 +2431,7 @@ function Battle.update(dt, game)
       local res = CatchSeq.result()
       if res == "catch" then
         local catchRes = CatchSeq.catchResult and CatchSeq.catchResult()
-        local enemy = Battle._st and Battle._st.enemy
-        local sp = enemy and enemy.mon and (enemy.mon.species or enemy.mon.speciesId)
-        if catchRes and catchRes.firstTimeCaught and sp and not Battle._headless then
-          local okP, Pokedex = pcall(require, "src.ui.game3.pokedex")
-          if okP and Pokedex and Pokedex.showRegistration then
-            Battle._phase = "pokedex_reg"
-            local Runtime = package.loaded["src.core.game3.runtime"]
-            local session = Runtime and Runtime.getSession and Runtime.getSession()
-            Pokedex.showRegistration(sp, {
-              session = session,
-              onDone = function()
-                Battle._actions = {}
-                Battle._pendingEnd = "catch"
-                Battle._phase = "ending"
-              end,
-            })
-            return
-          end
-        end
-        Battle._actions = {}
-        Battle._pendingEnd = "catch"
-        Battle._phase = "ending"
+        start_post_catch_flow(catchRes)
       else
         Battle._phase = "actions"
         if not Battle._actions or not Battle._actions[Battle._actionI] then
@@ -2253,6 +2443,23 @@ function Battle.update(dt, game)
   end
 
   if Battle._phase == "pokedex_reg" then
+    return
+  end
+
+  if Battle._phase == "catch_nickname_prompt" then
+    if not Ui.pump() then return end
+    return
+  end
+
+  if Battle._phase == "catch_naming" then
+    return
+  end
+
+  if Battle._phase == "catch_pc_msg" then
+    if not Ui.pump() then return end
+    Battle._actions = {}
+    Battle._pendingEnd = "catch"
+    Battle._phase = "ending"
     return
   end
 
@@ -2277,6 +2484,13 @@ function Battle.update(dt, game)
 
   -- Post-battle evolution (EVO_LEVEL)
   if Battle._phase == "evolving" then
+    local EvolutionScene = package.loaded["src.ui.game3.evolution_scene"]
+    if EvolutionScene and EvolutionScene.isOpen and EvolutionScene.isOpen() then
+      if not Battle._auto and game and game.input then
+        EvolutionScene.handleInput(game.input)
+      end
+      return
+    end
     if Ui.choiceActive and Ui.choiceActive() then return end
     if not Ui.pump() then return end
     local done = EvoSeq.update()

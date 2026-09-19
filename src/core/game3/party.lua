@@ -161,20 +161,18 @@ function Party.giveMon(session, species, level, nickname)
   local Pokemon = require("src.core.game3.pokemon")
   if not Pokemon._names then pcall(Pokemon.install, nil) end
 
-  local personality
-  if love and love.math and love.math.random then
-    personality = love.math.random(0, 0xFFFFFFFF)
-  else
-    personality = math.floor(math.random() * 0x100000000) % 0x100000000
-  end
-  local ivs = {}
-  for _, k in ipairs({ "hp", "atk", "def", "spe", "spa", "spd" }) do
-    if love and love.math and love.math.random then
-      ivs[k] = love.math.random(0, 31)
-    else
-      ivs[k] = math.random(0, 31)
-    end
-  end
+  local Rng = require("src.core.game3.rng")
+  local personality = Rng.Random32()
+  local iv1 = Rng.Random()
+  local iv2 = Rng.Random()
+  local ivs = {
+    hp  = iv1 % 32,
+    atk = math.floor(iv1 / 32) % 32,
+    def = math.floor(iv1 / 1024) % 32,
+    spe = iv2 % 32,
+    spa = math.floor(iv2 / 32) % 32,
+    spd = math.floor(iv2 / 1024) % 32,
+  }
 
   local meta = Pokemon.speciesMeta and Pokemon.speciesMeta(species)
   local friendship = (meta and meta.friendship) or 70
@@ -185,6 +183,11 @@ function Party.giveMon(session, species, level, nickname)
   local moves, pp, maxPp = {}, {}, {}
   if Pokemon.movesAtLevel then
     moves, pp, maxPp = Pokemon.movesAtLevel(species, level)
+  end
+  if not moves or #moves == 0 then
+    moves = { 33 }
+    pp = { 35 }
+    maxPp = { 35 }
   end
 
   local SummaryData = require("src.core.game3.summary_data")
@@ -224,6 +227,24 @@ function Party.giveMon(session, species, level, nickname)
   session.dex.seen[species] = true
   session.dex.owned[species] = true
   return true
+end
+
+--- Give an egg for script giveegg.
+function Party.giveEgg(session, species)
+  if not session or not session.party then return false end
+  if #session.party >= 6 then return false end
+  species = tonumber(species) or 1
+  local Pokemon = require("src.core.game3.pokemon")
+  local ok = Party.giveMon(session, species, 5, "EGG")
+  if ok then
+    local egg = session.party[#session.party]
+    if egg then
+      egg.isEgg = true
+      egg.name = "EGG"
+      egg.nickname = "EGG"
+    end
+  end
+  return ok
 end
 
 --- Prove DVs/Stat Exp bit-identical between two opaque snapshots.

@@ -267,6 +267,13 @@ function BattleBridge.start(mod, game, foe, opts)
 
   local startOpts = {
     wild = opts.wild,
+    wildScripted = opts.wildScripted or (foe and foe.wildScripted),
+    legendary = opts.legendary or (foe and foe.legendary),
+    safari = opts.safari or (foe and foe.safari),
+    roamer = opts.roamer or (foe and foe.roamer),
+    firstBattle = opts.firstBattle or (foe and foe.firstBattle),
+    oldManTutorial = opts.oldManTutorial or (foe and foe.oldManTutorial),
+    aiFlags = opts.aiFlags or (foe and foe.aiFlags),
     double = isDouble,
     playerParty = battleParty,
     foe = foe,
@@ -392,6 +399,13 @@ end
 function BattleBridge.startWild(mod, game, encounter, opts)
   opts = opts or {}
   opts.wild = true
+  -- pret battle_setup.c resets the encounter cooldown when a battle starts, so
+  -- the grace period re-arms after every wild battle -- including ones nothing
+  -- stepped into (scripted battles, fishing).
+  local okE, Encounters = pcall(require, "src.core.game3.encounters")
+  if okE and Encounters and Encounters.resetRateModifiers then
+    Encounters.resetRateModifiers()
+  end
   return BattleBridge.start(mod, game, encounter, opts)
 end
 

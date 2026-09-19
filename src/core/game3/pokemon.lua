@@ -22,6 +22,7 @@ Pokemon._abilityNames = nil
 Pokemon._speciesMeta = nil
 Pokemon._moveNames = nil
 Pokemon._learnsets = nil
+Pokemon._eggMoves = nil
 Pokemon._evolutions = nil
 Pokemon._tmhm = nil
 Pokemon._dex = nil
@@ -124,6 +125,7 @@ function Pokemon.install(cache)
   Pokemon._speciesMeta = nil
   Pokemon._moveNames = nil
   Pokemon._learnsets = nil
+  Pokemon._eggMoves = nil
   Pokemon._evolutions = nil
   Pokemon._tmhm = nil
   Pokemon._dex = nil
@@ -144,6 +146,7 @@ function Pokemon.install(cache)
   Pokemon._speciesMeta = load_lua(c, root .. "/meta.lua")
   Pokemon._moveNames = load_lua(c, root .. "/move_names.lua")
   Pokemon._learnsets = load_lua(c, root .. "/learnsets.lua")
+  Pokemon._eggMoves = load_lua(c, root .. "/egg_moves.lua")
   Pokemon._evolutions = load_lua(c, root .. "/evolutions.lua")
   Pokemon._tmhm = load_lua(c, root .. "/tmhm.lua")
   Pokemon._dex = load_lua(c, root .. "/dex.lua")
@@ -203,6 +206,7 @@ function Pokemon.invalidate()
   Pokemon._speciesMeta = nil
   Pokemon._moveNames = nil
   Pokemon._learnsets = nil
+  Pokemon._eggMoves = nil
   Pokemon._evolutions = nil
   Pokemon._tmhm = nil
   Pokemon._dex = nil
@@ -498,6 +502,19 @@ function Pokemon.learnset(species)
   return (Pokemon._learnsets and Pokemon._learnsets[species]) or {}
 end
 
+--- Egg move ids for a species (FRLG gEggMoves), or nil when it has none.
+--- Mirrors Pokemon.learnset's species coercion so mods can pass either form.
+function Pokemon.eggMoves(species)
+  if type(species) == "table" then species = Pokemon.speciesOf(species) end
+  if type(species) == "string" then species = Pokemon.speciesFromName(species) or tonumber(species) end
+  species = tonumber(species)
+  if not species then return nil end
+  if not Pokemon._eggMoves then Pokemon.install(Pokemon._cache) end
+  local list = Pokemon._eggMoves and Pokemon._eggMoves[species]
+  if type(list) ~= "table" or #list == 0 then return nil end
+  return list
+end
+
 function Pokemon.evolutions(species)
   if type(species) == "table" then species = Pokemon.speciesOf(species) end
   if type(species) == "string" then species = Pokemon.speciesFromName(species) or tonumber(species) end
@@ -533,40 +550,52 @@ function Pokemon.movePp(moveId)
 end
 Pokemon.moveMaxPp = Pokemon.movePp
 
---- FRLG GiveBoxMonInitialMoveset: learn all ≤ level; if full, drop first.
+--- FRLG GiveBoxMonInitialMoveset: learn all ≤ level; if full, drop first; avoid duplicates.
 function Pokemon.movesAtLevel(species, level)
   if type(species) == "table" then species = Pokemon.speciesOf(species) end
   if type(species) == "string" then species = Pokemon.speciesFromName(species) or tonumber(species) end
   species = tonumber(species)
   level = tonumber(level) or 1
   local set = Pokemon.learnset(species)
-  local pool = {}
-  for _, e in ipairs(set) do
-    local lv = e[1] or e.level or 0
-    local mv = tonumber(e[2] or e.move) or 0
-    if lv <= level and mv > 0 then
-      pool[#pool + 1] = mv
-    end
-  end
   local moves = {}
   local pp = {}
   local maxPp = {}
-  for _, m in ipairs(pool) do
+
+  local function giveMove(moveId)
+    if not moveId or moveId <= 0 then return end
+    for i = 1, #moves do
+      if moves[i] == moveId then
+        return -- already knows this move (pret GiveMoveToBoxMon)
+      end
+    end
+    local mpp = Pokemon.movePp(moveId)
     if #moves < 4 then
-      moves[#moves + 1] = m
-      local mpp = Pokemon.movePp(m)
+      moves[#moves + 1] = moveId
       pp[#pp + 1] = mpp
       maxPp[#maxPp + 1] = mpp
     else
       table.remove(moves, 1)
       table.remove(pp, 1)
       table.remove(maxPp, 1)
-      moves[4] = m
-      local mpp = Pokemon.movePp(m)
+      moves[4] = moveId
       pp[4] = mpp
       maxPp[4] = mpp
     end
   end
+
+  for _, e in ipairs(set) do
+    local lv = e[1] or e.level or 0
+    local mv = tonumber(e[2] or e.move) or 0
+    if lv > level then
+      break
+    end
+    giveMove(mv)
+  end
+
+  if #moves == 0 then
+    giveMove(33) -- fallback to Tackle if learnset empty
+  end
+
   return moves, pp, maxPp
 end
 

@@ -24,6 +24,15 @@ local BallOpen = require("src.core.game3.battle.ball_open")
 
 local Ui = {}
 
+-- The stat window may only be on screen while the battle is in a phase that can
+-- still dismiss it; init.lua owns the list (#2324).  Resolved lazily because
+-- init.lua requires this module.
+local function stat_window_phase()
+  local Battle = package.loaded["src.core.game3.battle.init"]
+  if not (Battle and Battle.statWindowPhase) then return true end
+  return Battle.statWindowPhase()
+end
+
 Ui._queue = {}
 Ui._showing = false
 Ui._headless = false
@@ -324,6 +333,14 @@ function Ui.waitingForCommand()
   return Ui._mode == "menu" or Ui._mode == "moves" or Ui._mode == "bag" or Ui._mode == "target"
 end
 
+local function restore_action_menu()
+  Ui._mode = "menu"
+  Ui._linger = false
+  Ui._timed = nil
+  Ui._showing = false
+  if Message and Message.open then Message.open = false end
+end
+
 local function open_battle_bag()
   local BagMenu = require("src.ui.game3.bag_menu")
   local Runtime = package.loaded["src.core.game3.runtime"]
@@ -332,7 +349,7 @@ local function open_battle_bag()
   local bag = session and session.bag
   if not bag then
     Ui.push("The BAG is empty.")
-    Ui._mode = "menu"
+    restore_action_menu()
     return
   end
   Ui._mode = "bag"
@@ -341,7 +358,7 @@ local function open_battle_bag()
     battle = true,
     onBattleUse = function(itemId, partySlot)
       if itemId == nil then
-        Ui._mode = "menu"
+        restore_action_menu()
         return
       end
       Ui._pendingCommand = {
@@ -354,7 +371,9 @@ local function open_battle_bag()
       Ui._mode = "none"
     end,
     onClose = function()
-      -- close already notifies onBattleUse(nil) when cancelled
+      if Ui._mode == "bag" then
+        restore_action_menu()
+      end
     end,
   })
 end
@@ -422,7 +441,7 @@ local function open_battle_party_double()
   Ui.openPartyMenu(Ui._st, id, {
     onSelect = function(slot)
       if slot == nil then
-        Ui._mode = "menu"
+        restore_action_menu()
         return
       end
       Ui._pendingCommand = {
@@ -434,7 +453,9 @@ local function open_battle_party_double()
       Ui._mode = "none"
     end,
     onClose = function()
-      Ui._mode = "menu"
+      if Ui._mode == "party" then
+        restore_action_menu()
+      end
     end,
   })
 end
@@ -461,7 +482,7 @@ local function open_battle_party()
     validate = function(slot) return Commands.switchError(Ui._st, slot) end,
     onSelect = function(slot)
       if slot == nil or slot == activeSlot then
-        Ui._mode = "menu"
+        restore_action_menu()
         return
       end
       Ui._pendingCommand = {
@@ -472,7 +493,9 @@ local function open_battle_party()
       Ui._mode = "none"
     end,
     onClose = function()
-      Ui._mode = "menu"
+      if Ui._mode == "party" then
+        restore_action_menu()
+      end
     end,
   })
 end
@@ -2018,7 +2041,8 @@ function Ui.draw(w, h)
   end
 
   local StatGrowth = package.loaded["src.ui.game3.stat_growth"]
-  if StatGrowth and StatGrowth.isOpen and StatGrowth.isOpen() and StatGrowth.draw then
+  if StatGrowth and StatGrowth.isOpen and StatGrowth.isOpen() and StatGrowth.draw
+      and stat_window_phase() then
     StatGrowth.draw()
   end
 
