@@ -493,29 +493,34 @@ local function dispatch(vm, row)
     end
     return false
   elseif op == "specialvar" then
-    if Natives.special(ctx, row[2], a) then
+    -- pokefirered/src/scrcmd.c:109
+    local yield, value, known = Natives.special(ctx, row[2], a)
+    if value == nil and not known then value = 0 end
+    if value ~= nil then
+      Flags.setVar(store, ctx, row[1], value)
+    end
+    if yield then
       return true
     end
     return false
   elseif op == "waitstate" then
-    -- Host specials / warps that set nativePoll or warpPending: wait out; else no-op.
-    if ctx.warpPending then
+    -- pokefirered/src/scrcmd.c:127
+    local task = ctx.stateWait
+    ctx.stateWait = nil
+    local inner = (ctx.mode == "native") and ctx.nativePoll or nil
+    if task or ctx.warpPending or inner then
       ctx.mode = "native"
       ctx.status = "waiting"
       ctx.nativePoll = function()
-        -- Drain Gen2 MAPSETUP fade (adapters.warp defers done until mapSetup clears).
-        if a.pollWarp then a.pollWarp() end
-        return not ctx.warpPending
+        if ctx.warpPending then
+          -- Drain Gen2 MAPSETUP fade (adapters.warp defers done until mapSetup clears).
+          if a.pollWarp then a.pollWarp() end
+          if ctx.warpPending then return false end
+        end
+        if task and not task() then return false end
+        if inner and not inner() then return false end
+        return true
       end
-      if ctx.nativePoll() then
-        ctx.mode = "bytecode"
-        ctx.status = "running"
-        ctx.nativePoll = nil
-        return false
-      end
-      return true
-    end
-    if ctx.mode == "native" and ctx.nativePoll then
       if ctx.nativePoll() then
         ctx.mode = "bytecode"
         ctx.status = "running"
@@ -772,7 +777,7 @@ local function dispatch(vm, row)
       return true
     end
     if op == "setmetatile" and a.setMetatile then
-      a.setMetatile(row[1], row[2], row[3], row[4])
+      a.setMetatile(row[1], row[2], row[3], (tonumber(row[4]) or 0) ~= 0)
     elseif op == "dofieldeffect" and a.doFieldEffect then
       a.doFieldEffect(row[1])
     end
@@ -852,6 +857,8 @@ local function dispatch(vm, row)
     local battleType = tonumber(row.type) or 0
     local rivalFlags = tonumber(row.flags or row.localId) or 0
     local earlyRival = (battleType == 9) -- TRAINER_BATTLE_EARLY_RIVAL
+    -- pokefirered/src/battle_setup.c:899
+    local tutorialBattle = earlyRival and (rivalFlags % 4) ~= 0
     local eventScript = row.eventScript
     local trainerFlag = Flags.trainerFlagId(trainerId)
     local VsSeeker = require("src.core.game3.vs_seeker")
@@ -996,6 +1003,7 @@ local function dispatch(vm, row)
           trainerId = opponentA,
           earlyRival = earlyRival,
           rivalFlags = rivalFlags,
+          firstBattle = tutorialBattle,
           noWhiteout = earlyRival and (rivalFlags % 2 == 1),
           defeatText = defeatText,
           victoryText = victoryText,

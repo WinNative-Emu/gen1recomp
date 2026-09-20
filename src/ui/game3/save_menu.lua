@@ -9,6 +9,7 @@ local Window = require("src.ui.game3.window")
 local Chrome = require("src.ui.game3.chrome")
 local FrlgFont = require("src.ui.game3.frlg_font")
 local MapSectionsExtract = require("src.import.gba.map_sections_extract")
+local Strings = require("src.core.Strings")
 
 local SaveMenu = {}
 
@@ -67,7 +68,7 @@ function SaveMenu.show(opts)
   SaveMenu._game = opts.game
   SaveMenu._onClose = opts.onClose
   Stack.push("save", SaveMenu, { hideBelow = true })
-  se(6) -- SE_WIN_OPEN
+  -- pokefirered/src/start_menu.c:605
 end
 
 function SaveMenu.close()
@@ -75,7 +76,6 @@ function SaveMenu.close()
   Stack.pop("save")
   local cb = SaveMenu._onClose
   SaveMenu._onClose = nil
-  se(9) -- SE_EXIT
   if cb then cb() end
 end
 
@@ -109,7 +109,7 @@ function SaveMenu.confirm()
   if SaveMenu._phase == "saved" then
     SaveMenu.close()
     local StartMenu = require("src.ui.game3.start_menu")
-    if StartMenu.isOpen() then StartMenu.close() end
+    if StartMenu.isOpen() then StartMenu.close(true) end -- pokefirered/src/start_menu.c:583
     return
   end
   if SaveMenu._phase == "saving" then
@@ -126,6 +126,7 @@ function SaveMenu.confirm()
       do_save()
     end
   else -- NO
+    se(5) -- pokefirered/src/menu.c:376
     SaveMenu.close()
   end
 end
@@ -168,18 +169,36 @@ function SaveMenu.locationName(session)
   return tostring(mapId or "PALLET TOWN"):gsub("^FR_", ""):gsub("^SEVII_", ""):gsub("_", " "):upper()
 end
 
+-- pret prints every stat value at one x (56 px into the window, labels at 4).
+-- A translated label can be wider than the English one the column was placed
+-- for ("DUREE JEU", "SPIELZEIT"), so push the column past the widest label,
+-- keeping the English gap.
+local VALUE_X = 56
+local VALUE_GAP = VALUE_X - 4 - 42 -- 42 = width of "POKéDEX", the widest US label
+
+function SaveMenu.valueX(labels)
+  local x = VALUE_X
+  for _, label in ipairs(labels) do
+    x = math.max(x, 4 + FrlgFont.measure(label) + VALUE_GAP)
+  end
+  return x
+end
+
 function SaveMenu.draw()
   if not SaveMenu.open then return end
   local session = SaveMenu._session or {}
   local name = tostring(session.name or session.playerName or "RED")
-  local map = SaveMenu.locationName(session)
+  local map = Strings(SaveMenu.locationName(session))
+  local labels = { Strings("PLAYER"), Strings("BADGES"), Strings("POKéDEX"), Strings("TIME") }
+  local valueX = 1 * 8 + SaveMenu.valueX(labels)
   local badges = count_badges(session)
   local caught = count_caught(session.dex) or tonumber(session.caughtMonsCount) or 0
   local hours = tonumber(session.playTimeHours or session.hours) or 0
   local mins = tonumber(session.playTimeMinutes or session.minutes) or 0
 
   -- 1. Top-Left Save Stats Box (pret sSaveStatsWindowTemplate at (1, 1, 14, 9))
-  Window.stdFrame(Window.template(1, 1, 14, 9))
+  -- pokefirered/src/start_menu.c:971
+  Window.fixedStdFrame(Window.template(1, 1, 14, 9))
   -- Location Header.  pret start_menu.c PrintSaveStats centres it in the
   -- 14-tile window: x = (112 - GetStringWidth(FONT_NORMAL, text)) / 2.
   local headerW = 14 * 8
@@ -187,27 +206,27 @@ function SaveMenu.draw()
   local mapX = 1 * 8 + math.max(0, math.floor((headerW - mapW) / 2))
   FrlgFont.draw(map, mapX, 1 * 8 + 2, { maxWidth = headerW, colors = FrlgFont.COLOR.NORMAL })
   -- PLAYER
-  FrlgFont.draw("PLAYER", 1 * 8 + 4, 1 * 8 + 18, { colors = FrlgFont.COLOR.NORMAL })
-  FrlgFont.draw(name, 1 * 8 + 56, 1 * 8 + 18, { colors = FrlgFont.COLOR.NORMAL })
+  FrlgFont.draw(labels[1], 1 * 8 + 4, 1 * 8 + 18, { colors = FrlgFont.COLOR.NORMAL })
+  FrlgFont.draw(name, valueX, 1 * 8 + 18, { colors = FrlgFont.COLOR.NORMAL })
   -- BADGES
-  FrlgFont.draw("BADGES", 1 * 8 + 4, 1 * 8 + 32, { colors = FrlgFont.COLOR.NORMAL })
-  FrlgFont.draw(tostring(badges), 1 * 8 + 56, 1 * 8 + 32, { colors = FrlgFont.COLOR.NORMAL })
+  FrlgFont.draw(labels[2], 1 * 8 + 4, 1 * 8 + 32, { colors = FrlgFont.COLOR.NORMAL })
+  FrlgFont.draw(tostring(badges), valueX, 1 * 8 + 32, { colors = FrlgFont.COLOR.NORMAL })
   -- POKéDEX
-  FrlgFont.draw("POKéDEX", 1 * 8 + 4, 1 * 8 + 46, { colors = FrlgFont.COLOR.NORMAL })
-  FrlgFont.draw(tostring(caught), 1 * 8 + 56, 1 * 8 + 46, { colors = FrlgFont.COLOR.NORMAL })
+  FrlgFont.draw(labels[3], 1 * 8 + 4, 1 * 8 + 46, { colors = FrlgFont.COLOR.NORMAL })
+  FrlgFont.draw(tostring(caught), valueX, 1 * 8 + 46, { colors = FrlgFont.COLOR.NORMAL })
   -- TIME
-  FrlgFont.draw("TIME", 1 * 8 + 4, 1 * 8 + 60, { colors = FrlgFont.COLOR.NORMAL })
-  FrlgFont.draw(string.format("%d:%02d", hours, mins), 1 * 8 + 56, 1 * 8 + 60, { colors = FrlgFont.COLOR.NORMAL })
+  FrlgFont.draw(labels[4], 1 * 8 + 4, 1 * 8 + 60, { colors = FrlgFont.COLOR.NORMAL })
+  FrlgFont.draw(string.format("%d:%02d", hours, mins), valueX, 1 * 8 + 60, { colors = FrlgFont.COLOR.NORMAL })
 
   -- 2. Bottom Dialogue Window (pret WindowFunc_DrawDialogueFrame at (2, 15, 26, 4))
   Chrome.dialogueFrame()
-  local msg = "Would you like to SAVE\nthe game?"
+  local msg = Strings("Would you like to SAVE\nthe game?")
   if SaveMenu._phase == "overwrite" then
-    msg = "There is already a saved file.\nIs it okay to overwrite it?"
+    msg = Strings("There is already a saved file.\nIs it okay to overwrite it?")
   elseif SaveMenu._phase == "saving" then
-    msg = "SAVING…\nDON'T TURN OFF THE POWER."
+    msg = Strings("SAVING…\nDON'T TURN OFF THE POWER.")
   elseif SaveMenu._phase == "saved" then
-    msg = name .. " saved\nthe game."
+    msg = Strings("%s saved\nthe game.", name)
   end
   FrlgFont.draw(msg, 2 * 8 + 4, 15 * 8 + 2, { linePitch = 15, colors = FrlgFont.COLOR.NORMAL })
 
@@ -222,8 +241,8 @@ function SaveMenu.draw()
     local rowY2 = popY * 8 + 18
     local curY = (SaveMenu.cursor == 1) and rowY1 or rowY2
     Window.cursorPx(popX * 8 + 1, curY)
-    FrlgFont.draw("YES", popX * 8 + 9, rowY1, { colors = FrlgFont.COLOR.NORMAL })
-    FrlgFont.draw("NO", popX * 8 + 9, rowY2, { colors = FrlgFont.COLOR.NORMAL })
+    FrlgFont.draw(Strings("YES"), popX * 8 + 9, rowY1, { colors = FrlgFont.COLOR.NORMAL })
+    FrlgFont.draw(Strings("NO"), popX * 8 + 9, rowY2, { colors = FrlgFont.COLOR.NORMAL })
   end
 end
 

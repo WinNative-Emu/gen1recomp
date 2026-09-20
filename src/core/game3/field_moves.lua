@@ -7,6 +7,7 @@
 --   2. Overworld A-Press Collision / Object Interaction (tryOW / EventScript_*)
 
 local Flags = require("src.core.game3.scripting.flags")
+local Strings = require("src.core.Strings")
 
 local FieldMoves = {}
 
@@ -50,10 +51,17 @@ FieldMoves.BADGE_FLAGS = {
 }
 
 -- System flags
+-- include/constants/flags.h:1330
 FieldMoves.SYS_FLAGS = {
-  FLASH_ACTIVE  = 0x803, -- FLAG_SYS_FLASH_ACTIVE
-  USE_STRENGTH  = 0x804, -- FLAG_SYS_USE_STRENGTH
-  USE_SURF      = 0x805, -- FLAG_SYS_USE_SURF
+  WHITE_FLUTE_ACTIVE = 0x803,
+  BLACK_FLUTE_ACTIVE = 0x804,
+  USE_STRENGTH  = 0x805,
+  FLASH_ACTIVE  = 0x806,
+}
+
+-- src/event_data.c:49
+FieldMoves.TEMP_SYS_FLAGS = {
+  0x803, 0x804, 0x805,
 }
 
 -- Graphics IDs for interactable field objects
@@ -86,12 +94,18 @@ FieldMoves.CUT_GRASS_METATILES = {
 }
 
 -- Metatile terrain / collision behaviors
+-- include/constants/metatile_behaviors.h:14
 FieldMoves.BEHAVIORS = {
   GRASS      = { [0x01] = true, [0x02] = true, [0x03] = true },
-  WATER      = { [0x10] = true, [0x11] = true, [0x12] = true, [0x13] = true, [0x14] = true, [0x15] = true },
-  WATERFALL  = { [0x13] = true, [0x21] = true },
-  DEEP_WATER = { [0x14] = true, [0x22] = true },
+  WATER      = { [0x10] = true, [0x11] = true, [0x12] = true, [0x13] = true, [0x15] = true },
+  WATERFALL  = { [0x13] = true },
+  DEEP_WATER = { [0x12] = true },
 }
+
+-- src/metatile_behavior.c:594
+function FieldMoves.isWaterfallBehavior(beh)
+  return beh ~= nil and FieldMoves.BEHAVIORS.WATERFALL[beh] == true
+end
 
 -- Map Types (matching pret include/constants/map_types.h)
 FieldMoves.MAP_TYPES = {
@@ -106,61 +120,68 @@ FieldMoves.MAP_TYPES = {
   SECRET_BASE = 9,
 }
 
--- Standard Text Strings
-FieldMoves.TEXT = {
-  CANT_USE_HERE         = "Can't use that here.",
-  BADGE_REQUIRED        = "Sorry! A new BADGE is required.",
-  NOT_ENOUGH_HP         = "Not enough HP!",
-  CANT_BE_USED_ON_PKMN  = "It won't have any effect.",
+-- Standard Text Strings.  Read through FieldMoves.TEXT, which translates each
+-- one when it is read: this table exists before any translation catalog.
+local TEXT_SOURCE = {
+  CANT_USE_HERE         = Strings.source("Can't use that here."),
+  BADGE_REQUIRED        = Strings.source("Sorry! A new BADGE is required."),
+  NOT_ENOUGH_HP         = Strings.source("Not enough HP!"),
+  CANT_BE_USED_ON_PKMN  = Strings.source("It won't have any effect."),
 
   -- Cut
-  ASK_CUT_TREE          = "This tree looks like it can be CUT\ndown!\nWould you like to CUT it?",
-  TREE_CAN_BE_CUT       = "This tree looks like it can be CUT\ndown!",
-  USED_CUT              = "{STR_VAR_1} used CUT!",
-  CUT_NOTHING           = "There's nothing to CUT here.",
+  ASK_CUT_TREE          = Strings.source("This tree looks like it can be CUT\ndown!\nWould you like to CUT it?"),
+  TREE_CAN_BE_CUT       = Strings.source("This tree looks like it can be CUT\ndown!"),
+  USED_CUT              = Strings.source("{STR_VAR_1} used CUT!"),
+  CUT_NOTHING           = Strings.source("There's nothing to CUT here."),
 
   -- Rock Smash
-  ASK_ROCK_SMASH        = "This rock appears to be breakable.\nWould you like to use ROCK SMASH?",
-  MON_MAY_SMASH_ROCK    = "It's a rugged rock, but a POKéMON\nmay be able to smash it.",
-  USED_ROCK_SMASH       = "{STR_VAR_1} used ROCK SMASH!",
+  ASK_ROCK_SMASH        = Strings.source("This rock appears to be breakable.\nWould you like to use ROCK SMASH?"),
+  MON_MAY_SMASH_ROCK    = Strings.source("It's a rugged rock, but a POKéMON\nmay be able to smash it."),
+  USED_ROCK_SMASH       = Strings.source("{STR_VAR_1} used ROCK SMASH!"),
 
   -- Strength
-  ASK_STRENGTH          = "It's a big boulder, but a POKéMON\nmay be able to push it aside.\nWould you like to use STRENGTH?",
-  MON_MAY_PUSH_BOULDER  = "It's a big boulder, but a POKéMON\nmay be able to push it aside.",
-  USED_STRENGTH         = "{STR_VAR_1} used STRENGTH!\n{STR_VAR_1}'s STRENGTH made it\npossible to move boulders around!",
-  STRENGTH_ACTIVE       = "STRENGTH made it possible to move\nboulders around.",
+  ASK_STRENGTH          = Strings.source("It's a big boulder, but a POKéMON\nmay be able to push it aside.\nWould you like to use STRENGTH?"),
+  MON_MAY_PUSH_BOULDER  = Strings.source("It's a big boulder, but a POKéMON\nmay be able to push it aside."),
+  USED_STRENGTH         = Strings.source("{STR_VAR_1} used STRENGTH!\n{STR_VAR_1}'s STRENGTH made it\npossible to move boulders around!"),
+  STRENGTH_ACTIVE       = Strings.source("STRENGTH made it possible to move\nboulders around."),
 
   -- Surf
-  ASK_SURF              = "The water is dyed a deep blue…\nWould you like to SURF?",
-  USED_SURF             = "{STR_VAR_1} used SURF!",
-  CANT_SURF_CURRENT     = "The current is much too fast!\nSURF can't be used here…",
-  ALREADY_SURFING       = "You're already SURFING.",
+  ASK_SURF              = Strings.source("The water is dyed a deep blue…\nWould you like to SURF?"),
+  USED_SURF             = Strings.source("{STR_VAR_1} used SURF!"),
+  CANT_SURF_CURRENT     = Strings.source("The current is much too fast!\nSURF can't be used here…"),
+  ALREADY_SURFING       = Strings.source("You're already SURFING."),
 
   -- Flash
-  USED_FLASH            = "{STR_VAR_1} used FLASH!\nA blinding light illuminates\nthe area!",
+  USED_FLASH            = Strings.source("{STR_VAR_1} used FLASH!\nA blinding light illuminates\nthe area!"),
 
   -- Waterfall
-  ASK_WATERFALL         = "It's a large waterfall.\nWould you like to use WATERFALL?",
-  USED_WATERFALL        = "{STR_VAR_1} used WATERFALL.",
-  CANT_WATERFALL        = "A wall of water is crashing down\nwith a mighty roar.",
+  ASK_WATERFALL         = Strings.source("It's a large waterfall.\nWould you like to use WATERFALL?"),
+  USED_WATERFALL        = Strings.source("{STR_VAR_1} used WATERFALL."),
+  CANT_WATERFALL        = Strings.source("A wall of water is crashing down\nwith a mighty roar."),
 
   -- Dive
-  ASK_DIVE              = "The sea is deep here.\nWould you like to use DIVE?",
-  ASK_SURFACE           = "Light is filtering down from above.\nWould you like to use DIVE?",
-  USED_DIVE             = "{STR_VAR_1} used DIVE.",
-  CANT_DIVE             = "The sea is deep here. A POKéMON\nmay be able to go underwater.",
-  CANT_SURFACE          = "Light is filtering down from above.\nA POKéMON may be able to surface.",
-  DIVE_OBSTACLE         = "There is an obstacle above.\nDIVE can't be used here.",
+  ASK_DIVE              = Strings.source("The sea is deep here.\nWould you like to use DIVE?"),
+  ASK_SURFACE           = Strings.source("Light is filtering down from above.\nWould you like to use DIVE?"),
+  USED_DIVE             = Strings.source("{STR_VAR_1} used DIVE."),
+  CANT_DIVE             = Strings.source("The sea is deep here. A POKéMON\nmay be able to go underwater."),
+  CANT_SURFACE          = Strings.source("Light is filtering down from above.\nA POKéMON may be able to surface."),
+  DIVE_OBSTACLE         = Strings.source("There is an obstacle above.\nDIVE can't be used here."),
 
   -- Teleport & Dig
-  TELEPORT_RETURN       = "Return to the last POKéMON CENTER.",
-  USED_DIG              = "{STR_VAR_1} used DIG!",
-  USED_ESCAPE_ROPE      = "{PLAYER} used an ESCAPE ROPE.",
+  TELEPORT_RETURN       = Strings.source("Return to the last POKéMON CENTER."),
+  USED_DIG              = Strings.source("{STR_VAR_1} used DIG!"),
+  USED_ESCAPE_ROPE      = Strings.source("{PLAYER} used an ESCAPE ROPE."),
 
   -- Sweet Scent
-  USED_SWEET_SCENT      = "{STR_VAR_1} used SWEET SCENT!",
-  NO_SWEET_SCENT_MONS   = "Looks like there's nothing here…",
+  USED_SWEET_SCENT      = Strings.source("{STR_VAR_1} used SWEET SCENT!"),
+  NO_SWEET_SCENT_MONS   = Strings.source("Looks like there's nothing here…"),
 }
+FieldMoves.TEXT = setmetatable({}, {
+  __index = function(_, key)
+    local source = TEXT_SOURCE[key]
+    return source and Strings(source) or nil
+  end,
+})
 
 -- ---------------------------------------------------------------- helpers
 --- Normalize move identifier to numeric ID
@@ -405,6 +426,7 @@ function FieldMoves.rockSmashFromMenu(ctx)
 end
 
 --- Waterfall from Party Menu
+-- src/party_menu.c:4118
 function FieldMoves.waterfallFromMenu(ctx)
   if not FieldMoves.hasBadge(ctx, "WATERFALL") then
     return { ok = false, text = FieldMoves.TEXT.BADGE_REQUIRED, badge = "WATERFALL" }
@@ -415,13 +437,11 @@ function FieldMoves.waterfallFromMenu(ctx)
   end
 
   local mon = ctx.mon or FieldMoves.partyMoveUser(ctx.party, "WATERFALL")
-  local monName = FieldMoves.getMonName(mon)
 
   return {
     ok = true,
     action = "waterfall",
     mon = mon,
-    text = FieldMoves.TEXT.USED_WATERFALL:gsub("{STR_VAR_1}", monName),
   }
 end
 
@@ -685,15 +705,17 @@ function FieldMoves.trySurfOW(ctx)
 end
 
 --- Waterfall Collision Interaction (EventScript_Waterfall)
+-- src/field_control_avatar.c:608, data/scripts/field_moves.inc:178
 function FieldMoves.tryWaterfallOW(ctx)
-  if not ctx.isSurfing or not ctx.isFacingWaterfall or ctx.facing ~= "up" then
+  if not ctx.isFacingWaterfall then
     return { ok = false }
   end
 
   local mon, slot = FieldMoves.partyMoveUser(ctx.party, "WATERFALL")
   local hasBadge = FieldMoves.hasBadge(ctx, "WATERFALL")
+  local surfingNorth = ctx.isSurfing and ctx.facing == "up"
 
-  if not mon or not hasBadge then
+  if not mon or not hasBadge or not surfingNorth then
     return {
       ok = false,
       text = FieldMoves.TEXT.CANT_WATERFALL,

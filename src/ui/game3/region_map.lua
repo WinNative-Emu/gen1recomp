@@ -5,6 +5,7 @@ local FrlgFont = require("src.ui.game3.frlg_font")
 local PokedexChrome = require("src.ui.game3.pokedex_chrome")
 local RegionExtract = require("src.import.gba.region_map_extract")
 local MapSectionsExtract = require("src.import.gba.map_sections_extract")
+local Strings = require("src.core.Strings")
 
 local RegionMap = {}
 
@@ -103,38 +104,110 @@ local function guideArtworkSec(dSec)
   return ROCK_TUNNEL_SEC
 end
 
-local function try_load_image(path)
-  if not (love and love.graphics and love.graphics.newImage) then return nil end
-  local okC, CacheFs = pcall(require, "src.import.CacheFs")
-  if okC and CacheFs and CacheFs.read then
-    local data = CacheFs.read(path)
-    if data and type(data) == "string" and #data > 0 then
-      if love.filesystem and love.filesystem.newFileData and love.image and love.image.newImageData then
-        local okFd, fd = pcall(love.filesystem.newFileData, data, path)
-        if okFd and fd then
-          local okId, id = pcall(love.image.newImageData, fd)
-          if okId and id then
-            local okImg, img = pcall(love.graphics.newImage, id)
-            if okImg and img then
-              if img.setFilter then img:setFilter("nearest", "nearest") end
-              return img
-            end
-          end
-        end
-      end
+local function read_cache_file(rel)
+  local okD, Dataset = pcall(require, "src.core.game3.dataset")
+  if okD and Dataset and Dataset.cache then
+    local d = Dataset.cache():read(rel)
+    if type(d) == "string" and #d > 0 then return d end
+  end
+  local ok, CacheFs = pcall(require, "src.import.CacheFs")
+  if ok and CacheFs then
+    if CacheFs.readActive then
+      local d = CacheFs.readActive(rel)
+      if type(d) == "string" and #d > 0 then return d end
+    end
+    if CacheFs.read then
+      local d = CacheFs.read(rel)
+      if type(d) == "string" and #d > 0 then return d end
     end
   end
-  if love.filesystem and love.filesystem.getInfo and love.filesystem.getInfo(path) then
-    local ok, img = pcall(love.graphics.newImage, path)
-    if ok and img then
+  if love and love.filesystem and love.filesystem.read then
+    local d = love.filesystem.read(rel)
+    if type(d) == "string" and #d > 0 then return d end
+    local alt = "data/generated/gba/" .. (rel:gsub("^data/generated/gba/", ""))
+    d = love.filesystem.read(alt)
+    if type(d) == "string" and #d > 0 then return d end
+  end
+  local candidates = {
+    rel,
+    "data/generated/gba/" .. (rel:gsub("^data/generated/gba/", "")),
+  }
+  for _, p in ipairs(candidates) do
+    local f = io.open(p, "rb")
+    if f then
+      local d = f:read("*a")
+      f:close()
+      if d and #d > 0 then return d end
+    end
+  end
+  return nil
+end
+
+local function rgba_to_image(rgba, w, h)
+  if not (love and love.image and love.graphics) then return nil end
+  if not rgba or #rgba < w * h * 4 then return nil end
+
+  local ok, imgData = pcall(love.image.newImageData, w, h, "rgba8", rgba)
+  if ok and imgData then
+    local okImg, img = pcall(love.graphics.newImage, imgData)
+    if okImg and img then
       if img.setFilter then img:setFilter("nearest", "nearest") end
       return img
     end
   end
-  local ok, img = pcall(love.graphics.newImage, path)
-  if ok and img then
-    if img.setFilter then img:setFilter("nearest", "nearest") end
-    return img
+
+  local ok2, id = pcall(love.image.newImageData, w, h)
+  if ok2 and id then
+    local i = 1
+    for y = 0, h - 1 do
+      for x = 0, w - 1 do
+        local r = (rgba:byte(i) or 0) / 255
+        local g = (rgba:byte(i + 1) or 0) / 255
+        local b = (rgba:byte(i + 2) or 0) / 255
+        local a = (rgba:byte(i + 3) or 0) / 255
+        id:setPixel(x, y, r, g, b, a)
+        i = i + 4
+      end
+    end
+    local okImg, img = pcall(love.graphics.newImage, id)
+    if okImg and img then
+      if img.setFilter then img:setFilter("nearest", "nearest") end
+      return img
+    end
+  end
+  return nil
+end
+
+local function try_load_image(paths, w, h)
+  if not (love and love.graphics) then return nil end
+  if type(paths) == "string" then paths = { paths } end
+  for _, p in ipairs(paths) do
+    if p:sub(-5) == ".rgba" and w and h then
+      local raw = read_cache_file(p)
+      if raw then
+        local img = rgba_to_image(raw, w, h)
+        if img then return img end
+      end
+    else
+      local bytes = read_cache_file(p)
+      if bytes and #bytes > 0 and love.filesystem and love.image then
+        local ok, img = pcall(function()
+          local fd = love.filesystem.newFileData(bytes, p:match("[^/]+$") or "img.png")
+          local id = love.image.newImageData(fd)
+          local image = love.graphics.newImage(id)
+          if image and image.setFilter then image:setFilter("nearest", "nearest") end
+          return image
+        end)
+        if ok and img then return img end
+      end
+      if love.filesystem and love.filesystem.getInfo and love.filesystem.getInfo(p) then
+        local ok, img = pcall(love.graphics.newImage, p)
+        if ok and img then
+          if img.setFilter then img:setFilter("nearest", "nearest") end
+          return img
+        end
+      end
+    end
   end
   return nil
 end
@@ -144,26 +217,29 @@ local function get_map_image()
     return RegionMap._images["kanto_map"] or nil
   end
   local candidates = {
+    "region_map/kanto_map.rgba",
+    "data/generated/gba/region_map/kanto_map.rgba",
+    "region_map/kanto_map.png",
     "data/generated/gba/region_map/kanto_map.png",
     "assets/generated/region_map/kanto_map.png",
   }
-  for _, p in ipairs(candidates) do
-    local img = try_load_image(p)
-    if img then
-      RegionMap._images["kanto_map"] = img
-      return img
-    end
-  end
-  RegionMap._images["kanto_map"] = false
-  return nil
+  local img = try_load_image(candidates, 240, 160)
+  RegionMap._images["kanto_map"] = img or false
+  return img
 end
 
 local function get_cursor_image()
   if RegionMap._images["cursor"] ~= nil then
     return RegionMap._images["cursor"] or nil
   end
-  local img = try_load_image("data/generated/gba/region_map/cursor.png")
-    or try_load_image("pokefirered/graphics/region_map/cursor.png")
+  local candidates = {
+    "region_map/cursor.rgba",
+    "data/generated/gba/region_map/cursor.rgba",
+    "region_map/cursor.png",
+    "data/generated/gba/region_map/cursor.png",
+    "pokefirered/graphics/region_map/cursor.png",
+  }
+  local img = try_load_image(candidates, 16, 16)
   RegionMap._images["cursor"] = img or false
   return img
 end
@@ -172,7 +248,14 @@ local function get_dungeon_icon_image()
   if RegionMap._images["dungeon_icon"] ~= nil then
     return RegionMap._images["dungeon_icon"] or nil
   end
-  local img = try_load_image("data/generated/gba/region_map/dungeon_icon.png")
+  local candidates = {
+    "region_map/dungeon_icon.rgba",
+    "data/generated/gba/region_map/dungeon_icon.rgba",
+    "region_map/dungeon_icon.png",
+    "data/generated/gba/region_map/dungeon_icon.png",
+    "pokefirered/graphics/region_map/dungeon_icon.png",
+  }
+  local img = try_load_image(candidates, 8, 8)
   RegionMap._images["dungeon_icon"] = img or false
   return img
 end
@@ -182,10 +265,15 @@ local function get_player_image(female)
   if RegionMap._images[key] ~= nil then
     return RegionMap._images[key] or nil
   end
-  local path = "data/generated/gba/region_map/" .. key .. ".png"
-  local img = try_load_image(path)
-    or (female and try_load_image("pokefirered/graphics/region_map/player_icon_leaf.png")
-               or try_load_image("pokefirered/graphics/region_map/player_icon_red.png"))
+  local candidates = {
+    "region_map/" .. key .. ".rgba",
+    "data/generated/gba/region_map/" .. key .. ".rgba",
+    "region_map/" .. key .. ".png",
+    "data/generated/gba/region_map/" .. key .. ".png",
+    female and "pokefirered/graphics/region_map/player_icon_leaf.png"
+           or "pokefirered/graphics/region_map/player_icon_red.png",
+  }
+  local img = try_load_image(candidates, 16, 16)
   RegionMap._images[key] = img or false
   return img
 end
@@ -236,7 +324,7 @@ function RegionMap.currentLocationName()
   local row = RegionExtract.KANTO_GRID[RegionMap.cursorY]
   local sec = row and row[RegionMap.cursorX]
   if sec and RegionExtract.SECTION_NAMES[sec] then
-    return RegionExtract.SECTION_NAMES[sec]
+    return Strings(RegionExtract.SECTION_NAMES[sec])
   end
   return nil
 end
@@ -250,7 +338,7 @@ function RegionMap.currentDungeonName()
   RegionExtract.ensureGenerated()
   local dSec = RegionMap.currentDungeonSec()
   if dSec and RegionExtract.SECTION_NAMES[dSec] then
-    return RegionExtract.SECTION_NAMES[dSec]
+    return Strings(RegionExtract.SECTION_NAMES[dSec])
   end
   return nil
 end
@@ -273,7 +361,7 @@ function RegionMap.handleInput(input)
 
   -- Close on B or SELECT
   if input:wasPressed("b") or input:wasPressed("select") then
-    se(9)
+    -- pokefirered/src/region_map.c:2826
     RegionMap.close()
     return
   end
@@ -295,11 +383,11 @@ function RegionMap.handleInput(input)
   -- A button action
   if input:wasPressed("a") then
     if RegionMap.cursorX == CANCEL_BUTTON_X and RegionMap.cursorY == CANCEL_BUTTON_Y then
-      se(9)
+      se(240) -- pokefirered/src/region_map.c:2798
       RegionMap.close()
       return
     elseif RegionMap.cursorX == SWITCH_BUTTON_X and RegionMap.cursorY == SWITCH_BUTTON_Y then
-      se(5)
+      se(240) -- pokefirered/src/region_map.c:2805
       return
     else
       local dSec = RegionMap.currentDungeonSec()
@@ -479,25 +567,25 @@ function RegionMap.draw()
   end
 
   -- 7. Top Bar Button Prompts with authentic keypad icons (WIN_TOPBAR_LEFT at x=144, WIN_TOPBAR_RIGHT at x=192, y=2)
-  PokedexChrome.drawControlInfoLeft("{DPAD_ANY}MOVE", 144, 2)
+  PokedexChrome.drawControlInfoLeft(Strings("{DPAD_ANY}MOVE"), 144, 2)
   if RegionMap.previewDungeon then
-    PokedexChrome.drawControlInfoLeft("{A_BUTTON}CANCEL", 192, 2)
+    PokedexChrome.drawControlInfoLeft(Strings("{A_BUTTON}CANCEL"), 192, 2)
   elseif RegionMap.cursorX == CANCEL_BUTTON_X and RegionMap.cursorY == CANCEL_BUTTON_Y then
-    PokedexChrome.drawControlInfoLeft("{A_BUTTON}CANCEL", 192, 2)
+    PokedexChrome.drawControlInfoLeft(Strings("{A_BUTTON}CANCEL"), 192, 2)
   elseif RegionMap.cursorX == SWITCH_BUTTON_X and RegionMap.cursorY == SWITCH_BUTTON_Y then
-    PokedexChrome.drawControlInfoLeft("{A_BUTTON}SWITCH", 192, 2)
+    PokedexChrome.drawControlInfoLeft(Strings("{A_BUTTON}SWITCH"), 192, 2)
   elseif RegionMap.currentDungeonName() then
-    PokedexChrome.drawControlInfoLeft("{A_BUTTON}GUIDE", 192, 2)
+    PokedexChrome.drawControlInfoLeft(Strings("{A_BUTTON}GUIDE"), 192, 2)
   end
 
   -- 8. Dungeon Map Preview / Guide Modal (WIN_MAP_PREVIEW, pret region_map.c:486-494)
   if RegionMap.previewDungeon then
     RegionExtract.ensureGenerated()
     local dSec = RegionMap.previewDungeon
-    local dTitle = RegionExtract.SECTION_NAMES[dSec] or "DUNGEON"
+    local dTitle = Strings(RegionExtract.SECTION_NAMES[dSec] or "DUNGEON")
     -- GetDungeonName/GetDungeonFlavorText fall back to gText_RegionMap_NoData
     -- ("No data") for both fields when the mapsec is absent from sDungeonInfo.
-    local dDesc = RegionExtract.DUNGEON_DESCRIPTIONS[dSec] or "No data"
+    local dDesc = Strings(RegionExtract.DUNGEON_DESCRIPTIONS[dSec] or "No data")
     local tf = previewTextFrame()
 
     -- drawState 2: FillWindowPixelBuffer(WIN_MAP_PREVIEW, PIXEL_FILL(0)) turns the

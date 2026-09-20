@@ -4,6 +4,7 @@ local MapIds = require("src.core.game3.map_ids")
 local Movement = require("src.core.game3.scripting.movement")
 local Flags = require("src.core.game3.scripting.flags")
 local Opcodes = require("src.core.game3.scripting.opcodes")
+local Strings = require("src.core.Strings")
 
 local Adapters = {}
 
@@ -98,11 +99,11 @@ function Adapters.stub(opts)
     end
     if op == "bufferstdstring" then
       local STD = {
-        [24] = "ITEMS POCKET",
-        [25] = "KEY ITEMS POCKET",
-        [26] = "POKé BALLS POCKET",
-        [27] = "TM CASE",
-        [28] = "BERRY POUCH",
+        [24] = Strings("ITEMS POCKET"),
+        [25] = Strings("KEY ITEMS POCKET"),
+        [26] = Strings("POKé BALLS POCKET"),
+        [27] = Strings("TM CASE"),
+        [28] = Strings("BERRY POUCH"),
       }
       return STD[tonumber(src) or -1]
     end
@@ -270,6 +271,14 @@ function Adapters.host(mod, game, world)
             tr.i = tr.i + 1
             if act.kind == "step" then
               if ent and ent.scriptStep then ent:scriptStep(act.dir) end
+            elseif act.kind == "jump" then
+              if ent and ent.scriptJump then
+                ent:scriptJump(act.dir, act.distance or 1)
+              elseif ent and ent.scriptStep then
+                for _ = 1, (act.distance or 1) do
+                  ent:scriptStep(act.dir)
+                end
+              end
             elseif act.kind == "turn" then
               if ent and ent.scriptFace then
                 ent:scriptFace(act.dir)
@@ -784,14 +793,9 @@ function Adapters.host(mod, game, world)
           npc.cellX, npc.cellY = x, y
           if npc.x then npc.x = x * 16 end
           if npc.y then npc.y = y * 16 end
-          if npc.def then
-            npc.def.x, npc.def.y = x, y
-          end
         end
       elseif op == "copyobjectxytoperm" then
-        if npc.cellX and npc.cellY and npc.def then
-          npc.def.x, npc.def.y = npc.cellX, npc.cellY
-        end
+        -- Instance template copy on live NPC; do not poison global mapDef.objects.
       elseif op == "setobjectmovementtype" then
         -- Cosmetic on host; facing types 7–10 are FACE_*.
         local mt = tonumber(row[2]) or 0
@@ -1263,6 +1267,7 @@ function Adapters.host(mod, game, world)
         victoryText = battleOpts.victoryText or (foe and foe.victoryText),
         earlyRival = battleOpts.earlyRival,
         rivalFlags = battleOpts.rivalFlags,
+        firstBattle = battleOpts.firstBattle or (foe and foe.firstBattle),
         noWhiteout = battleOpts.noWhiteout,
         double = battleOpts.double,
         done = function(result)
@@ -1302,16 +1307,16 @@ function Adapters.host(mod, game, world)
       if op == "bufferstdstring" then
         -- pret constants/menu.h STDSTRING_*
         local STD = {
-          [10] = "ITEMS",
-          [11] = "KEY ITEMS",
-          [12] = "POKé BALLS",
-          [13] = "TMs & HMs",
-          [14] = "BERRIES",
-          [24] = "ITEMS POCKET",
-          [25] = "KEY ITEMS POCKET",
-          [26] = "POKé BALLS POCKET",
-          [27] = "TM CASE",
-          [28] = "BERRY POUCH",
+          [10] = Strings("ITEMS"),
+          [11] = Strings("KEY ITEMS"),
+          [12] = Strings("POKé BALLS"),
+          [13] = Strings("TMs & HMs"),
+          [14] = Strings("BERRIES"),
+          [24] = Strings("ITEMS POCKET"),
+          [25] = Strings("KEY ITEMS POCKET"),
+          [26] = Strings("POKé BALLS POCKET"),
+          [27] = Strings("TM CASE"),
+          [28] = Strings("BERRY POUCH"),
         }
         return STD[tonumber(src) or -1] or tostring(src)
       end

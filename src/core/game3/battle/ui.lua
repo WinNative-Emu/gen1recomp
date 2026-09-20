@@ -21,6 +21,14 @@ local Pokemon = require("src.core.game3.pokemon")
 local Window = require("src.ui.game3.window")
 local Types = require("src.core.game3.battle.types")
 local BallOpen = require("src.core.game3.battle.ball_open")
+local Oak = require("src.core.game3.battle.oak_advice")
+local Strings = require("src.core.Strings")
+local Anim = require("src.core.game3.battle.anim")
+local PicCoords = require("src.core.game3.battle.pic_coords")
+local TrainerPic = require("src.core.game3.trainer_pic")
+local Audio = require("src.core.game3.audio")
+local SE = require("src.core.game3.se_ids")
+local bit = require("bit")
 
 local Ui = {}
 
@@ -60,11 +68,6 @@ local BATTLE_YESNO = { left = 24, top = 9, style = "battle" }
 -- pret sBattlerCoords (singles) — CreateSprite CENTER before pic y_offset
 local ENEMY_MON = { x = 176, y = 40 }
 local PLAYER_MON = { x = 72, y = 80 }
-
-local PicCoords = nil
-pcall(function()
-  PicCoords = require("src.core.game3.battle.pic_coords")
-end)
 
 --- pret GetBattlerSpriteFinal_Y (a3=TRUE / BATTLER_COORD_Y_PIC_OFFSET).
 local SPECIES_CASTFORM = 385
@@ -198,6 +201,9 @@ function Ui.reset(opts)
   Ui._bounce = { hb = {}, mon = {} }
   Ui._preview = nil
   Ui._partnerAction = nil
+  Ui._oak = nil
+  Ui._oakTexts = nil
+  if Message and Message.isHeld and Message.isHeld() then Message.close() end
   if not Ui._headless then
     pcall(BattleChrome.install, nil)
   end
@@ -212,13 +218,30 @@ function Ui.bindSession(session)
   Ui._session = session
 end
 
+-- pokefirered/src/battle_controller_oak_old_man.c:647
+function Ui.markVoiceover(text)
+  if type(text) ~= "string" or text == "" then return end
+  Ui._oakTexts = Ui._oakTexts or {}
+  Ui._oakTexts[text] = true
+end
+
+function Ui.isVoiceoverText(text)
+  return type(text) == "string" and Ui._oakTexts ~= nil and Ui._oakTexts[text] == true
+end
+
 function Ui.push(text, cb)
   if not text or text == "" then
     if cb then cb() end
     return
   end
   Ui._log[#Ui._log + 1] = text
-  Ui._queue[#Ui._queue + 1] = cb and { text = text, cb = cb } or text
+  if Ui.isVoiceoverText(text) then
+    Ui._queue[#Ui._queue + 1] = { text = text, cb = cb, oak = true }
+  elseif cb or type(text) == "table" then
+    Ui._queue[#Ui._queue + 1] = { text = text, cb = cb }
+  else
+    Ui._queue[#Ui._queue + 1] = text
+  end
 end
 
 -- pokefirered/src/battle_script_commands.c:2041
@@ -227,13 +250,35 @@ function Ui.pushTimed(text, waitFrames, cb)
     if cb then cb() end
     return
   end
+  -- pokefirered/src/battle_controller_oak_old_man.c:780
+  if Ui.isVoiceoverText(text) then return Ui.push(text, cb) end
   Ui._log[#Ui._log + 1] = text
   Ui._queue[#Ui._queue + 1] = { text = text, cb = cb, timed = true, wait = waitFrames or 64 }
 end
 
 local function message_blocking()
   if not (Message and Message.isOpen and Message.isOpen()) then return false end
+  if Message.isHeld and Message.isHeld() then return false end
   return not Ui._linger
+end
+
+-- pokefirered/src/battle_controller_oak_old_man.c:759
+local OAK_DIM_TARGET = 8
+local OAK_DIM_DELAY = 4
+
+local function oak_state()
+  local f = Ui._oak
+  if not f then
+    f = { y = 0, target = 0, counter = 0, pending = nil }
+    Ui._oak = f
+  end
+  return f
+end
+
+function Ui.voiceoverDim()
+  local f = Ui._oak
+  if not f or f.y <= 0 then return 0 end
+  return f.y / 16
 end
 
 function Ui.busy()
@@ -243,6 +288,7 @@ function Ui.busy()
   if message_blocking() then return true end
   if Ui._showing then return true end
   if #Ui._queue > 0 then return true end
+  if Ui._oak and (Ui._oak.pending or Ui._oak.y > 0) then return true end
   return false
 end
 
@@ -252,6 +298,7 @@ function Ui.dialogPending()
   if Ui._timed then return true end
   if message_blocking() then return true end
   if Ui._showing then return true end
+  if Ui._oak and (Ui._oak.pending or Ui._oak.y > 0) then return true end
   return #Ui._queue > 0
 end
 
@@ -348,7 +395,7 @@ local function open_battle_bag()
     or (Runtime and Runtime.getSession and Runtime.getSession())
   local bag = session and session.bag
   if not bag then
-    Ui.push("The BAG is empty.")
+    Ui.push(Strings("The BAG is empty."))
     restore_action_menu()
     return
   end
@@ -566,6 +613,12 @@ local function show_next()
     return
   end
   Ui._linger = false
+  if item and item.oak and Message and Message.show then
+    -- pokefirered/src/battle_controller_oak_old_man.c:744
+    Ui._showing = true
+    oak_state().pending = { text = text, cb = cb }
+    return
+  end
   if item and item.timed and Message and Message.show then
     Ui._showing = true
     Ui._timed = { frames = 0, wait = item.wait or 64, cb = cb }
@@ -585,6 +638,57 @@ local function show_next()
   elseif cb then
     cb()
   end
+end
+
+local function oak_wants_dim()
+  local f = oak_state()
+  if f.pending then return true end
+  if Message and Message.isOpen and Message.isOpen()
+      and Message.frameKind and Message.frameKind() == "voiceover"
+      and not (Message.isHeld and Message.isHeld()) then
+    return true
+  end
+  local nxt = Ui._queue[1]
+  return type(nxt) == "table" and nxt.oak == true
+end
+
+-- pokefirered/src/battle_controller_oak_old_man.c:793
+local function drop_held_voiceover()
+  if Message and Message.isHeld and Message.isHeld() and Message.frameKind() == "voiceover" then
+    Message.close()
+  end
+end
+
+-- pokefirered/src/battle_controller_oak_old_man.c:744
+local function tick_oak()
+  local f = oak_state()
+  f.target = oak_wants_dim() and OAK_DIM_TARGET or 0
+  if f.y ~= f.target then
+    f.counter = f.counter + 1
+    if f.counter > OAK_DIM_DELAY then
+      f.counter = 0
+      f.y = f.y + ((f.y < f.target) and 1 or -1)
+    end
+    if f.y == 0 then drop_held_voiceover() end
+    return true
+  end
+  f.counter = 0
+  if f.target == 0 then drop_held_voiceover() end
+  if f.pending then
+    local p = f.pending
+    f.pending = nil
+    Ui._showing = true
+    Message.show(p.text, {
+      frame = "voiceover",
+      hold = true,
+      done = function()
+        Ui._showing = false
+        if p.cb then p.cb() end
+      end,
+    })
+    return true
+  end
+  return false
 end
 
 local function tick_timed()
@@ -610,8 +714,10 @@ function Ui.pump()
     end
     Ui._showing = false
     Ui._timed = nil
+    Ui._oak = nil
     return true
   end
+  if tick_oak() then return false end
   if tick_timed() then return false end
   if open_pending_yesno() then return false end
   if message_blocking() then
@@ -1127,6 +1233,8 @@ local function handle_double_input(input)
           Ui._selReturn = "menu"
           Ui._mode = "selmsg"
           Ui.push(why)
+          -- pokefirered/src/battle_controller_oak_old_man.c:1782
+          Oak.say(st, "noRunning")
         else
           Ui._pendingCommand = Commands.playerAction(st, Ui._menuIndex, nil, id)
           Ui._mode = "none"
@@ -1284,6 +1392,8 @@ function Ui.handleInput(input)
           Ui._selReturn = "menu"
           Ui._mode = "selmsg"
           Ui.push(why)
+          -- pokefirered/src/battle_controller_oak_old_man.c:1782
+          Oak.say(Ui._st, "noRunning")
         else
           Ui._pendingCommand = Commands.playerAction(Ui._st, Ui._menuIndex, nil)
           Ui._mode = "none"
@@ -1517,7 +1627,6 @@ local function draw_mon_sprite(battler, base, back, id)
   if not battler then return end
   local side = back and "player" or "enemy"
   local key = id or side
-  local Anim = require("src.core.game3.battle.anim")
   local pres = Anim.present(key)
   if pres and (pres.visible == false or pres.blinkHidden or pres.battlerInvisible or pres.invisible) then return end
   if id and Ui.targetHidden(id) then return end
@@ -1656,8 +1765,8 @@ local function draw_action_menu(st)
   -- cursor is a 1×2 BG pip whose ink lines up with printer y=2 text → draw at text Y.
   local ab = st and (is_double(st) and active_battler(st) or st.player)
   local name = ab and State.displayName(ab) or "POKéMON"
-  draw_prompt_text(string.format("What will\n%s do?", name), 10, 122)
-  local labels = { "FIGHT", "BAG", "POKéMON", "RUN" }
+  draw_prompt_text(Strings("What will\n%s do?", name), 10, 122)
+  local labels = { Strings("FIGHT"), Strings("BAG"), Strings("POKéMON"), Strings("RUN") }
   local positions = {
     { 136, 122 }, { 184, 122 },
     { 136, 138 }, { 184, 138 },
@@ -1703,8 +1812,8 @@ local function draw_move_menu(st)
     local def = Moves.get(mv)
     local pp = mon.pp and mon.pp[slot] or 0
     local maxPp = mon.maxPp and mon.maxPp[slot] or (def and def.pp) or pp
-    draw_menu_text(string.format("PP %d/%d", pp, maxPp), 168, 122, { small = true, colors = FrlgFont.COLOR.NORMAL })
-    draw_menu_text(Types.get(def and def.type) or "NORMAL", 168, 138, { small = true, colors = FrlgFont.COLOR.NORMAL })
+    draw_menu_text(Strings("PP %d/%d", pp, maxPp), 168, 122, { small = true, colors = FrlgFont.COLOR.NORMAL })
+    draw_menu_text(Strings(Types.get(def and def.type) or "NORMAL"), 168, 138, { small = true, colors = FrlgFont.COLOR.NORMAL })
   end
 end
 
@@ -1905,7 +2014,6 @@ function Ui.draw(w, h)
   w = w or Display.W
   h = h or Display.H
 
-  local Anim = require("src.core.game3.battle.anim")
   local st = Ui._st
   local stage = Anim.stage and Anim.stage()
 
@@ -2011,6 +2119,14 @@ function Ui.draw(w, h)
     draw_action_menu(st)
   elseif Ui._mode == "moves" or Ui._mode == "target" then
     draw_move_menu(st)
+  end
+
+  -- pokefirered/src/battle_controller_oak_old_man.c:759
+  local oakDim = Ui.voiceoverDim()
+  if oakDim > 0 then
+    love.graphics.setColor(0, 0, 0, oakDim)
+    love.graphics.rectangle("fill", 0, 0, w, h)
+    love.graphics.setColor(1, 1, 1, 1)
   end
 
   local BagMenu = package.loaded["src.ui.game3.bag_menu"]

@@ -12,6 +12,27 @@ Field._session = nil
 Field.locked = false
 Field.weather = 0
 Field.metatileOverrides = {}
+Field._overrideLayouts = {}
+Field._waterfall = nil
+Field._tempFlagMap = nil
+
+-- pokefirered/src/event_object_movement.c:8959
+local WALK_SLOWER_FRAMES = 32
+
+-- pokefirered/src/fieldmap.c:103
+function Field.clearMetatiles(layout)
+  for _, written in pairs(Field._overrideLayouts) do
+    if written.clearOverrides then written:clearOverrides() end
+  end
+  if layout and layout.clearOverrides then layout:clearOverrides() end
+  Field.metatileOverrides = {}
+  Field._overrideLayouts = {}
+end
+
+function Field.metatileOverrideAt(mapId, x, y)
+  local bucket = mapId and Field.metatileOverrides[mapId]
+  return bucket and bucket[y * 1024 + x] or nil
+end
 
 function Field.start(mod, game, session)
   Field._mod = mod
@@ -20,7 +41,10 @@ function Field.start(mod, game, session)
   Field.running = true
   Field.locked = false
   Field.weather = 0
-  Field.metatileOverrides = {}
+  Field._waterfall = nil
+  -- pokefirered/src/overworld.c:345
+  Field._tempFlagMap = session and session.map
+  Field.clearMetatiles()
   local PcAnim = package.loaded["src.core.game3.pc_anim"]
   if PcAnim then PcAnim.reset() end
   if session then
@@ -46,6 +70,8 @@ function Field.stop()
   Field.running = false
   Field._session = nil
   Field.locked = false
+  Field._waterfall = nil
+  Field._tempFlagMap = nil
 end
 
 function Field.getSession()
@@ -89,8 +115,14 @@ function Field.update(_dt)
   Ghosts.sync()
   Ghosts.update(game)
 
+  Field.pollMapChange(game)
+
   local input = game and game.input
-  Player.update(game, input)
+  -- pokefirered/src/field_control_avatar.c:98
+  local walkInput = input
+  if Field.forcedMovementPending() then walkInput = nil end
+  Player.update(game, walkInput)
+  Field.updateWaterfall(game)
 
   local Hud = require("src.ui.game3.hud")
   local Runtime = package.loaded["src.core.game3.runtime"]
@@ -558,6 +590,27 @@ function Field.interact(game)
     end
   end
 
+  -- 5) pokefirered/src/field_control_avatar.c:608
+  if FieldMoves.isWaterfallBehavior(behavior) then
+    local ctx = {
+      party = party, store = Space.store, session = Field._session,
+      isSurfing = P.surfing == true, isFacingWaterfall = true, facing = P.facing,
+    }
+    local res = FieldMoves.tryWaterfallOW(ctx)
+    local Message = require("src.ui.game3.message")
+    if res.ask then
+      local Choice = require("src.ui.game3.choice")
+      Message.show(res.ask, function()
+        Choice.yesNo(function(yes)
+          if yes then Field.executeFieldMove(res) else Message.close() end
+        end)
+      end)
+      return true
+    elseif res.text then
+      Message.show(res.text)
+      return true
+    end
+  end
 
   return false
 end
@@ -634,8 +687,14 @@ function Field.executeFieldMove(payload)
         if lid then Objects.removeObject(lid) end
       end
       Field.locked = false
+      -- pokefirered/data/scripts/field_moves.inc:88
       if payload.text then
-        Message.show(payload.text, function() Message.close() end)
+        Message.show(payload.text, function()
+          Message.close()
+          Field.tryRockSmashEncounter()
+        end)
+      else
+        Field.tryRockSmashEncounter()
       end
     end)
   elseif act == "strength" then
@@ -667,6 +726,21 @@ function Field.executeFieldMove(payload)
         Message.show(payload.text, function() Message.close() end)
       end
     end)
+  elseif act == "waterfall" then
+    -- pokefirered/data/scripts/field_moves.inc:178
+    Field.locked = true
+    local function ride()
+      P.startFieldMove(28)
+      Field.rideWaterfall("up", 28)
+    end
+    if payload.text then
+      Message.show(payload.text, function()
+        Message.close()
+        ride()
+      end)
+    else
+      ride()
+    end
   elseif act == "flash" then
     Field.locked = true
     P.startFieldMove(24)
@@ -708,6 +782,138 @@ function Field.executeFieldMove(payload)
     if payload.text then
       Message.show(payload.text, function() Message.close() end)
     end
+  end
+end
+
+-- pokefirered/src/wild_encounter.c:446
+function Field.tryRockSmashEncounter()
+  local okE, Encounters = pcall(require, "src.core.game3.encounters")
+  if not (okE and Encounters and Encounters.rollRocks) then return false end
+  local session = Field._session
+  local mapId = session and session.map
+  if not mapId then
+    local Map = package.loaded["src.core.game3.map"]
+    mapId = Map and Map.current
+  end
+  local enc = Encounters.rollRocks(mapId)
+  if not enc then return false end
+  local Runtime = package.loaded["src.core.game3.runtime"]
+  local BattleBridge = require("src.core.game3.battle_bridge")
+  local ok, err = BattleBridge.startWild(Runtime and Runtime._mod, Field._game, enc, {})
+  if not ok then
+    print("[game3/field] rock smash startWild failed: " .. tostring(err))
+    return false
+  end
+  return true
+end
+
+-- pokefirered/src/metatile_behavior.c:266
+function Field.forcedMovementPending()
+  if Field._waterfall then return false end
+  if not Player.surfing then return false end
+  local Collision = require("src.core.game3.collision")
+  local FieldMoves = require("src.core.game3.field_moves")
+  local x, y = Player.cellX, Player.cellY
+  if Player.moving then x, y = Player.targetX, Player.targetY end
+  if not FieldMoves.isWaterfallBehavior(Collision.behavior(x, y)) then return false end
+  -- pokefirered/src/field_player_avatar.c:295
+  return Collision.canEnter(Field._game, x, y + 1, {
+    fromX = x, fromY = y, dir = "down", surfing = true,
+  }) == true
+end
+
+-- pokefirered/src/event_data.c:49
+function Field.clearTempFieldEventData(game, mapId)
+  local FieldMoves = require("src.core.game3.field_moves")
+  local Flags = require("src.core.game3.scripting.flags")
+  local Space = package.loaded["src.core.game3.scripting.space"]
+  local session = Field._session
+  local ids = {}
+  for i = 1, #FieldMoves.TEMP_SYS_FLAGS do ids[i] = FieldMoves.TEMP_SYS_FLAGS[i] end
+  local data = game and game.data and game.data.maps
+  local def = mapId and data and data[mapId]
+  -- pokefirered/src/overworld.c:803
+  if FieldMoves.isOutdoors(def and def.mapType) then
+    ids[#ids + 1] = FieldMoves.SYS_FLAGS.FLASH_ACTIVE
+  end
+  for i = 1, #ids do
+    local id = ids[i]
+    if Space and Space.store then Flags.setFlag(Space.store, nil, id, false) end
+    if session and session.flags then session.flags[id] = nil end
+  end
+end
+
+-- pokefirered/src/overworld.c:797
+function Field.pollMapChange(game)
+  local session = Field._session
+  local mapId = session and session.map
+  if mapId == Field._tempFlagMap then return false end
+  Field._tempFlagMap = mapId
+  Field.clearTempFieldEventData(game or Field._game, mapId)
+  return true
+end
+
+-- pokefirered/src/field_effect.c:1605
+function Field.rideWaterfall(dir, delay)
+  Field.locked = true
+  Field._waterfall = { dir = dir or "up", wait = tonumber(delay) or 0, started = false, steps = 0 }
+end
+
+-- pokefirered/src/field_effect.c:1613
+-- pokefirered/src/field_player_avatar.c:246
+function Field.updateWaterfall(game)
+  local Collision = require("src.core.game3.collision")
+  local FieldMoves = require("src.core.game3.field_moves")
+  local onWaterfall = FieldMoves.isWaterfallBehavior(Collision.behavior(Player.cellX, Player.cellY))
+
+  local st = Field._waterfall
+  if st then
+    if st.wait > 0 then
+      st.wait = st.wait - 1
+      return
+    end
+    if Player.moving then return end
+    -- pokefirered/src/field_effect.c:1659
+    if (st.started and not onWaterfall) or st.steps >= 64 then
+      Field._waterfall = nil
+      Field.locked = false
+      return
+    end
+    st.started = true
+    st.steps = st.steps + 1
+    Player.forceStep(st.dir, function() end)
+    -- pokefirered/src/field_effect.c:1650
+    Player.stepFrames = WALK_SLOWER_FRAMES
+    return
+  end
+
+  if not onWaterfall or Field.locked or not Player.surfing then return end
+  local Space = package.loaded["src.core.game3.scripting.space"]
+  if Space and Space.vm and Space.vm.isRunning and Space.vm:isRunning() then return end
+  local Runtime = package.loaded["src.core.game3.runtime"]
+  if Runtime and Runtime.uiBusy and Runtime.uiBusy() then return end
+  local tx, ty = Player.cellX, Player.cellY + 1
+  -- pokefirered/src/field_player_avatar.c:295
+  if not Collision.canEnter(game or Field._game, tx, ty, {
+    fromX = Player.cellX, fromY = Player.cellY, dir = "down", surfing = true,
+  }) then return end
+  if Player.moving then
+    -- pokefirered/src/field_player_avatar.c:147
+    if Player.targetX == tx and Player.targetY == ty then return end
+    Player.moving = false
+    Player.progress = 0
+    Player.running = false
+    Player.jumping = false
+    Player.spriteYOffset = 0
+    Player.targetX, Player.targetY = Player.cellX, Player.cellY
+    Player.px, Player.py = Player.cellX * 16, Player.cellY * 16
+    Player._onStepDone = nil
+  end
+  -- pokefirered/src/field_control_avatar.c:142
+  if FieldMoves.isWaterfallBehavior(Collision.behavior(tx, ty)) then
+    Player.forceStep("down", function() end)
+  else
+    Player.scriptStep("down")
   end
 end
 
@@ -763,12 +969,36 @@ function Field.setWeather(id)
   Weather.apply(Field.weather)
 end
 
+local function passableColl(mapDef, pair, mid)
+  local Interaction = require("src.core.game3.scripting.interaction_scripts")
+  local behaviors = pair and Interaction.behaviors and Interaction.behaviors[pair]
+  local beh = behaviors and behaviors[mid]
+  if beh ~= nil then
+    local ScriptColl = require("src.core.game3.scripting.collision")
+    return (ScriptColl.fromCell(mid, 0, beh, mapDef.kind))
+  end
+  local okR, Register = pcall(require, "src.import.gba.register")
+  local midIndex = okR and Register and Register._midIndex
+  local row = midIndex and pair and midIndex[pair] and midIndex[pair][mid]
+  return row and row.coll or 0x00
+end
+
+-- pokefirered/src/scrcmd.c:2103
 function Field.setMetatile(x, y, metatile, isImpassable)
-  Field.metatileOverrides[#Field.metatileOverrides + 1] = {
-    x = x, y = y, metatile = metatile, impassable = isImpassable,
-  }
+  x, y = tonumber(x) or 0, tonumber(y) or 0
+  isImpassable = isImpassable == true or (tonumber(isImpassable) or 0) ~= 0
   local session = Field._session
   local mapId = session and session.map
+  if mapId then
+    local bucket = Field.metatileOverrides[mapId]
+    if not bucket then
+      bucket = {}
+      Field.metatileOverrides[mapId] = bucket
+    end
+    bucket[y * 1024 + x] = {
+      x = x, y = y, metatile = metatile, impassable = isImpassable,
+    }
+  end
   if ModRuntime.wants("world.block_replaced") then
     ModRuntime.emit("world.block_replaced", { mapId = mapId, bx = x, by = y, block = metatile })
   end
@@ -776,16 +1006,13 @@ function Field.setMetatile(x, y, metatile, isImpassable)
   local data = game and game.data and game.data.maps
   local mapDef = mapId and data and data[mapId]
   local mid = tonumber(metatile) or 0
-  local coll = isImpassable and 0x07 or 0x00
   if mapDef and mapDef.midLayout then
-    local pair = mapDef.pair or mapDef.midLayout.pair
-    local okR, Register = pcall(require, "src.import.gba.register")
-    local midIndex = okR and Register and Register._midIndex
-    if midIndex and pair and midIndex[pair] and midIndex[pair][mid] then
-      coll = midIndex[pair][mid].coll or coll
-      if isImpassable then coll = 0x07 end
-    end
-    mapDef.midLayout:applyOverride(x, y, mid, coll, 0)
+    local layout = mapDef.midLayout
+    local pair = mapDef.pair or layout.pair
+    local coll = isImpassable and 0x07 or passableColl(mapDef, pair, mid)
+    -- pokefirered/src/fieldmap.c:407
+    layout:applyOverride(x, y, mid, coll, layout:elevAt(x, y))
+    Field._overrideLayouts[mapId] = layout
     local Collision = require("src.core.game3.collision")
     Collision.bindMap(game, mapId, mapDef)
     local FieldView = package.loaded["src.core.game3.field_view"]

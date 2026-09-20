@@ -15,6 +15,7 @@ local Stack = require("src.ui.game3.stack")
 local FrlgFont = require("src.ui.game3.frlg_font")
 local PokedexData = require("src.core.game3.pokedex_data")
 local PokedexChrome = require("src.ui.game3.pokedex_chrome")
+local Strings = require("src.core.Strings")
 
 local Pokedex = {}
 
@@ -107,35 +108,35 @@ local function play_cry(speciesId)
 end
 
 local function species_label(sp)
-  return (Pokemon.name and Pokemon.name(sp)) or string.format("POKéMON %d", sp)
+  return (Pokemon.name and Pokemon.name(sp)) or Strings("POKéMON %d", sp)
 end
 
 local function build_modes(session, dex)
   local isNat = PokedexData.isNationalUnlocked(session, dex)
   local modes = {
     -- Section: POKéMON LIST
-    { isHeader = true, label = "POKéMON LIST" },
+    { isHeader = true, label = Strings("POKéMON LIST") },
   }
 
   if isNat then
-    table.insert(modes, { id = "numerical_kanto", type = "order", label = "NUMERICAL MODE: KANTO", icon = "numerical", unlocked = true })
-    table.insert(modes, { id = "numerical_national", type = "order", label = "NUMERICAL MODE: NATIONAL", icon = "numerical", unlocked = true })
+    table.insert(modes, { id = "numerical_kanto", type = "order", label = Strings("NUMERICAL MODE: KANTO"), icon = "numerical", unlocked = true })
+    table.insert(modes, { id = "numerical_national", type = "order", label = Strings("NUMERICAL MODE: NATIONAL"), icon = "numerical", unlocked = true })
   else
-    table.insert(modes, { id = "numerical_kanto", type = "order", label = "NUMERICAL MODE", icon = "numerical", unlocked = true })
+    table.insert(modes, { id = "numerical_kanto", type = "order", label = Strings("NUMERICAL MODE"), icon = "numerical", unlocked = true })
   end
 
   -- Section: POKéMON HABITATS
-  table.insert(modes, { isHeader = true, label = "POKéMON HABITATS" })
+  table.insert(modes, { isHeader = true, label = Strings("POKéMON HABITATS") })
   local habitats = {
-    { id = "grassland", label = "Grassland POKéMON", icon = "grassland" },
-    { id = "forest", label = "Forest POKéMON", icon = "forest" },
-    { id = "waters_edge", label = "Water's-edge POKéMON", icon = "waters_edge" },
-    { id = "sea", label = "Sea POKéMON", icon = "sea" },
-    { id = "cave", label = "Cave POKéMON", icon = "cave" },
-    { id = "mountain", label = "Mountain POKéMON", icon = "mountain" },
-    { id = "rough_terrain", label = "Rough-terrain POKéMON", icon = "rough_terrain" },
-    { id = "urban", label = "Urban POKéMON", icon = "urban" },
-    { id = "rare", label = "Rare POKéMON", icon = "rare" },
+    { id = "grassland", label = Strings("Grassland POKéMON"), icon = "grassland" },
+    { id = "forest", label = Strings("Forest POKéMON"), icon = "forest" },
+    { id = "waters_edge", label = Strings("Water's-edge POKéMON"), icon = "waters_edge" },
+    { id = "sea", label = Strings("Sea POKéMON"), icon = "sea" },
+    { id = "cave", label = Strings("Cave POKéMON"), icon = "cave" },
+    { id = "mountain", label = Strings("Mountain POKéMON"), icon = "mountain" },
+    { id = "rough_terrain", label = Strings("Rough-terrain POKéMON"), icon = "rough_terrain" },
+    { id = "urban", label = Strings("Urban POKéMON"), icon = "urban" },
+    { id = "rare", label = Strings("Rare POKéMON"), icon = "rare" },
   }
   for _, h in ipairs(habitats) do
     local isUnlocked = PokedexData.isCategoryUnlocked(dex, h.id)
@@ -149,15 +150,15 @@ local function build_modes(session, dex)
   end
 
   if isNat then
-    table.insert(modes, { isHeader = true, label = "SEARCH" })
-    table.insert(modes, { id = "atoz", type = "order", label = "A TO Z MODE", icon = "atoz", unlocked = true })
-    table.insert(modes, { id = "type", type = "order", label = "TYPE MODE", icon = "type", unlocked = true })
-    table.insert(modes, { id = "lightest", type = "order", label = "LIGHTEST MODE", icon = "lightest", unlocked = true })
-    table.insert(modes, { id = "smallest", type = "order", label = "SMALLEST MODE", icon = "smallest", unlocked = true })
+    table.insert(modes, { isHeader = true, label = Strings("SEARCH") })
+    table.insert(modes, { id = "atoz", type = "order", label = Strings("A TO Z MODE"), icon = "atoz", unlocked = true })
+    table.insert(modes, { id = "type", type = "order", label = Strings("TYPE MODE"), icon = "type", unlocked = true })
+    table.insert(modes, { id = "lightest", type = "order", label = Strings("LIGHTEST MODE"), icon = "lightest", unlocked = true })
+    table.insert(modes, { id = "smallest", type = "order", label = Strings("SMALLEST MODE"), icon = "smallest", unlocked = true })
   end
 
-  table.insert(modes, { isHeader = true, label = "OTHER" })
-  table.insert(modes, { id = "cancel", type = "cancel", label = "CANCEL", icon = "cancel", unlocked = true })
+  table.insert(modes, { isHeader = true, label = Strings("OTHER") })
+  table.insert(modes, { id = "cancel", type = "cancel", label = Strings("CANCEL"), icon = "cancel", unlocked = true })
 
   return modes
 end
@@ -167,6 +168,21 @@ function Pokedex.maxSpecies()
     return Dex.NATIONAL_MAX or 386
   end
   return Dex.KANTO_MAX or 151
+end
+
+-- pokefirered/src/pokedex_screen.c:3113
+function Pokedex.silhouetteScale(romScale)
+  local s = tonumber(romScale) or 256
+  if s <= 0 then s = 256 end
+  return 256 / s
+end
+
+-- pokefirered/src/trainer_pokemon_sprites.c:276
+function Pokedex.playerGender()
+  local s = Pokedex._session
+  local g = s and (s.gender or s.playerGender)
+  if g == "female" or g == 1 then return "female" end
+  return "male"
 end
 
 function Pokedex.show(dex, opts)
@@ -215,6 +231,26 @@ function Pokedex.show(dex, opts)
   se("SE_PIN")
 end
 
+-- pokefirered/src/pokedex_screen.c:3260
+local HABITAT_CATEGORIES = {
+  "grassland", "forest", "waters_edge", "sea", "cave",
+  "mountain", "rough_terrain", "urban", "rare",
+}
+
+function Pokedex.categoryForSpecies(speciesId)
+  local sp = tonumber(speciesId)
+  if not sp then return nil end
+  PokedexData.init()
+  for _, catKey in ipairs(HABITAT_CATEGORIES) do
+    for pageIdx, page in ipairs(PokedexData.getCategoryPages(catKey)) do
+      for _, member in ipairs(page) do
+        if member == sp then return catKey, pageIdx end
+      end
+    end
+  end
+  return nil
+end
+
 function Pokedex.showRegistration(speciesId, opts)
   opts = opts or {}
   Pokedex.open = true
@@ -233,6 +269,16 @@ function Pokedex.showRegistration(speciesId, opts)
   Pokedex.screen = "registration"
   Pokedex.dataPage = 1
 
+  -- pokefirered/src/pokedex_screen.c:3316
+  local catKey, pageIdx = Pokedex.categoryForSpecies(Pokedex._regSpecies)
+  if catKey then
+    Pokedex.currentCategory = catKey
+    Pokedex.categoryPage = pageIdx or 1
+    Pokedex.subScreenPrev = "category_grid"
+  else
+    Pokedex.subScreenPrev = "mode_select"
+  end
+
   Stack.push("pokedex", Pokedex, { hideBelow = true })
   play_cry(Pokedex._regSpecies)
 end
@@ -243,7 +289,6 @@ function Pokedex.close()
   local cb = Pokedex._onClose
   Pokedex._onClose = nil
   Pokedex._regSpecies = nil
-  se("SE_FLEE")
   if cb then cb() end
 end
 
@@ -524,10 +569,7 @@ end
 
 local function handle_data_input(input)
   if input:wasPressed("a") then
-    if Pokedex.screen == "registration" then
-      Pokedex.isOpen_ = false
-      if Pokedex._onDone then Pokedex._onDone() end
-    elseif Pokedex.dataPage == 1 then
+    if Pokedex.dataPage == 1 then
       Pokedex.dataPage = 2
       se("SE_SELECT")
     else
@@ -603,8 +645,9 @@ local function handle_size_input(input)
   end
 end
 
+-- pokefirered/src/pokedex_screen.c:3427
 local function handle_registration_input(input)
-  if input:wasPressed("a") or input:wasPressed("b") or input:wasPressed("start") then
+  if input:wasPressed("a") or input:wasPressed("b") then
     Pokedex.close()
   end
 end
@@ -641,7 +684,7 @@ local function draw_mode_select()
   PokedexChrome.drawPaperBg()
 
   -- Top Header Bar: POKéDEX   TABLE OF CONTENTS (centered, y=2)
-  PokedexChrome.drawHeader("POKéDEX   TABLE OF CONTENTS", nil, 2)
+  PokedexChrome.drawHeader(Strings("POKéDEX   TABLE OF CONTENTS"), nil, 2)
 
   -- Left Column: 9 visible rows inside window (x=8, y=16..144, 14px pitch)
   local maxVisible = 9
@@ -689,18 +732,18 @@ local function draw_mode_select()
     local kantoOwn = Dex.countCaught(dex, "kanto")
     local natOwn = Dex.countCaught(dex, "national")
 
-    FrlgFont.draw("Seen:", 168, 18, {
+    FrlgFont.draw(Strings("Seen:"), 168, 18, {
       small = true,
       colors = { fg = { 0x18/255, 0x18/255, 0x18/255, 1 }, shadow = { 0xD0/255, 0xD0/255, 0xD0/255, 1 } }
     })
-    FrlgFont.draw("KANTO", 176, 29, {
+    FrlgFont.draw(Strings("KANTO"), 176, 29, {
       small = true,
       colors = { fg = { 0x18/255, 0x18/255, 0x18/255, 1 }, shadow = { 0xD0/255, 0xD0/255, 0xD0/255, 1 } }
     })
     FrlgFont.draw(string.format("%3d", kantoSeen), 212, 29, {
       colors = { fg = { 255/255, 139/255, 57/255, 1 }, shadow = { 205/255, 65/255, 57/255, 1 } }
     })
-    FrlgFont.draw("NATIONAL", 176, 40, {
+    FrlgFont.draw(Strings("NATIONAL"), 176, 40, {
       small = true,
       colors = { fg = { 0x18/255, 0x18/255, 0x18/255, 1 }, shadow = { 0xD0/255, 0xD0/255, 0xD0/255, 1 } }
     })
@@ -708,18 +751,18 @@ local function draw_mode_select()
       colors = { fg = { 255/255, 139/255, 57/255, 1 }, shadow = { 205/255, 65/255, 57/255, 1 } }
     })
 
-    FrlgFont.draw("Owned:", 168, 53, {
+    FrlgFont.draw(Strings("Owned:"), 168, 53, {
       small = true,
       colors = { fg = { 0x18/255, 0x18/255, 0x18/255, 1 }, shadow = { 0xD0/255, 0xD0/255, 0xD0/255, 1 } }
     })
-    FrlgFont.draw("KANTO", 176, 64, {
+    FrlgFont.draw(Strings("KANTO"), 176, 64, {
       small = true,
       colors = { fg = { 0x18/255, 0x18/255, 0x18/255, 1 }, shadow = { 0xD0/255, 0xD0/255, 0xD0/255, 1 } }
     })
     FrlgFont.draw(string.format("%3d", kantoOwn), 212, 64, {
       colors = { fg = { 255/255, 139/255, 57/255, 1 }, shadow = { 205/255, 65/255, 57/255, 1 } }
     })
-    FrlgFont.draw("NATIONAL", 176, 75, {
+    FrlgFont.draw(Strings("NATIONAL"), 176, 75, {
       small = true,
       colors = { fg = { 0x18/255, 0x18/255, 0x18/255, 1 }, shadow = { 0xD0/255, 0xD0/255, 0xD0/255, 1 } }
     })
@@ -730,14 +773,14 @@ local function draw_mode_select()
     local kantoSeen = Dex.countSeen(dex, "kanto")
     local kantoOwn = Dex.countCaught(dex, "kanto")
 
-    FrlgFont.draw("Seen:", 168, 25, {
+    FrlgFont.draw(Strings("Seen:"), 168, 25, {
       colors = { fg = { 0x18/255, 0x18/255, 0x18/255, 1 }, shadow = { 0xD0/255, 0xD0/255, 0xD0/255, 1 } }
     })
     FrlgFont.draw(string.format("%3d", kantoSeen), 212, 37, {
       colors = { fg = { 255/255, 139/255, 57/255, 1 }, shadow = { 205/255, 65/255, 57/255, 1 } }
     })
 
-    FrlgFont.draw("Owned:", 168, 53, {
+    FrlgFont.draw(Strings("Owned:"), 168, 53, {
       colors = { fg = { 0x18/255, 0x18/255, 0x18/255, 1 }, shadow = { 0xD0/255, 0xD0/255, 0xD0/255, 1 } }
     })
     FrlgFont.draw(string.format("%3d", kantoOwn), 212, 65, {
@@ -755,7 +798,7 @@ local function draw_mode_select()
   PokedexChrome.drawDownArrow(195, 134)
 
   -- Bottom Bar Controls: {DPAD_UPDOWN}PICK   {A_BUTTON}OK
-  PokedexChrome.drawControlInfo("{DPAD_UPDOWN}PICK {A_BUTTON}OK", 236, 146)
+  PokedexChrome.drawControlInfo(Strings("{DPAD_UPDOWN}PICK {A_BUTTON}OK"), 236, 146)
 end
 
 --- 2. Pokémon List Screen (9 Rows)
@@ -764,7 +807,7 @@ local function draw_ordered_list()
   PokedexChrome.drawPaperBg()
 
   -- Top Header Bar: POKéMON LIST (centered, y=2)
-  PokedexChrome.drawHeader("POKéMON LIST", nil, 2)
+  PokedexChrome.drawHeader(Strings("POKéMON LIST"), nil, 2)
 
   local list = PokedexData.getOrderList(Pokedex.currentOrder, dex)
   local total = #list
@@ -833,7 +876,15 @@ local function draw_ordered_list()
   end
 
   -- Bottom Bar Controls: {DPAD_UPDOWN}PICK   {A_BUTTON}OK   {B_BUTTON}CANCEL
-  PokedexChrome.drawControlInfo("{DPAD_UPDOWN}PICK {A_BUTTON}OK {B_BUTTON}CANCEL", 236, 146)
+  PokedexChrome.drawControlInfo(Strings("{DPAD_UPDOWN}PICK {A_BUTTON}OK {B_BUTTON}CANCEL"), 236, 146)
+end
+
+-- pokefirered/src/pokedex_screen.c:2960
+function Pokedex.controlInfoForDataPage(screen)
+  if screen == "registration" then
+    return nil, Strings("{A_BUTTON}NEXT")
+  end
+  return Strings("{START_BUTTON}CRY"), Strings("{A_BUTTON}NEXT DATA {B_BUTTON}CANCEL")
 end
 
 --- 3. Detailed Data Entry Screen (Page 1: Specs & Flavor Text, Page 2: Size Chart & Area Map)
@@ -865,21 +916,21 @@ local function draw_data_screen()
     -- 2. Top Header Bar
     if Pokedex.subScreenPrev == "category_grid" then
       local catTitles = {
-        grassland = "Grassland POKéMON",
-        forest = "Forest POKéMON",
-        waters_edge = "Water's-edge POKéMON",
-        sea = "Sea POKéMON",
-        cave = "Cave POKéMON",
-        mountain = "Mountain POKéMON",
-        rough_terrain = "Rough-terrain POKéMON",
-        urban = "Urban POKéMON",
-        rare = "Rare POKéMON",
+        grassland = Strings("Grassland POKéMON"),
+        forest = Strings("Forest POKéMON"),
+        waters_edge = Strings("Water's-edge POKéMON"),
+        sea = Strings("Sea POKéMON"),
+        cave = Strings("Cave POKéMON"),
+        mountain = Strings("Mountain POKéMON"),
+        rough_terrain = Strings("Rough-terrain POKéMON"),
+        urban = Strings("Urban POKéMON"),
+        rare = Strings("Rare POKéMON"),
       }
-      local title = catTitles[Pokedex.currentCategory] or "Grassland POKéMON"
+      local title = catTitles[Pokedex.currentCategory] or Strings("Grassland POKéMON")
       PokedexChrome.drawHeader(title, 8, 2)
-      PokedexChrome.drawHeader("PAGE 1/ 2", 176, 2)
+      PokedexChrome.drawHeader(Strings("PAGE 1/ 2"), 176, 2)
     else
-      PokedexChrome.drawHeader("POKéMON LIST", nil, 2)
+      PokedexChrome.drawHeader(Strings("POKéMON LIST"), nil, 2)
     end
 
     -- 3. Top Specs Window (sWindowTemplate_DexEntry_SpeciesStats at x=16, y=24)
@@ -889,17 +940,17 @@ local function draw_data_screen()
     FrlgFont.draw(name, 44, 32, { small = false, colors = upperColors })
 
     -- Line 2 (y = 48): Category in FONT_SMALL at x=16
-    local catStr = isCaught and (entry.categoryName or "POKéMON") or "??????????? POKéMON"
+    local catStr = isCaught and (entry.categoryName or "POKéMON") or Strings("??????????? POKéMON")
     FrlgFont.draw(catStr, 16, 48, { small = true, colors = upperColors })
 
     -- Line 3 (y = 60): HT in FONT_SMALL at x=16; Height value at x=46
-    FrlgFont.draw("HT", 16, 60, { small = true, colors = upperColors })
+    FrlgFont.draw(Strings("HT"), 16, 60, { small = true, colors = upperColors })
     local htStr = isCaught and (entry.heightFormatted or " ??'??\"") or " ??'??\""
     FrlgFont.draw(htStr, 46, 60, { small = true, colors = upperColors })
 
     -- Line 4 (y = 72): WT in FONT_SMALL at x=16; Weight value at x=46
-    FrlgFont.draw("WT", 16, 72, { small = true, colors = upperColors })
-    local wtStr = isCaught and (entry.weightFormatted or " ???? ? lbs.") or " ???? ? lbs."
+    FrlgFont.draw(Strings("WT"), 16, 72, { small = true, colors = upperColors })
+    local wtStr = isCaught and (entry.weightFormatted or Strings(" ???? ? lbs.")) or Strings(" ???? ? lbs.")
     FrlgFont.draw(wtStr, 46, 72, { small = true, colors = upperColors })
 
     -- Footprint (16x16) at screen x=104, y=64 (window x=88, y=40)
@@ -929,12 +980,11 @@ local function draw_data_screen()
     end
 
     -- 5. Bottom Bar Controls
-    PokedexChrome.drawControlInfoLeft("{START_BUTTON}CRY", 8, 146)
-    if Pokedex.screen == "registration" then
-      PokedexChrome.drawControlInfo("{A_BUTTON}OK", 236, 146)
-    else
-      PokedexChrome.drawControlInfo("{A_BUTTON}NEXT DATA {B_BUTTON}CANCEL", 236, 146)
+    local cryHint, controlInfo = Pokedex.controlInfoForDataPage(Pokedex.screen)
+    if cryHint then
+      PokedexChrome.drawControlInfoLeft(cryHint, 8, 146)
     end
+    PokedexChrome.drawControlInfo(controlInfo, 236, 146)
 
   else
     -- ================= PAGE 2: SIZE CHART & AREA MAP =================
@@ -944,21 +994,21 @@ local function draw_data_screen()
     -- 2. Top Header Bar
     if Pokedex.subScreenPrev == "category_grid" then
       local catTitles = {
-        grassland = "Grassland POKéMON",
-        forest = "Forest POKéMON",
-        waters_edge = "Water's-edge POKéMON",
-        sea = "Sea POKéMON",
-        cave = "Cave POKéMON",
-        mountain = "Mountain POKéMON",
-        rough_terrain = "Rough-terrain POKéMON",
-        urban = "Urban POKéMON",
-        rare = "Rare POKéMON",
+        grassland = Strings("Grassland POKéMON"),
+        forest = Strings("Forest POKéMON"),
+        waters_edge = Strings("Water's-edge POKéMON"),
+        sea = Strings("Sea POKéMON"),
+        cave = Strings("Cave POKéMON"),
+        mountain = Strings("Mountain POKéMON"),
+        rough_terrain = Strings("Rough-terrain POKéMON"),
+        urban = Strings("Urban POKéMON"),
+        rare = Strings("Rare POKéMON"),
       }
-      local title = catTitles[Pokedex.currentCategory] or "Grassland POKéMON"
+      local title = catTitles[Pokedex.currentCategory] or Strings("Grassland POKéMON")
       PokedexChrome.drawHeader(title, 8, 2)
-      PokedexChrome.drawHeader("PAGE 2/ 2", 176, 2)
+      PokedexChrome.drawHeader(Strings("PAGE 2/ 2"), 176, 2)
     else
-      PokedexChrome.drawHeader("POKéMON LIST", nil, 2)
+      PokedexChrome.drawHeader(Strings("POKéMON LIST"), nil, 2)
     end
 
     -- 3. Top Left: Mon Icon (32x32) at (14, 20)
@@ -992,66 +1042,65 @@ local function draw_data_screen()
     end
 
     -- 4. Left Bottom: SIZE Title & Size Comparison Silhouettes
-    local sizeW = FrlgFont.measure("SIZE", { small = true })
-    FrlgFont.draw("SIZE", 16 + math.floor((80 - sizeW) / 2), 54, { small = true, colors = upperColors })
+    -- pokefirered/src/pokedex_screen.c:648
+    local sizeW = FrlgFont.measure(Strings("SIZE"), { small = true })
+    FrlgFont.draw(Strings("SIZE"), 16 + math.floor((80 - sizeW) / 2), 60, { small = true, colors = upperColors })
 
     if isCaught then
-      -- Trainer Silhouette (64x64) at x=48, y=72
-      local trainerImg = PokedexChrome.getTrainerPic("male")
-      if trainerImg then
-        PokedexChrome.drawSilhouette(trainerImg, 48, 72 + (entry.trainerOffset or 0))
-      end
-
-      -- Pokémon Silhouette (64x64 scaled by 256 / pokemonScale)
+      -- pokefirered/src/pokedex_screen.c:3107
       local pic = Pokemon.frontPic and Pokemon.frontPic(sp)
       if pic and pic.image then
-        local rawScale = entry.pokemonScale or 256
-        if rawScale <= 0 then rawScale = 256 end
-        local pScale = 256 / rawScale
-        local originX = 32
-        local originY = 32
-        local drawX = 40
-        local drawY = 104 + (entry.pokemonOffset or 0)
-        PokedexChrome.drawSilhouette(pic.image, drawX, drawY, pScale, pScale, originX, originY)
+        PokedexChrome.drawSilhouette(pic.image, 40, 104 + (entry.pokemonOffset or 0),
+          Pokedex.silhouetteScale(entry.pokemonScale), Pokedex.silhouetteScale(entry.pokemonScale), 32, 32)
+      end
+
+      -- pokefirered/src/pokedex_screen.c:3114
+      local trainerImg = PokedexChrome.getTrainerPic(Pokedex.playerGender())
+      if trainerImg then
+        PokedexChrome.drawSilhouette(trainerImg, 80, 104 + (entry.trainerOffset or 0),
+          Pokedex.silhouetteScale(entry.trainerScale), Pokedex.silhouetteScale(entry.trainerScale), 32, 32)
       end
     end
 
     -- 5. Right: AREA Title & Region Map
-    local areaW = FrlgFont.measure("AREA", { small = true })
-    FrlgFont.draw("AREA", 136 + math.floor((96 - areaW) / 2), 54, { small = true, colors = upperColors })
+    -- pokefirered/src/pokedex_screen.c:658
+    local areaW = FrlgFont.measure(Strings("AREA"), { small = true })
+    FrlgFont.draw(Strings("AREA"), 136 + math.floor((96 - areaW) / 2), 52, { small = true, colors = upperColors })
 
+    -- pokefirered/src/pokedex_screen.c:678
     local mapX, mapY = 136, 64
     PokedexChrome.drawMap("kanto", mapX, mapY)
 
-    -- Route Area Markers
-    local areas = PokedexData.getWildAreasForSpecies(sp)
-
-    if #areas > 0 then
-      for _, aKey in ipairs(areas) do
-        if PokedexData.getAreaMapKey(aKey) == "kanto" then
-          local m = PokedexData.getAreaMarker(aKey)
-          if m then
-            PokedexChrome.drawAreaMarker(m.shape, mapX + (m.x - 32), mapY + m.y)
-          end
+    -- pokefirered/src/pokedex_screen.c:3129
+    local drawn = 0
+    for _, aKey in ipairs(PokedexData.getWildAreasForSpecies(sp)) do
+      if PokedexData.getAreaMapKey(aKey) == "kanto" then
+        local m = PokedexData.getAreaMarker(aKey)
+        if m then
+          PokedexChrome.drawAreaMarker(m.shape, mapX + (m.x - 32), mapY + m.y)
+          drawn = drawn + 1
         end
       end
-    else
+    end
+
+    -- pokefirered/src/pokedex_screen.c:3130
+    if drawn == 0 then
       -- Area Unknown Wide Ellipse
       local ellipseImg = PokedexChrome.getImage("blit_wide_ellipse")
       if ellipseImg then
         love.graphics.setColor(1, 1, 1, 1)
         love.graphics.draw(ellipseImg, mapX + 4, mapY + 28)
       end
-      local unkW = FrlgFont.measure("AREA UNKNOWN", { small = true })
-      FrlgFont.draw("AREA UNKNOWN", mapX + math.floor((96 - unkW) / 2), mapY + 30, {
+      local unkW = FrlgFont.measure(Strings("AREA UNKNOWN"), { small = true })
+      FrlgFont.draw(Strings("AREA UNKNOWN"), mapX + math.floor((96 - unkW) / 2), mapY + 29, {
         small = true,
         colors = upperColors,
       })
     end
 
     -- 6. Bottom Bar Controls on Page 2
-    PokedexChrome.drawControlInfoLeft("{START_BUTTON}CRY", 8, 146)
-    PokedexChrome.drawControlInfo("{A_BUTTON}CANCEL {B_BUTTON}PREVIOUS DATA", 236, 146)
+    PokedexChrome.drawControlInfoLeft(Strings("{START_BUTTON}CRY"), 8, 146)
+    PokedexChrome.drawControlInfo(Strings("{A_BUTTON}CANCEL {B_BUTTON}PREVIOUS DATA"), 236, 146)
   end
 end
 
@@ -1070,17 +1119,17 @@ local function draw_habitat_grid()
 
   local catKey = Pokedex.currentCategory
   local catTitles = {
-    grassland = "Grassland POKéMON",
-    forest = "Forest POKéMON",
-    waters_edge = "Water's-edge POKéMON",
-    sea = "Sea POKéMON",
-    cave = "Cave POKéMON",
-    mountain = "Mountain POKéMON",
-    rough_terrain = "Rough-terrain POKéMON",
-    urban = "Urban POKéMON",
-    rare = "Rare POKéMON",
+    grassland = Strings("Grassland POKéMON"),
+    forest = Strings("Forest POKéMON"),
+    waters_edge = Strings("Water's-edge POKéMON"),
+    sea = Strings("Sea POKéMON"),
+    cave = Strings("Cave POKéMON"),
+    mountain = Strings("Mountain POKéMON"),
+    rough_terrain = Strings("Rough-terrain POKéMON"),
+    urban = Strings("Urban POKéMON"),
+    rare = Strings("Rare POKéMON"),
   }
-  local title = catTitles[catKey] or "Grassland POKéMON"
+  local title = catTitles[catKey] or Strings("Grassland POKéMON")
   local pages = PokedexData.getUnlockedCategoryPages(catKey, dex)
   local maxPages = math.max(1, #pages)
   Pokedex.categoryPage = math.max(1, math.min(Pokedex.categoryPage, maxPages))
@@ -1091,7 +1140,7 @@ local function draw_habitat_grid()
 
   -- Header Bar (y=2)
   PokedexChrome.drawHeader(title, 8, 2)
-  PokedexChrome.drawHeader(string.format("PAGE %d/ %d", Pokedex.categoryPage, maxPages), 176, 2)
+  PokedexChrome.drawHeader(Strings("PAGE %d/ %d", Pokedex.categoryPage, maxPages), 176, 2)
 
   Pokedex.spotlightTimer = Pokedex.spotlightTimer + 0.05
 
@@ -1133,7 +1182,7 @@ local function draw_habitat_grid()
   end
 
   -- Bottom Bar Controls: {DPAD_LEFTRIGHT}PICK+FLIP PAGE   {A_BUTTON}CHECK   {B_BUTTON}CANCEL
-  PokedexChrome.drawControlInfo("{DPAD_LEFTRIGHT}PICK+FLIP PAGE {A_BUTTON}CHECK {B_BUTTON}CANCEL", 236, 146)
+  PokedexChrome.drawControlInfo(Strings("{DPAD_LEFTRIGHT}PICK+FLIP PAGE {A_BUTTON}CHECK {B_BUTTON}CANCEL"), 236, 146)
 end
 
 --- 5. Area Map Screen
@@ -1147,7 +1196,7 @@ local function draw_area_screen()
   local areas = PokedexData.getWildAreasForSpecies(sp)
 
   -- Header (centered, y=2)
-  PokedexChrome.drawHeader("AREA: " .. name, nil, 2)
+  PokedexChrome.drawHeader(Strings("AREA: %s", name), nil, 2)
 
   -- Left Column: Mon Icon & Types & Name
   local icon = Pokemon.icon and Pokemon.icon(sp)
@@ -1208,12 +1257,12 @@ local function draw_area_screen()
     -- Area Unknown badge
     love.graphics.setColor(0.2, 0.2, 0.2, 0.8)
     love.graphics.rectangle("fill", 120, 72, 94, 18, 4, 4)
-    FrlgFont.draw("AREA UNKNOWN", 128, 76, { color = { 1, 0.9, 0.3, 1 } })
+    FrlgFont.draw(Strings("AREA UNKNOWN"), 128, 76, { color = { 1, 0.9, 0.3, 1 } })
   end
 
   -- Footer
-  PokedexChrome.drawControlInfoLeft("{START_BUTTON}CRY", 8, 146)
-  PokedexChrome.drawControlInfo("{DPAD_LEFTRIGHT}MAP {B_BUTTON}CANCEL", 236, 146)
+  PokedexChrome.drawControlInfoLeft(Strings("{START_BUTTON}CRY"), 8, 146)
+  PokedexChrome.drawControlInfo(Strings("{DPAD_LEFTRIGHT}MAP {B_BUTTON}CANCEL"), 236, 146)
 end
 
 --- 6. Size Comparison Screen
@@ -1225,12 +1274,12 @@ local function draw_size_screen()
   local entry = PokedexChrome.getEntry(sp)
 
   -- Header (centered, y=2)
-  PokedexChrome.drawHeader("SIZE COMPARISON: " .. name, nil, 2)
+  PokedexChrome.drawHeader(Strings("SIZE COMPARISON: %s", name), nil, 2)
 
   -- Left: Trainer Specs
-  FrlgFont.draw("TRAINER", 16, 32, { color = { 0.2, 0.4, 0.8, 1 } })
-  FrlgFont.draw("HT  4'07\"", 16, 48, { color = { 0.2, 0.2, 0.2, 1 } })
-  FrlgFont.draw("WT 114.6 lbs.", 16, 62, { color = { 0.2, 0.2, 0.2, 1 } })
+  FrlgFont.draw(Strings("TRAINER"), 16, 32, { color = { 0.2, 0.4, 0.8, 1 } })
+  FrlgFont.draw(Strings("HT  4'07\""), 16, 48, { color = { 0.2, 0.2, 0.2, 1 } })
+  FrlgFont.draw(Strings("WT 114.6 lbs."), 16, 62, { color = { 0.2, 0.2, 0.2, 1 } })
 
   -- Trainer Graphic
   love.graphics.setColor(0.3, 0.35, 0.4, 1)
@@ -1238,8 +1287,8 @@ local function draw_size_screen()
 
   -- Right: Mon Specs & Scaled Graphic
   FrlgFont.draw(name, 114, 32, { color = { 0.8, 0.3, 0.2, 1 } })
-  FrlgFont.draw("HT  " .. (entry.heightFormatted or "--'--\""), 114, 48, { color = { 0.2, 0.2, 0.2, 1 } })
-  FrlgFont.draw("WT  " .. (entry.weightFormatted or "---.- lbs."), 114, 62, { color = { 0.2, 0.2, 0.2, 1 } })
+  FrlgFont.draw(Strings("HT  %s", (entry.heightFormatted or "--'--\"")), 114, 48, { color = { 0.2, 0.2, 0.2, 1 } })
+  FrlgFont.draw(Strings("WT  %s", (entry.weightFormatted or Strings("---.- lbs."))), 114, 62, { color = { 0.2, 0.2, 0.2, 1 } })
 
   local pScale = (entry.pokemonScale or 256) / 256 * 0.75
   local pic = Pokemon.frontPic and Pokemon.frontPic(sp)
@@ -1249,8 +1298,8 @@ local function draw_size_screen()
   end
 
   -- Footer
-  PokedexChrome.drawControlInfoLeft("{START_BUTTON}CRY", 8, 146)
-  PokedexChrome.drawControlInfo("{B_BUTTON}CANCEL", 236, 146)
+  PokedexChrome.drawControlInfoLeft(Strings("{START_BUTTON}CRY"), 8, 146)
+  PokedexChrome.drawControlInfo(Strings("{B_BUTTON}CANCEL"), 236, 146)
 end
 
 --- 7. Action Popup Menu Modal
@@ -1263,14 +1312,14 @@ local function draw_action_popup()
 
   local isCaught = Dex.isCaught(Pokedex._dex, Pokedex.selectedSpecies)
   local actions = {
-    { id = "data", label = "DATA" },
-    { id = "cry", label = "CRY" },
-    { id = "area", label = "AREA" },
+    { id = "data", label = Strings("DATA") },
+    { id = "cry", label = Strings("CRY") },
+    { id = "area", label = Strings("AREA") },
   }
   if isCaught then
-    table.insert(actions, { id = "size", label = "SIZE" })
+    table.insert(actions, { id = "size", label = Strings("SIZE") })
   end
-  table.insert(actions, { id = "cancel", label = "CANCEL" })
+  table.insert(actions, { id = "cancel", label = Strings("CANCEL") })
 
   PokedexChrome.drawActionMenu(actions, Pokedex.actionCursor, 160, 48)
 end

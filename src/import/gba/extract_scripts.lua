@@ -309,8 +309,8 @@ local function write_tables(cache, root, scripts, text, movements, events, metaE
 end
 
 --- Primary write path: ROM MapEvents + BFS.
-function ExtractScripts.writeBundleFromRom(rom, cache, root, version)
-  local bundle = ExtractScripts.extractFromRom(rom, version)
+function ExtractScripts.writeBundleFromRom(rom, cache, root, version, extracted)
+  local bundle = extracted or ExtractScripts.extractFromRom(rom, version)
   write_tables(cache, root, bundle.scripts, bundle.text, bundle.movements, bundle.events, {
     source = "rom",
     opInventory = bundle.opInventory,
@@ -386,6 +386,7 @@ function ExtractScripts.loadBundle(cache, root, opts)
   if scripts and events then
     local objects=load_lua(root .. "/objects/pack.lua")
     require("src.core.game3.scripting.interaction_scripts").install(objects)
+    require("src.core.game3.encounters").installEncounterTypes(objects and objects.encounterTypes)
     if objects then
       text=text or {};movements=movements or {}
       for k,v in pairs(objects.scripts or {}) do scripts[k]=v end

@@ -23,8 +23,14 @@ local function diskFallback(rel)
     prefixes[#prefixes + 1] = "firered/"
   end
   local roots = {}
+  local identity = os.getenv("POKEPORT_IDENTITY") or ""
+  local sandboxed = identity ~= ""
   local home = os.getenv("HOME")
-  if home then
+  if home and sandboxed then
+    roots[#roots + 1] = home .. "/Library/Application Support/LOVE/" .. identity
+    roots[#roots + 1] = home .. "/.local/share/love/" .. identity
+  end
+  if home and not sandboxed then
     roots[#roots + 1] = home .. "/.local/share/love/pokemon-love2d"
   end
   if love and love.filesystem and love.filesystem.getSaveDirectory then
@@ -32,7 +38,7 @@ local function diskFallback(rel)
     if type(sd) == "string" and sd ~= "" then
       roots[#roots + 1] = sd
       local parent = sd:match("^(.*)/[^/]+$")
-      if parent then roots[#roots + 1] = parent .. "/pokemon-love2d" end
+      if parent and not sandboxed then roots[#roots + 1] = parent .. "/pokemon-love2d" end
     end
   end
   for _, root in ipairs(roots) do
@@ -234,8 +240,11 @@ end
 
 --- Point extract roots at the engine firered cache and install native tilesets.
 function Dataset.mountExtractRoots()
-  Extract.CACHE_ROOT = "data/generated/gba"
-  Extract.NATIVE_ROOT = "data/generated/gba/native"
+  local root = Dataset.cacheRootOverride
+    or os.getenv("POKEPORT_GBA_CACHE")
+    or "data/generated/gba"
+  Extract.CACHE_ROOT = root
+  Extract.NATIVE_ROOT = root .. "/native"
 end
 
 --- Bind LayoutNative handles onto map defs (FieldView needs midLayout).

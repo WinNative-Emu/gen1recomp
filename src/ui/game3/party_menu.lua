@@ -1,6 +1,7 @@
 -- Party menu — pret PARTY_LAYOUT_SINGLE (windows + FONT_SMALL + OAM sprites).
 
 local Stack = require("src.ui.game3.stack")
+local Chrome = require("src.ui.game3.chrome")
 local Window = require("src.ui.game3.window")
 local FrlgFont = require("src.ui.game3.frlg_font")
 local PartyChrome = require("src.ui.game3.party_chrome")
@@ -11,6 +12,7 @@ local SummaryMenu = require("src.ui.game3.summary_menu")
 local ItemUse = require("src.core.game3.item_use")
 local ItemsData = require("src.core.game3.items_data")
 local Bag = require("src.core.game3.bag")
+local Strings = require("src.core.Strings")
 
 local PartyMenu = {}
 
@@ -33,6 +35,13 @@ PartyMenu._bag = nil
 local function se(id)
   pcall(function() require("src.core.game3.audio").playSe(id) end)
 end
+
+-- pokefirered/include/constants/items.h:97
+function PartyMenu.itemIsEvolutionStone(item)
+  if item == nil or ItemsData.isTm(item) then return false end
+  return ItemsData.fieldUseKind(item) == "evo"
+end
+local is_evolution_stone = PartyMenu.itemIsEvolutionStone
 
 local function nav_up(cur, n)
   if cur == 1 then
@@ -116,10 +125,12 @@ local SLOT_SPRITES = {
 local INFO_LEFT = {
   nick = { 24, 11 }, level = { 32, 20 }, gender = { 64, 20 },
   hp = { 38, 36 }, hpMax = { 53, 36 }, hpBar = { 24, 35 },
+  desc = { 12, 34 },
 }
 local INFO_RIGHT = {
   nick = { 22, 3 }, level = { 32, 12 }, gender = { 64, 12 },
   hp = { 102, 12 }, hpMax = { 117, 12 }, hpBar = { 88, 10 },
+  desc = { 77, 4 },
 }
 
 -- pokefirered/src/data/party_menu.h:192
@@ -581,6 +592,75 @@ local function apply_battle_order(party, overlay, opts)
   return view, viewOverlay, o
 end
 
+-- pokefirered/src/party_menu.c:1944
+local OAK_DIM_TARGET = 6
+local OAK_DIM_DELAY = 4
+local OAK_TEXT_OPTS = { maxWidth = Chrome.DLG_W * 8, linePitch = 15, colors = FrlgFont.COLOR.NORMAL }
+
+local function set_oak_page(page)
+  PartyMenu._oakPage = page
+  local text = (PartyMenu._oakPages or {})[page]
+  PartyMenu._oakWrapped = text and FrlgFont.wrap(text, Chrome.DLG_W * 8) or nil
+end
+
+local function end_oak_advice()
+  PartyMenu._oakPages = nil
+  PartyMenu._oakWrapped = nil
+  PartyMenu._oakFx = nil
+  PartyMenu.mode = PartyMenu._oakReturn or "list"
+  PartyMenu._oakReturn = nil
+end
+
+local function oak_ramp(fx, key, target)
+  if fx[key] == target then return true end
+  fx.counter = fx.counter + 1
+  if fx.counter > OAK_DIM_DELAY then
+    fx.counter = 0
+    fx[key] = fx[key] + ((fx[key] < target) and 1 or -1)
+  end
+  return fx[key] == target
+end
+
+local function tick_oak_advice()
+  local fx = PartyMenu._oakFx
+  if not fx then return end
+  if fx.phase == "darken" then
+    if oak_ramp(fx, "y", OAK_DIM_TARGET) then fx.phase = "text" end
+  elseif fx.phase == "lighten" then
+    -- pokefirered/src/party_menu.c:1970
+    if oak_ramp(fx, "slot", 0) then
+      fx.phase = "text"
+      set_oak_page((PartyMenu._oakPage or 1) + 1)
+    end
+  elseif fx.phase == "normal" then
+    -- pokefirered/src/party_menu.c:2001
+    fx.slot = math.min(fx.slot, fx.y)
+    if oak_ramp(fx, "y", 0) then end_oak_advice() end
+  end
+end
+
+-- pokefirered/src/party_menu.c:5832
+local function begin_oak_advice(opts)
+  PartyMenu._oakPages = nil
+  PartyMenu._oakPage = 1
+  PartyMenu._oakReturn = nil
+  PartyMenu._oakWrapped = nil
+  PartyMenu._oakFx = nil
+  if not (opts and opts.battle) then return end
+  local BattleUi = package.loaded["src.core.game3.battle.ui"]
+  local st = BattleUi and BattleUi._st
+  if not st then return end
+  local okOak, Oak = pcall(require, "src.core.game3.battle.oak_advice")
+  if not okOak or not Oak then return end
+  local pages = Oak.take(st, Oak.FLAG_PARTY_MENU, "partyMenu")
+  if not pages then return end
+  PartyMenu._oakPages = pages
+  PartyMenu._oakReturn = PartyMenu.mode
+  PartyMenu.mode = "oak"
+  PartyMenu._oakFx = { phase = "darken", y = 0, slot = OAK_DIM_TARGET, counter = 0 }
+  set_oak_page(1)
+end
+
 function PartyMenu.show(sessionParty, moveOverlay, opts)
   if type(moveOverlay) == "table" and opts == nil and (moveOverlay.mode or moveOverlay.session or moveOverlay.battle or moveOverlay.onSelect or moveOverlay.activeSlot) then
     opts = moveOverlay
@@ -620,6 +700,7 @@ function PartyMenu.show(sessionParty, moveOverlay, opts)
   PartyMenu._lastSelectedSlot = 1
   if not Pokemon._names then Pokemon.install(nil) end
   PartyChrome.install(nil)
+  begin_oak_advice(opts)
   Stack.push("party", PartyMenu, { hideBelow = true })
   sync_all_oam()
 end
@@ -739,6 +820,7 @@ function PartyMenu.startHpAnim(slot, startHp, targetHp, maxHp, onDone)
 end
 
 function PartyMenu.update(dt)
+  if PartyMenu.mode == "oak" then tick_oak_advice() end
   local anim = PartyMenu._hpAnim
   if anim then
     dt = dt or (1 / 60)
@@ -789,6 +871,26 @@ function PartyMenu.handleInput(input)
     return
   end
 
+  -- pokefirered/src/party_menu.c:1936
+  if PartyMenu.mode == "oak" then
+    local fx = PartyMenu._oakFx
+    if not fx then
+      end_oak_advice()
+    elseif fx.phase == "text" and (input:wasPressed("a") or input:wasPressed("b")) then
+      se(5)
+      local page = (PartyMenu._oakPage or 1) + 1
+      if page > #(PartyMenu._oakPages or {}) then
+        PartyMenu._oakWrapped = nil
+        fx.phase = "normal"
+      elseif page == 2 and fx.slot > 0 then
+        fx.phase = "lighten"
+      else
+        set_oak_page(page)
+      end
+    end
+    return
+  end
+
   if PartyMenu.mode == "yesno" then
     if input:wasPressed("up") or input:wasPressed("down") then
       PartyMenu._yesNoCursor = (PartyMenu._yesNoCursor == 1) and 2 or 1
@@ -801,7 +903,7 @@ function PartyMenu.handleInput(input)
       PartyMenu._yesNoPrompt = nil
       if cb then cb(yes) end
     elseif input:wasPressed("b") then
-      se(9)
+      se(5) -- pokefirered/src/party_menu.c:5001
       local cb = PartyMenu._yesNoCallback
       PartyMenu._yesNoCallback = nil
       PartyMenu._yesNoPrompt = nil
@@ -829,7 +931,7 @@ function PartyMenu.handleInput(input)
         PartyMenu._forgetPrompt = nil
         if cb then cb(idx - 1) end
       elseif input:wasPressed("b") then
-        se(9)
+        se(5) -- pokefirered/src/party_menu.c:5001
         local cb = PartyMenu._forgetCallback
         PartyMenu._forgetCallback = nil
         PartyMenu._forgetMoves = nil
@@ -871,7 +973,7 @@ function PartyMenu.handleInput(input)
     end
     if input:wasPressed("a") then
       if PartyMenu.cursor == 7 then
-        se(9)
+        se(5) -- pokefirered/src/party_menu.c:1246
         PartyMenu.switchFrom = nil
         PartyMenu.mode = "list"
       else
@@ -881,7 +983,7 @@ function PartyMenu.handleInput(input)
         PartyMenu.mode = "list"
       end
     elseif input:wasPressed("b") then
-      se(9)
+      se(5) -- pokefirered/src/party_menu.c:1246
       PartyMenu.switchFrom = nil
       PartyMenu.mode = "list"
     end
@@ -900,7 +1002,7 @@ function PartyMenu.handleInput(input)
       local act = actions[PartyMenu.itemActionCursor]
       if act == "TAKE" then
         local ok, reason, msgText = ItemUse.takeFromMon(PartyMenu._session, PartyMenu._bag, PartyMenu.cursor)
-        if ok then se(5) else se(9) end
+        se(5) -- pokefirered/src/party_menu.c:3594
         PartyMenu.showMessage(msgText, function()
           PartyMenu.mode = "list"
         end)
@@ -913,11 +1015,11 @@ function PartyMenu.handleInput(input)
           end,
         })
       else
-        se(9)
+        se(5) -- pokefirered/src/party_menu.c:3733
         PartyMenu.mode = "list"
       end
     elseif input:wasPressed("b") then
-      se(9)
+      se(5) -- pokefirered/src/party_menu.c:3083
       PartyMenu.mode = "list"
     end
     return
@@ -988,8 +1090,8 @@ function PartyMenu.handleInput(input)
           local cost = math.floor(maxHp / 5)
           local curHp = mon and (mon.hp or 0) or 0
           if curHp <= cost or cost <= 0 then
-            se(9)
-            PartyMenu.showMessage("Not enough HP!", function()
+            se(5) -- pokefirered/src/party_menu.c:3910
+            PartyMenu.showMessage(Strings("Not enough HP!"), function()
               PartyMenu.mode = "list"
             end)
             return
@@ -1011,6 +1113,8 @@ function PartyMenu.handleInput(input)
           local isWater = Collision.isWater and Collision.isWater(fx, fy)
           local isGrass = Collision.isGrass and Collision.isGrass(fx, fy)
           local mapDef = Map.currentDef()
+          -- pokefirered/src/party_menu.c:4118
+          local facingBeh = Collision.behavior and Collision.behavior(fx, fy)
           local ctx = {
             party = PartyMenu._party,
             mon = mon,
@@ -1018,14 +1122,16 @@ function PartyMenu.handleInput(input)
             session = PartyMenu._session,
             facingObject = facingObj,
             isFacingWater = isWater,
+            isFacingWaterfall = FieldMoves.isWaterfallBehavior(facingBeh),
+            facing = P.facing,
             isSurfing = P.surfing == true,
             hasCuttableGrass = isGrass or (Collision.isGrass and Collision.isGrass(P.cellX, P.cellY)),
             mapType = mapDef and mapDef.type,
           }
           local res = FieldMoves.fromMenu(act, ctx)
           if not res or not res.ok then
-            se(9)
-            PartyMenu.showMessage((res and res.text) or "Can't use that here.", function()
+            se(5) -- pokefirered/src/party_menu.c:3910
+            PartyMenu.showMessage((res and res.text) or Strings("Can't use that here."), function()
               PartyMenu.mode = "list"
             end)
           else
@@ -1039,11 +1145,11 @@ function PartyMenu.handleInput(input)
           return
         end
       else
-        se(9)
+        se(5) -- pokefirered/src/party_menu.c:3393
         PartyMenu.mode = PartyMenu._previousMode or "list"
       end
     elseif input:wasPressed("b") then
-      se(9)
+      se(5) -- pokefirered/src/party_menu.c:3393
       PartyMenu.mode = PartyMenu._previousMode or "list"
     end
     return
@@ -1066,15 +1172,15 @@ function PartyMenu.handleInput(input)
     end
     if input:wasPressed("a") then
       if PartyMenu.cursor == 7 then
-        se(9)
+        se(5) -- pokefirered/src/party_menu.c:1246
         PartyMenu.mode = "list"
       else
         local userMon = PartyMenu._party and PartyMenu._party[PartyMenu._softboiledDonorSlot]
         local targetMon = PartyMenu._party and PartyMenu._party[PartyMenu.cursor]
         local ok, userHp, targetHp = FieldMoves.softboiledTransfer(userMon, targetMon)
         if not ok then
-          se(9)
-          PartyMenu.showMessage("It won't have any effect.", function()
+          se(5) -- pokefirered/src/party_menu.c:4490
+          PartyMenu.showMessage(Strings("It won't have any effect."), function()
             PartyMenu.mode = "softboiled"
           end)
         else
@@ -1083,7 +1189,7 @@ function PartyMenu.handleInput(input)
         end
       end
     elseif input:wasPressed("b") then
-      se(9)
+      se(5) -- pokefirered/src/party_menu.c:1246
       PartyMenu.mode = "list"
     end
     return
@@ -1141,7 +1247,7 @@ function PartyMenu.handleInput(input)
     end
     if input:wasPressed("a") then
       if PartyMenu.cursor == 7 then
-        se(9)
+        se(5) -- pokefirered/src/party_menu.c:1246
         if PartyMenu._onSelect then
           PartyMenu._onSelect(nil)
         else
@@ -1157,8 +1263,8 @@ function PartyMenu.handleInput(input)
       if not mon then return end
 
       if mon.isEgg then
-        se(9)
-        PartyMenu.showMessage("An EGG can't be used on.", function()
+        se(26) -- pokefirered/src/party_menu.c:1223
+        PartyMenu.showMessage(Strings("An EGG can't be used on."), function()
           PartyMenu.mode = "use"
         end)
         return
@@ -1168,7 +1274,7 @@ function PartyMenu.handleInput(input)
       if ItemsData.isTm(PartyMenu._item) then
         local status, preflightMsg, moveId, moveName = ItemUse.checkTmPreflight(mon, PartyMenu._item)
         if status == "knows" or status == "incompatible" or status == "invalid" then
-          se(9)
+          se(5) -- pokefirered/src/party_menu.c:5001
           PartyMenu.showMessage(preflightMsg, function()
             PartyMenu.mode = "use"
           end)
@@ -1191,7 +1297,7 @@ function PartyMenu.handleInput(input)
                   Bag.remove(PartyMenu._bag, PartyMenu._item, 1)
                 end
                 pcall(function() require("src.core.game3.audio").playFanfare(257) end)
-                PartyMenu.showMessage(string.format("%s learned\n%s!", monName, moveName), function()
+                PartyMenu.showMessage(Strings("%s learned\n%s!", monName, moveName), function()
                   PartyMenu.close()
                 end)
               else
@@ -1237,7 +1343,7 @@ function PartyMenu.handleInput(input)
                     pcall(function() require("src.core.game3.audio").playFanfare(257) end)
                     PartyMenu.close()
                   else
-                    PartyMenu.showMessage(string.format("%s did not learn\n%s.", monName, moveName), function()
+                    PartyMenu.showMessage(Strings("%s did not learn\n%s.", monName, moveName), function()
                       PartyMenu.mode = "use"
                     end)
                   end
@@ -1254,8 +1360,8 @@ function PartyMenu.handleInput(input)
         local lvl = tonumber(mon.level) or 1
         local hp = tonumber(mon.hp) or 0
         if lvl >= 100 or hp <= 0 then
-          se(9)
-          PartyMenu.showMessage("It won't have any effect.", function()
+          se(5) -- pokefirered/src/party_menu.c:5028
+          PartyMenu.showMessage(Strings("It won't have any effect."), function()
             PartyMenu.mode = "use"
           end)
           return
@@ -1280,7 +1386,7 @@ function PartyMenu.handleInput(input)
         pcall(function() require("src.core.game3.audio").playFanfare(257) end) -- MUS_LEVEL_UP (257)
 
         local monName = Pokemon.displayMonName(mon)
-        local lvlMsg = string.format("%s was elevated to\nLv. %d.", monName, mon.level)
+        local lvlMsg = Strings("%s was elevated to\nLv. %d.", monName, mon.level)
         local slot = PartyMenu.cursor
 
         local function check_evolution()
@@ -1364,12 +1470,12 @@ function PartyMenu.handleInput(input)
       end
 
       -- Case 3: Evolution Stone
-      if ItemsData.isEvolutionStone(PartyMenu._item) then
+      if is_evolution_stone(PartyMenu._item) then
         local Evolution = require("src.core.game3.evolution")
         local toSpecies = Evolution.itemTarget(mon, PartyMenu._item, PartyMenu._session)
         if not toSpecies then
-          se(9)
-          PartyMenu.showMessage("It won't have any effect.", function()
+          se(5) -- pokefirered/src/party_menu.c:4490
+          PartyMenu.showMessage(Strings("It won't have any effect."), function()
             PartyMenu.mode = "use"
           end)
         else
@@ -1420,13 +1526,13 @@ function PartyMenu.handleInput(input)
           end)
         end
       else
-        se(9)
-        PartyMenu.showMessage(msgText or "It won't have any effect.", function()
+        se(5) -- pokefirered/src/party_menu.c:4490
+        PartyMenu.showMessage(msgText or Strings("It won't have any effect."), function()
           PartyMenu.mode = "use"
         end)
       end
     elseif input:wasPressed("b") or input:wasPressed("start") then
-      se(9)
+      se(5) -- pokefirered/src/party_menu.c:1246
       PartyMenu.close()
     end
     return
@@ -1449,25 +1555,25 @@ function PartyMenu.handleInput(input)
     end
     if input:wasPressed("a") then
       if PartyMenu.cursor == 7 then
-        se(9)
+        se(5) -- pokefirered/src/party_menu.c:1246
         PartyMenu.close()
       else
         local mon = PartyMenu._party and PartyMenu._party[PartyMenu.cursor]
         if mon and mon.isEgg then
-          se(9)
-          PartyMenu.showMessage("An EGG can't hold an item.", function()
+          se(26) -- pokefirered/src/party_menu.c:1223
+          PartyMenu.showMessage(Strings("An EGG can't hold an item."), function()
             PartyMenu.close()
           end)
         else
           local ok, reason, msgText = ItemUse.giveToMon(PartyMenu._session, PartyMenu._bag, PartyMenu._item, PartyMenu.cursor)
-          if ok then se(5) else se(9) end
+          se(5) -- pokefirered/src/party_menu.c:1190
           PartyMenu.showMessage(msgText, function()
             PartyMenu.close()
           end)
         end
       end
     elseif input:wasPressed("b") or input:wasPressed("start") then
-      se(9)
+      se(5) -- pokefirered/src/party_menu.c:1246
       PartyMenu.close()
     end
     return
@@ -1490,7 +1596,7 @@ function PartyMenu.handleInput(input)
     end
     if input:wasPressed("a") then
       if PartyMenu.cursor == 7 then
-        se(9)
+        se(5) -- pokefirered/src/party_menu.c:1246
         PartyMenu.close()
       else
         se(5)
@@ -1505,7 +1611,7 @@ function PartyMenu.handleInput(input)
         if cb then cb(PartyMenu.cursor, PartyMenu._party and PartyMenu._party[PartyMenu.cursor]) end
       end
     elseif input:wasPressed("b") or input:wasPressed("start") then
-      se(9)
+      se(5) -- pokefirered/src/party_menu.c:1246
       PartyMenu.close()
     end
     return
@@ -1527,7 +1633,7 @@ function PartyMenu.handleInput(input)
   end
   if input:wasPressed("a") then
     if PartyMenu.cursor == 7 then
-      se(9)
+      se(5) -- pokefirered/src/party_menu.c:1246
       PartyMenu.close()
       return
     end
@@ -1560,7 +1666,7 @@ function PartyMenu.handleInput(input)
     PartyMenu.mode = "action"
     PartyMenu.actionCursor = 1
   elseif input:wasPressed("b") or input:wasPressed("start") then
-    se(9)
+    se(5) -- pokefirered/src/party_menu.c:1246
     PartyMenu.close()
   end
 end
@@ -1585,14 +1691,26 @@ local function hp_bar(hp, maxHp, px, py, width)
 end
 
 -- BG + text only; OAM sprites flushed by Display.present.
+-- pokefirered/src/party_menu.c:848 DisplayPartyPokemonDataForMoveTutorOrEvolutionItem
+local function slot_description(mon)
+  local item = PartyMenu._item
+  if not item or PartyMenu._battle then return nil end
+  if PartyMenu.mode ~= "use" and PartyMenu.mode ~= "message" then return nil end
+  if not is_evolution_stone(item) then return nil end
+  local Evolution = require("src.core.game3.evolution")
+  if Evolution.itemCheck(mon, item) then return nil end
+  return Strings("No use.")
+end
+
 local function draw_filled_slot(i, mon, selected)
   local win = slot_win(i)
   if not win then return end
   local T = Display.TILE or 8
   local baseX, baseY = win.left * T, win.top * T
   local info = slot_info(i)
+  local desc = slot_description(mon)
 
-  PartyChrome.drawSlot(win.kind, win.left, win.top, selected)
+  PartyChrome.drawSlot(win.kind, win.left, win.top, selected, desc ~= nil)
 
   local name = Pokemon.displayName(mon)
   party_print(name, baseX + info.nick[1], baseY + info.nick[2], 56)
@@ -1606,6 +1724,11 @@ local function draw_filled_slot(i, mon, selected)
     elseif gender == "F" then
       FrlgFont.draw("♀", baseX + info.gender[1], baseY + info.gender[2], { colors = FrlgFont.COLOR.PARTY_FEMALE, small = true })
     end
+  end
+
+  if desc then
+    party_print(desc, baseX + info.desc[1], baseY + info.desc[2], 64)
+    return
   end
 
   local hp = tonumber(mon.hp) or 0
@@ -1649,7 +1772,35 @@ function PartyMenu.draw()
     end
   end
 
-  if PartyMenu.mode == "message" then
+  if PartyMenu.mode == "oak" then
+    -- pokefirered/src/party_menu.c:1944
+    local fx = PartyMenu._oakFx
+    local y = fx and fx.y or 0
+    local slotY = fx and math.min(fx.slot, y) or 0
+    local win = slot_win(1)
+    if y > 0 and win then
+      local T = Display.TILE or 8
+      local sx, sy, sw, sh = win.left * T, win.top * T, win.w * T, win.h * T
+      love.graphics.setColor(0, 0, 0, y / 16)
+      love.graphics.rectangle("fill", 0, 0, Display.W, sy)
+      love.graphics.rectangle("fill", 0, sy, sx, sh)
+      love.graphics.rectangle("fill", sx + sw, sy, Display.W - sx - sw, sh)
+      love.graphics.rectangle("fill", 0, sy + sh, Display.W, Display.H - sy - sh)
+      if slotY > 0 then
+        -- pokefirered/src/party_menu.c:1970
+        love.graphics.setColor(0, 0, 0, slotY / 16)
+        love.graphics.rectangle("fill", sx, sy, sw, sh)
+      end
+      love.graphics.setColor(1, 1, 1, 1)
+    end
+    if fx and fx.phase ~= "darken" and fx.phase ~= "normal" then
+      -- pokefirered/src/party_menu.c:2604
+      Chrome.dialogueFrame()
+      if PartyMenu._oakWrapped then
+        FrlgFont.draw(PartyMenu._oakWrapped, Chrome.DLG_LEFT * 8, Chrome.DLG_TOP * 8 + 1, OAK_TEXT_OPTS)
+      end
+    end
+  elseif PartyMenu.mode == "message" then
     Window.stdFrame(Window.template(1, 15, 28, 4))
     if PartyMenu._messageText then
       local wrapped = FrlgFont.wrap(PartyMenu._messageText, 216)
@@ -1673,7 +1824,7 @@ function PartyMenu.draw()
 
     for idx = 1, 6 do
       local rowY = winY * 8 + 2 + (idx - 1) * 14
-      FrlgFont.draw(statNames[idx], winX * 8 + 2, rowY, { colors = FrlgFont.COLOR.NORMAL })
+      FrlgFont.draw(Strings(statNames[idx]), winX * 8 + 2, rowY, { colors = FrlgFont.COLOR.NORMAL })
       if isPage1 then
         local diff = newList[idx] - oldList[idx]
         local sign = (diff >= 0) and "+" or "-"
@@ -1700,11 +1851,11 @@ function PartyMenu.draw()
       if i == PartyMenu._yesNoCursor then
         Window.cursorPx(ynX * 8 + 1, rowY)
       end
-      FrlgFont.draw(opt, ynX * 8 + 9, rowY, { colors = FrlgFont.COLOR.NORMAL })
+      FrlgFont.draw(Strings(opt), ynX * 8 + 9, rowY, { colors = FrlgFont.COLOR.NORMAL })
     end
   elseif PartyMenu.mode == "forget" then
     Window.stdFrame(Window.template(1, 17, 15, 2))
-    FrlgFont.draw("Which move?", 1 * 8 + 2, 17 * 8 + 2, { colors = FrlgFont.COLOR.NORMAL })
+    FrlgFont.draw(Strings("Which move?"), 1 * 8 + 2, 17 * 8 + 2, { colors = FrlgFont.COLOR.NORMAL })
 
     local moves = PartyMenu._forgetMoves or {}
     local popW = 11
@@ -1721,7 +1872,7 @@ function PartyMenu.draw()
     end
   elseif PartyMenu.mode == "item_action" then
     Window.stdFrame(Window.template(1, 17, 18, 2))
-    FrlgFont.draw("Do what with an item?", 1 * 8 + 2, 17 * 8 + 2, { colors = FrlgFont.COLOR.NORMAL })
+    FrlgFont.draw(Strings("Do what with an item?"), 1 * 8 + 2, 17 * 8 + 2, { colors = FrlgFont.COLOR.NORMAL })
 
     local actCount = #PartyMenu.ITEM_ACTIONS
     local popW = 7
@@ -1734,11 +1885,11 @@ function PartyMenu.draw()
       if i == PartyMenu.itemActionCursor then
         Window.cursorPx(popX * 8 + 1, rowY)
       end
-      FrlgFont.draw(act, popX * 8 + 9, rowY, { colors = FrlgFont.COLOR.NORMAL })
+      FrlgFont.draw(Strings(act), popX * 8 + 9, rowY, { colors = FrlgFont.COLOR.NORMAL })
     end
   elseif PartyMenu.mode == "action" then
     Window.stdFrame(Window.template(1, 17, 17, 2))
-    FrlgFont.draw("Do what with this PKMN?", 1 * 8 + 2, 17 * 8 + 2, { colors = FrlgFont.COLOR.NORMAL })
+    FrlgFont.draw(Strings("Do what with this PKMN?"), 1 * 8 + 2, 17 * 8 + 2, { colors = FrlgFont.COLOR.NORMAL })
 
     local actCount = #PartyMenu.ACTIONS
     local popW = 10
@@ -1753,21 +1904,21 @@ function PartyMenu.draw()
       end
       local isFm = PartyMenu._fieldMoveNames and PartyMenu._fieldMoveNames[act]
       local col = isFm and (FrlgFont.COLOR.BLUE or FrlgFont.COLOR.MALE_NPC) or FrlgFont.COLOR.NORMAL
-      FrlgFont.draw(act, popX * 8 + 9, rowY, { colors = col })
+      FrlgFont.draw(Strings(act), popX * 8 + 9, rowY, { colors = col })
     end
   else
     Window.stdFrame(Window.template(1, 17, 21, 2))
-    local promptText = "Choose a POKéMON."
+    local promptText = Strings("Choose a POKéMON.")
     if PartyMenu.mode == "switch" then
-      promptText = "Move to where?"
+      promptText = Strings("Move to where?")
     elseif PartyMenu.mode == "use" then
       if PartyMenu._item and ItemsData.isTm(PartyMenu._item) then
-        promptText = "Teach which POKéMON?"
+        promptText = Strings("Teach which POKéMON?")
       else
-        promptText = "Use on which POKéMON?"
+        promptText = Strings("Use on which POKéMON?")
       end
     elseif PartyMenu.mode == "give" then
-      promptText = "Give to which POKéMON?"
+      promptText = Strings("Give to which POKéMON?")
     end
     FrlgFont.draw(promptText, 1 * 8 + 2, 17 * 8 + 2, { colors = FrlgFont.COLOR.NORMAL })
     PartyChrome.drawCancelButton(184, 136, PartyMenu.cursor == 7)

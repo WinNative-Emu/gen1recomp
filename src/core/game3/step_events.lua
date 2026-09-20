@@ -9,6 +9,7 @@
 
 local Pokemon = require("src.core.game3.pokemon")
 local ModRuntime = require("src.mods.Runtime")
+local Strings = require("src.core.Strings")
 
 local StepEvents = {}
 
@@ -83,7 +84,7 @@ local function trigger_white_out(session, game)
   -- 1. Faint message
   local Hud = require("src.ui.game3.hud")
   local playerName = (session and (session.name or session.playerName)) or "PLAYER"
-  local msg = playerName .. " is out of usable\nPOKéMON!\n\n" .. playerName .. " whited out!"
+  local msg = Strings("%s is out of usable\nPOKéMON!\n\n%s whited out!", playerName, playerName)
 
   Hud.openMessage(game, msg, {
     done = function()
@@ -132,18 +133,18 @@ function StepEvents.onStepTaken(session, game)
   local hapSteps = (tonumber(session.vars[0x403F] or session.happinessSteps) or 0) + 1
   if hapSteps >= 128 then
     hapSteps = 0
+    -- pokefirered/src/field_control_avatar.c:699
+    local ctx = { mapSec = Pokemon.currentMapSec(session) }
     for _, mon in ipairs(party) do
-      if not (mon.isEgg or (type(mon.egg) == "boolean" and mon.egg)) then
-        local curHap = tonumber(mon.friendship or mon.happiness) or 70
-        if curHap < 255 then
-          mon.friendship = math.min(255, curHap + 1)
-          mon.happiness = mon.friendship
-        end
-      end
+      Pokemon.adjustFriendship(mon, Pokemon.FRIENDSHIP_EVENT_WALKING, ctx)
     end
   end
   session.vars[0x403F] = hapSteps
   session.happinessSteps = hapSteps
+
+  -- pokefirered/src/field_specials.c:2068
+  local massage = tonumber(session.vars[0x4025]) or 0
+  if massage < 500 then session.vars[0x4025] = massage + 1 end
 
   -- pokefirered/src/field_control_avatar.c:658
   local vsChargeDone = false
@@ -176,6 +177,9 @@ function StepEvents.onStepTaken(session, game)
         anyPoisonDamage = true
         mon.hp = math.max(0, hp - 1)
         if mon.hp == 0 then
+          -- pokefirered/src/field_poison.c:36
+          Pokemon.adjustFriendship(mon, Pokemon.FRIENDSHIP_EVENT_FAINT_OUTSIDE_BATTLE,
+            { mapSec = Pokemon.currentMapSec(session) })
           mon.status = nil
           mon.statusNum = 0
           faintedMons[#faintedMons + 1] = {
@@ -206,7 +210,7 @@ function StepEvents.onStepTaken(session, game)
             end)
 
             local Hud = require("src.ui.game3.hud")
-            Hud.openMessage(game, fainted.name .. " fainted...", {
+            Hud.openMessage(game, Strings("%s fainted...", fainted.name), {
               done = function()
                 if party_is_wiped(party) then
                   trigger_white_out(session, game)
@@ -277,7 +281,7 @@ function StepEvents.onRepelStep(session, game)
         run = function(onDone)
           se(67) -- SE_REPEL
           local Hud = require("src.ui.game3.hud")
-          Hud.openMessage(game, "Repel's effect wore off...", {
+          Hud.openMessage(game, Strings("Repel's effect wore off..."), {
             done = onDone,
           })
         end,

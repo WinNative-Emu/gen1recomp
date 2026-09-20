@@ -71,7 +71,8 @@ local function Space()
 end
 
 function Objects.isPlayer(localId)
-  return tonumber(localId) == Objects.PLAYER_LOCAL_ID
+  local id = tonumber(localId)
+  return id == Objects.PLAYER_LOCAL_ID or id == 0xFF or id == 0x800F
 end
 
 local function facingFromDef(def)
@@ -185,7 +186,14 @@ function Objects.clear()
   Objects._mapId = nil
   Objects._defs = nil
   Objects._bounds = nil
-  -- Keep _perm across maps (templates are per-mapId keyed).
+end
+
+-- pokefirered/src/overworld.c:405
+function Objects.reset()
+  Objects.clear()
+  Objects._perm = {}
+  Objects._templateMt = {}
+  Objects._logged = false
 end
 
 function Objects.hasMap()
@@ -381,6 +389,8 @@ function Objects.loadMap(game, mapId, mapDef)
   if not sameMap then
     Objects._tracks = {}
     Objects._templateMt = {}
+    -- pokefirered/src/overworld.c:405
+    Objects._perm = {}
   end
   Objects._byId = {}
   Objects._order = {}
@@ -398,10 +408,7 @@ function Objects.loadMap(game, mapId, mapDef)
   end
   Objects._defs = defs or {}
   Objects._bounds = layoutBounds(mapDef)
-  -- House 1F never uses setobjectxyperm; clear stale perm + repair Mom template
-  -- left by the old Map.load bug (Pallet ON_TRANSITION hit Mom as localId 1).
   if mapId == "FR_PLAYERS_HOUSE_1F" then
-    Objects._perm[mapId] = nil
     for _, def in ipairs(Objects._defs) do
       if tonumber(def.localId or def.index) == 1 then
         def.x, def.y = 8, 4
@@ -501,6 +508,15 @@ function Objects.blocks(tx, ty, exceptLocalId)
   return false
 end
 
+-- pokefirered/src/event_object_movement.c:4899
+function Objects.playerBlocks(tx, ty)
+  local P = Player()
+  if not P then return false end
+  if P.cellX == tx and P.cellY == ty then return true end
+  if P.moving and P.targetX == tx and P.targetY == ty then return true end
+  return false
+end
+
 local function walkPhaseOf(eo)
   if not eo.moving then return 0 end
   local frames = eo.stepFrames or WALK_FRAMES
@@ -569,6 +585,23 @@ function Objects.scriptStep(eo, dir)
   return true
 end
 
+function Objects.scriptJump(eo, dir, distance)
+  if not eo then return false end
+  local P = Player()
+  if eo == P then
+    return P.scriptJump and P.scriptJump(dir, distance)
+  end
+  if eo.moving then return false end
+  distance = distance or 1
+  local d = DELTA[dir]
+  if not d then return false end
+  eo.facing = dir
+  beginStep(eo, eo.cellX + d[1] * distance, eo.cellY + d[2] * distance)
+  eo.frozen = true
+  eo.scriptBusy = true
+  return true
+end
+
 function Objects.scriptFace(eo, dir)
   if not eo then return end
   local P = Player()
@@ -622,8 +655,29 @@ local function advanceTrack(lid, tr, game)
       elseif eo then
         Objects.scriptStep(eo, act.dir)
       end
+    elseif act.kind == "jump" then
+      if eo == Player() then
+        if Player().scriptJump then
+          Player().scriptJump(act.dir, act.distance or 1)
+        elseif Player().scriptStep then
+          for _ = 1, (act.distance or 1) do
+            Player().scriptStep(act.dir)
+          end
+        end
+      elseif eo then
+        if Objects.scriptJump then
+          Objects.scriptJump(eo, act.dir, act.distance or 1)
+        else
+          Objects.scriptStep(eo, act.dir)
+        end
+      end
     elseif act.kind == "turn" then
       Objects.scriptFace(eo, act.dir)
+    elseif act.kind == "face_original" then
+      if eo and eo ~= Player() and eo.def then
+        local origFace = facingFromDef(eo.def)
+        Objects.scriptFace(eo, origFace)
+      end
     elseif act.kind == "bow" then
       if eo and eo ~= Player() then
         eo.bowFrames = act.frames or 48
@@ -819,9 +873,7 @@ local function idleTick(eo, game, ctx)
     else
       local Coll = Collision()
       ok = Coll.canEnter(game, tx, ty, {})
-      -- Don't collide with player.
-      local P = Player()
-      if P.cellX == tx and P.cellY == ty then ok = false end
+      if Objects.playerBlocks(tx, ty) then ok = false end
       if Objects.blocks(tx, ty, eo.localId) then ok = false end
     end
     if ok then
