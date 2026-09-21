@@ -380,6 +380,23 @@ function NativePack.scriptMidsByPair(scripts, events, pairOf)
   return out
 end
 
+NativePack.WARP_KEY_STRIDE = 4096
+
+function NativePack.warpKey(x, y)
+  return y * NativePack.WARP_KEY_STRIDE + x
+end
+
+-- pokefirered/src/event_object_movement.c:4835
+function NativePack.resolveLayoutColl(coll, mapColl, hasWarp)
+  if (mapColl or 0) == 0 then return coll end
+  local Permissions = require("src.world.gen2.Permissions")
+  if Permissions.isLedge(coll) then return coll end
+  -- pokefirered/src/field_control_avatar.c:987
+  if hasWarp and coll >= 0x60 and coll <= 0x7F then return coll end
+  if not Permissions.isWalkable(coll) then return coll end
+  return require("src.core.game3.scripting.collision").seed("BLOCKED")
+end
+
 local function addVoidFillMids(seen, borders, pairName)
   local VoidFill = require("src.core.game3.void_fill")
   local spec = Versions.TILESET_PAIRS and Versions.TILESET_PAIRS[pairName]
@@ -407,8 +424,9 @@ function NativePack.collectMidsForPair(grids, borders, pairName, scriptMids)
     end
   end
   for mapId, border in pairs(borders or {}) do
+    local grid = grids and grids[mapId]
     local spec = Versions.MAPS[mapId]
-    if (spec and spec.pair or "sevii_outdoor") == pairName then
+    if ((grid and grid.pair) or (spec and spec.pair) or "sevii_outdoor") == pairName then
       for _, mid in ipairs(border.mids or {}) do
         seen[mid] = true
       end
@@ -431,7 +449,7 @@ end
 -- grids: padded map grids; borders: mapId → { width, height, mids }
 -- midIndex: optional [pair][mid] = { coll, ... } for resolved COLL_* lookup
 -- CollisionFn: function(mid, rawColl, behavior, kind) → collByte
-function NativePack.writeExtract(cache, root, bundles, grids, borders, pairNames, midIndex, behaviorOf, fromCell, scriptMids)
+function NativePack.writeExtract(cache, root, bundles, grids, borders, pairNames, midIndex, behaviorOf, fromCell, scriptMids, warpCells)
   root = root or "data/generated/gba"
   local NativeRoot = root .. "/native"
   local manifest = {
@@ -463,6 +481,7 @@ function NativePack.writeExtract(cache, root, bundles, grids, borders, pairNames
     local pairName = grid.pair or "sevii_outdoor"
     local bundle = bundles[pairName]
     local indexForPair = midIndex and midIndex[pairName] or {}
+    local mapWarps = warpCells and warpCells[grid.altOwner or mapId] or nil
     local trueW = grid.padded_from and grid.padded_from.width or grid.width
     local trueH = grid.padded_from and grid.padded_from.height or grid.height
     local border = borders and borders[mapId] or { width = 1, height = 1, mids = { 0 } }
@@ -482,6 +501,10 @@ function NativePack.writeExtract(cache, root, bundles, grids, borders, pairNames
           coll = cell.coll or 0
         end
       end
+      local cx = (i - 1) % grid.width
+      local cy = math.floor((i - 1) / grid.width)
+      coll = NativePack.resolveLayoutColl(coll, cell.coll,
+        mapWarps and mapWarps[cy * NativePack.WARP_KEY_STRIDE + cx])
       cells[i] = { mid = cell.mid, coll = coll, elev = cell.elev or 0 }
     end
     local layout = {
@@ -499,12 +522,15 @@ function NativePack.writeExtract(cache, root, bundles, grids, borders, pairNames
     }
     local blob = NativePack.encodeMidLayout(layout)
     cache:write(NativeRoot .. "/layouts/" .. mapId .. ".mid", blob)
-    manifest.layouts[mapId] = {
-      pair = pairName,
-      width = layout.width,
-      height = layout.height,
-      file = "layouts/" .. mapId .. ".mid",
-    }
+    -- pokefirered/src/scrcmd.c:711
+    if not grid.altLayoutId then
+      manifest.layouts[mapId] = {
+        pair = pairName,
+        width = layout.width,
+        height = layout.height,
+        file = "layouts/" .. mapId .. ".mid",
+      }
+    end
   end
 
   local lines = {

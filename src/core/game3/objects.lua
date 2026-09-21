@@ -13,6 +13,10 @@ Objects.PLAYER_LOCAL_ID = Opcodes.LOCALID_PLAYER or 0xFF
 
 local CELL = 16
 local WALK_FRAMES = 16
+-- pokefirered/src/event_object_movement.c:5333 StartRunningAnim
+local RUN_FRAMES = 8
+-- pokefirered/src/event_object_movement.c:9029 UpdateRunSlowAnim
+local RUN_SLOW_FRAMES = 11
 local DELTA = {
   up = { 0, -1 },
   down = { 0, 1 },
@@ -142,6 +146,9 @@ local function newEventObject(def)
   if not sprite and resolvedGfx then
     sprite = GfxIds.spriteFor(resolvedGfx)
   end
+  local Coll = Collision()
+  local elev = (def.elevation and def.elevation ~= 0 and def.elevation)
+    or (Coll and Coll.elevationAt and Coll.elevationAt(x, y)) or 0
   return {
     localId = lid,
     def = def,
@@ -154,7 +161,7 @@ local function newEventObject(def)
     facing = facingFromDef(def),
     sprite = sprite or "SPRITE_YOUNGSTER",
     graphicsId = resolvedGfx,
-    elevation = def.elevation or 0,
+    elevation = elev,
     movementType = mt,
     movement = movement,
     range = range,
@@ -519,6 +526,8 @@ end
 
 local function walkPhaseOf(eo)
   if not eo.moving then return 0 end
+  -- pokefirered/src/event_object_movement.c:7040 MovementAction_DisableAnimation_Step0
+  if eo.inanimate then return 0 end
   local frames = eo.stepFrames or WALK_FRAMES
   local p = eo.animClock % frames
   local mid = math.floor(frames / 2)
@@ -549,6 +558,11 @@ local function finishStep(eo)
   if eo.def then
     eo.def.x, eo.def.y = eo.cellX, eo.cellY
   end
+  local Coll = Collision()
+  local curElev = Coll and Coll.elevationAt and Coll.elevationAt(eo.cellX, eo.cellY)
+  if curElev and curElev ~= 0 and curElev ~= 15 then
+    eo.elevation = curElev
+  end
 end
 
 local function tickMotion(eo)
@@ -569,17 +583,20 @@ local function tickMotion(eo)
 end
 
 --- Scripted one-cell step (no collision — FRLG applymovement forces).
-function Objects.scriptStep(eo, dir)
+function Objects.scriptStep(eo, dir, run, slow)
   if not eo then return false end
   local P = Player()
   if eo == P then
-    return P.scriptStep and P.scriptStep(dir)
+    return P.scriptStep and P.scriptStep(dir, run, slow)
   end
   if eo.moving then return false end
   local d = DELTA[dir]
   if not d then return false end
-  eo.facing = dir
+  -- pokefirered/src/event_object_movement.c:6796 MovementAction_LockFacingDirection_Step0
+  if not eo.facingLocked then eo.facing = dir end
   beginStep(eo, eo.cellX + d[1], eo.cellY + d[2])
+  -- pokefirered/src/event_object_movement.c:5333 StartRunningAnim
+  if run then eo.stepFrames = slow and RUN_SLOW_FRAMES or RUN_FRAMES end
   eo.frozen = true
   eo.scriptBusy = true
   return true
@@ -609,7 +626,20 @@ function Objects.scriptFace(eo, dir)
     if P.scriptFace then P.scriptFace(dir) else P.facing = dir end
     return
   end
+  -- pokefirered/src/event_object_movement.c:2501 SetObjectEventDirection
+  if eo.facingLocked then return end
   eo.facing = dir
+end
+
+-- pokefirered/src/event_object_movement.c:5208 GetOppositeDirection
+local OPPOSITE_DIR = { down = "up", up = "down", left = "right", right = "left" }
+
+-- pokefirered/src/event_object_movement.c:4789 GetDirectionToFace
+local function directionToFace(x1, y1, x2, y2)
+  if x1 > x2 then return "left" end
+  if x1 < x2 then return "right" end
+  if y1 > y2 then return "up" end
+  return "down"
 end
 
 local function advanceTrack(lid, tr, game)
@@ -651,9 +681,9 @@ local function advanceTrack(lid, tr, game)
   if type(act) == "table" then
     if act.kind == "step" then
       if eo == Player() then
-        if Player().scriptStep then Player().scriptStep(act.dir) end
+        if Player().scriptStep then Player().scriptStep(act.dir, act.run, act.slow) end
       elseif eo then
-        Objects.scriptStep(eo, act.dir)
+        Objects.scriptStep(eo, act.dir, act.run, act.slow)
       end
     elseif act.kind == "jump" then
       if eo == Player() then
@@ -673,6 +703,22 @@ local function advanceTrack(lid, tr, game)
       end
     elseif act.kind == "turn" then
       Objects.scriptFace(eo, act.dir)
+    elseif act.kind == "face_player" then
+      -- pokefirered/src/event_object_movement.c:6772 MovementAction_FacePlayer_Step0
+      if eo and eo ~= Player() then
+        local dir = directionToFace(eo.cellX, eo.cellY, Player().cellX, Player().cellY)
+        if act.away then dir = OPPOSITE_DIR[dir] end
+        Objects.scriptFace(eo, dir)
+      end
+    elseif act.kind == "lock_facing" then
+      -- pokefirered/src/event_object_movement.c:6796 MovementAction_LockFacingDirection_Step0
+      if eo and eo ~= Player() then eo.facingLocked = act.locked and true or false end
+    elseif act.kind == "animate" then
+      -- pokefirered/src/event_object_movement.c:7040 MovementAction_DisableAnimation_Step0
+      if eo and eo ~= Player() then eo.inanimate = act.inanimate and true or false end
+    elseif act.kind == "remove_obstacle" then
+      -- pokefirered/src/event_object_movement.c:7135 MovementAction_RockSmashBreak_Step0
+      tr.sleep = act.frames or 32
     elseif act.kind == "face_original" then
       if eo and eo ~= Player() and eo.def then
         local origFace = facingFromDef(eo.def)
@@ -868,11 +914,22 @@ local function idleTick(eo, game, ctx)
       return
     end
     local ok
+    -- pokefirered/src/event_object_movement.c:4830 GetCollisionAtCoords
     if ctx then
-      ok = ctx.canEnter(tx, ty) and not ctx.blocks(tx, ty, eo.localId)
+      local Coll = Collision()
+      ok = ctx.canEnter(tx, ty, eo.cellX, eo.cellY, dir)
+        and not ctx.blocks(tx, ty, eo.localId)
+      if ok and eo.mapDef and Coll.directionallyImpassableOn(
+          eo.mapDef, eo.cellX, eo.cellY, tx, ty, dir) then
+        ok = false
+      end
     else
       local Coll = Collision()
-      ok = Coll.canEnter(game, tx, ty, {})
+      -- pokefirered/src/event_object_movement.c:8346 IsElevationMismatchAt
+      local onWater = Coll.isWater(eo.cellX, eo.cellY)
+      ok = Coll.canEnter(game, tx, ty,
+        { fromX = eo.cellX, fromY = eo.cellY, dir = dir, surfing = onWater })
+      if ok and Coll.isWater(tx, ty) ~= onWater then ok = false end
       if Objects.playerBlocks(tx, ty) then ok = false end
       if Objects.blocks(tx, ty, eo.localId) then ok = false end
     end
@@ -905,10 +962,11 @@ function Objects.update(game)
 end
 
 function Objects.spawnFromDefs(defs, mapDef)
-  local pool = { byId = {}, order = {}, bounds = layoutBounds(mapDef) }
+  local pool = { byId = {}, order = {}, bounds = layoutBounds(mapDef), mapDef = mapDef }
   for _, def in ipairs(defs or {}) do
     local eo = newEventObject(def)
     if eo.localId > 0 then
+      eo.mapDef = mapDef
       pool.byId[eo.localId] = eo
       pool.order[#pool.order + 1] = eo.localId
     end

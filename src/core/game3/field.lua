@@ -2,6 +2,7 @@
 
 local Player = require("src.core.game3.player")
 local ModRuntime = require("src.mods.Runtime")
+local Strings = require("src.core.Strings")
 
 local Field = {}
 
@@ -90,16 +91,19 @@ function Field.update(_dt)
     local ad = Space.vm.adapters
     if ad and ad.pollMovement then ad.pollMovement(0) end
     Space.vm:tick()
-    if Space._pendingOnFrame and not Space.vm:isRunning() then
+    -- pokefirered/src/field_control_avatar.c:212
+    if not Space.vm:isRunning() then
       local world = game and (game.overworld or game.world)
       if not (Space._deferOnFrameForFade and world and world.mapSetup) then
+        local claiming = Space._pendingOnFrame
         Space._pendingOnFrame = false
         Space._deferOnFrameForFade = false
-        Space.runOnFrame()
-        -- Map.load locks until ON_FRAME can claim (lockall). If nothing
-        -- started, free the D-pad again (pret: no script → no lock).
-        if not Space.vm:isRunning() then
-          Field.unlock()
+        if claiming or not Field.locked then
+          Space.runOnFrame()
+          -- pokefirered/src/script.c:463 TryRunOnFrameMapScript
+          if claiming and not Space.vm:isRunning() then
+            Field.unlock()
+          end
         end
       end
     end
@@ -116,6 +120,8 @@ function Field.update(_dt)
   Ghosts.update(game)
 
   Field.pollMapChange(game)
+  -- pokefirered/src/safari_zone.c:60 CB2_EndSafariBattle
+  Field.pollSafariBalls(game)
 
   local input = game and game.input
   -- pokefirered/src/field_control_avatar.c:98
@@ -123,6 +129,8 @@ function Field.update(_dt)
   if Field.forcedMovementPending() then walkInput = nil end
   Player.update(game, walkInput)
   Field.updateWaterfall(game)
+  -- pokefirered/src/field_player_avatar.c:1691
+  Field.updateFishing()
 
   local Hud = require("src.ui.game3.hud")
   local Runtime = package.loaded["src.core.game3.runtime"]
@@ -170,7 +178,16 @@ function Field.lock()
   Field.locked = true
 end
 
+-- pokefirered/src/field_effect.c:1104 FieldCallback_FlyIntoMap
+Field._flyLanding = false
+
+-- pokefirered/src/field_effect.c:1155 FieldCB_FallWarpExit
+Field._fallWarp = false
+
 function Field.unlock()
+  if Field._flyLanding then return end
+  -- pokefirered/src/field_effect.c:1274 FallWarpEffect_7
+  if Field._fallWarp then return end
   Field.locked = false
 end
 
@@ -217,11 +234,21 @@ local function bg_event_at(game, fx, fy, elevation, facingDir)
   return nil
 end
 
+local function hidden_item_store(session)
+  local Runtime = package.loaded["src.core.game3.runtime"]
+  local Space = package.loaded["src.core.game3.scripting.space"]
+  if session and Runtime and Runtime.getSession and Runtime.getSession() == session
+      and Space and Space.store then
+    return Space.store, Space
+  end
+  return session and (session.store or session)
+end
+
 local function hidden_item_at(game, x, y, elevation)
   local session = Field._session
   local events = get_map_bg_events(game)
   local Flags = require("src.core.game3.scripting.flags")
-  local store = session and (session.store or session)
+  local store = hidden_item_store(session)
   for _, ev in ipairs(events) do
     if (ev.type == "hidden_item" or ev.kind == 7) and ev.x == x and ev.y == y then
       local flag = ev.flag or (ev.hiddenItemId and (0x3E8 + ev.hiddenItemId))
@@ -246,7 +273,7 @@ function Field.pickUpHiddenItem(game, hidden)
   local ItemsData = require("src.core.game3.items_data")
   local Message = require("src.ui.game3.message")
   local Audio = require("src.core.game3.audio")
-  local store = session and (session.store or session)
+  local store, Space = hidden_item_store(session)
 
   local flag = hidden.flag or (hidden.hiddenItemId and (0x3E8 + hidden.hiddenItemId))
   if flag and Flags.getFlag(store, nil, flag) then
@@ -257,7 +284,7 @@ function Field.pickUpHiddenItem(game, hidden)
   local qty = hidden.quantity or 1
   local bag = session and session.bag
 
-  if bag and not Bag.canAdd(bag, itemId, qty) then
+  if not bag or not Bag.add(bag, itemId, qty) then
     Message.show("Too bad!\nThe BAG is full…", {
       done = function()
         Message.close()
@@ -266,11 +293,9 @@ function Field.pickUpHiddenItem(game, hidden)
     return true
   end
 
-  if bag then
-    Bag.add(bag, itemId, qty)
-  end
   if flag and store then
     Flags.setFlag(store, nil, flag, true)
+    if Space then Space.persistSession(nil, game or Field._game) end
   end
 
   Audio.playFanfare(257)
@@ -306,7 +331,7 @@ function Field.useItemfinder(session, showOWMessage)
   local Flags = require("src.core.game3.scripting.flags")
   local Audio = require("src.core.game3.audio")
   local Message = require("src.ui.game3.message")
-  local store = session and (session.store or session)
+  local store = hidden_item_store(session)
 
   local found = nil
   local underfoot = false
@@ -408,6 +433,113 @@ function Field.tryCoordEvents(game, cx, cy)
     end
   end
   return false
+end
+
+-- pokefirered/include/constants/metatile_behaviors.h:27
+local MB_STRENGTH_BUTTON = 0x20
+-- pokefirered/include/constants/metatile_behaviors.h:78
+local MB_FALL_WARP = 0x66
+
+local function boulderCell(game, cx, cy)
+  local Collision = package.loaded["src.core.game3.collision"]
+    or require("src.core.game3.collision")
+  local beh = Collision.behavior and Collision.behavior(cx, cy)
+  return beh, Collision
+end
+
+-- pokefirered/src/field_control_avatar.c:1066
+local function boulderFallThroughHole(game, obj, cx, cy)
+  local beh, Collision = boulderCell(game, cx, cy)
+  if beh == nil then return false end
+  local hole
+  if Collision.isFallWarp then
+    hole = Collision.isFallWarp(beh) and true or false
+  else
+    hole = (beh == MB_FALL_WARP)
+  end
+  if not hole then return false end
+
+  pcall(function()
+    local Audio = require("src.core.game3.audio")
+    local SE = require("src.core.game3.se_ids")
+    if Audio.playSe and SE.SE_FALL then Audio.playSe(SE.SE_FALL) end
+  end)
+
+  -- pokefirered/src/event_object_movement.c:1520 RemoveObjectEventByLocalIdAndMap
+  require("src.core.game3.objects").removeObject(
+    obj.localId or (obj.def and (obj.def.localId or obj.def.index)))
+  obj.moving = false
+
+  -- pokefirered/src/event_object_movement.c:2546
+  local reveal = tonumber(obj.trainerType)
+    or tonumber(obj.def and obj.def.trainerType) or 0
+  if reveal > 0 and reveal ~= 0xFFFF then
+    local Space = package.loaded["src.core.game3.scripting.space"]
+    if Space and Space.store then
+      local Flags = require("src.core.game3.scripting.flags")
+      Flags.setFlag(Space.store, Space.vm and Space.vm.ctx or nil, reveal, false)
+    end
+    local Objects = package.loaded["src.core.game3.objects"]
+    if Objects and Objects.syncFlagVisibility then
+      Objects.syncFlagVisibility(reveal, false)
+    end
+  end
+  return true
+end
+
+-- pokefirered/src/field_control_avatar.c:1076
+local function boulderActivateVictoryRoadSwitch(game, cx, cy)
+  local beh, Collision = boulderCell(game, cx, cy)
+  if beh == nil then return false end
+  local button
+  if Collision.isStrengthButton then
+    button = Collision.isStrengthButton(beh) and true or false
+  else
+    button = (beh == MB_STRENGTH_BUTTON)
+  end
+  if not button then return false end
+
+  local Space = package.loaded["src.core.game3.scripting.space"]
+    or require("src.core.game3.scripting.space")
+  if not Space.active or not Space.startScript then return false end
+  if Space.vm and Space.vm.isRunning and Space.vm:isRunning() then return false end
+
+  local session = Field._session
+  local mapId = session and session.map
+  local data = game and game.data and game.data.maps
+  local def = mapId and data and data[mapId]
+  local events = def and def.coordEvents
+  if not events then
+    local ev = Space.bundle and Space.bundle.events and Space.bundle.events[mapId]
+    events = ev and ev.coordEvents
+  end
+  if type(events) ~= "table" then return false end
+
+  local P = require("src.core.game3.player")
+  local DIR_BY_FACING = { down = 1, up = 2, left = 3, right = 4 }
+  local facingDir = DIR_BY_FACING[P.facing] or 1
+
+  for _, ev in ipairs(events) do
+    if ev.x == cx and ev.y == cy and ev.scriptKey then
+      Space.startScript(ev.scriptKey, nil, facingDir)
+      return true
+    end
+  end
+  return false
+end
+
+-- pokefirered/src/field_player_avatar.c:1452
+function Field.onBoulderMoved(game, obj, cx, cy)
+  game = game or Field._game
+  if not obj then return false end
+  if not Field.running then return false end
+  if Field.locked then return false end
+  cx = tonumber(cx) or obj.cellX
+  cy = tonumber(cy) or obj.cellY
+  if not cx or not cy then return false end
+  local fell = boulderFallThroughHole(game, obj, cx, cy)
+  local pressed = boulderActivateVictoryRoadSwitch(game, cx, cy)
+  return fell or pressed
 end
 
 --- A-button field interact: NPC talk → bgEvent → metatile interaction → Surf.
@@ -673,6 +805,32 @@ function Field.executeFieldMove(payload)
         Message.show(payload.text, function() Message.close() end)
       end
     end)
+  elseif act == "dotted_hole" then
+    -- pokefirered/src/fldeff_cut.c:194
+    Field.locked = true
+    P.startFieldMove(24)
+    if payload.se then Audio.playSe(payload.se) end
+    FieldEffects.startCutGrass(P.cellX, P.cellY, function()
+      Field.openDottedHoleDoor()
+      if payload.text then
+        Message.show(payload.text, function() Message.close() end)
+      end
+    end)
+  elseif act == "fly" then
+    -- pokefirered/src/region_map.c:3873 CB2_OpenFlyMap
+    Field.locked = true
+    local okRm, RegionMap = pcall(require, "src.ui.game3.region_map")
+    local shown = okRm and RegionMap and RegionMap.show and pcall(RegionMap.show, {
+      session = Field._session,
+      mode = "fly",
+      onPick = function(section) Field.flyTo(section) end,
+      onClose = function() Field.locked = false end,
+    })
+    if not shown then
+      Field.locked = false
+      local FieldMoves = require("src.core.game3.field_moves")
+      Message.show(FieldMoves.TEXT.CANT_USE_HERE, function() Message.close() end)
+    end
   elseif act == "rock_smash" then
     Field.locked = true
     P.startFieldMove(28)
@@ -752,18 +910,20 @@ function Field.executeFieldMove(payload)
         Flags.setFlag(Space.store, nil, payload.flag, true)
       end
     end
+    -- pokefirered/src/fldeff_flash.c:177
+    if payload.text then
+      Message.show(payload.text, function() Message.close() end)
+    end
     FieldEffects.startFlash(function()
       Field.locked = false
-      if payload.text then
-        Message.show(payload.text, function() Message.close() end)
-      end
     end)
   elseif act == "teleport" or act == "dig" then
     Field.locked = true
     if payload.se then Audio.playSe(payload.se) end
     FieldEffects.startWarpSpin(act, function()
       Field.locked = false
-      Field.respawnAtHeal({ fieldMove = true })
+      -- pokefirered/src/field_effect.c:2126 SetWarpDestinationToEscapeWarp
+      Field.respawnAtHeal({ fieldMove = true, warp = payload.warp })
     end)
     if payload.text then
       Message.show(payload.text, function() Message.close() end)
@@ -787,8 +947,7 @@ end
 
 -- pokefirered/src/wild_encounter.c:446
 function Field.tryRockSmashEncounter()
-  local okE, Encounters = pcall(require, "src.core.game3.encounters")
-  if not (okE and Encounters and Encounters.rollRocks) then return false end
+  local Encounters = require("src.core.game3.encounters")
   local session = Field._session
   local mapId = session and session.map
   if not mapId then
@@ -807,6 +966,285 @@ function Field.tryRockSmashEncounter()
   return true
 end
 
+-- pokefirered/src/field_player_avatar.c:1721 Fishing3
+local FISHING_WAIT_FRAMES = 60
+-- pokefirered/src/field_player_avatar.c:1755 Fishing5
+local FISHING_DOT_FRAMES = 20
+-- pokefirered/src/field_player_avatar.c:1741 Fishing4
+local FISHING_DOT_MAX = 10
+local FISHING_FIRST_ROUND_DOTS = 4
+
+Field._fishing = nil
+
+function Field.isFishing()
+  return Field._fishing ~= nil
+end
+
+-- pokefirered/src/field_player_avatar.c:1679 StartFishing
+function Field.startFishing(rod)
+  if Field._fishing then return false end
+  Field.locked = true
+  Player.fishing = true
+  Field._fishing = { rod = tonumber(rod) or 0, step = "wait", timer = 0, dots = 0, required = 0 }
+  return true
+end
+
+-- pokefirered/src/field_player_avatar.c:1936 Fishing16
+local function fishingStop()
+  Field._fishing = nil
+  Player.fishing = false
+  Field.locked = false
+end
+
+-- pokefirered/src/wild_encounter.c:519 FishingWildEncounter
+function Field.tryFishingEncounter(rod)
+  local okE, Encounters = pcall(require, "src.core.game3.encounters")
+  if not (okE and Encounters and Encounters.rollFishing) then return false end
+  local session = Field._session
+  local mapId = session and session.map
+  if not mapId then
+    local Map = package.loaded["src.core.game3.map"]
+    mapId = Map and Map.current
+  end
+  local enc = Encounters.rollFishing(mapId, tonumber(rod) or 0)
+  if not enc then return false end
+  local Runtime = package.loaded["src.core.game3.runtime"]
+  local BattleBridge = require("src.core.game3.battle_bridge")
+  local ok, err = BattleBridge.startWild(Runtime and Runtime._mod, Field._game, enc, {})
+  if not ok then
+    print("[game3/field] fishing startWild failed: " .. tostring(err))
+    return false
+  end
+  return true
+end
+
+local function fishingMapId()
+  local session = Field._session
+  local mapId = session and session.map
+  if mapId then return mapId end
+  local Map = package.loaded["src.core.game3.map"]
+  return Map and Map.current
+end
+
+-- pokefirered/src/field_player_avatar.c:1691 Task_Fishing
+function Field.updateFishing()
+  local f = Field._fishing
+  if not f then return false end
+  local Message = require("src.ui.game3.message")
+  local Rng = require("src.core.game3.rng")
+  f.timer = f.timer + 1
+
+  if f.step == "wait" then
+    if f.timer >= FISHING_WAIT_FRAMES then
+      -- pokefirered/src/field_player_avatar.c:1741 Fishing4
+      f.required = math.min(FISHING_DOT_MAX, (Rng.Random() % 10) + FISHING_FIRST_ROUND_DOTS)
+      f.dots = 0
+      f.timer = 0
+      f.step = "dots"
+      Message.showStay("", { speed = 0 })
+    end
+  elseif f.step == "dots" then
+    if f.timer >= FISHING_DOT_FRAMES then
+      f.timer = 0
+      if f.dots >= f.required then
+        f.step = "bite"
+      else
+        f.dots = f.dots + 1
+        Message.showStay(string.rep("·", f.dots), { speed = 0 })
+      end
+    end
+  elseif f.step == "bite" then
+    -- pokefirered/src/field_player_avatar.c:1777 Fishing6
+    f.step = "result"
+    local okE, Encounters = pcall(require, "src.core.game3.encounters")
+    local hasMons = okE and Encounters and Encounters.hasFishingMons
+      and Encounters.hasFishingMons(fishingMapId()) or false
+    if (not hasMons) or (Rng.Random() % 2 == 1) then
+      -- pokefirered/src/strings.c:1060 gText_NotEvenANibble
+      Message.show(Strings("Not even a nibble…"), function() fishingStop() end)
+    else
+      -- pokefirered/src/strings.c:1059 gText_PokemonOnHook
+      local rod = f.rod
+      Message.show(Strings("A POKéMON's on the hook!"), function()
+        fishingStop()
+        Field.tryFishingEncounter(rod)
+      end)
+    end
+  end
+  return true
+end
+
+-- pokefirered/src/field_specials.c:2310 CutMoveOpenDottedHoleDoor
+function Field.openDottedHoleDoor()
+  local FieldMoves = require("src.core.game3.field_moves")
+  local RV = FieldMoves.RUIN_VALLEY
+  Field.setMetatile(RV.doorX, RV.doorY, RV.doorOpen, false)
+  pcall(function()
+    local Audio = require("src.core.game3.audio")
+    local SE = require("src.core.game3.se_ids")
+    Audio.playSe(SE.SE_BANG)
+  end)
+  local Flags = require("src.core.game3.scripting.flags")
+  local Space = package.loaded["src.core.game3.scripting.space"]
+  if Space and Space.store then
+    Flags.setFlag(Space.store, Space.vm and Space.vm.ctx or nil, RV.flag, true)
+  end
+  local session = Field._session
+  if session and session.flags then session.flags[RV.flag] = true end
+  Field.locked = false
+  return true
+end
+
+-- pokefirered/src/region_map.c:828 sMapFlyDestinations
+local FLY_DESTINATIONS = {
+  MAPSEC_PALLET_TOWN = { map = "FR_PALLET_TOWN", x = 6, y = 8 },
+  MAPSEC_VIRIDIAN_CITY = { map = "FR_VIRIDIAN_CITY", x = 26, y = 27 },
+  MAPSEC_PEWTER_CITY = { map = "FR_PEWTER_CITY", x = 17, y = 26 },
+  MAPSEC_CERULEAN_CITY = { map = "FR_CERULEAN_CITY", x = 22, y = 20 },
+  MAPSEC_LAVENDER_TOWN = { map = "FR_LAVENDER_TOWN", x = 6, y = 6 },
+  MAPSEC_VERMILION_CITY = { map = "FR_VERMILION_CITY", x = 15, y = 7 },
+  MAPSEC_CELADON_CITY = { map = "FR_CELADON_CITY", x = 48, y = 12 },
+  MAPSEC_FUCHSIA_CITY = { map = "FR_FUCHSIA_CITY", x = 25, y = 32 },
+  MAPSEC_CINNABAR_ISLAND = { map = "FR_CINNABAR_ISLAND", x = 14, y = 12 },
+  MAPSEC_INDIGO_PLATEAU = { map = "FR_INDIGO_PLATEAU_EXTERIOR", x = 11, y = 7 },
+  MAPSEC_SAFFRON_CITY = { map = "FR_SAFFRON_CITY", x = 24, y = 39 },
+  MAPSEC_ROUTE_4_POKECENTER = { map = "FR_ROUTE_4", x = 12, y = 6 },
+  MAPSEC_ROUTE_10_POKECENTER = { map = "FR_ROUTE_10", x = 13, y = 21 },
+  MAPSEC_ONE_ISLAND = { map = "SEVII_ONE_ISLAND", x = 14, y = 6 },
+  MAPSEC_TWO_ISLAND = { map = "FR_TWO_ISLAND", x = 21, y = 8 },
+  MAPSEC_THREE_ISLAND = { map = "FR_THREE_ISLAND", x = 14, y = 28 },
+  MAPSEC_FOUR_ISLAND = { map = "FR_FOUR_ISLAND", x = 18, y = 21 },
+  MAPSEC_FIVE_ISLAND = { map = "FR_FIVE_ISLAND", x = 18, y = 7 },
+  MAPSEC_SIX_ISLAND = { map = "FR_SIX_ISLAND", x = 11, y = 12 },
+  MAPSEC_SEVEN_ISLAND = { map = "FR_SEVEN_ISLAND", x = 12, y = 4 },
+}
+Field.FLY_DESTINATIONS = FLY_DESTINATIONS
+
+Field.FLY_BAKED_REL = "region_map/fly_destinations.lua"
+Field._flyBaked = nil
+Field._flyBakedRoot = nil
+
+local function fly_default_root()
+  local ok, Extract = pcall(require, "src.import.gba.extract_island1")
+  if ok and Extract and Extract.CACHE_ROOT then return Extract.CACHE_ROOT end
+  return "data/generated/gba"
+end
+
+local function fly_cache()
+  local ok, Dataset = pcall(require, "src.core.game3.dataset")
+  if ok and Dataset and Dataset.cache then return Dataset.cache() end
+  return nil
+end
+
+local function fly_normalize(row)
+  if type(row) ~= "table" then return nil end
+  local map = row.map or row.mapId
+  if type(map) ~= "string" or map == "" then return nil end
+  return { map = map, x = tonumber(row.x) or 0, y = tonumber(row.y) or 0 }
+end
+
+function Field.installFlyDestinations(pack)
+  Field._flyBaked = {}
+  if type(pack) ~= "table" then return 0 end
+  local rows = pack.fly_destinations or pack.destinations or pack
+  if type(rows) ~= "table" then return 0 end
+  local n = 0
+  for key, row in pairs(rows) do
+    local dest = fly_normalize(row)
+    if dest then
+      local name = (type(key) == "string" and key:match("^MAPSEC_") and key)
+        or (type(row.mapsec) == "string" and row.mapsec)
+        or (type(row.id) == "string" and row.id)
+        or nil
+      local num = tonumber(key) or tonumber(row.mapsec) or tonumber(row.section)
+      if name then Field._flyBaked[name] = dest end
+      if num then Field._flyBaked[num] = dest end
+      if name or num then n = n + 1 end
+    end
+  end
+  return n
+end
+
+function Field.loadFlyDestinations(cache, root)
+  cache = cache or fly_cache()
+  root = root or fly_default_root()
+  Field._flyBaked = {}
+  Field._flyBakedRoot = root
+  if not (cache and cache.read) then return 0 end
+  local rel = root .. "/" .. Field.FLY_BAKED_REL
+  local src = cache:read(rel)
+  if type(src) ~= "string" or src == "" then return 0 end
+  local chunk = load(src, "@" .. rel, "t", {})
+  if not chunk then return 0 end
+  local ok, pack = pcall(chunk)
+  if not ok then return 0 end
+  return Field.installFlyDestinations(pack)
+end
+
+function Field.invalidateFlyDestinations()
+  Field._flyBaked = nil
+  Field._flyBakedRoot = nil
+end
+
+-- pokefirered/src/region_map.c:4022 SetFlyWarpDestination
+function Field.flyDestination(section)
+  if section == nil then return nil end
+  if Field._flyBaked == nil or Field._flyBakedRoot ~= fly_default_root() then
+    Field.loadFlyDestinations()
+  end
+  local baked = Field._flyBaked
+  local num = tonumber(section)
+  local hit = baked[section] or (num and baked[num])
+  if hit then return hit end
+  local byName = FLY_DESTINATIONS[section]
+  if byName then return byName end
+  if not num then return nil end
+  local okS, MapSections = pcall(require, "src.import.gba.map_sections_extract")
+  local info = okS and MapSections and MapSections.SECTIONS and MapSections.SECTIONS[num]
+  local id = info and info.id
+  if not id then return nil end
+  return baked[id] or FLY_DESTINATIONS[id] or nil
+end
+
+-- pokefirered/src/field_effect.c:1065 ReturnToFieldFromFlyMapSelect
+function Field.flyTo(section)
+  local dest = Field.flyDestination(section)
+  local Message = require("src.ui.game3.message")
+  if not dest then
+    Field.locked = false
+    local FieldMoves = require("src.core.game3.field_moves")
+    Message.show(FieldMoves.TEXT.CANT_USE_HERE, function() Message.close() end)
+    return false
+  end
+  Field.locked = true
+  local FieldEffects = require("src.core.game3.field_effects")
+  local function land()
+    local Map = require("src.core.game3.map")
+    Map.load(Field._mod, Field._game, dest.map, {
+      x = dest.x, y = dest.y, facing = "down", depth1Connections = true,
+    })
+    Player.reset(dest.x, dest.y, "down")
+    Player.syncToHost(Field._game)
+    Player.setVisible(true)
+    -- pokefirered/src/field_effect.c:1104 FieldCallback_FlyIntoMap
+    Field._flyLanding = true
+    Field.locked = true
+    FieldEffects.startFlyLanding(function()
+      Field._flyLanding = false
+      Field.locked = false
+    end)
+  end
+  if love and love.graphics and FieldEffects.startFlyTakeoff then
+    Player.setVisible(false)
+    FieldEffects.startFlyTakeoff(land, nil)
+  else
+    land()
+    Field._flyLanding = false
+    Field.locked = false
+  end
+  return true
+end
+
 -- pokefirered/src/metatile_behavior.c:266
 function Field.forcedMovementPending()
   if Field._waterfall then return false end
@@ -820,6 +1258,24 @@ function Field.forcedMovementPending()
   return Collision.canEnter(Field._game, x, y + 1, {
     fromX = x, fromY = y, dir = "down", surfing = true,
   }) == true
+end
+
+-- pokefirered/src/safari_zone.c:60 CB2_EndSafariBattle
+function Field.pollSafariBalls(game)
+  if Field.locked then return false end
+  local Battle = package.loaded["src.core.game3.battle"]
+  if Battle and Battle.isActive and Battle.isActive() then return false end
+  local Space = package.loaded["src.core.game3.scripting.space"]
+  if Space and Space.vm and Space.vm.isRunning and Space.vm:isRunning() then return false end
+  local Warp = package.loaded["src.core.game3.warp"]
+  if Warp and Warp.isBusy and Warp.isBusy() then return false end
+  local okS, Safari = pcall(require, "src.core.game3.safari")
+  if not (okS and Safari and Safari.isActive) then return false end
+  local session = Field._session
+  if not Safari.isActive(session) then return false end
+  if Safari.balls(session) > 0 then return false end
+  -- pokefirered/data/scripts/safari_zone.inc:31 SafariZone_EventScript_OutOfBalls
+  return Safari.outOfBalls(session, game or Field._game) and true or false
 end
 
 -- pokefirered/src/event_data.c:49
@@ -923,18 +1379,34 @@ function Field.respawnAtHeal(opts)
   if not session then return end
   local HealLocations = require("src.core.game3.heal_locations")
   HealLocations.normalizeSession(session)
+  if not (opts and opts.fieldMove) then
+    -- pokefirered/src/overworld.c:1553 CB2_WhiteOut
+    local okS, Safari = pcall(require, "src.core.game3.safari")
+    if okS and Safari and Safari.reset then Safari.reset(session) end
+  end
   if not (opts and opts.fieldMove) and ModRuntime.wants("world.blacked_out") then
     ModRuntime.emit("world.blacked_out", {
       save = session,
       healTarget = { map = session.healMap, x = session.healX, y = session.healY },
     })
   end
-  local Party = require("src.core.game3.party")
-  Party.healAll(session.party)
+  if not (opts and opts.fieldMove) then
+    -- pokefirered/src/overworld.c:1553 CB2_WhiteOut
+    local Party = require("src.core.game3.party")
+    Party.healAll(session.party)
+  end
   local Map = require("src.core.game3.map")
   local mapId = session.healMap or "FR_PLAYERS_HOUSE_1F"
   local hx = session.healX or 8
   local hy = session.healY or 5
+  local warp = opts and opts.warp
+  if type(warp) == "string" then warp = { map = warp } end
+  if type(warp) == "table" and type(warp.map) == "string" then
+    -- pokefirered/src/overworld.c:656 SetWarpDestinationToEscapeWarp
+    mapId = warp.map
+    hx = tonumber(warp.x) or hx
+    hy = tonumber(warp.y) or hy
+  end
   Map.load(Field._mod, Field._game, mapId, {
     x = hx,
     y = hy,
@@ -944,6 +1416,16 @@ function Field.respawnAtHeal(opts)
   })
   Player.reset(hx, hy, "down")
   Player.syncToHost(Field._game)
+  -- pokefirered/src/heal_location.c:119 SetWhiteoutRespawnHealerNpcAsLastTalked
+  local healerId = tonumber(session.healHealerLocalId)
+  if healerId and not (opts and opts.fieldMove) then
+    local Space = package.loaded["src.core.game3.scripting.space"]
+    if Space and Space.store then
+      local Flags = require("src.core.game3.scripting.flags")
+      local Ctx = require("src.core.game3.scripting.ctx")
+      Flags.setVar(Space.store, Space.vm and Space.vm.ctx or nil, Ctx.VAR_LAST_TALKED, healerId)
+    end
+  end
   -- Map.load already locked; ON_FRAME / releaseall own unlock.
 end
 

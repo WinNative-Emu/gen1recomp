@@ -692,6 +692,42 @@ function Pokemon.currentMapSec(session)
   return def and tonumber(def.regionMapSectionId) or nil
 end
 
+local function player_identity(player)
+  player = player or {}
+  local id = player.trainerId or player.id or player.playerId
+  local name = player.name or player.playerName or player.otName
+  if id == nil or name == nil then
+    local Runtime = package.loaded["src.core.game3.runtime"]
+    local ok, sess = pcall(function()
+      return Runtime and Runtime.getSession and Runtime.getSession()
+    end)
+    if ok and sess then
+      id = id or sess.trainerId or sess.id or sess.playerId
+      name = name or sess.name or sess.playerName
+    end
+  end
+  return tonumber(id), name
+end
+
+-- pokefirered/src/pokemon.c:5974 IsOtherTrainer
+function Pokemon.isOtherTrainer(otId, otName, player)
+  local playerId, playerName = player_identity(player)
+  if playerId == nil then return false end
+  if tonumber(otId) ~= playerId then return true end
+  local mine = tostring(playerName or "")
+  local theirs = tostring(otName or "")
+  for i = 1, #theirs do
+    if theirs:sub(i, i) ~= mine:sub(i, i) then return true end
+  end
+  return false
+end
+
+-- pokefirered/src/pokemon.c:5965 IsTradedMon
+function Pokemon.isTradedMon(mon, player)
+  if type(mon) ~= "table" or mon.otId == nil then return false end
+  return Pokemon.isOtherTrainer(mon.otId, mon.otName or mon.ot, player)
+end
+
 local function friendship_bonuses(mon, friendship, ctx)
   if (tonumber(mon.pokeball or mon.ball) or 0) == ITEM_LUXURY_BALL then
     friendship = friendship + 1
@@ -1480,6 +1516,33 @@ function Pokemon.ghostPic()
   return pic_entry(Pokemon._front, "ghost", rgba)
 end
 
+Pokemon.NUMBERING_INTERNAL = "internal"
+Pokemon.NUMBERING_NATIONAL = "national"
+
+-- pokefirered/src/data/text/species_names.h:254
+function Pokemon.isInternalSpecies(n)
+  n = tonumber(n)
+  if not n or n < 1 then return false end
+  if not Pokemon._names then Pokemon.install(Pokemon._cache) end
+  local name = Pokemon._names and Pokemon._names[n]
+  if type(name) ~= "string" or name == "" then return false end
+  return name:match("^%?+$") == nil
+end
+
+function Pokemon.numberingOf(mon)
+  if type(mon) ~= "table" then return nil end
+  local tag = mon.speciesNumbering
+  if tag == Pokemon.NUMBERING_INTERNAL or tag == Pokemon.NUMBERING_NATIONAL then return tag end
+  return nil
+end
+
+function Pokemon.tagNumbering(mon, kind)
+  if type(mon) ~= "table" then return mon end
+  if kind ~= Pokemon.NUMBERING_NATIONAL then kind = Pokemon.NUMBERING_INTERNAL end
+  mon.speciesNumbering = kind
+  return mon
+end
+
 --- Resolve display species for a host/opaque mon table.
 -- Host mons use string ids ("KYOGRE"); FRLG scripts use internal SPECIES ints.
 function Pokemon.speciesOf(mon)
@@ -1497,21 +1560,13 @@ function Pokemon.speciesOf(mon)
   local n = tonumber(raw)
   if not n or n < 1 then return nil end
 
-  -- Prefer internal id when pack has that name; else try national → internal.
-  if not Pokemon._names then Pokemon.install(Pokemon._cache) end
-  if Pokemon._names and Pokemon._names[n] and Pokemon._names[n] ~= "??????????" then
-    -- Ambiguous for Gen3: national 382 is KYOGRE but internal 382 is ARON.
-    -- Host numeric ids in this project are Gen1/2 range or string names.
-    if n <= 251 then return n end
-    -- If national map says this number is a national dex, resolve.
-    local fromNat = Pokemon.speciesFromNational(n)
-    if fromNat and fromNat ~= n then
-      -- Heuristic: if name at n looks like a valid mon and equals national's
-      -- species name mismatch, prefer national mapping when n > 251.
-      return fromNat
-    end
-    return n
+  local numbering = Pokemon.numberingOf(mon)
+  if numbering == Pokemon.NUMBERING_NATIONAL then
+    return Pokemon.speciesFromNational(n) or n
   end
+  if numbering == Pokemon.NUMBERING_INTERNAL then return n end
+
+  if Pokemon.isInternalSpecies(n) then return n end
   return Pokemon.speciesFromNational(n) or n
 end
 
