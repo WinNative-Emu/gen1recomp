@@ -82,7 +82,7 @@ contains(tostring(picsErr), "front/0", "the error lists the missing front sprite
 
 print("[test] 2. RomExtractorGen3 stage gating")
 local Json = require("src.link.Json")
-local SHA1 = "0000000000000000000000000000000000000000"
+local SHA1 = "41cb23d8dccc8ebd7c649cd8fbb58eeace6e2fdc"
 
 local function loadExtractorWithStubs(pokeRun, sectionsRun)
   for name in pairs(package.loaded) do
@@ -365,6 +365,20 @@ for _, rel in ipairs(siblings) do
   check(requiredSet[rel] == true,
     rel .. " is both a ready() sentinel and a contract-required key")
 end
+
+print("[test] 4. the parallel success path writes the stage markers")
+local par, parFiles = loadExtractorWithStubs(function()
+  return { root = "data/generated/gba/pokemon", picsWritten = { icons = 412 } }
+end)
+par.runParallel = function() return true end
+local parOk, parErr = pcall(par.run, par)
+check(parOk == true, "the parallel path completes the import (" .. tostring(parErr) .. ")")
+local parPoke = parFiles[STATUS] and Json.decode(parFiles[STATUS])
+check(parPoke ~= nil and parPoke.ok == true,
+  "the parallel path writes pokemon/extract_status.json with ok = true")
+local parAux = parFiles[AUX_STATUS] and Json.decode(parFiles[AUX_STATUS])
+check(parAux ~= nil and parAux.ok == true,
+  "the parallel path writes region_map/extract_status.json with ok = true")
 
 if failed > 0 then
   print("[test] FAILED " .. failed)

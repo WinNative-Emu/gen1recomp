@@ -10,6 +10,7 @@ local FrlgFont = require("src.ui.game3.frlg_font")
 local Pokemon = require("src.core.game3.pokemon")
 local Dex = require("src.core.game3.dex")
 local PokedexData = require("src.core.game3.pokedex_data")
+local PokedexChrome = require("src.ui.game3.pokedex_chrome")
 local SummaryChrome = require("src.ui.game3.summary_chrome")
 local SummaryData = require("src.core.game3.summary_data")
 local Strings = require("src.core.Strings")
@@ -56,7 +57,7 @@ end
 -- pokefirered/src/pokemon_summary_screen.c:5180
 local function play_mon_cry()
   local mon = current_mon()
-  if not mon or mon.isEgg then return end
+  if not mon or Pokemon.isEgg(mon) then return end
   local species = Pokemon.speciesOf(mon)
   if not species then return end
   local okA, Audio = pcall(require, "src.core.game3.audio")
@@ -153,7 +154,7 @@ function SummaryMenu.openMenu(party, startIndex, opts)
   SummaryMenu._slide.active = false
 
   local mon = current_mon()
-  if mon and mon.isEgg then
+  if mon and Pokemon.isEgg(mon) then
     SummaryMenu._page = PAGE_EGG
   elseif SummaryMenu._mode == "select_move" then
     SummaryMenu._page = PAGE_MOVES_INFO
@@ -194,7 +195,7 @@ local function change_mon(delta)
   SummaryMenu._moveCursor = 1
   SummaryMenu._swapSlot = nil
   local mon = current_mon()
-  if mon and mon.isEgg then
+  if mon and Pokemon.isEgg(mon) then
     SummaryMenu._page = PAGE_EGG
   elseif SummaryMenu._page == PAGE_EGG then
     SummaryMenu._page = PAGE_INFO
@@ -454,13 +455,13 @@ local function draw_header(mon)
   end
 
   if SummaryData.isShiny(mon) then
-    local sx, sy = isMovesPage and 8 or 8, isMovesPage and 24 or 40
+    local sx, sy = 8, isMovesPage and 24 or 40
     SummaryChrome.drawShinyStar(sx, sy)
   end
 
   local ailment = SummaryData.statusAilment(mon)
   if ailment > 0 then
-    local ax, ay = isMovesPage and 16 or 16, isMovesPage and 44 or 38
+    local ax, ay = 16, isMovesPage and 44 or 38
     SummaryChrome.drawStatusIcon(ax, ay, ailment)
   end
 
@@ -676,7 +677,8 @@ local function draw_page_moves(mon, isDetail)
 end
 
 local function draw_page_egg(mon)
-  local species = Pokemon.speciesOf(mon)
+  -- pokefirered/src/pokemon_summary_screen.c:4016 MON_DATA_SPECIES_OR_EGG
+  local species = Pokemon.speciesOrEgg(mon)
   local nx, ny = cxy("name", 40, 18)
   draw_text(Strings("EGG"), nx, ny, 64, "NORMAL")
 
@@ -735,7 +737,6 @@ local function draw_top_bar_text(page, isEgg)
   })
 
   local ctrl = get_controls_str(page, isEgg)
-  local PokedexChrome = require("src.ui.game3.pokedex_chrome")
   PokedexChrome.drawControlInfo(ctrl, 236, 1)
 end
 
@@ -759,7 +760,7 @@ function SummaryMenu.draw()
   end
 
   -- 2. OVERLAY LAYER (Foreground elements anchored to screen coordinates)
-  draw_top_bar_text(SummaryMenu._page, mon.isEgg)
+  draw_top_bar_text(SummaryMenu._page, Pokemon.isEgg(mon))
   if SummaryMenu._page == PAGE_EGG then
     draw_page_egg(mon)
   else

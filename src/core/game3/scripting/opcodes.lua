@@ -27,9 +27,12 @@ Opcodes.TABLE = {
   [0x0e] = op("setmysteryeventstatus", 2, { B }),
   [0x0f] = op("loadword", 6, { B, W }),
   [0x10] = op("loadbyte", 3, { B, B }),
-  [0x11] = op("setptr", 5, { W }),
-  [0x12] = op("loadbytefromptr", 2, { B }),
-  [0x13] = op("setptrbyte", 2, { B }),
+  -- pret asm/macros/event.inc: setptr — .byte value / .4byte ptr
+  [0x11] = op("setptr", 6, { B, W }),
+  -- pret asm/macros/event.inc: loadbytefromptr — .byte destIndex / .4byte source
+  [0x12] = op("loadbytefromptr", 6, { B, W }),
+  -- pret asm/macros/event.inc: setptrbyte — .byte srcIndex / .4byte destination
+  [0x13] = op("setptrbyte", 6, { B, W }),
   [0x14] = op("copylocal", 3, { B, B }),
   [0x15] = op("copybyte", 9, { W, W }),
   [0x16] = op("setvar", 5, { H, H }),
@@ -131,7 +134,9 @@ Opcodes.TABLE = {
   [0x76] = op("hidemonpic", 1),
   [0x77] = op("showcontestpainting", 2, { B }),
   [0x78] = op("braillemessage", 5, { W }),
-  [0x79] = op("givemon", 9, { H, B, H, H, H }),
+  -- pret asm/macros/event.inc: .byte 0x79, .2byte species, .byte level,
+  -- .2byte item, .4byte unk1, .4byte unk2, .byte unkParam3 (14 operand bytes).
+  [0x79] = op("givemon", 15, { H, B, H, W, W, B }),
   [0x7a] = op("giveegg", 3, { H }),
   [0x7b] = op("setmonmove", 5, { B, B, H }),
   [0x7c] = op("checkpartymove", 3, { H }),
@@ -158,8 +163,10 @@ Opcodes.TABLE = {
   [0x91] = op("removemoney", 6, { W, B }),
   [0x92] = op("checkmoney", 6, { W, B }),
   [0x93] = op("showmoneybox", 4, { B, B, B }),
-  [0x94] = op("hidemoneybox", 1),
-  [0x95] = op("updatemoneybox", 3, { B, B }),
+  -- pokefirered/asm/macros/event.inc:1198-1202
+  [0x94] = op("hidemoneybox", 3, { B, B }),
+  -- pokefirered/asm/macros/event.inc:1206-1211
+  [0x95] = op("updatemoneybox", 4, { B, B, B }),
   [0x96] = op("getpokenewsactive", 3, { H }),
   [0x97] = op("fadescreen", 2, { B }),
   [0x98] = op("fadescreenspeed", 3, { B, B }),
@@ -178,8 +185,10 @@ Opcodes.TABLE = {
   [0xa5] = op("doweather", 1),
   [0xa6] = op("setstepcallback", 2, { B }),
   [0xa7] = op("setmaplayoutindex", 3, { H }),
-  [0xa8] = op("setobjectsubpriority", 5, { B, B, B, B }),
-  [0xa9] = op("resetobjectsubpriority", 4, { B, B, B }),
+  -- src/scrcmd.c:1122-1130
+  [0xa8] = op("setobjectsubpriority", 6, { H, B, B, B }),
+  -- src/scrcmd.c:1133-1140
+  [0xa9] = op("resetobjectsubpriority", 5, { H, B, B }),
   [0xaa] = op("createvobject", 8, { B, B, H, H, B, B }),
   [0xab] = op("turnvobject", 3, { B, B }),
   [0xac] = op("opendoor", 5, { H, H }),
@@ -214,7 +223,8 @@ Opcodes.TABLE = {
   [0xc9] = op("unloadhelp", 1),
   [0xca] = op("signmsg", 1),
   [0xcb] = op("normalmsg", 1),
-  [0xcc] = op("comparestat", 4, { B, H }),
+  -- pret asm/macros/event.inc: comparestat — .byte statId / .4byte value
+  [0xcc] = op("comparestat", 7, { B, W }),
   [0xcd] = op("setmonmodernfatefulencounter", 3, { H }),
   [0xce] = op("checkmonmodernfatefulencounter", 3, { H }),
   [0xcf] = op("trywondercardscript", 1),

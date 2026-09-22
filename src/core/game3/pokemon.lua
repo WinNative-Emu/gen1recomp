@@ -1,6 +1,5 @@
 -- Runtime FRLG species names / menu icons / types (extracted pack).
-
-local Extract = require("src.import.gba.extract_island1")
+local CachePaths = require("src.core.game3.cache_paths")
 local PokemonExtract = require("src.import.gba.pokemon_extract")
 local Versions = require("src.import.gba.versions")
 local ModRuntime = require("src.mods.Runtime")
@@ -35,7 +34,7 @@ Pokemon._dex = nil
 Pokemon._battleMoves = nil
 Pokemon._logged = false
 
-local ROOT = (Extract.CACHE_ROOT or "data/generated/gba") .. "/pokemon"
+local ROOT = (CachePaths.CACHE_ROOT or "data/generated/gba") .. "/pokemon"
 
 local function log(msg)
   if Pokemon._logged then return end
@@ -75,6 +74,7 @@ local function copy_names(names)
   return out
 end
 
+local pkLoadWarned = false
 local function load_lua(cache, rel)
   cache = resolve_cache(cache)
   local src = cache:read(rel)
@@ -83,6 +83,10 @@ local function load_lua(cache, rel)
   if not chunk then return nil end
   local ok, t = pcall(chunk)
   if ok then return t end
+  if not pkLoadWarned then
+    pkLoadWarned = true
+    print("[game3/pokemon] load failed for " .. tostring(rel) .. ": " .. tostring(t))
+  end
   return nil
 end
 
@@ -149,7 +153,7 @@ function Pokemon.install(cache)
   Pokemon._front = {}
   Pokemon._romBytes = nil
   Pokemon._logged = false
-  local root = (Extract.CACHE_ROOT or "data/generated/gba") .. "/pokemon"
+  local root = (CachePaths.CACHE_ROOT or "data/generated/gba") .. "/pokemon"
   local c = Pokemon._cache
   Pokemon._manifest = load_lua(c, root .. "/manifest.lua")
   Pokemon._names = load_lua(c, root .. "/names.lua")
@@ -216,6 +220,8 @@ function Pokemon.invalidate()
   Pokemon._types = nil
   Pokemon._national = nil
   Pokemon._manifest = nil
+  Pokemon._installTried = nil
+  Pokemon._installWarned = nil
   Pokemon._byName = nil
   Pokemon._stats = nil
   Pokemon._abilities = nil
@@ -236,7 +242,7 @@ end
 function Pokemon.ready()
   if Pokemon._names then return true end
   local cache = Pokemon._cache
-  return PokemonExtract.ready(cache, Extract.CACHE_ROOT)
+  return PokemonExtract.ready(cache, CachePaths.CACHE_ROOT)
     or load_lua(cache, ROOT .. "/names.lua") ~= nil
 end
 
@@ -1052,7 +1058,6 @@ local HM_MOVES = {
   [70] = true,  -- STRENGTH
   [148] = true, -- FLASH
   [249] = true, -- ROCK SMASH
-  [250] = true, -- WHIRLPOOL (Gen2 leftover; still protected in some builds)
   [127] = true, -- WATERFALL
   [291] = true, -- DIVE
 }
@@ -1160,8 +1165,18 @@ function Pokemon.replaceMove(mon, slot, newMoveId)
   return old
 end
 
+-- An egg reads as the language's own EGG whatever its nickname holds: pret's
+-- GetMonData(MON_DATA_NICKNAME) returns gText_EggNickname for any egg
+-- (pokefirered/src/pokemon.c:3020).  The stored nickname is only a placeholder
+-- -- the cart's daycare writes タマゴ (daycare.c:1100), this engine "EGG".
+local function eggName(mon)
+  if Pokemon.isEgg(mon) then return Strings("EGG") end
+end
+
 function Pokemon.displayMonName(mon)
   if not mon then return "POKéMON" end
+  local egg = eggName(mon)
+  if egg then return egg end
   local nick = mon.nickname
   if type(nick) == "string" and nick ~= "" then return nick end
   if mon.name and mon.name ~= "" then return mon.name end
@@ -1246,9 +1261,16 @@ function Pokemon.isEgg(mon)
   return (mon.isEgg == true) or (mon.egg == true) or (mon.species == 412)
 end
 
+-- pokefirered/src/pokemon.c:3245 MON_DATA_SPECIES_OR_EGG: an egg's menu icon is
+-- SPECIES_EGG's, not the species it will hatch into (party_menu.c:2655).
+function Pokemon.speciesOrEgg(mon)
+  if Pokemon.isEgg(mon) then return Pokemon.SPECIES_EGG end
+  return Pokemon.speciesOf(mon)
+end
+
 local function read_rgba(species)
   local cache = resolve_cache(Pokemon._cache)
-  local root = (Extract.CACHE_ROOT or "data/generated/gba") .. "/pokemon"
+  local root = (CachePaths.CACHE_ROOT or "data/generated/gba") .. "/pokemon"
   local rel = root .. "/icons/" .. species .. ".rgba"
   local d = cache:read(rel)
   if type(d) == "string" and #d > 0 then return d end
@@ -1451,7 +1473,7 @@ local function form_of(species, form)
 end
 
 local function pic_rel(kind, species, form)
-  local root = (Extract.CACHE_ROOT or "data/generated/gba") .. "/pokemon/" .. kind .. "/"
+  local root = (CachePaths.CACHE_ROOT or "data/generated/gba") .. "/pokemon/" .. kind .. "/"
   if form > 0 then return root .. species .. "_" .. form .. ".rgba" end
   return root .. species .. ".rgba"
 end
@@ -1572,6 +1594,8 @@ end
 
 function Pokemon.displayName(mon)
   if not mon then return "?????" end
+  local egg = eggName(mon)
+  if egg then return egg end
   if mon.nickname and mon.nickname ~= "" then return tostring(mon.nickname) end
   -- Prefer pack name over host species string when we can resolve.
   local sp = Pokemon.speciesOf(mon)

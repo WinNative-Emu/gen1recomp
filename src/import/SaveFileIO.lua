@@ -24,7 +24,13 @@ local SaveFileIO = {}
 -- rather than inside it: export needs the regions the codec does not model,
 -- and 32 KB of binary in the serialized table is 40 KB of Lua source reparsed
 -- on every save and load.
+local function valid_slot_id(id)
+  id = tostring(id)
+  return id:match("^slot%d+$") ~= nil or id == "save"
+end
+
 local function cartPath(version, slotId)
+  if not valid_slot_id(slotId) then return nil end
   return ("saves/%s/%s.cart"):format(version, tostring(slotId))
 end
 
@@ -40,13 +46,17 @@ local function writeCart(version, slotId, bytes)
     fs.createDirectory("saves")
     fs.createDirectory("saves/" .. version)
   end
-  fs.write(cartPath(version, slotId), bytes)
+  local rel = cartPath(version, slotId)
+  if not rel then return end
+  fs.write(rel, bytes)
 end
 
 local function readCart(version, slotId)
   local fs = cartFs()
   if not (fs and fs.read) then return nil end
-  local ok, bytes = pcall(fs.read, cartPath(version, slotId))
+  local rel = cartPath(version, slotId)
+  if not rel then return nil end
+  local ok, bytes = pcall(fs.read, rel)
   if ok and type(bytes) == "string" then return bytes end
   return nil
 end
@@ -173,6 +183,7 @@ function SaveFileIO.exportActiveSlot(version)
   if not save then return false, "this game has no save to export yet" end
   local activeSlot = SaveData.activeSlot(version)
   local slotId = activeSlot or "save"
+  if not valid_slot_id(slotId) then return false, "invalid save slot id" end
   if activeSlot and type(save.meta) == "table" then
     local minted, id = pcall(SaveData.slotPlaythroughId, version, activeSlot, save)
     if minted and type(id) == "string" then save.meta.playthroughId = id end
@@ -208,6 +219,35 @@ function SaveFileIO.exportActiveSlot(version)
   local base = fs.getSaveDirectory and fs.getSaveDirectory() or ""
   if base ~= "" then return true, base .. "/" .. rel end
   return true, rel
+end
+
+-- Copy the original serialized source rather than decoding and re-encoding it.
+-- readSlotSource also recovers a valid backup when the primary file is damaged.
+function SaveFileIO.exportLuaSlot(version, slotId, cartId)
+  if not GameVersion.info(version) then return false, "unknown game" end
+  slotId = slotId or SaveData.activeSlot(version)
+  local bytes
+  if cartId then bytes = SaveData.readCartSlotSource(cartId, slotId)
+  else bytes = SaveData.readSlotSource(version, slotId) end
+  if not bytes then return false, "this slot has no save to export yet" end
+  local fs = SaveData.portableFs() or (love and love.filesystem)
+  if not (fs and fs.write) then return false, "no filesystem available to export to" end
+  if fs.createDirectory then
+    fs.createDirectory("exports")
+    fs.createDirectory("exports/" .. version)
+  end
+  local name = (cartId and (cartId .. "-") or "") .. tostring(slotId)
+  name = name:gsub("[^%w_-]", "_")
+  local rel = ("exports/%s/gen1recomp-%s-%s.lua"):format(version, version, name)
+  local ok, err = fs.write(rel, bytes)
+  if not ok then return false, "could not write the export: " .. tostring(err) end
+  local base = SaveData.portableBaseDir()
+  if base then
+    local sep = package.config:sub(1, 1)
+    return true, base .. sep .. rel:gsub("/", sep)
+  end
+  base = fs.getSaveDirectory and fs.getSaveDirectory() or ""
+  return true, base ~= "" and base .. "/" .. rel or rel
 end
 
 return SaveFileIO

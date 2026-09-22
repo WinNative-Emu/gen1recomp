@@ -18,6 +18,12 @@ Scene.__index = Scene
 
 Scene.GBA_HZ = 16777216 / 280896
 
+local proxyPressed, proxyInput
+local INPUT_PROXY = {
+  wasPressed = function(_, k) return proxyPressed ~= nil and proxyPressed[k] == true end,
+  isDown = function(_, k) return proxyInput ~= nil and proxyInput.isDown and proxyInput:isDown(k) or false end,
+}
+
 local MUS_ROUTE24 = 292
 local MUS_NEW_GAME_INSTRUCT = 323
 local MUS_NEW_GAME_INTRO = 324
@@ -125,6 +131,19 @@ local OAK_TEXT = {
 local MALE_NAMES = { "RED", "FIRE", "ASH", "KENE", "GEKI", "JAK", "JANNE", "JONN", "KAMON", "KARL", "TAYLOR", "OSCAR", "HIRO", "MAX", "JON", "RALPH", "KAY", "TOSH", "ROAK" }
 local FEMALE_NAMES = { "RED", "FIRE", "OMI", "JODI", "AMANDA", "HILLARY", "MAKEY", "MICHI", "PAULA", "JUNE", "CASSIE", "REY", "SEDA", "KIKO", "MINA", "NORIE", "SAI", "MOMO", "SUZI" }
 local RIVAL_NAMES = { "GREEN", "GARY", "KAZ", "TORU" }
+local LEAFGREEN_MALE_NAMES, LEAFGREEN_FEMALE_NAMES = {}, {}
+for i, name in ipairs(MALE_NAMES) do LEAFGREEN_MALE_NAMES[i] = name end
+for i, name in ipairs(FEMALE_NAMES) do LEAFGREEN_FEMALE_NAMES[i] = name end
+for i, name in ipairs({ "GREEN", "LEAF", "GARY", "KAZ", "TORU" }) do LEAFGREEN_MALE_NAMES[i] = name end
+LEAFGREEN_FEMALE_NAMES[1], LEAFGREEN_FEMALE_NAMES[2] = "GREEN", "LEAF"
+local LEAFGREEN_RIVAL_NAMES = { "RED", "ASH", "KENE", "GEKI" }
+local function nameChoices(gender, rival)
+  local leafgreen = require("src.core.GameVersion").get() == "leafgreen"
+  if rival then return leafgreen and LEAFGREEN_RIVAL_NAMES or RIVAL_NAMES end
+  if gender == MALE then return leafgreen and LEAFGREEN_MALE_NAMES or MALE_NAMES end
+  return leafgreen and LEAFGREEN_FEMALE_NAMES or FEMALE_NAMES
+end
+Scene.nameChoices = nameChoices
 -- The name lists are the cart's English choices; translations localise them
 -- (gNameChoice_*: GREEN is GRÜN in German), so they go through Strings()
 -- where they are listed and picked, under a context of their own: FIRE the
@@ -283,8 +302,8 @@ function Scene.new(assets, opts)
     section = "controls",
     textSpeedOption = tonumber(opts.textSpeed) or 1,
     gender = MALE,
-    playerName = "RED",
-    rivalName = "GREEN",
+    playerName = nameChoices(MALE, false)[1],
+    rivalName = nameChoices(MALE, true)[1],
     hasPlayerBeenNamed = false,
     coordOffsetX = 0,
     bg2X = 0,
@@ -1148,9 +1167,9 @@ function Scene:printNameChoices()
   -- pokefirered/src/oak_speech.c:2117
   local names
   if not self.hasPlayerBeenNamed then
-    names = self.gender == MALE and MALE_NAMES or FEMALE_NAMES
+    names = nameChoices(self.gender, false)
   else
-    names = RIVAL_NAMES
+    names = nameChoices(self.gender, true)
   end
   local items = { { Strings("NEW NAME"), 8, 1 } }
   for i = 1, 4 do items[#items + 1] = { Strings(names[i], NAME_CONTEXT), 8, 16 * i + 1 } end
@@ -1174,12 +1193,12 @@ end
 function Scene:getDefaultName(choice)
   -- pokefirered/src/oak_speech.c:2138
   if not self.hasPlayerBeenNamed then
-    local list = self.gender == MALE and MALE_NAMES or FEMALE_NAMES
+    local list = nameChoices(self.gender, false)
     local r = require("src.core.game3.rng").Random()
     self.playerName = Strings(list[(r % #list) + 1], NAME_CONTEXT)
     self:_answered("name", self.playerName, "name")
   else
-    self.rivalName = Strings(RIVAL_NAMES[choice + 1], NAME_CONTEXT)
+    self.rivalName = Strings(nameChoices(self.gender, true)[choice + 1], NAME_CONTEXT)
     self:_answered("rivalName", self.rivalName, "rivalName")
   end
 end
@@ -1253,7 +1272,8 @@ function Scene:namingFrame()
     n.pal:updateFade()
     if not n.pal:fadeActive() then n.stage = "input" end
   elseif n.stage == "input" then
-    Naming.update(self.inputProxy, 1 / Scene.GBA_HZ)
+    Naming.handleInput(self.inputProxy)
+    Naming.update(1 / Scene.GBA_HZ)
   elseif n.stage == "fade_out" then
     n.pal:updateFade()
     if not n.pal:fadeActive() then
@@ -1551,11 +1571,8 @@ function Scene:update(input, dt)
     self.input = self.pending
     self.pending = {}
     self.held = held
-    local pressed = self.input
-    self.inputProxy = {
-      wasPressed = function(_, k) return pressed[k] == true end,
-      isDown = function(_, k) return input and input.isDown and input:isDown(k) or false end,
-    }
+    proxyPressed, proxyInput = self.input, input
+    self.inputProxy = INPUT_PROXY
     self:frame()
   end
   return self.result

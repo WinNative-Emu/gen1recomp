@@ -90,6 +90,7 @@ function Dataset.cache()
   return loveCache()
 end
 
+local dsLoadWarned = false
 local function load_lua_rel(rel)
   local cache = loveCache()
   local src = cache:read(rel)
@@ -98,6 +99,10 @@ local function load_lua_rel(rel)
   if not chunk then return nil end
   local ok, val = pcall(chunk)
   if ok then return val end
+  if not dsLoadWarned then
+    dsLoadWarned = true
+    print("[game3/dataset] load failed for " .. tostring(rel) .. ": " .. tostring(val))
+  end
   return nil
 end
 
@@ -188,7 +193,12 @@ function Dataset.buildMaps(warps)
     -- Fallback inference if header.json was not loaded
     if regionMapSectionId == nil then
       local secInfo = MapSectionsExtract.getInfo(nil, mapId, floorNum or 0)
-      regionMapSectionId = secInfo and secInfo.secId
+      -- getInfo echoes secId 88 (a real section: Pallet Town) with
+      -- resolved=false for a map it cannot identify.  Taking that id would
+      -- advertise an unknown map as Pallet Town, so only trust a resolved one.
+      if secInfo and secInfo.resolved then
+        regionMapSectionId = secInfo.secId
+      end
     end
     if showMapName == nil then
       showMapName = 0
@@ -205,7 +215,7 @@ function Dataset.buildMaps(warps)
       tileset = tileset,
       warps = warps[mapId] or {},
       connections = connections[mapId] or {},
-      regionMapSectionId = regionMapSectionId or 88,
+      regionMapSectionId = regionMapSectionId,
       showMapName = (showMapName == 1 or showMapName == true) and 1 or 0,
       floorNum = tonumber(floorNum) or 0,
       weather = weather or 0,

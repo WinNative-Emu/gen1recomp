@@ -2,6 +2,7 @@
 
 local MapIds = require("src.core.game3.map_ids")
 local Options = require("src.core.game3.options")
+local Profile = require("src.core.game3.profile")
 local ModRuntime = require("src.mods.Runtime")
 
 local Schema = {}
@@ -113,13 +114,16 @@ function Schema.newGame(opts)
   local session = {
     schemaVersion = Schema.VERSION,
     engine = "game3",
-    version = opts.version or "firered",
+    version = opts.version or ((require("src.core.GameVersion").get() == "leafgreen")
+      and "leafgreen" or Profile.active().id),
     generation = 3,
     party = {},
     bag = Bag.new(),
-    dex = { seen = {}, owned = {}, national = false },
+    dex = { seen = {}, owned = {}, caught = {}, national = false },
     money = tonumber(opts.money) or 3000,
     coins = 0,
+    -- include/global.h:354, src/berry_powder.c:50
+    berryPowder = 0,
     name = opts.name or "RED",
     rivalName = opts.rivalName or "BLUE",
     gender = opts.gender or 0, -- 0 boy / 1 girl
@@ -138,6 +142,8 @@ function Schema.newGame(opts)
     easyChatProfile = { 2601, 4128, 526, 2611 },
     options = nil,
     registeredItem = nil,
+    monBoxId = nil,
+    monBoxPos = nil,
     -- pokefirered/include/global.h:764
     dynamicWarp = nil,
     escapeWarp = nil,
@@ -154,6 +160,8 @@ function Schema.newGame(opts)
   session.trainerId = Rng.seedNewGame({ seed = opts.rngSeed })
   -- pokefirered/src/new_game.c:56 InitPlayerTrainerId
   session.secretId = Rng.Random()
+  session.id = session.trainerId
+  session.playerId = session.trainerId
   Rng.captureToSession(session)
   local Storage = require("src.core.game3.storage")
   session.storage = Storage.new()
@@ -187,12 +195,15 @@ function Schema.toSaveTable(session)
   return {
     schemaVersion = session.schemaVersion or Schema.VERSION,
     engine = "game3",
-    version = "firered",
+    version = session.version or Profile.active().id,
+    generation = session.generation or 3,
     name = session.name,
     rivalName = session.rivalName,
     gender = session.gender,
     money = session.money,
     coins = session.coins,
+    -- include/global.h:354, src/berry_powder.c:50
+    berryPowder = session.berryPowder or 0,
     party = session.party,
     bag = session.bag,
     inventory = session.bag, -- SaveData compatibility alias
@@ -213,6 +224,8 @@ function Schema.toSaveTable(session)
     options = Options.engine(session) or session.options,
     storage = session.storage and require("src.core.game3.storage").serialize(session.storage) or nil,
     registeredItem = session.registeredItem,
+    monBoxId = session.monBoxId,
+    monBoxPos = session.monBoxPos,
     -- pokefirered/include/global.h:764
     dynamicWarp = session.dynamicWarp,
     escapeWarp = session.escapeWarp,
@@ -221,8 +234,25 @@ function Schema.toSaveTable(session)
     move_overlay = session.move_overlay or {},
     trainerId = session.trainerId,
     secretId = session.secretId,
+    secretId = session.secretId,
     rng = session.rng,
     vsSeeker = session.vsSeeker,
+    -- GAME_STAT_* counters: slot-machine jackpots, hatched eggs, link W/L/D,
+    -- link trades, and the sticker-man brags that read them.
+    gameStats = session.gameStats or {},
+    -- Link battle records (Record Corner / fan club) and the trainer card's
+    -- link win/loss counters -- both read back by link and UI modules.
+    linkBattleRecords = type(session.linkBattleRecords) == "table" and session.linkBattleRecords or {},
+    trainerCard = type(session.trainerCard) == "table" and session.trainerCard or {},
+    -- Hall of Fame induction (pret hall_of_fame.c): written by
+    -- commit_clear_and_save, read by the trainer card and HOF viewers.
+    game_cleared = session.game_cleared == true,
+    hasHallOfFameRecords = session.hasHallOfFameRecords == true,
+    hofDebutHours = tonumber(session.hofDebutHours),
+    hofDebutMinutes = tonumber(session.hofDebutMinutes),
+    hofDebutSeconds = tonumber(session.hofDebutSeconds),
+    hofDebutTime = session.hofDebutTime,
+    hallOfFameTeams = type(session.hallOfFameTeams) == "table" and session.hallOfFameTeams or {},
     mail = mail_export(session),
     questLog = require("src.core.game3.quest_log").export(session),
     modData = session.modData,
@@ -241,12 +271,16 @@ function Schema.fromSaveTable(save)
   end
   local session = {
     schemaVersion = save.schemaVersion or Schema.VERSION,
+    engine = save.engine or "game3",
+    version = save.version or Profile.active().id,
+    generation = tonumber(save.generation) or 3,
     party = save.party or {},
     bag = bag,
     dex = save.dex or {},
     money = save.money or 0,
     coins = save.coins or 0,
-    name = save.name or save.playerName or "RED",
+    berryPowder = tonumber(save.berryPowder) or 0,
+    name = save.name or "RED",
     rivalName = save.rivalName or "BLUE",
     gender = save.gender or 0,
     map = save.map or MapIds.NEW_GAME_START.map,
@@ -265,6 +299,8 @@ function Schema.fromSaveTable(save)
     options = nil,
     storage = require("src.core.game3.storage").restore(save.storage, save.pc, save.pcItems or save.pc_items),
     registeredItem = save.registeredItem,
+    monBoxId = save.monBoxId,
+    monBoxPos = save.monBoxPos,
     -- pokefirered/include/global.h:764
     dynamicWarp = type(save.dynamicWarp) == "table" and save.dynamicWarp or nil,
     escapeWarp = type(save.escapeWarp) == "table" and save.escapeWarp or nil,
@@ -273,8 +309,23 @@ function Schema.fromSaveTable(save)
     move_overlay = save.move_overlay or {},
     trainerId = save.trainerId,
     secretId = save.secretId,
+    id = save.trainerId,
+    playerId = save.trainerId,
     rng = save.rng,
     vsSeeker = type(save.vsSeeker) == "table" and save.vsSeeker or { steps = 0, charging = 0, rematches = {} },
+    -- Additive: a save written before this key exists loads as an empty table.
+    gameStats = type(save.gameStats) == "table" and save.gameStats or {},
+    -- Additive: older saves load these as empty tables.
+    linkBattleRecords = type(save.linkBattleRecords) == "table" and save.linkBattleRecords or {},
+    trainerCard = type(save.trainerCard) == "table" and save.trainerCard or {},
+    -- Additive: older saves load these as defaults.
+    game_cleared = save.game_cleared == true,
+    hasHallOfFameRecords = save.hasHallOfFameRecords == true,
+    hofDebutHours = tonumber(save.hofDebutHours),
+    hofDebutMinutes = tonumber(save.hofDebutMinutes),
+    hofDebutSeconds = tonumber(save.hofDebutSeconds),
+    hofDebutTime = save.hofDebutTime,
+    hallOfFameTeams = type(save.hallOfFameTeams) == "table" and save.hallOfFameTeams or {},
     mail = mail_restore(save),
     questLog = require("src.core.game3.quest_log").restore(save.questLog),
     modData = type(save.modData) == "table" and save.modData or {},

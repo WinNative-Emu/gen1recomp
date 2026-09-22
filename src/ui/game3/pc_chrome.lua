@@ -125,6 +125,7 @@ function PcChrome.ensure()
   PcChrome._partySlotFilledImg = load_texture("party_slot_filled.png")
   PcChrome._partySlotEmptyImg = load_texture("party_slot_empty.png")
   PcChrome._waveformImg = load_texture("waveform.png")
+  PcChrome._waveformQuads = nil
 
   for id, name in ipairs(PcChrome.WALLPAPER_NAMES) do
     PcChrome._wallpapers[id] = load_texture("wallpapers/" .. name .. ".png")
@@ -150,6 +151,18 @@ function PcChrome.drawBackground()
 end
 
 --- Draw animated waveforms beside PKMN DATA header
+local function waveform_quad(img, frameIdx)
+  local quads = PcChrome._waveformQuads
+  if not quads then quads = {}; PcChrome._waveformQuads = quads end
+  local q = quads[frameIdx + 1]
+  if not q then
+    local iw, ih = img:getDimensions()
+    q = love.graphics.newQuad(0, frameIdx * 8, 16, 8, iw, ih)
+    quads[frameIdx + 1] = q
+  end
+  return q
+end
+
 function PcChrome.drawWaveforms(active, frame)
   PcChrome.ensure()
   if not PcChrome._waveformImg then return end
@@ -166,9 +179,8 @@ function PcChrome.drawWaveforms(active, frame)
     rightFrameIdx = rightSeq[idx]
   end
 
-  local iw, ih = PcChrome._waveformImg:getDimensions()
-  local leftQuad = love.graphics.newQuad(0, leftFrameIdx * 8, 16, 8, iw, ih)
-  local rightQuad = love.graphics.newQuad(0, rightFrameIdx * 8, 16, 8, iw, ih)
+  local leftQuad = waveform_quad(PcChrome._waveformImg, leftFrameIdx)
+  local rightQuad = waveform_quad(PcChrome._waveformImg, rightFrameIdx)
 
   love.graphics.setColor(1, 1, 1, 1)
   love.graphics.draw(PcChrome._waveformImg, leftQuad, 0, 5)
@@ -205,7 +217,8 @@ function PcChrome.drawLeftDataPanel(hoveredMon, hoverFrame)
   if not hoveredMon then return end
 
   -- 1. Front Sprite in TV Screen (X: 10..73, Y: 19..80, W: 64, H: 61)
-  local sp = Pokemon.speciesOf(hoveredMon)
+  -- pokefirered/src/pokemon_storage_system_data.c:1034, :1057 MON_DATA_SPECIES_OR_EGG
+  local sp = Pokemon.speciesOrEgg(hoveredMon)
   local sprite = Pokemon.frontPic(sp)
   if sprite and sprite.image then
     love.graphics.setColor(1, 1, 1, 1)
@@ -218,7 +231,6 @@ function PcChrome.drawLeftDataPanel(hoveredMon, hoverFrame)
 
   -- 2. Lower Stats Card Text & Info (X: 0..80, Y: 88..160)
   -- Matches pret FRLG PrintDisplayMonInfo (Window 0: left=0, top=11 / Y=88)
-  local sp = Pokemon.speciesOf(hoveredMon)
   local spName = (sp and Pokemon.name(sp)) or "----"
   local nick = hoveredMon.nickname
   if not nick or nick == "" then
@@ -229,6 +241,10 @@ function PcChrome.drawLeftDataPanel(hoveredMon, hoverFrame)
   end
   local lvl = hoveredMon.level or 5
   local gender = hoveredMon.gender or (hoveredMon.personality and ((hoveredMon.personality % 256 < 127) and "F" or "M"))
+  -- pokefirered/src/pokemon_storage_system_data.c:1091: an egg shows only
+  -- gText_EggNickname; the species, gender/level and item lines stay blank.
+  local isEgg = Pokemon.isEgg(hoveredMon)
+  if isEgg then nick = Strings("EGG") end
 
   -- Line 1: Nickname or Species Name (FONT_NORMAL, Y: 88)
   FrlgFont.draw(nick:sub(1, 10), 6, 88, {
@@ -236,32 +252,34 @@ function PcChrome.drawLeftDataPanel(hoveredMon, hoverFrame)
     colors = FrlgFont.COLOR.WHITE
   })
 
-  -- Line 2: /Species Name (FONT_NORMAL, Y: 102)
-  FrlgFont.draw("/" .. spName:sub(1, 10), 6, 102, {
-    small = false,
-    colors = FrlgFont.COLOR.WHITE
-  })
+  if not isEgg then
+    -- Line 2: /Species Name (FONT_NORMAL, Y: 102)
+    FrlgFont.draw("/" .. spName:sub(1, 10), 6, 102, {
+      small = false,
+      colors = FrlgFont.COLOR.WHITE
+    })
 
-  -- Line 3: Gender & Level (FONT_NORMAL, Y: 116)
-  if gender == "M" or gender == "male" then
-    FrlgFont.draw("♂", 6, 116, { small = false, colors = FrlgFont.COLOR.MALE })
-    FrlgFont.draw(Strings("Lv%s", tostring(lvl)), 18, 116, { small = false, colors = FrlgFont.COLOR.WHITE })
-  elseif gender == "F" or gender == "female" then
-    FrlgFont.draw("♀", 6, 116, { small = false, colors = FrlgFont.COLOR.FEMALE })
-    FrlgFont.draw(Strings("Lv%s", tostring(lvl)), 18, 116, { small = false, colors = FrlgFont.COLOR.WHITE })
-  else
-    FrlgFont.draw(Strings("Lv%s", tostring(lvl)), 6, 116, { small = false, colors = FrlgFont.COLOR.WHITE })
-  end
+    -- Line 3: Gender & Level (FONT_NORMAL, Y: 116)
+    if gender == "M" or gender == "male" then
+      FrlgFont.draw("♂", 6, 116, { small = false, colors = FrlgFont.COLOR.MALE })
+      FrlgFont.draw(Strings("Lv%s", tostring(lvl)), 18, 116, { small = false, colors = FrlgFont.COLOR.WHITE })
+    elseif gender == "F" or gender == "female" then
+      FrlgFont.draw("♀", 6, 116, { small = false, colors = FrlgFont.COLOR.FEMALE })
+      FrlgFont.draw(Strings("Lv%s", tostring(lvl)), 18, 116, { small = false, colors = FrlgFont.COLOR.WHITE })
+    else
+      FrlgFont.draw(Strings("Lv%s", tostring(lvl)), 6, 116, { small = false, colors = FrlgFont.COLOR.WHITE })
+    end
 
-  -- Line 4: Held Item Name (if holding an item) (FONT_SMALL, Y: 132)
-  local held = hoveredMon.heldItem or hoveredMon.item
-  if held and held > 0 then
-    local heldName = ItemsData.displayName(held)
-    if heldName and heldName ~= "" and heldName ~= "NONE" then
-      FrlgFont.draw(heldName:sub(1, 10), 6, 132, {
-        small = true,
-        colors = FrlgFont.COLOR.WHITE
-      })
+    -- Line 4: Held Item Name (if holding an item) (FONT_SMALL, Y: 132)
+    local held = hoveredMon.heldItem or hoveredMon.item
+    if held and held > 0 then
+      local heldName = ItemsData.displayName(held)
+      if heldName and heldName ~= "" and heldName ~= "NONE" then
+        FrlgFont.draw(heldName:sub(1, 10), 6, 132, {
+          small = true,
+          colors = FrlgFont.COLOR.WHITE
+        })
+      end
     end
   end
 
@@ -381,7 +399,7 @@ function PcChrome.drawPartyDrawer(party, partyCursor, hoverFrame, holdingSource)
   local isLeadPickedUp = (holdingSource and holdingSource.loc == "party" and holdingSource.slot == 1)
   local leadMon = (not isLeadPickedUp) and party[1]
   if leadMon then
-    local sp = Pokemon.speciesOf(leadMon)
+    local sp = Pokemon.speciesOrEgg(leadMon)
     local icon = Pokemon.icon(sp)
     if icon and icon.image then
       local isHovered = (partyCursor == 1)
@@ -401,7 +419,7 @@ function PcChrome.drawPartyDrawer(party, partyCursor, hoverFrame, holdingSource)
     local isPickedUp = (holdingSource and holdingSource.loc == "party" and holdingSource.slot == p)
     local pMon = (not isPickedUp) and party[p]
     if pMon then
-      local sp = Pokemon.speciesOf(pMon)
+      local sp = Pokemon.speciesOrEgg(pMon)
       local icon = Pokemon.icon(sp)
       if icon and icon.image then
         local isHovered = (partyCursor == p)

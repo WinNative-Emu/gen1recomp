@@ -273,9 +273,14 @@ function Storage.moveMon(session, srcLoc, srcIdx, destLoc, destIdx, srcBox, dest
     session.party[srcIdx] = destMon
     -- Clean up trailing nils in party array if moved without swap
     if not destMon and srcIdx > #session.party then
-      -- compact party
+      local keys = {}
+      for k in pairs(session.party) do
+        if type(k) == "number" then keys[#keys + 1] = k end
+      end
+      table.sort(keys)
       local newParty = {}
-      for _, m in pairs(session.party) do
+      for _, k in ipairs(keys) do
+        local m = session.party[k]
         if m then newParty[#newParty + 1] = m end
       end
       session.party = newParty
@@ -437,7 +442,13 @@ function Storage.depositItem(session, bagPocket, bagIdx, qty)
 
   if foundIdx then
     local curQty = storage.items[foundIdx].qty or 0
-    storage.items[foundIdx].qty = math.min(Storage.MAX_ITEM_QTY, curQty + qty)
+    -- Refuse when the stack cannot take the whole deposit.  Capping with
+    -- math.min while the bag below is debited the full qty destroyed the
+    -- overflow: a stack already at MAX_ITEM_QTY lost every deposited item.
+    if curQty + qty > Storage.MAX_ITEM_QTY then
+      return false, "pc_item_stack_full"
+    end
+    storage.items[foundIdx].qty = curQty + qty
   else
     if #storage.items >= Storage.PC_ITEMS_COUNT then
       return false, "pc_items_full"
@@ -554,7 +565,10 @@ function Storage.deserialize(data)
   local storage = Storage.new()
   if not data then return storage end
   storage.currentBox = tonumber(data.currentBox) or 1
-  if data.items ~= nil then
+  if data.items == nil then
+    -- pokefirered/src/player_pc.c:100
+    storage.items = {}
+  else
     storage.items = {}
     for _, item in ipairs(data.items) do
       if item and item.id and (tonumber(item.qty) or 0) > 0 then

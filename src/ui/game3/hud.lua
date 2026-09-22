@@ -12,6 +12,13 @@ local OptionMenu = require("src.ui.game3.option_menu")
 local SaveMenu = require("src.ui.game3.save_menu")
 local TrainerCard = require("src.ui.game3.trainer_card")
 local PcMenu = require("src.ui.game3.pc_menu")
+
+local s9Warned = {}
+local function s9log(key, err)
+  if s9Warned[key] then return end
+  s9Warned[key] = true
+  print("[game3/hud] hot-path pcall failed (" .. key .. "): " .. tostring(err))
+end
 local SummaryMenu = require("src.ui.game3.summary_menu")
 local ShopMenu = require("src.ui.game3.shop_menu")
 local Stack = require("src.ui.game3.stack")
@@ -174,23 +181,32 @@ function Hud.sampleFieldInput(game)
   }
 end
 
-function Hud.update(game, _dt)
+function Hud.update(game, _dt, inputTop)
   local dt = tonumber(_dt) or (1 / 60)
 
   -- Active stack modal menu tick
   local top = Stack.top()
+  local namingTick = top and top.id == "naming"
+  if namingTick and top.mod and top.mod.handleInput then
+    -- Naming consumes input before its page-swap timer can unlock the keyboard.
+    -- A prompt that opened it during this frame keeps its opening button press.
+    if inputTop == nil or top == inputTop then top.mod.handleInput(game and game.input) end
+  end
   if top and top.mod and top.mod.update then
-    pcall(top.mod.update, dt)
+    local okU, errU = pcall(top.mod.update, dt)
+    if not okU then s9log("top.update", errU) end
   end
 
   -- Tick location map name popup banner
   local okPop, MapNamePopup = pcall(require, "src.ui.game3.map_name_popup")
+  if not okPop then s9log("map_name_popup", MapNamePopup) end
   if okPop and MapNamePopup and MapNamePopup.update then
     MapNamePopup.update(dt)
   end
 
   -- Tick location preview screen (map_preview_screen.c Task_RunMapPreviewScreenForest)
   local okPrev, MapPreviewScreen = pcall(require, "src.ui.game3.map_preview_screen")
+  if not okPrev then s9log("map_preview_screen", MapPreviewScreen) end
   if okPrev and MapPreviewScreen and MapPreviewScreen.update then
     MapPreviewScreen.update(dt)
   end
@@ -212,6 +228,9 @@ function Hud.update(game, _dt)
       MapPreviewScreen.dismiss()
     end
   end
+
+  -- Do not replay naming input or leak its closing press to the menu underneath.
+  if namingTick then return end
 
   -- Active stack modal menu input takes top precedence.
   -- When battle is active, overlays like EvolutionScene or modal stack menus still receive input.
@@ -326,7 +345,8 @@ function Hud.openStartMenu(game, session)
       if scene >= 1 then
         Flags.setFlag(store, nil, Flags.IDS.OPENED_START_MENU, true)
         if Space.persistSession then
-          pcall(Space.persistSession)
+          local okP, errP = pcall(Space.persistSession)
+          if not okP then s9log("persistSession", errP) end
         end
       end
     end

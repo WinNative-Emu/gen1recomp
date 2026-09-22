@@ -64,6 +64,23 @@ local TRADES = {
   },
 }
 Trade.TRADES = TRADES
+local LEAFGREEN_TRADES = {}
+for id, entry in pairs(TRADES) do
+  local copy = {}
+  for k, v in pairs(entry) do copy[k] = v end
+  LEAFGREEN_TRADES[id] = copy
+end
+local nidoran = LEAFGREEN_TRADES[2]
+nidoran.nickname, nidoran.species, nidoran.requestedSpecies = "MR. NIDO", 32, 29
+nidoran.ivs, nidoran.personality = {19, 25, 18, 22, 22, 15}, 0x4c970b9e
+local nidorino = LEAFGREEN_TRADES[4]
+nidorino.nickname, nidorino.species, nidorino.requestedSpecies = "NINO", 33, 30
+nidorino.ivs, nidorino.personality = {19, 18, 25, 22, 15, 22}, 0x00eeca19
+LEAFGREEN_TRADES[5].requestedSpecies = 80
+function Trade.entry(id)
+  local entries = require("src.core.GameVersion").get() == "leafgreen" and LEAFGREEN_TRADES or TRADES
+  return entries[id]
+end
 Trade.COUNT = 9
 
 -- pokefirered/src/data/ingame_trades.h:184 sInGameTradeMailMessages
@@ -137,8 +154,11 @@ local function speciesName(species)
   return (Pokemon.name and Pokemon.name(species)) or ""
 end
 
+-- GetMonData(MON_DATA_NICKNAME) is gText_EggNickname for an egg
+-- (pokefirered/src/pokemon.c:3020)
 local function nicknameOf(mon)
   if not mon then return "" end
+  if require("src.core.game3.pokemon").isEgg(mon) then return Strings("EGG") end
   if mon.nickname and mon.nickname ~= "" then return tostring(mon.nickname) end
   return speciesName(speciesOf(mon))
 end
@@ -285,7 +305,7 @@ end
 
 -- pokefirered/src/trade_scene.c:2456 CreateInGameTradePokemonInternal
 function Trade.createTradeMon(tradeIdx, level)
-  local entry = TRADES[tonumber(tradeIdx) or -1]
+  local entry = Trade.entry(tonumber(tradeIdx) or -1)
   if not entry then return nil end
   level = math.max(1, math.min(100, tonumber(level) or 5))
 
@@ -331,7 +351,8 @@ end
 -- pokefirered/src/trade_scene.c:1054 TradeMons
 function Trade.tradeMons(session, playerSlot, offered)
   if not (session and offered) then return nil end
-  local party = session.party or {}
+  session.party = session.party or {}
+  local party = session.party
   local slot = (tonumber(playerSlot) or 0) + 1
   local sent = party[slot]
   if not sent then return nil end
@@ -355,13 +376,15 @@ function Trade.tradeMons(session, playerSlot, offered)
     if record then Mail.giveMailToMon2(session, offered, record) end
   end
   -- pokefirered/src/trade_scene.c:1081 UpdatePokedexForReceivedMon
-  session.dex = session.dex or { seen = {}, owned = {} }
+  session.dex = session.dex or { seen = {}, owned = {}, caught = {} }
   session.dex.seen = session.dex.seen or {}
   session.dex.owned = session.dex.owned or {}
+  session.dex.caught = session.dex.caught or {}
   local species = speciesOf(offered)
   if species ~= SPECIES_NONE then
     session.dex.seen[species] = true
     session.dex.owned[species] = true
+    session.dex.caught[species] = true
   end
   return sent
 end
@@ -395,7 +418,7 @@ end
 -- pokefirered/src/trade_scene.c:2774 DoInGameTradeScene
 function Trade.sceneTask(ctx, adapters, tradeIdx, playerSlot)
   local TradeScene = require("src.core.game3.trade_scene")
-  local entry = TRADES[tonumber(tradeIdx) or -1]
+  local entry = Trade.entry(tonumber(tradeIdx) or -1)
   local frames = 0
   local phase = "fadeout"
   return function()
@@ -463,7 +486,7 @@ end
 Trade.HANDLERS = {
   -- pokefirered/src/trade_scene.c:2434
   [Std.SPECIAL.GetInGameTradeSpeciesInfo] = function(ctx, adapters)
-    local entry = TRADES[varGet(ctx, VAR_0x8004)]
+    local entry = Trade.entry(varGet(ctx, VAR_0x8004))
     if not entry then return false, SPECIES_NONE end
     setStringVar(ctx, adapters, 1, speciesName(entry.requestedSpecies))
     setStringVar(ctx, adapters, 2, speciesName(entry.species))
