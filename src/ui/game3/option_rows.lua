@@ -2,6 +2,7 @@
 
 local Options = require("src.core.game3.options")
 local Strings = require("src.core.Strings")
+local RomText = require("src.core.game3.rom_text")
 
 local Rows = {}
 
@@ -17,12 +18,16 @@ local function cartCycle(ctx, key, n, dir)
   return true
 end
 
--- The option key is the Strings() context, so a mod can tell apart values that
--- share an English word (the "SHIFT" battle style from other uses).
-local function cartLabel(ctx, key, values)
-  local o = cart(ctx)
-  local label = values[(tonumber(o[key]) or 0) + 1]
-  return label and Strings(label, "option." .. key) or "?"
+-- src/option_menu.c:478
+local function cartLabel(ctx, key, tbl)
+  local cur = tonumber(cart(ctx)[key]) or 0
+  if cur < 0 or cur >= RomText.count(tbl) then return "?" end
+  return RomText.at(tbl, cur)
+end
+
+-- src/option_menu.c:136
+local function cartName(item)
+  return RomText.at("sOptionMenuItemsNames", item)
 end
 
 local function volLabel(v)
@@ -60,8 +65,8 @@ function Rows.build(ctx)
   local function add(row) rows[#rows + 1] = row end
 
   add({
-    id = "textSpeed", label = Strings("TEXT SPEED"),
-    value = function(c) return cartLabel(c, "textSpeed", { "SLOW", "MID", "FAST" }) end,
+    id = "textSpeed", label = cartName(0),
+    value = function(c) return cartLabel(c, "textSpeed", "sTextSpeedOptions") end,
     step = function(c, dir) return cartCycle(c, "textSpeed", 3, dir) end,
   })
   add(speedRow("speedOverworld", "OVERWORLD SPEED", "speedOverworld"))
@@ -69,19 +74,19 @@ function Rows.build(ctx)
   add(speedRow("speedMenu", "MENU SPEED", "speedMenu"))
 
   add({
-    id = "battleScene", label = Strings("BATTLE SCENE"),
-    value = function(c) return cartLabel(c, "battleScene", { "ON", "OFF" }) end,
+    id = "battleScene", label = cartName(1),
+    value = function(c) return cartLabel(c, "battleScene", "sBattleSceneOptions") end,
     step = function(c, dir) return cartCycle(c, "battleScene", 2, dir) end,
   })
   add({
-    id = "battleStyle", label = Strings("BATTLE STYLE"),
-    value = function(c) return cartLabel(c, "battleStyle", { "SHIFT", "SET" }) end,
+    id = "battleStyle", label = cartName(2),
+    value = function(c) return cartLabel(c, "battleStyle", "sBattleStyleOptions") end,
     step = function(c, dir) return cartCycle(c, "battleStyle", 2, dir) end,
   })
 
   add({
-    id = "sound", label = Strings("SOUND"),
-    value = function(c) return cartLabel(c, "sound", { "MONO", "STEREO" }) end,
+    id = "sound", label = cartName(3),
+    value = function(c) return cartLabel(c, "sound", "sSoundOptions") end,
     step = function(c, dir)
       cartCycle(c, "sound", 2, dir)
       local Audio = require("src.core.game3.audio")
@@ -121,14 +126,14 @@ function Rows.build(ctx)
   })
 
   add({
-    id = "buttonMode", label = Strings("BUTTON MODE"),
-    value = function(c) return cartLabel(c, "buttonMode", { "HELP", "LR", "L=A" }) end,
+    id = "buttonMode", label = cartName(4),
+    value = function(c) return cartLabel(c, "buttonMode", "sButtonTypeOptions") end,
     step = function(c, dir) return cartCycle(c, "buttonMode", 3, dir) end,
   })
   add({
-    id = "frameType", label = Strings("FRAME"),
+    id = "frameType", label = cartName(5),
     value = function(c)
-      return Strings("TYPE") .. string.format("%2d", (tonumber(cart(c).frameType) or 0) + 1) -- src/option_menu.c:496
+      return RomText.plain("gText_FrameType") .. string.format("%2d", (tonumber(cart(c).frameType) or 0) + 1) -- src/option_menu.c:496
     end,
     step = function(c, dir)
       cartCycle(c, "frameType", 10, dir)
@@ -344,6 +349,20 @@ function Rows.build(ctx)
       return true
     end,
   })
+  -- Manager discoverable home (18-mod-manager-ux), same contract as Gen 1
+  -- OptionsMenu: always listed with an installed count, activate opens the
+  -- manager. Inert until A; costs a vanilla install a single row.
+  add({
+    id = "mods", label = Strings("MODS"),
+    value = function(c)
+      local status = (c.game and c.game.modStatus) or {}
+      return Strings("%d INSTALLED", #(status.available or {}))
+    end,
+    activate = function(c)
+      local ModManager = require("src.ui.game3.mod_manager")
+      ModManager.show({ game = c.game, session = c.session })
+    end,
+  })
   add({
     id = "hotbar", label = Strings("KEY BAR"),
     value = function(c) return Strings(c.options.hotbar == false and "OFF" or "ON") end,
@@ -394,7 +413,7 @@ Rows.GROUPS = {
 
 Rows.ORDER = {
   "group.speed", "group.video", "group.graphics", "group.audio",
-  "performance", "group.battle", "group.extras", "buttonMode",
+  "performance", "group.battle", "group.extras", "buttonMode", "mods",
 }
 
 function Rows.group(rows, openPage)

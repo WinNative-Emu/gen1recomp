@@ -97,7 +97,7 @@ end
 local function nicknameOf(mon)
   if not mon then return "" end
   local Pokemon = require("src.core.game3.pokemon")
-  if Pokemon.isEgg(mon) then return Strings("EGG") end
+  if Pokemon.isEgg(mon) then return require("src.core.game3.rom_text").plain("gText_EggNickname") end
   if mon.nickname and mon.nickname ~= "" then return tostring(mon.nickname) end
   ensurePokemonNames(Pokemon)
   return (Pokemon.name and Pokemon.name(mon.species or mon.speciesId)) or ""
@@ -497,13 +497,19 @@ Natives.ALLOW = {
     if not (adapters and adapters.nurseHeal) then return false end
     return yield_host(ctx, adapters, adapters.nurseHeal)
   end,
+  -- pokefirered/src/pokemon_storage_system_menu.c:354
   ["special:" .. Std.SPECIAL.ShowPokemonStorageSystemPC] = function(ctx, adapters)
     if not (adapters and adapters.openPc) then return false end
-    return yield_host(ctx, adapters, adapters.openPc)
+    return yield_host(ctx, adapters, function(done)
+      adapters.openPc(function() done() end, { mode = "storage" })
+    end)
   end,
+  -- pokefirered/src/player_pc.c:163
   ["special:" .. Std.SPECIAL.PlayerPC] = function(ctx, adapters)
     if not (adapters and adapters.openPc) then return false end
-    return yield_host(ctx, adapters, adapters.openPc)
+    return yield_host(ctx, adapters, function(done)
+      adapters.openPc(function() done() end, { mode = "player" })
+    end)
   end,
   -- pokefirered/src/player_pc.c:151
   ["special:" .. Std.SPECIAL.BedroomPC] = function(ctx, adapters)
@@ -528,10 +534,28 @@ Natives.ALLOW = {
     require("src.core.game3.pc_anim").turnOff(ctx)
     return false
   end,
+  -- pokefirered/src/script_menu.c:977
   ["special:" .. Std.SPECIAL.CreatePCMenu] = function(ctx, adapters)
-    -- Cart builds a menu; host PC UI is the whole menu — open it directly.
     if not (adapters and adapters.openPc) then return false end
-    return yield_host(ctx, adapters, adapters.openPc)
+    return yield_host(ctx, adapters, function(done)
+      adapters.openPc(function(result)
+        setResult(ctx, tonumber(result) or 127)
+        done()
+      end, { mode = "select" })
+    end)
+  end,
+  -- pokefirered/src/hof_pc.c:23
+  ["special:" .. Std.SPECIAL.HallOfFamePCBeginFade] = function(ctx, adapters)
+    if not (adapters and adapters.hallOfFamePc) then return false end
+    return yield_host(ctx, adapters, function(done)
+      adapters.hallOfFamePc(function()
+        -- pokefirered/src/hof_pc.c:40
+        adapters.openPc(function(result)
+          setResult(ctx, tonumber(result) or 127)
+          done()
+        end, { mode = "select", reshow = true })
+      end)
+    end)
   end,
   ["special:" .. Std.SPECIAL.FieldShowRegionMap] = function(ctx, adapters)
     if not (adapters and adapters.showTownMap) then return false end
@@ -561,7 +585,7 @@ Natives.ALLOW = {
       local chatType = flagsMod().getVar(nil, ctx, 0x8004) or 0
       local Runtime = package.loaded["src.core.game3.runtime"]
       local session = Runtime and Runtime.getSession and Runtime.getSession()
-      local EasyChatData = require("src.core.game3.easy_chat_data")
+      local EasyChatData = require("src.core.game3.easy_chat_text")
       local currentWords = (session and session.easyChatProfile) or EasyChatData.DEFAULT_PROFILE
       adapters.openEasyChat({
         type = chatType,
@@ -616,9 +640,8 @@ Natives.ALLOW = {
   ["special:" .. Std.SPECIAL.ShowEasyChatMessage] = function(ctx, adapters)
     local Runtime = package.loaded["src.core.game3.runtime"]
     local session = Runtime and Runtime.getSession and Runtime.getSession()
-    local EasyChatData = require("src.core.game3.easy_chat_data")
     local EasyChatText = require("src.core.game3.easy_chat_text")
-    local words = (session and session.easyChatProfile) or EasyChatData.DEFAULT_PROFILE
+    local words = (session and session.easyChatProfile) or EasyChatText.DEFAULT_PROFILE
     -- The saved profile is a list of word ids; the words themselves are drawn
     -- here, so they go through the catalog like the picker's own list.
     local text = EasyChatText.phrase(words, 2, 2)
@@ -640,7 +663,7 @@ Natives.ALLOW = {
       local before = nicknameOf(mon)
       setStringVar(ctx, adapters, 3, before)
       setStringVar(ctx, adapters, 2, before)
-      local sname = (Pokemon.name and Pokemon.name(species)) or "POKéMON"
+      local sname = Pokemon.name(species)
       adapters.openNaming({
         title = require("src.ui.game3.naming").monTitle(sname),
         template = "NICKNAME",
@@ -667,7 +690,7 @@ Natives.ALLOW = {
       local before = nicknameOf(mon)
       setStringVar(ctx, adapters, 3, before)
       setStringVar(ctx, adapters, 2, before)
-      local sname = (Pokemon.name and Pokemon.name(species)) or Strings("POKéMON")
+      local sname = Pokemon.name(species)
       adapters.openNaming({
         title = require("src.ui.game3.naming").monTitle(sname),
         template = "NICKNAME",
@@ -785,19 +808,25 @@ Natives.ALLOW = {
     local flagGameClear = (Flags.IDS and Flags.IDS.SYS_GAME_CLEAR) or 0x82C
     local Space = package.loaded["src.core.game3.scripting.space"]
     local store = Space and Space.store
-    if store and Flags and Flags.setFlag then
-      Flags.setFlag(store, nil, flagGameClear, true) -- FLAG_SYS_GAME_CLEAR
-    end
-    if adapters and adapters.setFlag then
-      adapters.setFlag(flagGameClear, true)
-    end
     local Runtime = package.loaded["src.core.game3.runtime"]
     local session = Runtime and Runtime.getSession and Runtime.getSession()
+    local function set_flag(id)
+      if store and Flags and Flags.setFlag then
+        Flags.setFlag(store, nil, id, true)
+      end
+      if adapters and adapters.setFlag then
+        adapters.setFlag(id, true)
+      end
+      if session and session.store and Flags and Flags.setFlag then
+        Flags.setFlag(session.store, nil, id, true)
+      end
+    end
+    if session then
+      Natives.enterHallOfFameState(session, set_flag)
+    end
+    set_flag(flagGameClear)
     if session then
       session.game_cleared = true
-      if session.store and Flags and Flags.setFlag then
-        Flags.setFlag(session.store, nil, flagGameClear, true)
-      end
     end
     if adapters and adapters.hallOfFame then
       return yield_host(ctx, adapters, adapters.hallOfFame)
@@ -805,6 +834,44 @@ Natives.ALLOW = {
     return false
   end,
 }
+
+-- pokefirered/src/post_battle_event_funcs.c:12 EnterHallOfFame
+function Natives.enterHallOfFameState(session, setFlag)
+  local Bit = require("bit")
+  local Pokemon = require("src.core.game3.pokemon")
+  -- pokefirered/src/post_battle_event_funcs.c:18
+  require("src.core.game3.party").healAll(session.party)
+  session.gameStats = type(session.gameStats) == "table" and session.gameStats or {}
+  -- pokefirered/src/post_battle_event_funcs.c:28
+  if (tonumber(session.gameStats[1]) or 0) == 0 then
+    local pt = session.playtime or session.playTime or {}
+    local h = tonumber(pt.hours or session.playTimeHours) or 0
+    local m = tonumber(pt.minutes or session.playTimeMinutes) or 0
+    local s = tonumber(pt.seconds or session.playTimeSeconds) or 0
+    session.gameStats[1] = Bit.bor(Bit.lshift(h, 16), Bit.lshift(m, 8), s)
+  end
+  -- pokefirered/src/load_save.c:144
+  session.specialSaveWarpFlags = Bit.bor(tonumber(session.specialSaveWarpFlags) or 0, 0x01)
+  -- pokefirered/src/overworld.c:694
+  local dest = assert(require("src.core.game3.field").flyDestination("MAPSEC_PALLET_TOWN"),
+    "no heal location for MAPSEC_PALLET_TOWN")
+  session.continueGameWarp = { map = dest.map, x = dest.x, y = dest.y }
+  -- pokefirered/src/post_battle_event_funcs.c:35
+  local gave = false
+  for i = 1, 6 do
+    local mon = type(session.party) == "table" and session.party[i] or nil
+    if type(mon) == "table" and not Pokemon.isEgg(mon) and not mon.championRibbon then
+      mon.championRibbon = true
+      gave = true
+    end
+  end
+  if gave then
+    -- pokefirered/src/post_battle_event_funcs.c:47
+    local n = tonumber(session.gameStats[42]) or 0
+    session.gameStats[42] = math.min(0xFFFFFF, n + 1)
+    if setFlag then setFlag(0x83B) end -- pokefirered/include/constants/flags.h:1393
+  end
+end
 
 local MODULE_DIR = "src/core/game3/scripting"
 local MODULE_PACKAGE = "src.core.game3.scripting."

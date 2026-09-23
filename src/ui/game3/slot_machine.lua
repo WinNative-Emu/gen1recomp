@@ -4,6 +4,7 @@ local Stack = require("src.ui.game3.stack")
 local Window = require("src.ui.game3.window")
 local FrlgFont = require("src.ui.game3.frlg_font")
 local Strings = require("src.core.Strings")
+local RomText = require("src.core.game3.rom_text")
 local Model = require("src.core.game3.slot_machine")
 
 local SlotMachineUi = {}
@@ -371,7 +372,7 @@ end
 local function update_bet(st, input)
   if coins() == 0 then
     SlotMachineUi.task = "nocoins"
-    SlotMachineUi._message = Strings("You've run out of COINS.\nGame over!")
+    SlotMachineUi._message = RomText.plain("gString_OutOfCoins")
     return
   end
   if input:wasPressed("down") then
@@ -392,7 +393,7 @@ local function update_bet(st, input)
     SlotMachineUi.task = "spin"
   elseif input:wasPressed("b") then
     SlotMachineUi.task = "quit"
-    SlotMachineUi._message = Strings("Quit playing?")
+    SlotMachineUi._message = RomText.plain("gString_QuitPlaying")
     SlotMachineUi._yesNo = 1
   elseif input:wasPressed("right") then
     -- pokefirered/src/slot_machine.c:993
@@ -913,8 +914,8 @@ function SlotMachineUi.draw()
   if SlotMachineUi._yesNo then
     local tpl = SlotMachineUi._yesNoTpl
     Window.stdFrame(tpl)
-    Window.printPx(Strings("YES"), (SlotMachineUi.YESNO_LEFT + 1) * 8, SlotMachineUi.YESNO_TOP * 8 + 2)
-    Window.printPx(Strings("NO"), (SlotMachineUi.YESNO_LEFT + 1) * 8, SlotMachineUi.YESNO_TOP * 8 + 16)
+    Window.printPx(RomText.plain("gText_Yes"), (SlotMachineUi.YESNO_LEFT + 1) * 8, SlotMachineUi.YESNO_TOP * 8 + 2)
+    Window.printPx(RomText.plain("gText_No"), (SlotMachineUi.YESNO_LEFT + 1) * 8, SlotMachineUi.YESNO_TOP * 8 + 16)
     Window.cursorPx(SlotMachineUi.YESNO_LEFT * 8 + 2,
       SlotMachineUi.YESNO_TOP * 8 + 2 + (SlotMachineUi._yesNo - 1) * 14)
   end

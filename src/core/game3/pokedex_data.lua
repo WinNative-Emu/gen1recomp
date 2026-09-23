@@ -4,7 +4,7 @@
 local Extract = require("src.import.gba.extract_island1")
 local Dex = require("src.core.game3.dex")
 local Pokemon = require("src.core.game3.pokemon")
-local Strings = require("src.core.Strings")
+local RomText = require("src.core.game3.rom_text")
 
 local PokedexData = {}
 
@@ -184,28 +184,9 @@ end
 function PokedexData.getEntry(speciesId)
   PokedexData.init()
   local sp = tonumber(speciesId) or 1
-  local natId = Pokemon.national and Pokemon.national(sp) or sp
-
-  local raw = (PokedexData._entries and PokedexData._entries[natId])
-    or (PokedexData._entries and PokedexData._entries[sp])
-
-  if not raw then
-    local name = (Pokemon.name and Pokemon.name(sp)) or "POKéMON"
-    return {
-      category = "UNKNOWN",
-      categoryName = Strings("UNKNOWN POKéMON"),
-      heightDm = 0,
-      weightHg = 0,
-      heightFormatted = "--'--\"",
-      weightFormatted = Strings("---.- lbs."),
-      description = Strings("This is a newly discovered POKéMON. It is\ncurrently under investigation."),
-      description2 = Strings("This is a newly discovered POKéMON. It is\ncurrently under investigation."),
-      pokemonScale = 256,
-      pokemonOffset = 0,
-      trainerScale = 256,
-      trainerOffset = 0,
-    }
-  end
+  -- src/data/pokemon/pokedex_entries.h:3 NATIONAL_DEX_NONE
+  local raw = PokedexData._entries[sp] or assert(PokedexData._entries[0],
+    "pokemon/pokedex/entries.lua has no NATIONAL_DEX_NONE entry")
 
   local dm = raw.height or 0
   local inchesTenths = math.floor(10000 * dm / 254)
@@ -223,10 +204,12 @@ function PokedexData.getEntry(speciesId)
   end
   local wholeLbs = math.floor(lbsHund / 100)
   local fracLbs = math.floor((lbsHund % 100) / 10)
-  local weightFormatted = Strings("%4d.%d lbs.", wholeLbs, fracLbs)
+  -- src/pokedex_screen.c:2846
+  local weightFormatted = string.format("%4d.%d ", wholeLbs, fracLbs) .. RomText.plain("gText_Lbs")
 
-  local cat = raw.category or "POKéMON"
-  local categoryName = cat:find("POKéMON") and cat or Strings("%s POKéMON", cat)
+  local cat = raw.category
+  -- src/pokedex_screen.c:2703
+  local categoryName = cat .. RomText.plain("gText_PokedexPokemon")
 
   return {
     category = cat,
@@ -296,28 +279,42 @@ function PokedexData.getOrderList(orderKey, dex)
   elseif orderKey == "numerical_national" then
     local maxNat = Dex.NATIONAL_MAX or 386
     local highestSeen = 0
-    for i = 1, maxNat do
-      if Dex.isSeen(dex, i) then
-        highestSeen = i
+    for nat = 1, maxNat do
+      if Dex.isSeen(dex, Pokemon.speciesFromNational(nat)) then
+        highestSeen = nat
       end
     end
     local result = {}
-    for i = 1, highestSeen do
-      table.insert(result, i)
+    for nat = 1, highestSeen do
+      table.insert(result, Pokemon.speciesFromNational(nat))
     end
     return result
   elseif orderKey == "atoz" then
+    -- pokefirered/src/pokedex_screen.c:1404
     local result = {}
-    for _, sp in ipairs(rawList) do
-      if sp <= maxN and Dex.isSeen(dex, sp) then
+    for _, nat in ipairs(rawList) do
+      local sp = Pokemon.speciesFromNational(nat)
+      if nat <= maxN and sp and Dex.isSeen(dex, sp) then
         table.insert(result, sp)
       end
     end
     return result
-  elseif orderKey == "type" or orderKey == "lightest" or orderKey == "smallest" then
+  elseif orderKey == "lightest" or orderKey == "smallest" then
+    -- pokefirered/src/pokedex_screen.c:1438
+    local result = {}
+    for _, nat in ipairs(rawList) do
+      local sp = Pokemon.speciesFromNational(nat)
+      if nat <= maxN and sp and Dex.isCaught(dex, sp) then
+        table.insert(result, sp)
+      end
+    end
+    return result
+  elseif orderKey == "type" then
+    -- pokefirered/src/pokedex_screen.c:1421
     local result = {}
     for _, sp in ipairs(rawList) do
-      if sp <= maxN and Dex.isCaught(dex, sp) then
+      local nat = Pokemon.national(sp)
+      if nat and nat <= maxN and Dex.isCaught(dex, sp) then
         table.insert(result, sp)
       end
     end

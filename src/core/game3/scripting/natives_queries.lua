@@ -1,5 +1,5 @@
 
-local Strings = require("src.core.Strings")
+local RomText = require("src.core.game3.rom_text")
 local Std = require("src.core.game3.scripting.stdscripts")
 
 local Queries = {}
@@ -123,7 +123,7 @@ end
 local function nicknameOf(mon)
   if not mon then return "" end
   local Pokemon = require("src.core.game3.pokemon")
-  if Pokemon.isEgg(mon) then return Strings("EGG") end
+  if Pokemon.isEgg(mon) then return RomText.plain("gText_EggNickname") end
   if mon.nickname and mon.nickname ~= "" then return tostring(mon.nickname) end
   pcall(function()
     if not Pokemon._names then Pokemon.install(nil) end
@@ -328,7 +328,7 @@ Queries.HANDLERS = {
   [Std.SPECIAL.BufferBigGuyOrBigGirlString] = function(ctx, adapters)
     local session = sessionOf()
     local female = (tonumber(session and session.gender) or 0) ~= 0
-    setStringVar(ctx, adapters, 1, female and Strings("Big girl") or Strings("Big guy"))
+    setStringVar(ctx, adapters, 1, RomText.plain(female and "gText_BigGirl" or "gText_BigGuy"))
     return false
   end,
   -- pokefirered/src/field_player_avatar.c:1082
@@ -422,6 +422,14 @@ Queries.HANDLERS = {
   -- pokefirered/src/field_specials.c:1980
   [Std.SPECIAL.GetPCBoxToSendMon] = function()
     return false, Queries.pcBoxToSendMon or 0
+  end,
+  -- pokefirered/src/field_specials.c:2056
+  [Std.SPECIAL.BufferTMHMMoveName] = function(ctx, adapters)
+    local Pokemon = require("src.core.game3.pokemon")
+    local move = Pokemon.moveFromTmItem(varGet(ctx, 0x8004))
+    if not move then return boolReturn(false) end
+    setStringVar(ctx, adapters, 1, Pokemon.moveName(move))
+    return boolReturn(true)
   end,
 }
 

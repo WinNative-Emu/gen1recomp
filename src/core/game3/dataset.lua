@@ -8,6 +8,15 @@ local MapIds = require("src.core.game3.map_ids")
 local Dataset = {}
 
 local function diskFallback(rel)
+  local override = Dataset.cacheRootOverride
+  if override then
+    local f = io.open(override .. "/" .. rel:gsub("^data/generated/gba/", ""), "rb")
+    if f then
+      local data = f:read("*a")
+      f:close()
+      if type(data) == "string" and #data > 0 then return data end
+    end
+  end
   local f = io.open(rel, "rb") or io.open("data/generated/gba/" .. rel, "rb")
   if f then
     local data = f:read("*a")
@@ -18,10 +27,6 @@ local function diskFallback(rel)
   local okG, GameVersion = pcall(require, "src.core.GameVersion")
   local prefix = (okG and GameVersion.cachePrefix and GameVersion.cachePrefix()) or "firered/"
   local prefixes = { prefix }
-  -- Always also try firered/ for GBA extract paths (standalone Game3).
-  if prefix ~= "firered/" then
-    prefixes[#prefixes + 1] = "firered/"
-  end
   local roots = {}
   local identity = os.getenv("POKEPORT_IDENTITY") or ""
   local sandboxed = identity ~= ""
@@ -30,15 +35,10 @@ local function diskFallback(rel)
     roots[#roots + 1] = home .. "/Library/Application Support/LOVE/" .. identity
     roots[#roots + 1] = home .. "/.local/share/love/" .. identity
   end
-  if home and not sandboxed then
-    roots[#roots + 1] = home .. "/.local/share/love/pokemon-love2d"
-  end
   if love and love.filesystem and love.filesystem.getSaveDirectory then
     local sd = love.filesystem.getSaveDirectory()
     if type(sd) == "string" and sd ~= "" then
       roots[#roots + 1] = sd
-      local parent = sd:match("^(.*)/[^/]+$")
-      if parent and not sandboxed then roots[#roots + 1] = parent .. "/pokemon-love2d" end
     end
   end
   for _, root in ipairs(roots) do
@@ -308,8 +308,10 @@ function Dataset.attachMidLayouts(maps, cache)
         if decoded then
           local pair = (info and info.pair) or def.pair
           def.midLayout = LayoutNative.fromDecoded(decoded, mapId, pair)
-          if decoded.width and decoded.width > 0 then def.width = decoded.width end
-          if decoded.height and decoded.height > 0 then def.height = decoded.height end
+          local tw = decoded.trueWidth or decoded.width
+          local th = decoded.trueHeight or decoded.height
+          if tw and tw > 0 then def.width = tw end
+          if th and th > 0 then def.height = th end
           if pair then def.pair = pair end
           attached = attached + 1
         end

@@ -1,7 +1,7 @@
 local Data = require("src.core.game3.vs_seeker_data")
 local Flags = require("src.core.game3.scripting.flags")
 local Rng = require("src.core.game3.rng")
-local Strings = require("src.core.Strings")
+local RomText = require("src.core.game3.rom_text")
 
 local VsSeeker = {}
 
@@ -40,12 +40,11 @@ VsSeeker.MOVEMENT_UNFOUGHT = { 0x62, 0xFE }
 VsSeeker.MOVEMENT_NO_REMATCH = { 0x64, 0xFE }
 VsSeeker.MOVEMENT_REMATCH = { 0x2D, 0x65, 0xFE }
 
--- English sources, translated where they are shown.
 -- data/text/trainers.inc:1
 VsSeeker.TEXT = {
-  notCharged = Strings.source("The battery isn't charged enough.\fNo. of steps required to fully\ncharge the battery: %d"),
-  noTrainers = Strings.source("There are no TRAINERS within range\nwho can battle…\fThe VS SEEKER was turned off."),
-  notReady = Strings.source("The other TRAINERS don't appear\nto be ready for battle.\fLet's wait till later."),
+  notCharged = "VSSeeker_Text_BatteryNotChargedNeedXSteps",
+  noTrainers = "VSSeeker_Text_NoTrainersWithinRange",
+  notReady = "VSSeeker_Text_TrainersNotReady",
 }
 
 -- src/item_use.c:712
@@ -482,8 +481,7 @@ end
 
 -- src/strings.c:188
 function VsSeeker.notTimeText(session)
-  local name = tostring((session and (session.name or session.playerName)) or "RED")
-  return Strings("OAK: %s!\nThis isn't the time to use that!", name)
+  return RomText.ascii("gText_OakForbidsUseOfItemHere", { playerName = session.name or session.playerName })
 end
 
 local function fieldLock(on)
@@ -539,10 +537,11 @@ function VsSeeker.use(session, game, onDone)
   local px, py = playerCoords()
   local code, need = VsSeeker.canUse(infos, px, py, s, st)
   if code == VsSeeker.NOT_CHARGED then
-    showMessage(game, Strings(VsSeeker.TEXT.notCharged, need), onDone)
+    -- src/vs_seeker.c:864
+    showMessage(game, RomText.ascii(VsSeeker.TEXT.notCharged, { stringVars = { tostring(need) } }), onDone)
     return false, code
   elseif code == VsSeeker.NO_ONE_IN_RANGE then
-    showMessage(game, Strings(VsSeeker.TEXT.noTrainers), onDone)
+    showMessage(game, RomText.ascii(VsSeeker.TEXT.noTrainers), onDone)
     return false, code
   end
 
@@ -568,7 +567,10 @@ function VsSeeker.use(session, game, onDone)
       fieldLock(true)
       freezeAll(Objects)
       local Player = package.loaded["src.core.game3.player"]
-      if Player and Player.startFieldMove then Player.startFieldMove(VsSeeker.EFFECT_FRAMES) end
+      -- src/field_player_avatar.c:1336
+      if Player and Player.startFieldMove then
+        Player.startFieldMove(VsSeeker.EFFECT_FRAMES, Player.biking and "vs_seeker_bike" or "vs_seeker")
+      end
     end,
     tick = function()
       if seq.finished or seq.waitingText then return end
@@ -593,7 +595,7 @@ function VsSeeker.use(session, game, onDone)
         if seq.response == VsSeeker.RESPONSE_NO_RESPONSE then
           seq.waitingText = true
           local Hud = package.loaded["src.ui.game3.hud"] or require("src.ui.game3.hud")
-          Hud.openMessage(game, Strings(VsSeeker.TEXT.notReady), { done = finish })
+          Hud.openMessage(game, RomText.ascii(VsSeeker.TEXT.notReady), { done = finish })
         else
           if seq.response == VsSeeker.RESPONSE_FOUND_REMATCHES then
             VsSeeker.startAllRespondantIdleMovements(infos, seq.responders, s, st, Objects)
@@ -617,10 +619,18 @@ function VsSeeker.chargingDoneEvent()
     if not ev.done then return end
     local Player = package.loaded["src.core.game3.player"]
     if Player and Player.moving then return end
+    -- src/vs_seeker.c:616
+    local waiting = false
     for _, lid in ipairs(Objects._order or {}) do
       local eo = Objects._byId[lid]
-      if eo and (eo.moving or (eo.raiseY or 0) ~= 0) then return end
+      if eo then
+        if not eo.frozen then
+          if (eo.raiseY or 0) ~= 0 then waiting = true else eo.frozen = true end
+        end
+        if eo.moving then waiting = true end
+      end
     end
+    if waiting then return end
     if Objects.hasActiveTracks and Objects.hasActiveTracks() then return end
     freezeAll(Objects)
     VsSeeker.resetObjectMovementAfterChargeComplete(Objects)

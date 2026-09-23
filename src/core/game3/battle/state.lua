@@ -326,13 +326,19 @@ function State.resetSentPokes(st)
   local sent = {}
   for _, id in ipairs({ 0, 2 }) do
     local b = State.battler(st, id)
-    if b and b.partyIndex then sent[#sent + 1] = b.partyIndex end
+    if b and b.partyIndex and not State.isAbsent(st, id) then sent[#sent + 1] = b.partyIndex end
   end
   for _, id in ipairs({ 1, 3 }) do
     local foe = State.battler(st, id)
     if foe then
       foe.participants = {}
       for _, pi in ipairs(sent) do foe.participants[pi] = true end
+    end
+  end
+  if st.enemy and not st.enemy.participants then
+    st.enemy.participants = {}
+    if st.player and st.player.partyIndex and not State.isAbsent(st, 0) then
+      st.enemy.participants[st.player.partyIndex] = true
     end
   end
 end
@@ -347,6 +353,9 @@ function State.opponentSwitchInResetSentPokes(st, foeBattler)
       foeBattler.participants[b.partyIndex] = true
     end
   end
+  if not st.double and st.player and not State.isAbsent(st, 0) and st.player.partyIndex then
+    foeBattler.participants[st.player.partyIndex] = true
+  end
 end
 
 -- pokefirered/src/battle_util.c:273
@@ -359,6 +368,9 @@ function State.updateSentPokes(st, battler)
     local foe = State.battler(st, id)
     if foe then State.trackParticipant(st, foe, battler.partyIndex) end
   end
+  if not st.double and st.enemy then
+    State.trackParticipant(st, st.enemy, battler.partyIndex)
+  end
 end
 
 function State.displayName(battler)
@@ -369,6 +381,21 @@ function State.displayName(battler)
     if not Pokemon._names then Pokemon.install(nil) end
   end)
   return Pokemon.name(battler.species)
+end
+
+-- src/battle_message.c:1807
+function State.text(st, id, fill)
+  fill = require("src.core.game3.battle.adapter").fill(st, fill)
+  return require("src.core.game3.battle.battle_text").get(id, fill)
+end
+
+function State.prefixedName(st, battler, name)
+  name = name or State.displayName(battler)
+  if battler and battler.side == "player" then return name end
+  local RomText = require("src.core.game3.rom_text")
+  local prefix = (st ~= nil and not st.wild) and "sText_FoePkmnPrefix" or "sText_WildPkmnPrefix"
+  local ok, pre = pcall(RomText.plain, prefix)
+  return (ok and pre or (st ~= nil and not st.wild and "Foe " or "Wild ")) .. name
 end
 
 function State.isFainted(battler)

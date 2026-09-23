@@ -89,6 +89,7 @@ local SHEETS = {
   cableEnd = "cable_end",
   linkMonGlow = "link_mon_glow",
   linkMonShadow = "link_mon_shadow",
+  monShadowBg = "mon_shadow_bg",
   gbaFlash = "gba_screen_flash",
   ball = "ball",
 }
@@ -216,6 +217,12 @@ function TradeSceneUi.draw()
   love.graphics.setColor(0, 0, 0, 1)
   love.graphics.rectangle("fill", 0, 0, Display.W, Display.H)
 
+  -- pokefirered/src/trade_scene.c:1121
+  if art and s.monShadowBg and art.monShadowBg then
+    love.graphics.setColor(1, 1, 1, 1)
+    love.graphics.draw(art.monShadowBg, -(tonumber(s.bg2hofs) or 0), 0)
+  end
+
   if art and s.gbaVisible then
     love.graphics.setColor(1, 1, 1, 1)
     -- pokefirered/src/trade_scene.c:678 REG_OFFSET_BG1VOFS
@@ -260,21 +267,21 @@ function TradeSceneUi.draw()
   -- pokefirered/src/trade_scene.c:757 draws every mon by MON_DATA_SPECIES_OR_EGG
   -- pokefirered/src/trade_scene.c:1541
   if s.crossMonVisible then
-    draw_mon(Pokemon.frontPic(Pokemon.speciesOrEgg(s.offer)),
+    draw_mon(Pokemon.monFrontPic(s.offer),
       60, 192 + (s.monY2a or 0), 1)
-    draw_mon(Pokemon.frontPic(Pokemon.speciesOrEgg(s.received)),
+    draw_mon(Pokemon.monFrontPic(s.received),
       180, -32 + (s.monY2b or 0), 1)
   end
 
   -- pokefirered/src/trade_scene.c:772
   if s.playerVisible then
-    draw_mon(Pokemon.frontPic(Pokemon.speciesOrEgg(s.offer)),
+    draw_mon(Pokemon.monFrontPic(s.offer),
       120 + (s.monX2 or 0), 60, s.monScale or 1)
   end
 
   -- pokefirered/src/trade_scene.c:1716
   if s.partnerVisible then
-    draw_mon(Pokemon.frontPic(Pokemon.speciesOrEgg(s.received)),
+    draw_mon(Pokemon.monFrontPic(s.received),
       120, 60, 1)
   end
 

@@ -5,6 +5,7 @@ local FrlgFont = require("src.ui.game3.frlg_font")
 local Chrome = require("src.ui.game3.chrome")
 local MapSectionsExtract = require("src.import.gba.map_sections_extract")
 local Strings = require("src.core.Strings")
+local RomText = require("src.core.game3.rom_text")
 
 local MapNamePopup = {}
 
@@ -35,17 +36,20 @@ MapNamePopup._widthTiles = 14
 MapNamePopup._contentWidth = 112 -- 14 tiles * 8px
 MapNamePopup._floorNum = 0
 
---- Check if flag FLAG_DONT_SHOW_MAP_NAME_POPUP (0x8000) is set in session
+-- pokefirered/include/constants/flags.h:1530
+local FLAG_DONT_SHOW_MAP_NAME_POPUP = 0x4000
+
+-- pokefirered/src/map_name_popup.c:30
 local function isFlagSuppressed()
   local Space = package.loaded["src.core.game3.scripting.space"]
   local Flags = package.loaded["src.core.game3.scripting.flags"]
   local store = Space and Space.store
   if store and Flags and Flags.getFlag then
-    if Flags.getFlag(store, nil, 0x8000) then return true end
+    if Flags.getFlag(store, nil, FLAG_DONT_SHOW_MAP_NAME_POPUP) then return true end
   end
   local Runtime = package.loaded["src.core.game3.runtime"]
   local session = Runtime and Runtime.getSession and Runtime.getSession()
-  if session and session.flags and session.flags[0x8000] then
+  if session and session.flags and session.flags[FLAG_DONT_SHOW_MAP_NAME_POPUP] then
     return true
   end
   return false
@@ -70,9 +74,10 @@ end
 local function translated_name(info)
   local base = Strings(info.rawName or info.name)
   local floor = tonumber(info.floorNum) or 0
+  -- pokefirered/src/map_name_popup.c:211
+  if floor == 127 then return base .. " " .. RomText.plain("gText_Rooftop2") end
   local label
-  if floor == 127 then label = "ROOFTOP"
-  elseif floor < 0 then label = string.format("B%dF", -floor)
+  if floor < 0 then label = string.format("B%dF", -floor)
   elseif floor > 0 then label = string.format("%dF", floor) end
   if not label then return base end
   return base .. " " .. Strings(label)

@@ -62,6 +62,12 @@ function UiPass.drawUi()
     tryDraw(CoinsBox)
   end
 
+  -- pokefirered/src/berry_powder.c:113
+  local BerryPowderBox = require("src.ui.game3.berry_powder_box")
+  if BerryPowderBox.isVisible() then
+    tryDraw(BerryPowderBox)
+  end
+
   -- pokefirered/src/field_specials.c:1094
   if ElevatorWindow.isVisible and ElevatorWindow.isVisible() then
     tryDraw(ElevatorWindow)
@@ -115,6 +121,11 @@ function UiPass.drawUi()
   local okTr, BattleTransition = pcall(require, "src.core.game3.battle_transition")
   if okTr and BattleTransition and BattleTransition.draw then
     BattleTransition.draw()
+  end
+
+  local okSea, SeagallopUi = pcall(require, "src.ui.game3.seagallop")
+  if okSea and SeagallopUi and SeagallopUi.isActive and SeagallopUi.isActive() then
+    tryDraw(SeagallopUi)
   end
 
   local okF, Fade = pcall(require, "src.ui.game3.fade")

@@ -11,10 +11,10 @@ package.path = "./?.lua;./?/init.lua;" .. package.path
 local T = require("tests.harness")
 local check, eq = T.check, T.eq
 love = love or require("tests.love_stub")
+require("tests.game3_cache").mountOrSkip("game3_script_verbs_subset_test")
 
 local Vm = require("src.core.game3.scripting.vm")
 local Ops = require("src.core.game3.scripting.ops_a")
-local Std = require("src.core.game3.scripting.stdscripts")
 local Flags = require("src.core.game3.scripting.flags")
 local Ctx = require("src.core.game3.scripting.ctx")
 local Storage = require("src.core.game3.storage")
@@ -36,7 +36,6 @@ local function new_vm()
   local vm = Vm.new({
     store = Flags.newStore(),
     scripts = { t_main = END, ["std:1"] = END, ["std:2"] = END },
-    text = Std.TEXT, stdscripts = Std.SCRIPTS,
   })
   vm.ctx.stack = vm.ctx.stack or {}
   return vm

@@ -121,7 +121,8 @@ local function loadExtractorWithStubs(pokeRun, sectionsRun)
   for _, sibling in ipairs({
     "items_extract", "pokedex_chrome_extract", "storage_chrome_extract",
     "text_chrome_extract", "trainer_card_extract", "seagallop_extract",
-    "map_preview_extract",
+    "cave_transition_extract", "weather_extract", "ingame_trades_extract",
+    "union_room_classes_extract", "map_preview_extract",
   }) do
     package.loaded["src.import.gba." .. sibling] = { run = function() return true end }
   end
@@ -133,6 +134,12 @@ local function loadExtractorWithStubs(pokeRun, sectionsRun)
     ready = function() return true end,
     run = function() return {} end,
   }
+  for _, sibling in ipairs({ "credits_extract", "league_extract", "battle_ai_extract" }) do
+    package.loaded["src.import.gba." .. sibling] = {
+      ready = function() return true end,
+      run = function() return {} end,
+    }
+  end
   package.loaded["src.import.gba.map_sections_extract"] = {
     run = sectionsRun or function(_, cache, opts)
       cache:write((opts and opts.cacheRoot or "data/generated/gba")
@@ -210,6 +217,9 @@ package.loaded["src.import.gba.rom"] = nil
 package.loaded["src.import.gba.pokemon_extract"] = nil
 package.loaded["src.import.gba.region_map_extract"] = nil
 package.loaded["src.import.gba.multichoice_extract"] = nil
+package.loaded["src.import.gba.credits_extract"] = nil
+package.loaded["src.import.gba.league_extract"] = nil
+package.loaded["src.import.gba.battle_ai_extract"] = nil
 package.loaded["src.import.gba.map_sections_extract"] = nil
 package.loaded["src.import.gba.revision_view"] = nil
 package.loaded["src.import.gba.extract_intro"] = nil
@@ -219,6 +229,7 @@ package.loaded["src.import.RomExtractorGen3"] = nil
 for _, sibling in ipairs({
   "items_extract", "pokedex_chrome_extract", "storage_chrome_extract",
   "text_chrome_extract", "trainer_card_extract", "seagallop_extract",
+  "cave_transition_extract", "ingame_trades_extract", "union_room_classes_extract",
   "map_preview_extract",
 }) do
   package.loaded["src.import.gba." .. sibling] = nil

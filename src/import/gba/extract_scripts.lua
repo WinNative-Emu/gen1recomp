@@ -1,7 +1,5 @@
--- Write game3 script/event cache blobs from ROM MapEvents + BFS (primary),
--- or curated island1_content (dev/CI fallback when no ROM extract).
+-- Write game3 script/event cache blobs from ROM MapEvents + BFS.
 
-local Content = require("src.import.gba.island1_content")
 local Disasm = require("src.core.game3.scripting.disasm")
 local TextIR = require("src.core.game3.scripting.text_ir")
 local Movement = require("src.core.game3.scripting.movement")
@@ -16,7 +14,7 @@ ExtractScripts.CACHE_SUB = "scripts"
 local SCRIPT_CHUNK = 8192
 local TEXT_MAX = 1024
 local MOVE_MAX = 256
-local BFS_MAX = 4000
+local BFS_MAX = 16000
 
 local function json_escape(s)
   return (tostring(s):gsub("\\", "\\\\"):gsub('"', '\\"'):gsub("\n", "\\n"))
@@ -38,7 +36,7 @@ local function serialize_lua(val, indent)
   local isArr = n > 0
   if isArr then
     for k in pairs(val) do
-      if type(k) ~= "number" then isArr = false; break end
+      if type(k) ~= "number" or k < 1 or k > n or k % 1 ~= 0 then isArr = false; break end
     end
   end
   local parts = { "{\n" }
@@ -64,33 +62,12 @@ local function serialize_lua(val, indent)
   return table.concat(parts)
 end
 
-local function merge_std_scripts()
-  local scripts = {}
-  for k, v in pairs(Content.STDSCRIPTS) do scripts[k] = v end
-  return scripts
-end
-
-local function merge_std_text()
-  local text = {}
-  for k, v in pairs(Content.TEXT) do
-    -- Prefer extracted text; curated TEXT is only used for std nurse/PC labels
-    -- that are not in ROM BFS (EventScript_PC host path).
-    if type(k) == "string" and (k:find("^Text_", 1, true) or k:find("^EventScript", 1, true)) then
-      text[k] = v
-    end
-  end
-  -- Always include Std nurse/PC text keys.
-  local Std = require("src.core.game3.scripting.stdscripts")
-  for k, v in pairs(Std.TEXT) do text[k] = v end
-  return text
-end
-
 local function is_rom_ptr(ptr)
   ptr = tonumber(ptr) or 0
   return ptr >= 0x08000000 and ptr < 0x0A000000
 end
 
-local function read_text_ir(rom, gbaPtr)
+local function read_text_ir(rom, gbaPtr, opts)
   local off = rom:ptrOffset(gbaPtr)
   if not off then return nil end
   local bytes = {}
@@ -99,7 +76,45 @@ local function read_text_ir(rom, gbaPtr)
     bytes[#bytes + 1] = b
     if b == 0xFF then break end
   end
-  return TextIR.decode(bytes)
+  return TextIR.decode(bytes, opts)
+end
+
+local function table_key(name, i, inner)
+  if inner then
+    return string.format("%s[%d][%d]", name, math.floor(i / inner), i % inner)
+  end
+  return string.format("%s[%d]", name, i)
+end
+
+-- src/battle_message.c:517, include/constants/battle_string_ids.h:393
+local function extract_text_tables(rom, text)
+  local counts = {}
+  local battle = { battle = true }
+  for _, t in ipairs(Versions.TEXT_TABLES) do
+    local slots = t.count * (t.inner or 1)
+    for i = 0, slots - 1 do
+      local key
+      if t.ids then
+        key = assert(Versions.BATTLE_STRING_IDS[i + t.ids], t.name .. " has no string id for " .. i)
+      else
+        key = table_key(t.name, i, t.inner)
+      end
+      local ir
+      if t.inline then
+        ir = assert(read_text_ir(rom, 0x08000000 + t.addr + i * t.stride),
+          "ROM text " .. key .. " is not readable")
+      else
+        local ptr = rom:u32(t.addr + i * t.stride)
+        if ptr ~= 0 then
+          assert(rom:ptrOffset(ptr), string.format("%s entry is not a ROM pointer (0x%08X)", key, ptr))
+          ir = read_text_ir(rom, ptr, t.battle and battle or nil)
+        end
+      end
+      text[key] = ir
+    end
+    counts[t.name] = t.inner and { t.count, t.inner } or t.count
+  end
+  return counts
 end
 
 -- pokefirered/include/characters.h:285
@@ -282,11 +297,11 @@ function ExtractScripts.bfsFromSeeds(rom, seedPtrs)
       if row.op == "end" or row.op == "return" then
         break
       end
-      -- gotostd / callstd — std overlay covers runtime; no ROM enqueue
     end
     scripts[key] = rows
     ::continue::
   end
+  assert(#queue == 0, "script BFS stopped at BFS_MAX with " .. #queue .. " scripts queued")
 
   return {
     scripts = scripts,
@@ -299,20 +314,50 @@ function ExtractScripts.bfsFromSeeds(rom, seedPtrs)
   }
 end
 
---- Full Island 1 extract: MapEvents + BFS + stdscripts overlay.
 function ExtractScripts.extractFromRom(rom, version)
   local events, seeds = ExtractMapEvents.extractIsland1(rom, version)
+  local aliases = {}
+  -- data/event_scripts.s:77
+  for i = 0, Versions.STD_SCRIPTS_COUNT - 1 do
+    local ptr = rom:u32(Versions.STD_SCRIPTS + i * 4)
+    assert(rom:ptrOffset(ptr), "gStdScripts entry " .. i .. " is not a ROM pointer")
+    seeds[#seeds + 1] = ptr
+    aliases["std:" .. i] = Opcodes.key(ptr)
+  end
+  -- data/scripts/pc.inc:1
+  for name, off in pairs(Versions.NAMED_SCRIPTS) do
+    local ptr = 0x08000000 + off
+    seeds[#seeds + 1] = ptr
+    aliases[name] = Opcodes.key(ptr)
+  end
   local bfs = ExtractScripts.bfsFromSeeds(rom, seeds)
-  local scripts = merge_std_scripts()
+  local scripts = {}
   for k, v in pairs(bfs.scripts) do scripts[k] = v end
-  local text = merge_std_text()
+  for name, key in pairs(aliases) do
+    scripts[name] = assert(scripts[key], "ROM script " .. name .. " was not extracted")
+  end
+  local text = {}
   for k, v in pairs(bfs.text) do text[k] = v end
+  for name, off in pairs(Versions.NAMED_TEXTS) do
+    text[name] = assert(read_text_ir(rom, 0x08000000 + off), "ROM text " .. name .. " is not readable")
+  end
+  for name, off in pairs(Versions.NAMED_BATTLE_TEXTS) do
+    text[name] = assert(read_text_ir(rom, 0x08000000 + off, { battle = true }),
+      "ROM text " .. name .. " is not readable")
+  end
+  local textTables = extract_text_tables(rom, text)
+  -- src/script_menu.c:574
+  for i = 0, Versions.STD_STRING_COUNT - 1 do
+    local ptr = rom:u32(Versions.STD_STRING_PTRS + i * 4)
+    text["stdstring:" .. i] = assert(read_text_ir(rom, ptr), "gStdStringPtrs entry " .. i .. " is not a ROM pointer")
+  end
   local movements = {}
   for k, v in pairs(bfs.movements) do movements[k] = v end
   return {
     events = events,
     scripts = scripts,
     text = text,
+    textTables = textTables,
     movements = movements,
     marts = bfs.marts or {},
     opInventory = bfs.opInventory,
@@ -328,8 +373,10 @@ local function write_tables(cache, root, scripts, text, movements, events, metaE
   local base = root .. "/" .. ExtractScripts.CACHE_SUB
   cache:write(base .. "/scripts.lua", "return " .. serialize_lua(scripts) .. "\n")
   cache:write(base .. "/text.lua", "return " .. serialize_lua(text) .. "\n")
+  if metaExtra and metaExtra.textTables then
+    cache:write(base .. "/text_tables.lua", "return " .. serialize_lua(metaExtra.textTables) .. "\n")
+  end
   cache:write(base .. "/movements.lua", "return " .. serialize_lua(movements) .. "\n")
-  cache:write(base .. "/stdscripts.lua", "return " .. serialize_lua(merge_std_scripts()) .. "\n")
   cache:write(base .. "/events.lua", "return " .. serialize_lua(events) .. "\n")
   local meta = {
     cache_version = Versions.CACHE_VERSION,
@@ -379,6 +426,7 @@ function ExtractScripts.writeBundleFromRom(rom, cache, root, version, extracted)
   write_tables(cache, root, bundle.scripts, bundle.text, bundle.movements, bundle.events, {
     source = "rom",
     opInventory = bundle.opInventory,
+    textTables = assert(bundle.textTables, "ROM text tables were not extracted"),
   })
   do
     local MartsExtract = require("src.import.gba.marts_extract")
@@ -402,20 +450,6 @@ function ExtractScripts.writeBundleFromRom(rom, cache, root, version, extracted)
     FlagsExtract.write(cache, root)
   end
   return bundle
-end
-
---- Dev/CI fallback: curated island1_content (no ROM).
-function ExtractScripts.writeBundle(cache, root)
-  local scripts = merge_std_scripts()
-  for k, v in pairs(Content.SCRIPTS) do scripts[k] = v end
-  write_tables(cache, root, scripts, Content.TEXT, Content.MOVEMENTS or {}, Content.EVENTS, {
-    source = "curated",
-  })
-  do
-    local FlagsExtract = require("src.import.gba.flags_extract")
-    FlagsExtract.write(cache, root)
-  end
-  return true
 end
 
 --- Cache contract: ready extract has events+scripts+text.
@@ -448,6 +482,7 @@ function ExtractScripts.loadBundle(cache, root, opts)
   local text = load_lua(base .. "/text.lua")
   local movements = load_lua(base .. "/movements.lua")
   local events = load_lua(base .. "/events.lua")
+  local textTables = load_lua(base .. "/text_tables.lua")
   if scripts and events then
     local objects=load_lua(root .. "/objects/pack.lua")
     require("src.core.game3.scripting.interaction_scripts").install(objects)
@@ -458,22 +493,13 @@ function ExtractScripts.loadBundle(cache, root, opts)
       for k,v in pairs(objects.text or {}) do text[k]=v end
       for k,v in pairs(objects.movements or {}) do movements[k]=v end
     end
-    -- Overlay stdscripts always (nurse/PC host arms).
-    for k, v in pairs(merge_std_scripts()) do
-      scripts[k] = v
-    end
-    local stdText = merge_std_text()
-    text = text or {}
-    for k, v in pairs(stdText) do
-      if text[k] == nil then text[k] = v end
-    end
     local bundle = {
       scripts = scripts,
-      text = text,
+      text = text or {},
+      textTables = textTables,
       movements = movements or {},
       events = events,
       fromCache = true,
-      fromCurated = false,
     }
     do
       local Marts = require("src.core.game3.marts")
@@ -482,35 +508,18 @@ function ExtractScripts.loadBundle(cache, root, opts)
     end
     local ok, why = ExtractScripts.bundleReady(bundle)
     if not ok and not opts.allowIncomplete then
-      -- Incomplete cache: refuse silent curated substitution for "normal" boots.
       if opts.strict then
         return nil, why
       end
     end
     return bundle
   end
-  -- No cache: curated fallback (CI / no ROM).
-  if opts.forbidCurated then
-    return nil, "extract cache missing"
-  end
-  return {
-    scripts = (function()
-      local s = merge_std_scripts()
-      for k, v in pairs(Content.SCRIPTS) do s[k] = v end
-      return s
-    end)(),
-    text = Content.TEXT,
-    movements = Content.MOVEMENTS or {},
-    events = Content.EVENTS,
-    fromCache = false,
-    fromCurated = true,
-  }
+  return nil, "extract cache missing"
 end
 
 ExtractScripts.Disasm = Disasm
 ExtractScripts.TextIR = TextIR
 ExtractScripts.Movement = Movement
-ExtractScripts.Content = Content
 ExtractScripts.serialize_lua = serialize_lua
 
 return ExtractScripts

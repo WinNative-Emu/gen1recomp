@@ -210,26 +210,18 @@ FrlgFont._logged = false
 local FG_PATHS = {
   { path = "chrome/fonts/latin_normal_fg.rgba", w = 256, h = 512 },
   { path = "data/generated/gba/chrome/fonts/latin_normal_fg.rgba", w = 256, h = 512 },
-  { path = "chrome/fonts/latin_normal_fg.png", w = 256, h = 512 },
-  { path = "data/generated/gba/chrome/fonts/latin_normal_fg.png", w = 256, h = 512 },
 }
 local SH_PATHS = {
   { path = "chrome/fonts/latin_normal_shadow.rgba", w = 256, h = 512 },
   { path = "data/generated/gba/chrome/fonts/latin_normal_shadow.rgba", w = 256, h = 512 },
-  { path = "chrome/fonts/latin_normal_shadow.png", w = 256, h = 512 },
-  { path = "data/generated/gba/chrome/fonts/latin_normal_shadow.png", w = 256, h = 512 },
 }
 local SMALL_FG_PATHS = {
   { path = "chrome/fonts/latin_small_fg.rgba", w = 256, h = 288 },
   { path = "data/generated/gba/chrome/fonts/latin_small_fg.rgba", w = 256, h = 288 },
-  { path = "chrome/fonts/latin_small_fg.png", w = 256, h = 288 },
-  { path = "data/generated/gba/chrome/fonts/latin_small_fg.png", w = 256, h = 288 },
 }
 local SMALL_SH_PATHS = {
   { path = "chrome/fonts/latin_small_shadow.rgba", w = 256, h = 288 },
   { path = "data/generated/gba/chrome/fonts/latin_small_shadow.rgba", w = 256, h = 288 },
-  { path = "chrome/fonts/latin_small_shadow.png", w = 256, h = 288 },
-  { path = "data/generated/gba/chrome/fonts/latin_small_shadow.png", w = 256, h = 288 },
 }
 
 local function log(msg)
@@ -411,6 +403,108 @@ local function ensure_small()
   return true
 end
 
+-- The US cart's Japanese fonts (pokefirered/src/text.c:141, :227), which the
+-- text printer draws for a string in Japanese mode.  Their glyphs are numbered
+-- like the Latin ones, so a Japanese character's id is its byte in the
+-- Japanese block of pokefirered/charmap.txt, offset by JAPANESE_BASE so it
+-- never collides with a Latin glyph.  Only characters with no Latin glyph take
+-- them: kana, and the full-width digits, letters and punctuation Japanese text
+-- is written with.
+FrlgFont.JAPANESE_BASE = 0x400
+
+local JP_FG_PATHS = {
+  { path = "chrome/fonts/japanese_normal_fg.rgba", w = 256, h = 512 },
+  { path = "data/generated/gba/chrome/fonts/japanese_normal_fg.rgba", w = 256, h = 512 },
+}
+local JP_SH_PATHS = {
+  { path = "chrome/fonts/japanese_normal_shadow.rgba", w = 256, h = 512 },
+  { path = "data/generated/gba/chrome/fonts/japanese_normal_shadow.rgba", w = 256, h = 512 },
+}
+local JP_SMALL_FG_PATHS = {
+  { path = "chrome/fonts/japanese_small_fg.rgba", w = 256, h = 512 },
+  { path = "data/generated/gba/chrome/fonts/japanese_small_fg.rgba", w = 256, h = 512 },
+}
+local JP_SMALL_SH_PATHS = {
+  { path = "chrome/fonts/japanese_small_shadow.rgba", w = 256, h = 512 },
+  { path = "data/generated/gba/chrome/fonts/japanese_small_shadow.rgba", w = 256, h = 512 },
+}
+
+-- pokefirered/charmap.txt: hiragana 01-50, katakana 51-A0, "　" 00, ！？。ー AB-AE,
+-- ‥ B0.  The font continues with the same symbols as the Latin block at the
+-- same codes (digits A1-AA, 『』「」 B1-B4, ♂♀ B5-B6, 円 B7, letters BB-EE, ▶ EF,
+-- ： F0), which Japanese text writes in their full-width forms.
+local HIRAGANA = "あいうえおかきくけこさしすせそたちつてとなにぬねのはひふへほまみむめもやゆよらりるれろわをんぁぃぅぇぉゃゅょがぎぐげござじずぜぞだぢづでどばびぶべぼぱぴぷぺぽっ"
+local KATAKANA = "アイウエオカキクケコサシスセソタチツテトナニヌネノハヒフヘホマミムメモヤユヨラリルレロワヲンァィゥェォャュョガギグゲゴザジズゼゾダヂヅデドバビブベボパピプペポッ"
+local function japanese_glyphs()
+  local t = {}
+  local code = 0x01
+  for ch in (HIRAGANA .. KATAKANA):gmatch("[\xE0-\xEF][\x80-\xBF][\x80-\xBF]") do
+    t[ch] = code
+    code = code + 1
+  end
+  local function run(first, from, n)
+    local b1, b2, b3 = from:byte(1, 3)
+    local cp = (b1 % 16) * 4096 + (b2 % 64) * 64 + (b3 % 64)
+    for i = 0, n - 1 do
+      local c = cp + i
+      t[string.char(0xE0 + math.floor(c / 4096), 0x80 + math.floor(c / 64) % 64, 0x80 + c % 64)] = first + i
+    end
+  end
+  run(0xA1, "０", 10)
+  run(0xBB, "Ａ", 26)
+  run(0xD5, "ａ", 26)
+  local more = {
+    ["　"] = 0x00, ["！"] = 0xAB, ["？"] = 0xAC, ["。"] = 0xAD, ["ー"] = 0xAE, ["・"] = 0xAF,
+    ["‥"] = 0xB0, ["…"] = 0xB0, ["『"] = 0xB1, ["』"] = 0xB2, ["「"] = 0xB3, ["」"] = 0xB4,
+    ["円"] = 0xB7, ["．"] = 0xB8, ["／"] = 0xBA, ["："] = 0xF0,
+  }
+  for ch, c in pairs(more) do t[ch] = c end
+  return t
+end
+FrlgFont.JAPANESE_GLYPHS = japanese_glyphs()
+
+local function load_japanese(key, fgPaths, shPaths)
+  if FrlgFont[key] ~= nil then return FrlgFont[key] or nil end
+  local fg = loadImage(fgPaths)
+  if not fg then
+    FrlgFont[key] = false
+    return nil
+  end
+  local sh = loadImage(shPaths)
+  local iw, ih = fg:getDimensions()
+  local quads = {}
+  for code = 0, 511 do
+    quads[code] = love.graphics.newQuad((code % 16) * 16, math.floor(code / 16) * 16, 16, 16, iw, ih)
+  end
+  FrlgFont[key] = { fg = fg, sh = sh, quads = quads }
+  return FrlgFont[key]
+end
+
+local function japanese_widths()
+  if FrlgFont._jpWidths then return FrlgFont._jpWidths end
+  local widths
+  local okC, CacheFs = pcall(require, "src.import.CacheFs")
+  local path = "data/generated/gba/chrome/fonts/japanese_widths.lua"
+  local src = okC and CacheFs and ((CacheFs.readActive and CacheFs.readActive(path)) or (CacheFs.read and CacheFs.read(path)))
+  if not src and love and love.filesystem and love.filesystem.read then
+    src = love.filesystem.read(path) or love.filesystem.read("chrome/fonts/japanese_widths.lua")
+  end
+  if type(src) == "string" then
+    local chunk = load(src, "@japanese_widths.lua", "t", {})
+    if chunk then widths = chunk() end
+  end
+  FrlgFont._jpWidths = widths or {}
+  return FrlgFont._jpWidths
+end
+
+-- The Japanese sheet (small or normal) and the quad for a Japanese glyph id.
+local function japanese_quad(glyphId, small)
+  local sheet = small and load_japanese("_jpSmall", JP_SMALL_FG_PATHS, JP_SMALL_SH_PATHS)
+    or load_japanese("_jpNormal", JP_FG_PATHS, JP_SH_PATHS)
+  if not sheet then return nil end
+  return sheet.fg, sheet.sh, sheet.quads[glyphId - FrlgFont.JAPANESE_BASE]
+end
+
 -- The remaining single characters of the Latin block of pret
 -- pokefirered/charmap.txt: glyphs the US ROM font draws (latin_normal and
 -- latin_small, both charmap-ordered) that US text never prints, so
@@ -469,6 +563,9 @@ local function buildRev()
   for code, ch in pairs(FrlgFont.LATIN_GLYPHS) do
     if not rev[ch] then rev[ch] = code end
   end
+  for ch, code in pairs(FrlgFont.JAPANESE_GLYPHS) do
+    if not rev[ch] then rev[ch] = FrlgFont.JAPANESE_BASE + code end
+  end
   -- ASCII digits/letters already via CHARMAP; ensure common punctuation.
   FrlgFont._rev = rev
   return rev
@@ -490,6 +587,58 @@ local function utf8Chars(s)
     local from = i
     i = i + len
     return ch, from, i - 1
+  end
+end
+
+-- charmap.txt:42-66
+FrlgFont.GLYPH_TAGS = {
+  PK = { 0x53 },
+  MN = { 0x54 },
+  PKMN = { 0x53, 0x54 },
+  POKEBLOCK = { 0x55, 0x56, 0x57, 0x58, 0x59 },
+  LV = { 0x34 },
+  SUPER_ER = { 0x2C },
+  SUPER_E = { 0x84 },
+  SUPER_RE = { 0xA0 },
+}
+for id, sym in pairs(TextIR.EXTRA_SYMBOL) do
+  local name = sym:match("^{(.+)}$")
+  if name then FrlgFont.GLYPH_TAGS[name] = { 0x100 + id } end
+end
+
+FrlgFont.KEYPAD_TAGS = {}
+for id, name in pairs(TextIR.KEYGFX) do FrlgFont.KEYPAD_TAGS[name] = id end
+
+-- src/text.c:81
+FrlgFont.KEYPAD_ICONS = {
+  [0x00] = { tile = 0x00, w = 8, h = 12 },
+  [0x01] = { tile = 0x01, w = 8, h = 12 },
+  [0x02] = { tile = 0x02, w = 16, h = 12 },
+  [0x03] = { tile = 0x04, w = 16, h = 12 },
+  [0x04] = { tile = 0x06, w = 24, h = 12 },
+  [0x05] = { tile = 0x09, w = 24, h = 12 },
+  [0x06] = { tile = 0x0C, w = 8, h = 12 },
+  [0x07] = { tile = 0x0D, w = 8, h = 12 },
+  [0x08] = { tile = 0x0E, w = 8, h = 12 },
+  [0x09] = { tile = 0x0F, w = 8, h = 12 },
+  [0x0A] = { tile = 0x20, w = 8, h = 12 },
+  [0x0B] = { tile = 0x21, w = 8, h = 12 },
+  [0x0C] = { tile = 0x22, w = 8, h = 12 },
+}
+
+local KEYPAD_PATHS = {
+  { path = "chrome/fonts/keypad_icons.rgba", w = 128, h = 32 },
+  { path = "data/generated/gba/chrome/fonts/keypad_icons.rgba", w = 128, h = 32 },
+}
+
+local reportedTags = {}
+local function unknownTag(tag)
+  if os.getenv("POKEPORT_DEV") == "1" or _G.POKEPORT_DEV_MODE == true then
+    error("FrlgFont: no glyph for text tag {" .. tostring(tag) .. "}", 0)
+  end
+  if not reportedTags[tag] then
+    reportedTags[tag] = true
+    log("no glyph for text tag {" .. tostring(tag) .. "}")
   end
 end
 
@@ -527,14 +676,31 @@ local function acquireColorScratch(c)
   return cur
 end
 
+-- src/text.c:740-787
+local PEN_CODES = {
+  [0x0D] = "shiftx",
+  [0x0E] = "shifty",
+  [0x11] = "clear",
+  [0x12] = "skip",
+  [0x13] = "clearto",
+  [0x14] = "minspacing",
+}
+
 --- Byte-by-byte token scanner for GBA FRLG text strings.
 -- Handles \xFC bytecode sequences, {TAG} macros, and UTF-8 characters without choking on null bytes.
 function FrlgFont.scanTokens(text, initialColors)
   local s = tostring(text or "")
   local curColors = acquireColorScratch(initialColors)
   local i, n = 1, #s
+  local pending, pendingIdx = nil, 0
 
   return function()
+    if pending then
+      pendingIdx = pendingIdx + 1
+      local id = pending[pendingIdx]
+      if pendingIdx >= #pending then pending = nil end
+      return "glyph", id, curColors
+    end
     while i <= n do
       local b = s:byte(i)
 
@@ -582,12 +748,17 @@ function FrlgFont.scanTokens(text, initialColors)
           end
           i = i + 3
           return "ctrl", "FONT", curColors
+        elseif PEN_CODES[cmd] and i + 2 <= n then
+          local arg = s:byte(i + 2)
+          i = i + 3
+          return PEN_CODES[cmd], arg, curColors
+        elseif cmd == 0x15 or cmd == 0x16 then
+          i = i + 2
+          return "jpn", cmd == 0x15, curColors
         else
           -- Skip variable length commands according to pret text.c
           local skip = 2
-          if cmd == 0x05 or cmd == 0x08 or cmd == 0x0C or cmd == 0x0D
-              or cmd == 0x0E or cmd == 0x0F or cmd == 0x11 or cmd == 0x12
-              or cmd == 0x13 or cmd == 0x14 then
+          if cmd == 0x05 or cmd == 0x08 or cmd == 0x0C then
             skip = 3
           elseif cmd == 0x0B or cmd == 0x10 then
             skip = 4
@@ -633,8 +804,16 @@ function FrlgFont.scanTokens(text, initialColors)
             local col = resolveColorId(val)
             if col then curColors.bg = col end
             return "ctrl", tag, curColors
+          elseif FrlgFont.GLYPH_TAGS[upperTag] then
+            local ids = FrlgFont.GLYPH_TAGS[upperTag]
+            if #ids > 1 then
+              pending, pendingIdx = ids, 1
+            end
+            return "glyph", ids[1], curColors
+          elseif FrlgFont.KEYPAD_TAGS[upperTag] then
+            return "icon", FrlgFont.KEYPAD_TAGS[upperTag], curColors
           else
-            -- Non-color placeholder or tag
+            unknownTag(tag)
             return "ctrl", tag, curColors
           end
         else
@@ -683,6 +862,12 @@ end
 
 function FrlgFont.advance(glyphId, opts)
   opts = opts or {}
+  if glyphId >= FrlgFont.JAPANESE_BASE then
+    -- pokefirered/src/text.c:1391 (small: 8px), :1492 (normal: its width table).
+    -- The window's letter spacing is added by japanese_step, as the cart does.
+    if opts.small then return 8 end
+    return japanese_widths()[glyphId - FrlgFont.JAPANESE_BASE] or 10
+  end
   if opts.small then
     ensure_small()
     local sw = FrlgFont._small and FrlgFont._small.widths
@@ -704,20 +889,81 @@ function FrlgFont.advance(glyphId, opts)
   return w
 end
 
+-- src/text.c:841 / :1020 GetStringWidth
+local function glyph_step(w, minW, jpn, ls)
+  if minW > 0 then return minW > w and minW or w end
+  if jpn then return w + ls end
+  return w
+end
+
+-- A glyph drawn from a Japanese sheet is Japanese whether or not the string
+-- carries the {JPN} control code a ROM-extracted one does, so it takes the
+-- window's letter spacing either way (src/text.c:853).  Without one, the field
+-- message printer's spacing applies: 1 for the normal font
+-- (new_menu_helpers.c:413), 0 for the small one (gFontInfos, :65).
+local function japanese_step(glyphId, w, minW, jpn, opts, small)
+  local ls = opts.letterSpacing
+  if glyphId < FrlgFont.JAPANESE_BASE then return glyph_step(w, minW, jpn, ls or 0) end
+  return glyph_step(w, minW, true, ls or (small and 0 or 1))
+end
+
 function FrlgFont.measure(text, opts)
   opts = opts or {}
+  local ls = opts.letterSpacing or 0
+  local minW, jpn = 0, false
   local line, maxLine = 0, 0
   for ttype, val in FrlgFont.scanTokens(text) do
     if ttype == "nl" or ttype == "page" then
       if line > maxLine then maxLine = line end
       line = 0
     elseif ttype == "char" then
-      line = line + FrlgFont.advance(FrlgFont.glyphId(val), opts)
+      local id = FrlgFont.glyphId(val)
+      line = line + japanese_step(id, FrlgFont.advance(id, opts), minW, jpn, opts, opts.small)
+    elseif ttype == "glyph" then
+      line = line + japanese_step(val, FrlgFont.advance(val, opts), minW, jpn, opts, opts.small)
+    elseif ttype == "icon" then
+      line = line + FrlgFont.KEYPAD_ICONS[val].w + ls
+    elseif ttype == "clear" then
+      line = line + val
+    elseif ttype == "skip" then
+      line = val
+    elseif ttype == "clearto" then
+      if val > line then line = val end
+    elseif ttype == "minspacing" then
+      minW = val
+    elseif ttype == "jpn" then
+      jpn = val
     end
   end
   if line > maxLine then maxLine = line end
   return maxLine
 end
+
+local keypadQuads = nil
+
+-- src/text.c:1335
+function FrlgFont.drawKeypadIcon(iconId, x, y)
+  local icon = FrlgFont.KEYPAD_ICONS[iconId]
+  if not FrlgFont._keypad then
+    FrlgFont._keypad = loadImage(KEYPAD_PATHS)
+    if not FrlgFont._keypad then
+      error("FrlgFont: keypad_icons.rgba is not in the cache", 0)
+    end
+    keypadQuads = nil
+  end
+  if not keypadQuads then
+    local iw, ih = FrlgFont._keypad:getDimensions()
+    keypadQuads = {}
+    for id, k in pairs(FrlgFont.KEYPAD_ICONS) do
+      keypadQuads[id] = love.graphics.newQuad((k.tile % 16) * 8, math.floor(k.tile / 16) * 8, k.w, k.h, iw, ih)
+    end
+  end
+  love.graphics.setColor(1, 1, 1, 1)
+  love.graphics.draw(FrlgFont._keypad, keypadQuads[iconId], x, y)
+  return icon.w
+end
+
+local restore_ext = TextIR.restoreExt
 
 --- Word-wrap text to fit within maxWidth pixels.
 function FrlgFont.wrap(text, maxWidth, opts)
@@ -726,7 +972,7 @@ function FrlgFont.wrap(text, maxWidth, opts)
   local spaceW = FrlgFont.measure(" ", opts)
   local outLines = {}
   local rawLines = {}
-  local clean = tostring(text or ""):gsub("\\n", "\n"):gsub("\\p", "\n"):gsub("\\l", "\n")
+  local clean = TextIR.protectExt(text):gsub("\\n", "\n"):gsub("\\p", "\n"):gsub("\\l", "\n")
   for line in (clean .. "\n"):gmatch("(.-)\r?\n") do
     rawLines[#rawLines + 1] = line
   end
@@ -739,10 +985,10 @@ function FrlgFont.wrap(text, maxWidth, opts)
       outLines[#outLines + 1] = ""
     else
       local curLine = words[1]
-      local curW = FrlgFont.measure(curLine, opts)
+      local curW = FrlgFont.measure(restore_ext(curLine), opts)
       for i = 2, #words do
         local w = words[i]
-        local wW = FrlgFont.measure(w, opts)
+        local wW = FrlgFont.measure(restore_ext(w), opts)
         if curW + spaceW + wW <= maxWidth then
           curLine = curLine .. " " .. w
           curW = curW + spaceW + wW
@@ -755,7 +1001,7 @@ function FrlgFont.wrap(text, maxWidth, opts)
       outLines[#outLines + 1] = curLine
     end
   end
-  return table.concat(outLines, "\n")
+  return restore_ext(table.concat(outLines, "\n"))
 end
 
 local ADVANCE_SMALL = { small = true }
@@ -798,6 +1044,8 @@ function FrlgFont.draw(text, x, y, opts)
 
   local maxW = opts.maxWidth or 240
   local limit = opts.limitChars
+  local ls = opts.letterSpacing or 0
+  local minW, jpn = 0, false
   local penX, penY = 0, 0
   local drawn = 0
   local pitch = opts.linePitch
@@ -823,12 +1071,34 @@ function FrlgFont.draw(text, x, y, opts)
       penX = 0
       penY = penY + pitch
       drawn = drawn + 1
-    elseif ttype == "char" then
-      local id = FrlgFont.glyphId(val)
+    elseif ttype == "icon" then
+      local w = FrlgFont.KEYPAD_ICONS[val].w
+      if penX + w <= maxW or penX == 0 then
+        FrlgFont.drawKeypadIcon(val, x + penX, y + penY)
+        penX = penX + w + ls
+      end
+      drawn = drawn + 1
+    elseif ttype == "shiftx" or ttype == "skip" then
+      penX = val
+    elseif ttype == "shifty" then
+      penY = val
+    elseif ttype == "clear" then
+      penX = penX + val
+    elseif ttype == "clearto" then
+      if val > penX then penX = val end
+    elseif ttype == "minspacing" then
+      minW = val
+    elseif ttype == "jpn" then
+      jpn = val
+    elseif ttype == "char" or ttype == "glyph" then
+      local id = ttype == "glyph" and val or FrlgFont.glyphId(val)
       local adv = FrlgFont.advance(id, useSmall and ADVANCE_SMALL or ADVANCE_NORMAL)
       if penX + adv <= maxW or penX == 0 then
         local dx, dy = x + penX, y + penY
-        local q = quads[id]
+        local gfg, gsh, q = fg, sh, quads[id]
+        if id >= FrlgFont.JAPANESE_BASE then
+          gfg, gsh, q = japanese_quad(id, useSmall)
+        end
         if q then
           -- Draw background / highlight fill if bg is not transparent
           if curCol.bg and curCol.bg[4] and curCol.bg[4] > 0 then
@@ -836,17 +1106,17 @@ function FrlgFont.draw(text, x, y, opts)
             love.graphics.rectangle("fill", dx, dy, adv, pitch)
           end
           -- Draw shadow
-          if sh and curCol.shadow and (not curCol.shadow[4] or curCol.shadow[4] > 0) then
+          if gsh and curCol.shadow and (not curCol.shadow[4] or curCol.shadow[4] > 0) then
             set_col(curCol.shadow)
-            love.graphics.draw(sh, q, dx, dy)
+            love.graphics.draw(gsh, q, dx, dy)
           end
           -- Draw foreground
           if curCol.fg and (not curCol.fg[4] or curCol.fg[4] > 0) then
             set_col(curCol.fg)
-            love.graphics.draw(fg, q, dx, dy)
+            love.graphics.draw(gfg, q, dx, dy)
           end
         end
-        penX = penX + adv
+        penX = penX + japanese_step(id, adv, minW, jpn, opts, useSmall)
       end
       drawn = drawn + 1
     end
@@ -907,10 +1177,24 @@ FrlgFont.CHAR_FEMALE = 0xB6
 FrlgFont.CHAR_SLASH = 0xBA
 
 --- Count printable UTF-8 characters in text (including newlines, skipping control codes).
+--- The first n characters of text (UTF-8 aware): a name limit counts
+-- characters (pokefirered POKEMON_NAME_LENGTH, PLAYER_NAME_LENGTH), and a kana
+-- is three bytes, so a byte cut would split it.
+function FrlgFont.truncate(text, n)
+  text = tostring(text or "")
+  local out, count = {}, 0
+  for ch in utf8Chars(text) do
+    if count >= n then break end
+    count = count + 1
+    out[count] = ch
+  end
+  return table.concat(out)
+end
+
 function FrlgFont.countChars(text)
   local n = 0
   for ttype in FrlgFont.scanTokens(text) do
-    if ttype == "char" or ttype == "nl" then
+    if ttype == "char" or ttype == "nl" or ttype == "glyph" or ttype == "icon" then
       n = n + 1
     end
   end
@@ -922,6 +1206,10 @@ function FrlgFont.invalidate()
   FrlgFont._sh = nil
   FrlgFont._quads = nil
   FrlgFont._small = nil
+  FrlgFont._keypad = nil
+  FrlgFont._jpNormal = nil
+  FrlgFont._jpSmall = nil
+  FrlgFont._jpWidths = nil
   FrlgFont._logged = false
 end
 

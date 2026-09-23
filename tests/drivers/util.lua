@@ -44,20 +44,32 @@ function U.shot(game, path)
   if dir and dir ~= "" then
     os.execute('mkdir -p "' .. dir .. '" 2>/dev/null')
   end
+  os.remove(path)
   game.capturePath = path
   -- love.draw consumes capturePath once per rendered frame, but fast runs
   -- (POKEPORT_SPEED) step the driver many times per render; spin until the
   -- capture lands so later actions can't outrun it
-  for _ = 1, 120 do
+  for _ = 1, 4000 do
     if not game.capturePath then break end
     frame = frame + 1
     coroutine.yield()
   end
-  U.wait(1)
-  local f = io.open(path, "rb")
-  if f then f:close() return true end
+  for _ = 1, 4000 do
+    local f = io.open(path, "rb")
+    if f then f:close() return true end
+    frame = frame + 1
+    coroutine.yield()
+  end
   U.log("FAIL screenshot did not reach disk:", path)
   return false
+end
+
+function U.still(game, path)
+  local update = rawget(game, "update")
+  game.update = function() end
+  local ok = U.shot(game, path)
+  game.update = update
+  return ok
 end
 
 -- skip the intro movie + title into a fresh overworld game
@@ -98,5 +110,25 @@ function U.log(...)
 end
 
 function U.frame() return frame end
+
+-- pokefirered/src/field_screen_effect.c:387 Task_RushInjuredPokemonToCenter
+function U.clearWhiteoutRush(game)
+  local Rush = require("src.ui.game3.whiteout_rush")
+  local Message = require("src.ui.game3.message")
+  local Space = require("src.core.game3.scripting.space")
+  local Field = require("src.core.game3.field")
+  for _ = 1, 600 do
+    if Rush.phase() == "wait" then break end
+    U.wait(1)
+  end
+  U.tap(game, "a")
+  for _ = 1, 2400 do
+    local busy = Space.vm and Space.vm:isRunning()
+    if not Rush.isActive() and not Message.isOpen() and not busy and not Field.locked then break end
+    if Message.isOpen() and Message.isTyping() then Message.skipReveal() end
+    if Message.isOpen() and Message.isWaiting() then U.tap(game, "a") end
+    U.wait(2)
+  end
+end
 
 return U

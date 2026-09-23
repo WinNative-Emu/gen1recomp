@@ -75,6 +75,11 @@ end
 function Runtime.noteFieldFocus(screenOpen)
   local was = Runtime._menuFocus == true
   Runtime._menuFocus = screenOpen and true or false
+  if screenOpen and not was then
+    -- pokefirered/src/start_menu.c:453
+    local Lighting = package.loaded["src.core.game3.league_lighting"]
+    if Lighting then Lighting.stop() end
+  end
   if screenOpen or not was then return false end
   local Battle = package.loaded["src.core.game3.battle"]
   if Battle and Battle.isActive and Battle.isActive() then return false end
@@ -246,6 +251,10 @@ function Runtime.update(dt)
 
   local okF, Fade = pcall(require, "src.ui.game3.fade")
   if okF and Fade.tick then Fade.tick(dt) end
+  local okSea, SeagallopUi = pcall(require, "src.ui.game3.seagallop")
+  if okSea and SeagallopUi and SeagallopUi.isActive and SeagallopUi.isActive() then
+    SeagallopUi.update(dt)
+  end
   local okTr, BattleTransition = pcall(require, "src.core.game3.battle_transition")
   if okTr and BattleTransition.isActive and BattleTransition.isActive() then
     BattleTransition.tick(dt)
@@ -259,8 +268,15 @@ function Runtime.update(dt)
     Audio.tickCry(dt)
   end
 
+  local okW, FieldWeather = pcall(require, "src.core.game3.field_weather")
+  if okW and FieldWeather and FieldWeather.update then
+    FieldWeather.update(dt)
+  end
+
   local Battle = require("src.core.game3.battle")
   if Battle.isActive() then
+    local Weather = require("src.core.game3.weather")
+    Weather.suspend()
     Battle.update(dt, game)
     -- Keep script VM + message typewriter alive while battle runs.
     local Space = package.loaded["src.core.game3.scripting.space"]
@@ -273,6 +289,9 @@ function Runtime.update(dt)
     if Message and Message.tick then Message.tick() end
     Hud.update(game, dt, inputTop)
     return
+  else
+    local Weather = require("src.core.game3.weather")
+    Weather.resume()
   end
 
   if not inMenu then
@@ -497,7 +516,13 @@ function Runtime.install(mod)
             log("blocked Screens.push(" .. tostring(id) .. ") — game3 owns UI")
             if id == "StartMenu" or id == "Gen2StartMenu" then
               Hud.openStartMenu(game, Runtime.getSession())
-            elseif id == "Gen2Pokegear" or id == "PackMenu" or id == "Gen2PackMenu" then
+            elseif id == "PackMenu" or id == "Gen2PackMenu" then
+              local session = Runtime.getSession()
+              require("src.ui.game3.bag_menu").show(session and session.bag, {
+                session = session,
+                onClose = function() end,
+              })
+            elseif id == "Gen2Pokegear" then
               local RegionMap = require("src.ui.game3.region_map")
               RegionMap.show({ session = Runtime.getSession() })
             end

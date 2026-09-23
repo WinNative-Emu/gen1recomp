@@ -17,6 +17,7 @@
 
 local Collision = require("src.world.Collision")
 local GameVersion = require("src.core.GameVersion")
+local ModRuntime = require("src.mods.Runtime")
 
 local PikachuFollower = {}
 
@@ -178,6 +179,12 @@ local function shouldSpawn(game, ow)
   return false
 end
 
+function PikachuFollower.setShouldSpawn(fn)
+  local previous = shouldSpawn
+  shouldSpawn = fn or previous
+  return previous
+end
+
 local function makeFollower(game, ow, x, y, facing)
   local NPC = require("src.world.NPC")
   local npc = NPC.new(game.data, ow.map.id, {
@@ -333,7 +340,7 @@ function PikachuFollower.onMapEntered(game, ow, opts, viaMapLoad)
   ow.pikachuBillsScene = nil
   ow.pikachuFanClubScene = nil
   remove(ow)
-  if not shouldSpawn(game, ow) then return end
+  if not ModRuntime.call("world.follower.spawn", shouldSpawn, game, ow) then return end
   -- opts.keepPikachu is the follower a connection crossing kept alive:
   -- LoadMapHeader's connection path sets wPikachuSpawnState = 2 and bit 4
   -- of wPikachuOverworldStateFlags, so SchedulePikachuSpawnForAfterText
@@ -608,10 +615,10 @@ function PikachuFollower.update(game, ow)
   if npc then updatePassable(game, ow, npc) end
   if PikachuFollower.isFollowingDisabled(ow) then return end
   if not npc then
-    if shouldSpawn(game, ow) then PikachuFollower.onMapEntered(game, ow) end
+    if ModRuntime.call("world.follower.spawn", shouldSpawn, game, ow) then PikachuFollower.onMapEntered(game, ow) end
     return
   end
-  if not shouldSpawn(game, ow) then
+  if not ModRuntime.call("world.follower.spawn", shouldSpawn, game, ow) then
     remove(ow)
     return
   end
@@ -968,18 +975,28 @@ function playEmotion(game, ow, npc, emotion, opts)
     return ow.emote
   end
 
-  local function cry()
-    if e.turnAway then
-      -- engine/pikachu/pikachu_emotions.asm:203
-      npc.facing = OPPOSITE[ow.player.facing] or npc.facing
-    end
+  -- audio/pikachu_pcm.asm:15
+  local function pcm(after)
+    if not e.cry then return after() end
     local Sound = require("src.core.Sound")
-    if e.cry then
-      if not Sound.playPikaCry(game.data, e.cry) then
-        Sound.playCry(game.data, "PIKACHU")
-      end
-    end
-    return pikapic()
+    local src = Sound.playPikaCry(game.data, e.cry)
+    local kind = type(src)
+    if kind ~= "userdata" and kind ~= "table" then return after() end
+    ow.emote = {
+      npc = npc, frames = 3 + Sound.waitFrames(src), bubble = false,
+      onDone = after,
+    }
+    return ow.emote
+  end
+
+  local function cry()
+    return pcm(pikapic)
+  end
+
+  if e.turnAway then
+    -- data/pikachu/pikachu_emotions.asm:203
+    -- engine/pikachu/pikachu_emotions.asm:203
+    npc.facing = OPPOSITE[ow.player.facing] or npc.facing
   end
 
   -- caches built before the Yellow bubble sheet only carry the three
@@ -993,13 +1010,7 @@ function playEmotion(game, ow, npc, emotion, opts)
   end
   if e.cryFirst then
     if not bi then return cry() end
-    if e.cry then
-      local Sound = require("src.core.Sound")
-      if not Sound.playPikaCry(game.data, e.cry) then
-        Sound.playCry(game.data, "PIKACHU")
-      end
-    end
-    return bubbleHold(pikapic)
+    return pcm(function() return bubbleHold(pikapic) end)
   end
   if bi then return bubbleHold(cry) end
   return cry()
@@ -1235,9 +1246,12 @@ function PikachuFollower.onBillExitedMachine(game, ow)
   local npc = findFollower(ow)
   if not npc then return end
   idleReset(npc)
-  npc.facing = "left"
-  -- BillsHouse_CheckPikachuEmotion SCRIPT5 -- scripts/BillsHouse_2.asm:88
-  billsHouseEmotion(game, ow, npc, "EXCLAMATION_BUBBLE", 27)
+  -- scripts/BillsHouse.asm:170
+  ow.emote = { npc = npc, frames = 12, bubble = false, onDone = function()
+    npc.facing = "left"
+    -- BillsHouse_CheckPikachuEmotion SCRIPT5 -- scripts/BillsHouse_2.asm:88
+    billsHouseEmotion(game, ow, npc, "EXCLAMATION_BUBBLE", 27)
+  end }
 end
 
 -- OaksLabPikachuMovementScript (pokeyellow scripts/OaksLab_2.asm): the
