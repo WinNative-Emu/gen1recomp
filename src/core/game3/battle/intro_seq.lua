@@ -2,6 +2,7 @@
 -- Separate from AnimSeq (hit loop); same contract as ExpSeq.
 
 local Anim = require("src.core.game3.battle.anim")
+local BallOpen = require("src.core.game3.battle.ball_open")
 local State = require("src.core.game3.battle.state")
 local Audio = require("src.core.game3.audio")
 local SE = require("src.core.game3.se_ids")
@@ -84,14 +85,22 @@ local function battler_of(st, key)
   return st[key]
 end
 
-local function ball_for(s, key)
-  if type(key) ~= "number" then return s.ball end
-  s.balls = s.balls or {}
-  local b = s.balls[key]
-  if not b then
-    b = { visible = false, x = 0, y = 0, frame = 0, rot = 0, battler = key, side = State.sideOf(key) }
-    s.balls[key] = b
+local function ball_for(s, key, st)
+  local b
+  if type(key) ~= "number" then
+    b = s.ball
+  else
+    s.balls = s.balls or {}
+    b = s.balls[key]
+    if not b then
+      b = { visible = false, x = 0, y = 0, frame = 0, rot = 0, battler = key, side = State.sideOf(key) }
+      s.balls[key] = b
+    end
   end
+  local mon = battler_of(st, key)
+  mon = mon and mon.mon
+  -- pokefirered/src/pokeball.c:373
+  b.ballId = BallOpen.ballIdForItem(mon and mon.pokeball)
   return b
 end
 
@@ -319,6 +328,23 @@ local function build_trainer(st, opts)
   return steps
 end
 
+function IntroSeq.multiTrainerPics(st, playerGender)
+  if not (st and st.multi and st.linkGenders) then return nil end
+  local LB = require("src.core.game3.link.battle")
+  local own = tonumber(st.linkOwn) or 0
+  local g = st.linkGenders
+  local function front(gender) return (gender == 1) and LB.TRAINER_PIC_LEAF or LB.TRAINER_PIC_RED end
+  return {
+    -- pokefirered/src/battle_controller_link_opponent.c:1133
+    enemyPic = front(g[1]), enemyX = 200,
+    enemyPic2 = front(g[3]), enemyX2 = 152,
+    -- pokefirered/src/battle_controller_player.c:2171
+    gender = g[own] or playerGender or 0, x = (own == 2) and 90 or 32,
+    -- pokefirered/src/battle_controller_link_partner.c:1106
+    partnerGender = g[(own + 2) % 4] or 0, partnerX = (own == 2) and 32 or 90,
+  }
+end
+
 --- Begin intro. Returns false when headless (caller pushes strings).
 function IntroSeq.begin(st, opts)
   opts = opts or {}
@@ -375,6 +401,15 @@ function IntroSeq.begin(st, opts)
     s.trainer.enemy.visible = true
     s.trainer.enemy.picId = opts.trainerPicId or st.trainerPicId
     s.trainer.enemy.ox = -240
+    s.trainer.enemy.x, s.trainer.enemy.pic2, s.trainer.enemy.x2 = nil, nil, nil
+    s.trainer.player.x, s.trainer.player.gender2, s.trainer.player.x2 = nil, nil, nil
+    local pics = IntroSeq.multiTrainerPics(st, playerGender)
+    if pics then
+      s.trainer.enemy.picId, s.trainer.enemy.x = pics.enemyPic, pics.enemyX
+      s.trainer.enemy.pic2, s.trainer.enemy.x2 = pics.enemyPic2, pics.enemyX2
+      s.trainer.player.gender, s.trainer.player.x = pics.gender, pics.x
+      s.trainer.player.gender2, s.trainer.player.x2 = pics.partnerGender, pics.partnerX
+    end
     IntroSeq._steps = build_trainer(st, opts)
   end
   IntroSeq._i = 1
@@ -639,7 +674,7 @@ local function run_step(step)
     local mons = {}
     for n, key in ipairs(keys) do
       local cx, cy = center_of(st, key)
-      local ball = ball_for(s, key)
+      local ball = ball_for(s, key, st)
       ball.visible = true
       ball.frame = 0
       ball.rot = 0
@@ -737,7 +772,7 @@ local function run_step(step)
     local mons = {}
     for n, key in ipairs(keys) do
       local pcx, pcy = center_of(st, key)
-      mons[n] = { key = key, ball = ball_for(s, key), tx = pcx, ty = pcy + 24 }
+      mons[n] = { key = key, ball = ball_for(s, key, st), tx = pcx, ty = pcy + 24 }
     end
     local threwSe, openedSe = false, false
     wait_busy()

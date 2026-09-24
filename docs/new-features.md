@@ -11,6 +11,8 @@ Features intentionally added beyond the original Pokémon Red, Blue, and Yellow 
 * **LOGIC CLOCK option** (60HZ or the cart's 59.73HZ vblank rate) on every game's options screen
 * **Peer-to-peer LAN link play** for trades and battles between Red, Blue, and Yellow
 * **Online lobby** in the launcher for battles, spectating and tournaments
+* **FireRed/LeafGreen online** over the relay (Union Room, Direct Corner, wireless minigames, PIN-locked private matches, launcher and in-game invites)
+* **FireRed/LeafGreen Mystery Gift** on the main menu after the first save: WONDER NEWS right away, WONDER CARDS once the questionnaire passphrase is in
 * **Persistent custom options** stored separately from game saves
 * **Optional widescreen battle layout**
 * **Mobile touch controls** with editable layouts, vibration, and orientation settings

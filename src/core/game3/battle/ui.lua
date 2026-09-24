@@ -277,8 +277,8 @@ function Ui.push(text, cb)
     if cb then cb() end
     return
   end
-  -- pokefirered/src/battle_message.c:2773 BATTLE_TYPE_POKEDUDE autoScroll
-  if Ui._st and Ui._st.pokedude and type(text) == "string" and not Ui.isVoiceoverText(text) then
+  -- pokefirered/src/battle_message.c:2773
+  if Ui._st and (Ui._st.pokedude or Ui._st.link) and type(text) == "string" and not Ui.isVoiceoverText(text) then
     return Ui.pushTimed(text, POKEDUDE_AUTO_SCROLL, cb)
   end
   Ui._log[#Ui._log + 1] = text
@@ -495,8 +495,46 @@ function Ui.activeBattler()
   return Ui._active or 0
 end
 
+-- pokefirered/src/party_menu.c:5981
+function Ui.multiPartyOrder(st)
+  local own = tonumber(st.linkOwn) or 0
+  local owners = st.partyOwner and st.partyOwner.player or {}
+  local lead = {}
+  for _, id in ipairs({ own, (own + 2) % 4 }) do
+    local b = State.battler(st, id)
+    lead[id] = b and tonumber(b.partyIndex) or nil
+  end
+  local order, used = {}, {}
+  local function add(i)
+    if i and st.playerParty[i] and not used[i] then
+      used[i] = true
+      order[#order + 1] = i
+    end
+  end
+  add(lead[own])
+  add(lead[(own + 2) % 4])
+  for _, id in ipairs({ own, (own + 2) % 4 }) do
+    for i = 1, #st.playerParty do
+      if owners[i] == id then add(i) end
+    end
+  end
+  for i = 1, #st.playerParty do add(i) end
+  return order
+end
+
 function Ui.battlePartyOrder(st)
+  if st and st.multi and st.playerParty then return Ui.multiPartyOrder(st) end
   return require("src.ui.game3.party_menu").battleOrder(st)
+end
+
+function Ui.allySlots(st, order)
+  if not (st and st.multi and st.partyOwner) then return nil end
+  local own = tonumber(st.linkOwn) or 0
+  local out = {}
+  for view, i in ipairs(order or {}) do
+    if st.partyOwner.player[i] ~= own then out[view] = true end
+  end
+  return out
 end
 
 function Ui.openPartyMenu(st, battlerId, opts)
@@ -516,12 +554,16 @@ function Ui.openPartyMenu(st, battlerId, opts)
       if b then State.syncBattlerToParty(b, st.playerParty) end
     end
   end
+  local order = st and st.playerParty and Ui.battlePartyOrder(st) or nil
+  local own = st and st.multi and State.battler(st, tonumber(st.linkOwn) or 0) or (st and st.player)
   PartyMenu.show(party, overlay, {
     mode = forced and "battle_faint" or "battle_switch",
     layout = (st and st.double) and "double" or nil,
-    battleOrder = st and st.playerParty and Ui.battlePartyOrder(st) or nil,
+    -- pokefirered/src/party_menu.c:1048
+    multi = Ui.allySlots(st, order),
+    battleOrder = order,
     session = session,
-    activeSlot = (st and st.player and st.player.partyIndex) or 1,
+    activeSlot = (own and own.partyIndex) or 1,
     battle = true,
     validate = function(pi)
       if opts.validate then return opts.validate(pi) end
@@ -601,6 +643,11 @@ local function open_battle_party()
 end
 
 function Ui.openMenu(battlerId, opts)
+  if Ui._st and Ui._st.spectate then
+    Ui._mode = "none"
+    Ui._pendingCommand = nil
+    return
+  end
   Ui._linger = false
   Ui._timed = nil
   Ui._mode = "menu"
@@ -770,7 +817,7 @@ local function tick_timed()
   local onLast = waiting and (Message._page or 1) >= #(Message._pages or {})
   if not onLast then
     -- pokefirered/src/text.c:537 TextPrinterWaitAutoMode
-    if waiting and Ui._st and Ui._st.pokedude then
+    if waiting and Ui._st and (Ui._st.pokedude or Ui._st.link) then
       t.pageFrames = (t.pageFrames or 0) + 1
       if t.pageFrames >= POKEDUDE_AUTO_SCROLL then
         t.pageFrames = 0
@@ -1362,7 +1409,7 @@ local function handle_double_input(input)
       if c < 2 then nc = c + 2 end
     elseif input:wasPressed("b") then
       -- pokefirered/src/battle_controller_player.c:286
-      if id == 2 and not (st.absent and st.absent[0]) then
+      if id == 2 and not (st.absent and st.absent[0]) and not st.multi then
         local pa = Ui._partnerAction
         local refund = nil
         if pa and pa.kind == "bag" then
@@ -1995,12 +2042,16 @@ local function draw_enemy_trainer(stage)
   local TrainerPic = require("src.core.game3.trainer_pic")
   local te = stage.trainer.enemy
   if te and te.visible then
-    local picId = te.picId
-    if picId ~= nil then
-      local entry = TrainerPic.front(picId)
-      if entry and entry.image then
-        love.graphics.setColor(1, 1, 1, 1)
-        love.graphics.draw(entry.image, 176 + (te.ox or 0) - 32, 40 + (te.oy or 0) - 32)
+    -- pokefirered/src/battle_controller_link_opponent.c:1133
+    local pics = { { te.pic2, te.x2 }, { te.picId, te.x or 176 } }
+    for _, row in ipairs(pics) do
+      local picId, x = row[1], row[2]
+      if picId ~= nil and x ~= nil then
+        local entry = TrainerPic.front(picId)
+        if entry and entry.image then
+          love.graphics.setColor(1, 1, 1, 1)
+          love.graphics.draw(entry.image, x + (te.ox or 0) - 32, 40 + (te.oy or 0) - 32)
+        end
       end
     end
   end
@@ -2011,23 +2062,70 @@ local function draw_player_trainer(stage)
   local TrainerPic = require("src.core.game3.trainer_pic")
   local tp = stage.trainer.player
   if tp and tp.visible then
-    local gender = tp.gender or 0
-    local entry = TrainerPic.back(gender)
-    if entry and entry.image then
-      local maxFrame = math.max(0, (entry.frames or 5) - 1)
-      local frame = math.max(0, math.min(maxFrame, tonumber(tp.frame) or 0))
-      local key = "back_" .. tostring(gender) .. "_" .. tostring(frame)
-      Ui._trainerQuads = Ui._trainerQuads or {}
-      if not Ui._trainerQuads[key] then
-        local imgH = entry.h or (entry.frames and entry.frames * 64) or 320
-        Ui._trainerQuads[key] = love.graphics.newQuad(0, frame * 64, 64, 64, entry.w or 64, imgH)
+    -- pokefirered/src/battle_controller_link_partner.c:1093
+    local backs = { { tp.gender2, tp.x2 }, { tp.gender or 0, tp.x or 80 } }
+    for _, row in ipairs(backs) do
+      local gender, x = row[1], row[2]
+      local entry = (gender ~= nil and x ~= nil) and TrainerPic.back(gender) or nil
+      if entry and entry.image then
+        local maxFrame = math.max(0, (entry.frames or 5) - 1)
+        local frame = math.max(0, math.min(maxFrame, tonumber(tp.frame) or 0))
+        local key = "back_" .. tostring(gender) .. "_" .. tostring(frame)
+        Ui._trainerQuads = Ui._trainerQuads or {}
+        if not Ui._trainerQuads[key] then
+          local imgH = entry.h or (entry.frames and entry.frames * 64) or 320
+          Ui._trainerQuads[key] = love.graphics.newQuad(0, frame * 64, 64, 64, entry.w or 64, imgH)
+        end
+        love.graphics.setColor(1, 1, 1, 1)
+        love.graphics.draw(
+          entry.image, Ui._trainerQuads[key],
+          x + (tp.ox or 0) - 32, 80 + (tp.oy or 0) - 32)
       end
-      love.graphics.setColor(1, 1, 1, 1)
-      love.graphics.draw(
-        entry.image, Ui._trainerQuads[key],
-        80 + (tp.ox or 0) - 32, 80 + (tp.oy or 0) - 32)
     end
   end
+end
+
+-- pokefirered/src/pokeball.c:59
+function Ui.ballSheet()
+  if Ui._ballSheet == nil then
+    Ui._ballSheet = false
+    local d = BallOpen.data()
+    if d and d.ballSheet and love and love.image and love.graphics then
+      local okE, Extract = pcall(require, "src.import.gba.extract_island1")
+      local root = (okE and Extract and Extract.CACHE_ROOT or "data/generated/gba") .. "/" .. BallOpen.CACHE_SUB
+      local okD, Dataset = pcall(require, "src.core.game3.dataset")
+      local c = okD and Dataset and Dataset.cache and Dataset.cache()
+      local rgba = c and c.read and c:read(root .. "/" .. d.ballSheet)
+      local w, h = d.ballSheetW, d.ballSheetH
+      if type(rgba) == "string" and w and h and #rgba >= w * h * 4 then
+        local ok, id = pcall(love.image.newImageData, w, h, "rgba8", rgba)
+        local okI, img = false, nil
+        if ok and id then okI, img = pcall(love.graphics.newImage, id) end
+        if okI and img then
+          img:setFilter("nearest", "nearest")
+          Ui._ballSheet = img
+        end
+      end
+    end
+  end
+  return Ui._ballSheet or nil
+end
+
+function Ui.ballQuad(ballId, frame)
+  local img = Ui.ballSheet()
+  if not img then return nil end
+  local id = math.floor(tonumber(ballId) or 0)
+  if id < 0 or id > 11 then id = 0 end
+  frame = math.max(0, math.min(2, math.floor(tonumber(frame) or 0)))
+  Ui._ballQuads = Ui._ballQuads or {}
+  local key = id * 3 + frame
+  local q = Ui._ballQuads[key]
+  if not q then
+    local iw, ih = img:getDimensions()
+    q = love.graphics.newQuad(id * 16, frame * 16, 16, 16, iw, ih)
+    Ui._ballQuads[key] = q
+  end
+  return img, q, id
 end
 
 local function draw_ball_entry(ball)
@@ -2047,35 +2145,11 @@ local function draw_ball_entry(ball)
     love.graphics.setColor(shade, shade, shade, alpha)
   end
 
-  Ui._ballPoke = Ui._ballPoke or nil
-  local img = Ui._ballPoke
-  if img == nil then
-    local candidates = {
-      "data/generated/gba/intro/ball_poke.png",
-    }
-    for _, rel in ipairs(candidates) do
-      if love and love.filesystem and love.filesystem.getInfo(rel) then
-        local ok, loaded = pcall(love.graphics.newImage, rel)
-        if ok and loaded then
-          if loaded.setFilter then loaded:setFilter("nearest", "nearest") end
-          img = loaded
-          break
-        end
-      end
-    end
-    Ui._ballPoke = img or false
-  end
-
+  local img, quad = Ui.ballQuad(ball.ballId, frame)
   if img then
-    Ui._ballQuads = Ui._ballQuads or {}
-    local key = "ball_" .. frame
-    if not Ui._ballQuads[key] then
-      local iw, ih = img:getDimensions()
-      Ui._ballQuads[key] = love.graphics.newQuad(0, frame * 16, 16, 16, iw, ih)
-    end
     local blend = ball.blend
     local blended = blend and BallOpen.setBlendShader(blend.coeff, blend.r, blend.g, blend.b)
-    love.graphics.draw(img, Ui._ballQuads[key], bx, by, rot, 1, 1, 8, 8)
+    love.graphics.draw(img, quad, bx, by, rot, 1, 1, 8, 8)
     if blended then love.graphics.setShader() end
   end
 

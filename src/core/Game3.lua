@@ -38,6 +38,7 @@ local FIELD_CB_SILENT = { bike = true, rod = true, map = true, escape = true }
 
 function Game3.new()
   return setmetatable({
+    generation = 3,
     input = Input,
     save = nil,
     session = nil,
@@ -113,6 +114,7 @@ function Game3:load(opts)
   Input:init()
   self.input = Input
   Dataset.hydrate(self)
+  if type(self.data) == "table" then self.data.generation = 3 end
   Help.reset()
   Help.install(Dataset.cache())
   QuestLog.install(Dataset.cache())
@@ -145,7 +147,7 @@ function Game3:load(opts)
     elseif action == "fast_forward_toggle" then
       if pressed then self:_cycleSpeed(1) end
     elseif action == "soft_reset" then
-      if pressed then
+      if pressed and self.phase ~= "arena" then
         if self.input then self.input:reset() end
         TouchControls:reset()
         self:returnToTitle()
@@ -178,6 +180,18 @@ function Game3:load(opts)
 
   self:_exposeModData()
   self:_loadMods(opts)
+  pcall(function() require("src.core.DiscordPresence").init(self) end)
+
+  if opts.arena then
+    FixedStep:init(function(dt)
+      self:fixedUpdate(dt)
+    end)
+    pcall(function()
+      require("src.core.PresentSync").applyFixedStepPeriod()
+    end)
+    self:enterArena(opts.arena)
+    return
+  end
 
   -- Never auto-skip boot into a legacy Sevii sidecar.
   local continueOk = self:_hasContinueSave()
@@ -201,6 +215,53 @@ function Game3:load(opts)
   if ModRuntime.wants("game.ready") then
     ModRuntime.emit("game.ready", { game = self })
   end
+end
+
+local function arenaSession(self, spec)
+  local session
+  local version = require("src.core.GameVersion").get()
+  if spec and spec.slotId and SaveData.setActiveSlot then
+    pcall(SaveData.setActiveSlot, version, spec.slotId)
+  end
+  local ok, save = pcall(SaveData.load)
+  if ok and type(save) == "table" and save.engine == "game3" then
+    local activeMods = self.modStatus and self.modStatus.loaded
+    if SaveData.runMigrations then
+      pcall(SaveData.runMigrations, save, self.mods and self.mods.migrations, activeMods)
+    end
+    local okS, loaded = pcall(Schema.fromSaveTable, save)
+    if okS and type(loaded) == "table" then session = loaded end
+  elseif spec and spec.role ~= "spectator" then
+    require("src.core.Logger").warn("arena3: save slot %s could not be loaded", tostring(spec and spec.slotId))
+  end
+  session = session or { party = {}, bag = {} }
+  if type(session.name) ~= "string" or session.name == "" then
+    for _, row in ipairs((spec and spec.players) or {}) do
+      if spec.seat ~= nil and tonumber(row.seat) == tonumber(spec.seat) then session.name = row.name end
+    end
+  end
+  session.store = session.store or { flags = {}, vars = {} }
+  return session
+end
+
+-- pokefirered/src/cable_club.c:964
+function Game3:enterArena(spec)
+  local session = arenaSession(self, spec)
+  Options.bind(session, self.options)
+  self.session = session
+  self.save = Schema.toSaveTable(session)
+  self.boot = nil
+  Runtime.session = session
+  Runtime._game = self
+  self.phase = "arena"
+  self.arena = require("src.ui.game3.arena_state").new(self, spec)
+  return self.arena
+end
+
+function Game3:leaveArena()
+  self.arena = nil
+  if Runtime.session == self.session then Runtime.session = nil end
+  if Runtime._game == self and not Runtime.isActive() then Runtime._game = nil end
 end
 
 function Game3:_exposeModData()
@@ -456,6 +517,11 @@ function Game3:fixedUpdate(dt)
     ModRuntime.call("input.step", noop, self, dt or FixedStep.STEP)
   end
   if self.input and self.input.step then self.input:step() end
+  if self.phase == "arena" then
+    if self.session then Audio.applyOptions(self.session) end
+    if self.arena then self.arena:update(dt) end
+    return
+  end
   if (self.input and self.input.softResetStep and self.input:softResetStep()) or self.softResetRequested then
     self.softResetRequested = nil
     if self.input then self.input:reset() end
@@ -507,14 +573,20 @@ function Game3:speedCategory()
   if okB and Battle and Battle.isActive and Battle.isActive() then
     return "battle"
   end
-  local okS, Stack = pcall(require, "src.ui.game3.stack")
-  if okS and Stack and Stack.busy and Stack.busy() then return "menu" end
-  if Help.isOpen and Help.isOpen() then return "menu" end
-  if self.phase ~= "field" then return "menu" end
-  return "overworld"
+  if self.phase == "field" then return "overworld" end
+  return "menu"
+end
+
+function Game3:isFixedSpeed()
+  if self.phase == "arena" then return true end
+  local Link = package.loaded["src.core.game3.link"]
+  if type(Link) == "table" and Link.link ~= nil then return true end
+  local MG = package.loaded["src.core.game3.minigames.common"]
+  return type(MG) == "table" and MG.isActive ~= nil and MG.isActive() == true
 end
 
 function Game3:logicSpeed()
+  if self:isFixedSpeed() then return 1 end
   local override = tonumber(self.speedOverride)
   if override then return math.max(1, override) end
   local b = self.phase == "boot" and self.boot
@@ -575,6 +647,7 @@ function Game3:update(dt)
   if self._audioAccum > 0.25 then self._audioAccum = 0 end
   local okT, errT = pcall(function() require("src.render.Tilt").update(dt) end)
   if not okT then s9log("tilt", errT) end
+  pcall(function() require("src.core.DiscordPresence").update(dt) end)
 end
 
 function Game3:_drawHud(w, h)
@@ -595,6 +668,13 @@ end
 function Game3:draw()
   local w = love.graphics.getWidth()
   local h = love.graphics.getHeight()
+
+  if self.phase == "arena" then
+    if self.arena then self.arena:draw(w, h) end
+    self:_drawHud(w, h)
+    if self.touchControls then self.touchControls:draw() end
+    return
+  end
 
   if self.phase == "quest_log" or (self.phase == "boot" and self.boot) then
     local kind = (self.phase == "quest_log") and "quest" or "boot"
@@ -648,6 +728,7 @@ function Game3:draw()
 end
 
 function Game3:_hotkey(key)
+  local hk = Input.hotkeyKey(key)
   if key == "f1" then
     if self.phase == "field" and self:saveOffered() then self:saveGame() end
     return true
@@ -662,10 +743,10 @@ function Game3:_hotkey(key)
       self:_handleBootAction({ action = "continue" })
     end
     return true
-  elseif key == "1" then
+  elseif hk == "1" then
     self:_cycleSpeed(1)
     return true
-  elseif key == "3" then
+  elseif hk == "3" then
     if self:zoomGateOK() then
       local Tilt = require("src.render.Tilt")
       Tilt.cycle()
@@ -675,7 +756,7 @@ function Game3:_hotkey(key)
       end
     end
     return true
-  elseif key == "4" then
+  elseif hk == "4" then
     if self:zoomGateOK() then
       local Zoom = require("src.render.Zoom")
       local Renderer = require("src.render.Renderer")
@@ -721,8 +802,8 @@ function Game3:_padPressedBody(joystick, button)
     local ok, down = pcall(function() return joystick:isGamepadDown("back") end)
     selectHeld = ok and down == true
   end
-  local isTrigger = button == "lefttrigger" or button == "righttrigger"
-  if not selectHeld and isTrigger and Input2.padAction then
+  local isShoulder = button == "leftshoulder" or button == "rightshoulder"
+  if not selectHeld and not isShoulder and Input2.padAction then
     local action = Input2:padAction(button)
     if action == "speedUp" then
       self:_cycleSpeed(1)
@@ -747,6 +828,7 @@ function Game3:_padReleasedBody(joystick, button)
 end
 
 function Game3:gamepadpressed(joystick, button)
+  if self.input and self.input.padEventSeen then self.input:padEventSeen(button) end
   local function vanilla() self:_padPressedBody(joystick, button) end
   if not ModRuntime.wantsHook("input.gamepad") then return vanilla() end
   return ModRuntime.call("input.gamepad", vanilla, self,
@@ -766,7 +848,7 @@ function Game3:saveOffered()
 end
 
 function Game3:saveGame()
-  if not self.session or self.phase == "quest_log" then return end
+  if not self.session or self.phase == "quest_log" or self.phase == "arena" then return end
   if ModRuntime.wantsHook("save.write")
       and ModRuntime.call("save.write", function() return true end, self) == false then
     return false
@@ -943,26 +1025,98 @@ function Game3:onResume()
   Audio.onFocusGained()
 end
 
+local function closeFlag(flag)
+  return function(m)
+    m[flag] = false
+    for k, v in pairs(m) do
+      if type(k) == "string" and type(v) == "function" and k:match("^_on%u") then m[k] = nil end
+    end
+  end
+end
+
+local function dropField(field)
+  return function(m) m[field] = nil end
+end
+
 -- pokefirered/src/main.c:480
-local FIELD_SCREENS = {
-  "src.ui.game3.choice",
-  "src.ui.game3.message",
-  "src.ui.game3.money_box",
-  "src.ui.game3.coins_box",
-  "src.ui.game3.elevator_window",
-  "src.ui.game3.berry_powder_box",
-  "src.ui.game3.minigame_records",
-  "src.ui.game3.hall_of_fame",
-  "src.ui.game3.hall_of_fame_pc",
-  "src.ui.game3.credits",
+local SOFT_RESET = {
+  { "src.core.game3.battle.init", "reset" },
+  { "src.core.game3.battle_bridge", "reset" },
+  { "src.core.game3.battle_transition", "abort" },
+  { "src.core.game3.task", "clear" },
+  { "src.core.game3.step_events", "flush" },
+  { "src.core.game3.field_move_show_mon", "reset" },
+  { "src.core.game3.pokecenter_heal", dropField("_fx") },
+  { "src.core.game3.ss_anne_cutscene", "reset" },
+  { "src.core.game3.itemfinder", "reset" },
+  { "src.core.game3.special_field_anim", "stopEscalator" },
+  { "src.core.game3.pc_anim", "reset" },
+  { "src.core.game3.camera_object", "reset" },
+  { "src.core.game3.trade_scene", "cancel" },
+  { "src.core.game3.scripting.natives_listmenu", "close" },
+  { "src.ui.game3.hud", "clearWaitButton" },
+  { "src.ui.game3.mon_pic", "hide" },
+  { "src.ui.game3.seagallop", "stop" },
+  { "src.ui.game3.map_preview_screen", "reset" },
+  { "src.ui.game3.cave_transition", "clear" },
+  { "src.ui.game3.map_name_popup", "dismiss" },
+  { "src.ui.game3.help_window", "reset" },
+  { "src.ui.game3.whiteout_rush", dropField("_state") },
+  { "src.ui.game3.trade_scene", "close" },
+  { "src.ui.game3.shop_menu", "reset" },
+  { "src.ui.game3.choice", "reset" },
+  { "src.ui.game3.message", "reset" },
+  { "src.ui.game3.money_box", "hide" },
+  { "src.ui.game3.coins_box", "hide" },
+  { "src.ui.game3.elevator_window", "hide" },
+  { "src.ui.game3.berry_powder_box", "hide" },
+  { "src.ui.game3.minigame_records", "reset" },
+  { "src.ui.game3.hall_of_fame", "reset" },
+  { "src.ui.game3.hall_of_fame_pc", "reset" },
+  { "src.ui.game3.credits", "reset" },
+  { "src.ui.game3.start_menu", closeFlag("open") },
+  { "src.ui.game3.start_menu", "resetCursor" }, -- pokefirered/src/start_menu.c:64
+  { "src.ui.game3.bag_menu", closeFlag("open") },
+  { "src.ui.game3.berry_pouch", closeFlag("open") },
+  { "src.ui.game3.tm_case", closeFlag("open") },
+  { "src.ui.game3.party_menu", closeFlag("open") },
+  { "src.ui.game3.summary_menu", closeFlag("open") },
+  { "src.ui.game3.pokedex", closeFlag("open") },
+  { "src.ui.game3.option_menu", closeFlag("open") },
+  { "src.ui.game3.save_menu", closeFlag("open") },
+  { "src.ui.game3.trainer_card", closeFlag("open") },
+  { "src.ui.game3.pc_menu", closeFlag("open") },
+  { "src.ui.game3.item_pc", closeFlag("open") },
+  { "src.ui.game3.box_storage_ui", closeFlag("open") },
+  { "src.ui.game3.region_map", closeFlag("open") },
+  { "src.ui.game3.daycare_menu", closeFlag("open") },
+  { "src.ui.game3.fame_checker", closeFlag("open") },
+  { "src.ui.game3.move_relearner", closeFlag("open") },
+  { "src.ui.game3.egg_hatch", closeFlag("open") },
+  { "src.ui.game3.evolution_scene", closeFlag("open") },
+  { "src.ui.game3.diploma", closeFlag("open") },
+  { "src.ui.game3.trainer_tower_records", closeFlag("open") },
+  { "src.ui.game3.teachy_tv", closeFlag("open") },
+  { "src.ui.game3.slot_machine", closeFlag("open") },
+  { "src.ui.game3.mod_manager", closeFlag("open") },
+  { "src.ui.game3.prize_corner", "reset" },
+  { "src.ui.game3.stat_growth", closeFlag("_open") },
+  { "src.ui.game3.release_seq", function(m) m.active = false; m.onComplete = nil end },
+  { "src.ui.game3.naming", closeFlag("openFlag") },
+  { "src.ui.game3.easy_chat", closeFlag("openFlag") },
+  { "src.ui.game3.fade", "clear" },
 }
 
 local function clearFieldScreens()
-  for _, name in ipairs(FIELD_SCREENS) do
-    local ok, mod = pcall(require, name)
-    if ok and type(mod) == "table" then
-      local fn = mod.reset or mod.hide
-      if fn then pcall(fn) end
+  for _, e in ipairs(SOFT_RESET) do
+    local mod = package.loaded[e[1]]
+    if type(mod) == "table" then
+      local fn = e[2]
+      if type(fn) == "string" then
+        if mod[fn] then pcall(mod[fn]) end
+      else
+        pcall(fn, mod)
+      end
     end
   end
   local LeagueLighting = package.loaded["src.core.game3.league_lighting"]
@@ -1046,6 +1200,7 @@ function Game3:reset()
     self.touchControls = nil
   end
   self.boot = nil
+  self.arena = nil
   self.session = nil
   self.data = nil
   self.mods = nil

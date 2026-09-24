@@ -1055,7 +1055,8 @@ local function findPendingSav(preferAny, skip)
   end
   if not preferAny then return nil end
   for _, name in ipairs(love.filesystem.getDirectoryItems("")) do
-    if name:lower():match("%.sav$") and not (skip and skip[name])
+    if name:lower():match("%.sav$") and name:lower() ~= "pending_export.sav"
+        and not (skip and skip[name])
         and love.filesystem.getInfo(name, "file") then
       return name
     end
@@ -1291,13 +1292,13 @@ local function chooseSav()
   local platform = love.system.getOS()
   if platform == "OS X" then
     return commandOutput(
-      ([[osascript -e 'POSIX path of (choose file with prompt "%s" of type {"sav"})' 2>/dev/null]])
+      ([[osascript -e 'POSIX path of (choose file with prompt "%s" of type {"sav", "lua"})' 2>/dev/null]])
         :format(prompt))
   elseif platform == "Windows" then
     local script = table.concat({
       HostPicker.WIN_OPEN_DIALOG,
       "$d.Title='" .. prompt .. "';",
-      "$d.Filter='Game Boy save (*.sav)|*.sav|All files (*.*)|*.*';",
+      "$d.Filter='Save file (*.sav;*.lua)|*.sav;*.lua|All files (*.*)|*.*';",
       -- copy the pick to a plain-ASCII temp name: io.open on Windows
       -- needs ANSI bytes, so a non-ASCII path (Pokémon -> Pok\x82mon)
       -- could never have been opened (#325, #665)
@@ -1311,11 +1312,11 @@ local function chooseSav()
       'powershell -NoProfile -STA -Command "' .. script .. '"')
   elseif platform == "Linux" then
     local path = commandOutput(
-      ([[zenity --file-selection --title="%s" --file-filter="Game Boy save | *.sav" 2>/dev/null]])
+      ([[zenity --file-selection --title="%s" --file-filter="Save file | *.sav *.lua" 2>/dev/null]])
         :format(prompt))
     if path then return path end
     return commandOutput(
-      [[kdialog --getopenfilename "$HOME" "*.sav|Game Boy save" 2>/dev/null]])
+      [[kdialog --getopenfilename "$HOME" "*.sav *.lua|Save file" 2>/dev/null]])
   end
   return nil
 end
@@ -1565,10 +1566,12 @@ function RomImporter.new(onComplete, opts)
   if type(opts.initialTab) == "string" and opts.initialTab ~= "" then
     self:_switchTab(opts.initialTab)
   end
-  if type(opts.joinCode) == "string" and opts.joinCode ~= "" then
+  if type(opts.invite) == "string" and opts.invite ~= "" then
     self:_switchTab("online")
     local okOnline, OnlinePanel = pcall(require, "src.import.OnlinePanel")
-    if okOnline then pcall(OnlinePanel.deepLink, self, opts.joinCode, "player") end
+    if okOnline then
+      pcall(OnlinePanel.deepLink, self, { invite = opts.invite }, "player")
+    end
   end
   self:_queueBaseRomScan()
   self:_queueLaunchReimports()
@@ -2346,7 +2349,8 @@ function RomImporter:filedropped(file)
   -- A dropped .sav is a battery save: import it to a new slot for the active
   -- game tab (see _savedropTarget for the tab-selection rule).  It never steals
   -- .gb/.zip routing above.
-  if name:lower():match("%.sav$") then
+  if name:lower():match("%.sav$")
+      or (name:lower():match("%.lua$") and GameVersion.VERSIONS[self.tab]) then
     self:_importSave(self:_savedropTarget(), file)
     return
   end
@@ -2917,7 +2921,8 @@ function RomImporter:_importSave(version, source, force)
     self:_refreshSlots(version)
     self.activeSlot[version] = res
     self.slotScroll[version] = math.huge   -- pin the new row on screen (clamped in draw)
-    self.saveNotice[version] = { ok = true, text = "Imported save into " .. tostring(res) .. "." }
+    self.saveNotice[version] = { ok = true, text = "Imported save into " .. tostring(res) .. "."
+      .. (info and info.note and (" " .. info.note) or "") }
     return
   end
   if res == nil and info and info.needsConfirm then
@@ -2993,7 +2998,7 @@ function RomImporter:chooseSaveImport(version)
     if okKit and Kit.FileBrowser then
       self._padCursorActive = false
       Kit.FileBrowser.open({
-        title = "Select Save (.sav)",
+        title = "Select Save (.sav / .lua)",
         mode = "save",
         onSelect = function(pickedPath)
           self:_importSave(version, pickedPath)
@@ -3012,7 +3017,7 @@ function RomImporter:chooseSaveImport(version)
   if okKit and Kit.FileBrowser then
     self._padCursorActive = false
     Kit.FileBrowser.open({
-      title = "Select Save (.sav)",
+      title = "Select Save (.sav / .lua)",
       mode = "save",
       onSelect = function(pickedPath)
         self:_importSave(version, pickedPath)
@@ -4775,6 +4780,7 @@ function RomImporter:_syncSupported()
 end
 
 function RomImporter:_pumpOnline(dt)
+  pcall(function() require("src.online.Trade").pumpPending(dt) end)
   if not self._online then return end
   local ok, OnlinePanel = pcall(require, "src.import.OnlinePanel")
   if not ok then return end
@@ -5387,21 +5393,14 @@ function RomImporter:keypressed(key)
     local st = OnlinePanel.state(self)
     local field = self._onlineFocus
     if key == "backspace" then
-      if field == "online-name" then
-        st.nameDraft = utf8Back(st.nameDraft or "")
-      elseif field == "online-note" then
-        st.note = utf8Back(st.note or "")
-      elseif field == "online-code" then
-        st.joinCode = utf8Back(st.joinCode or "")
-      elseif field == "online-trade-code" then
-        local tr = OnlinePanel.tradeState(self)
-        tr.code = utf8Back(tr.code or "")
-      elseif field == OnlinePanel.PC_FIELD then
-        local pc = OnlinePanel.pcPicker(self)
-        OnlinePanel.pcQuery(self, utf8Back((pc and pc.query) or ""))
-      end
+      OnlinePanel.fieldBack(self, field)
+    elseif (key == "return" or key == "kpenter")
+        and field == OnlinePanel.PIN_FIELD then
+      OnlinePanel.pinSubmit(self)
     elseif key == "return" or key == "kpenter" then
       self:_commitOnlineField()
+    elseif key == "escape" and field == OnlinePanel.PIN_FIELD then
+      OnlinePanel.pinClose(self)
     elseif key == "escape" then
       self._onlineFocus = nil
       st.nameDraft = nil
@@ -6108,7 +6107,7 @@ function RomImporter:playArena(version, cartId, spec)
 end
 
 function RomImporter:_blurPanelFields()
-  if self._pcPicker then return end
+  if self._pcPicker or self._pinModal then return end
   if self._onlineFocus then
     self:_commitOnlineField()
     return
@@ -6184,19 +6183,11 @@ function RomImporter:textinput(text)
   end
   if self._onlineFocus then
     local OnlinePanel = require("src.import.OnlinePanel")
-    local st = OnlinePanel.state(self)
-    if self._onlineFocus == "online-name" then
-      st.nameDraft = OnlinePanel.sanitizeName((st.nameDraft or "") .. text)
-    elseif self._onlineFocus == "online-note" then
+    if self._onlineFocus == "online-note" then
+      local st = OnlinePanel.state(self)
       st.note = utf8Cap((st.note or "") .. text, OnlinePanel.NOTE_MAX)
-    elseif self._onlineFocus == "online-code" then
-      st.joinCode = OnlinePanel.sanitizeCode((st.joinCode or "") .. text)
-    elseif self._onlineFocus == "online-trade-code" then
-      local tr = OnlinePanel.tradeState(self)
-      tr.code = OnlinePanel.sanitizeCode((tr.code or "") .. text)
-    elseif self._onlineFocus == OnlinePanel.PC_FIELD then
-      local pc = OnlinePanel.pcPicker(self)
-      OnlinePanel.pcQuery(self, ((pc and pc.query) or "") .. text)
+    else
+      OnlinePanel.fieldType(self, self._onlineFocus, text)
     end
     return
   end

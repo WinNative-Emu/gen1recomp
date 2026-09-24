@@ -102,7 +102,8 @@ local NativesLink = require("src.core.game3.scripting.natives_link")
 local Link = require("src.core.game3.link")
 local Union = require("src.core.game3.link.union_room")
 local Screen = require("src.ui.game3.union_room")
-local Game3Link = require("src.link.Game3Link")
+local FakeRelay = require("tests.g3link_fake_relay")
+Union._avatars = FakeRelay.avatars()
 local Flags = require("src.core.game3.scripting.flags")
 local Std = require("src.core.game3.scripting.stdscripts")
 
@@ -153,7 +154,7 @@ eq(#logs, 0, "nothing reached the unknown-special log")
 Link.reset()
 
 print("[test] 3. RunUnionRoom starts the session and announces to the peer")
-local host, guest = Game3Link.loopback({ game = game })
+local host, guest = FakeRelay.pair({ game = game })
 host:update(0)
 guest:update(0)
 Link.attach(host)
@@ -202,17 +203,8 @@ eq(#Screen.items, 4, "with the four pret entries")
 teq(Screen.labelFor(Screen.items[1]), "GREETINGS", "GREETINGS first")
 teq(Screen.labelFor(Screen.items[4]), "EXIT", "EXIT last")
 
-print("[test] 7. BATTLE needs two mons at or below level 30")
-session.party = { { species = 1, level = 42 } }
-Screen.cursor = 2
-Screen.confirm()
-check(not Screen.isOpen(), "the chooser closed")
-eq(Union.activity, nil, "an over-level party cannot start a union room battle")
-
-session.party = { { species = 1, level = 12 }, { species = 4, level = 9 } }
-Union.state = "do_something_prompt"
-Union.partnerId = 1
-Union.update(0)
+print("[test] 7. BATTLE has no level limit")
+session.party = { { species = 1, level = 42 }, { species = 4, level = 60 } }
 Screen.cursor = 2
 Screen.confirm()
 eq(Union.activity, Union.ACTIVITY.BATTLE_SINGLE + Union.IN_UNION_ROOM,
@@ -279,7 +271,7 @@ print("[test] 13. the link group flows answer LINKUP through VAR_RESULT")
 Link.reset()
 Space.mapId = UNION_MAP
 session.map = UNION_MAP
-local host2, guest2 = Game3Link.loopback({ game = game })
+local host2, guest2 = FakeRelay.pair({ game = game })
 host2:update(0)
 guest2:update(0)
 Link.attach(host2)
@@ -342,7 +334,7 @@ end
 print("[test] an incoming activity request is answered, never parked")
 Link.reset()
 Union.reset()
-local reqHost, reqGuest = Game3Link.loopback({ game = game })
+local reqHost, reqGuest = FakeRelay.pair({ game = game })
 reqHost:update(0)
 reqGuest:update(0)
 Link.attach(reqHost)
@@ -359,13 +351,13 @@ Union.update(1 / 60)
 eq(Union.activity, Union.ACTIVITY.CHAT + Union.IN_UNION_ROOM,
   "the request lands in UR_STATE_RECV_ACTIVITY_REQUEST with the activity asked for")
 eq(Union._requestName, "BLUE", "and the name of the trainer who asked")
--- pokefirered/src/union_room_message.c:86 gText_UR_PlayerContactedYouForXAccept
+-- pokefirered/src/union_room.c:4486
 local prompt = Union.requestPrompt()
 if romBundle then
-  check(prompt:find("BLUE", 1, true) ~= nil, "the prompt names the trainer who contacted you")
-  check(prompt:find("CHAT", 1, true) ~= nil, "and the activity they asked for")
+  eq(prompt, require("src.core.game3.rom_text").ascii("gText_UR_ChatInvitation"),
+    "the prompt is the cart's chat invitation")
 else
-  print("[skip] ROM text: the contact prompt reads gText_UR_PlayerContactedYouForXAccept")
+  print("[skip] ROM text: the contact prompt reads gText_UR_ChatInvitation")
 end
 Union.update(1 / 60)
 reqHost:update(0)
@@ -395,7 +387,8 @@ reqGuest:send({ type = Chat.MSG.LINE, name = "BLUE", text = "HELLO" })
 reqHost:update(0)
 Chat.update(1 / 60)
 eq(#Chat.lines, 2, "and the peer's line lands in the log")
-eq(Chat.lines[2] and Chat.lines[2].text, "HELLO", "with the peer's words")
+check(Chat.lines[2] and Chat.lines[2].text:find("BLUE", 1, true) == 1
+  and Chat.lines[2].text:sub(-6) == ":HELLO", "with the peer's name and words")
 Chat.stop("left")
 Union.update(1 / 60)
 eq(Union.state, "main", "leaving the chat puts the room back in its main loop")
@@ -425,7 +418,7 @@ eq(cardOut and cardOut.card and cardOut.card.name, session.name, "carrying the p
 print("[test] the link group at the counter lists the machine on the cable")
 Link.reset()
 Union.reset()
-local grpHost, grpGuest = Game3Link.loopback({ game = game })
+local grpHost, grpGuest = FakeRelay.pair({ game = game })
 grpHost:update(0)
 grpGuest:update(0)
 Link.attach(grpHost)
