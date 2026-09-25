@@ -1,5 +1,4 @@
--- Wait gates hold for the sound's real length at high GAME SPEED
--- (#1952/#2087) without pitching one-shot SFX (#1990/#1991/#1997).
+-- home/text.asm:506 (#1952/#2087, #1990/#1991/#1997)
 return function(game)
   local U = dofile("tests/drivers/util.lua")
   local DIR = os.getenv("SHOT_DIR") or os.getenv("POKEPORT_SHOT_DIR") or "/tmp/shots"
@@ -88,5 +87,5 @@ return function(game)
       :format(held, dur))
   end
   U.log("PASS the fanfare kept natural pitch and played to completion at 4X")
-  love.event.quit()
+  love.event.quit(0)
 end

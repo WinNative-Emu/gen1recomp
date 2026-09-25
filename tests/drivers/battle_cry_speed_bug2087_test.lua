@@ -111,5 +111,5 @@ return function(game)
   end
   if fail then error(fail) end
   U.log("PASS every battle sfx gate held for its real length at 4X")
-  U.log("input is yours now")
+  love.event.quit(0)
 end

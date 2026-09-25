@@ -45,7 +45,7 @@ local menu = OptionsMenu.new(game)
 
 T.check(find(menu.rows, "battleBg"), "self.rows keeps the flat list for mods")
 T.check(find(menu.rows, "musicVol"), "self.rows keeps the audio rows too")
-for _, id in ipairs({ "battleBg", "speedBattle", "uiLayout", "tilt", "zoom",
+for _, id in ipairs({ "battleBg", "speedMenu", "uiLayout", "tilt", "zoom",
                       "voidFill", "colors", "shaderfx", "shaderfx2",
                       "musicVol", "videoMode" }) do
   T.check(not find(menu.view, id), id .. " moved onto a page")

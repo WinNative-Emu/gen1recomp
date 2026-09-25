@@ -75,10 +75,10 @@ FieldMoves.SE = {
   USE_ITEM    = 1,   -- SE_USE_ITEM
   BANG        = 20,
   WARP_OUT    = 40,  -- SE_WARP_OUT
-  CUT         = 143, -- SE_M_CUT
-  ROCK_SMASH  = 146, -- SE_M_ROCK_THROW
-  FLASH       = 175, -- SE_M_REFLECT
-  SWEET_SCENT = 197, -- SE_M_SWEET_SCENT
+  CUT         = 121, -- SE_M_CUT
+  ROCK_SMASH  = 124, -- SE_M_ROCK_THROW
+  FLASH       = 200, -- SE_M_REFLECT
+  SWEET_SCENT = 229, -- SE_M_SWEET_SCENT
 }
 
 -- pokefirered/src/field_specials.c:2296 CutMoveRuinValleyCheck
@@ -106,6 +106,8 @@ FieldMoves.CUT_GRASS_METATILES = {
   [0x300] = 0x310, -- FuchsiaCity: SafariZoneTreeTopLeft_Grass -> SafariZoneTreeTopLeft_Mowed
   [0x301] = 0x311, -- FuchsiaCity: SafariZoneTreeTopMiddle_Grass -> SafariZoneTreeTopMiddle_Mowed
   [0x302] = 0x312, -- FuchsiaCity: SafariZoneTreeTopRight_Grass -> SafariZoneTreeTopRight_Mowed
+  -- pokefirered/include/constants/metatile_labels.h:295
+  [0x284] = 0x281,
 }
 
 -- Metatile terrain / collision behaviors
@@ -757,7 +759,8 @@ end
 -- `getMetatileFn(x, y)`: returns numeric metatileId
 -- `setMetatileFn(x, y, newMetatileId)`: applies new metatileId
 -- Returns count of cut tiles
-function FieldMoves.mowGrass3x3(cx, cy, getMetatileFn, setMetatileFn, isGrassFn)
+-- pokefirered/src/fldeff_cut.c:200
+function FieldMoves.mowGrass3x3(cx, cy, getMetatileFn, setMetatileFn, sameElevationFn)
   if not getMetatileFn or not setMetatileFn then return 0 end
   local count = 0
 
@@ -765,13 +768,10 @@ function FieldMoves.mowGrass3x3(cx, cy, getMetatileFn, setMetatileFn, isGrassFn)
     for dx = -1, 1 do
       local x = cx + dx
       local y = cy + dy
-      local mid = getMetatileFn(x, y)
-      if mid then
-        local newMid = FieldMoves.CUT_GRASS_METATILES[mid]
-        if not newMid and isGrassFn and isGrassFn(x, y) then
-          -- Default flat-ground replacement in general tileset
-          newMid = 0x001
-        end
+      if not sameElevationFn or sameElevationFn(x, y) then
+        local mid = getMetatileFn(x, y)
+        -- pokefirered/src/fldeff_cut.c:237
+        local newMid = mid and FieldMoves.CUT_GRASS_METATILES[mid]
         if newMid then
           setMetatileFn(x, y, newMid)
           count = count + 1

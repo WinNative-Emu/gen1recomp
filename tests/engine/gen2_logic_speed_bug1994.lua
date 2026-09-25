@@ -25,6 +25,40 @@ eq(game({ options = { speed = -5 } }):logicSpeed(), 1,
 eq(game({ options = { speed = "fast" } }):logicSpeed(), 1,
   "an unparseable option falls back rather than erroring")
 
+local function stack(...) return { states = { ... } } end
+local battle = { isBattle = true }
+local world = {}
+
+eq(game({ options = { speed = 10 }, stack = stack(world) }):logicSpeed(), 10,
+  "the overworld under a plain stack honors GAME SPEED")
+eq(game({ options = { speed = 10 }, stack = stack(world, battle) }):logicSpeed(), 10,
+  "a local battle honors GAME SPEED")
+eq(game({ options = { speed = 10 }, linkNet = { closed = false },
+          stack = stack(world, battle) }):logicSpeed(), 1,
+  "a link battle is locked to 1X")
+eq(game({ options = { speed = 10 }, linkNet = { closed = false } }):logicSpeed(), 1,
+  "an open linkNet (online arena, LinkBattle2) is locked to 1X")
+eq(game({ options = { speed = 10 }, linkNet = { closed = true } }):logicSpeed(), 10,
+  "a closed linkNet is not")
+eq(game({ options = { speed = 10 }, linkSession = true }):logicSpeed(), 1,
+  "a link session (tournament, spectate) is locked to 1X")
+eq(require("src.ui.gen2.BattleState").isBattle, true,
+  "the Gen 2 battle screen marks itself as a battle")
+
+do
+  local persisted = 0
+  local g = game({ options = { speed = 1 }, stack = stack(world, battle),
+                   linkNet = { closed = false },
+                   persistOptions = function() persisted = persisted + 1 end })
+  g:_cycleSpeed(1)
+  eq(g.options.speed, 1, "SPEED + in a link battle is ignored")
+  eq(persisted, 0, "and persists nothing")
+  g.linkNet = nil
+  g.stack = stack(world)
+  g:_cycleSpeed(1)
+  eq(g.options.speed, 2, "SPEED + on the overworld still cycles")
+end
+
 local Gen2Compat = require("src.mods.Gen2Compat")
 local live = game({ options = { speed = 4 } })
 Gen2Compat.bind(function() return live end)

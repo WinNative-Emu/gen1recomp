@@ -344,8 +344,6 @@ local function coreRows(opts, hooks)
 
   local okSpd, GameSpeed = pcall(require, "src.core.GameSpeed")
   if okSpd then
-    -- Per-category (RFC 0007): overworld/battle/menu each cycle their own
-    -- multiplier, mirroring OptionsMenu.lua's three rows.
     add(Strings("OVERWORLD SPEED"),
       function() return GameSpeed.levelLabel(opts.speedOverworld) end,
       function(dir)
@@ -786,6 +784,26 @@ function LauncherSettings.open(hooks, version)
           opts.reduceMotion = not (opts.reduceMotion == true)
           local okT, Transition = pcall(require, "src.ui.kit.Transition")
           if okT then Transition.reduceMotion = opts.reduceMotion end
+          return true
+        end,
+      },
+      {
+        label = Strings("Splash Video"),
+        value = function()
+          return opts.splashVideo == false and Strings("OFF") or Strings("ON")
+        end,
+        step = function()
+          opts.splashVideo = opts.splashVideo == false
+          return true
+        end,
+      },
+      {
+        label = Strings("Splash Sound"),
+        value = function()
+          return opts.splashMute == true and Strings("OFF") or Strings("ON")
+        end,
+        step = function()
+          opts.splashMute = not (opts.splashMute == true)
           return true
         end,
       },

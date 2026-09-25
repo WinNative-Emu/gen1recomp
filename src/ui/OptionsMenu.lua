@@ -529,10 +529,7 @@ local function buildRows(game)
         return true
       end },
     -- fast-forward the logic clock only; music and sfx keep their tempo
-    -- (src/core/GameSpeed.lua), so this is safe to leave on. Per-category
-    -- (RFC 0007): overworld walking, battle turns and menu navigation each
-    -- cycle their own multiplier -- GameSpeed.CATEGORIES is the single
-    -- source of truth for which three rows exist.
+    -- (src/core/GameSpeed.lua), so this is safe to leave on.
     { id = "speedOverworld", label = Strings("OVERWORLD SPEED"),
       value = function(g)
         return gameSpeedLabel(g.save.options.speedOverworld)

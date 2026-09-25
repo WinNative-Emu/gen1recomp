@@ -66,6 +66,7 @@ do
   local g = gameWith({ battle },
     { speedOverworld = 4, speedBattle = 10, speedMenu = 2 })
   eq(g:_resolveLogicSpeed(), 10, "battle reads speedBattle")
+  eq(g:logicSpeed(), 10, "and a local battle runs at BATTLE SPEED")
 end
 do
   local g = gameWith({ overlay },
@@ -97,9 +98,15 @@ do
   eq(g:logicSpeed(), 1, "an open linkNet forces 1X the same way")
 end
 do
-  local g = gameWith({ battle }, { speedBattle = 50 })
+  local g = gameWith({ overworld }, { speedOverworld = 50 })
   g.linkNet = { closed = true }
   eq(g:logicSpeed(), 50, "a CLOSED linkNet does not force 1X")
+end
+do
+  local g = gameWith({ overworld, battle }, { speedOverworld = 50, speedBattle = 50 })
+  g.speedOverride = 20
+  eq(g:logicSpeed(), 20, "speedOverride wins in a local battle")
+  check(not g:speedLocked(), "a local battle is not speed locked")
 end
 do
   local g = gameWith({ overworld }, { speedOverworld = 4 })
@@ -176,6 +183,16 @@ do
   eq(g.save.options.speedOverworld, 1, "...and leaves speedOverworld alone")
   eq(g.save.options.speedMenu, 1, "...and leaves speedMenu alone")
   eq(writeOptions.calls, 1, "a successful cycle persists the option")
+end
+do
+  local calls = 0
+  local g = gameWith({ overworld },
+    { speedOverworld = 1, speedBattle = 1, speedMenu = 1 })
+  function g:writeOptions() calls = calls + 1 end
+  g.linkSession = true
+  g:_cycleSpeed(1)
+  eq(g.save.options.speedOverworld, 1, "cycling during link play is ignored")
+  eq(calls, 0, "...and persists nothing")
 end
 do
   local g = gameWith({ overworld },
