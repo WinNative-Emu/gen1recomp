@@ -30,6 +30,9 @@ end
 local function rom_blob(rom, ptr, nbytes)
   local off = rom:ptrOffset(ptr)
   if not off or not nbytes or nbytes < 1 then return nil end
+  if rom.readString then
+    return rom:readString(off, nbytes)
+  end
   local bytes = rom:readBytes(off, nbytes)
   local s = {}
   for i = 1, #bytes do
@@ -47,6 +50,20 @@ local function simplify_events(ev)
     return { objects = {}, warps = {}, bgEvents = {}, coordEvents = {} }
   end
   local function slim_obj(o)
+    local t = o.cloneTarget
+    if t then
+      return {
+        localId = o.localId,
+        graphicsId = o.graphicsId,
+        kind = o.kind,
+        x = o.x,
+        y = o.y,
+        targetLocalId = t.localId,
+        targetMapNum = t.mapNum,
+        targetMapGroup = t.mapGroup,
+        flag = o.flag,
+      }
+    end
     return {
       localId = o.localId,
       graphicsId = o.graphicsId,

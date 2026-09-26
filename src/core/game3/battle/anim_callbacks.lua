@@ -1224,7 +1224,7 @@ AnimCallbacks.MudSportDirt = AnimCallbacks.DirtPlumeParticle
 AnimCallbacks.SandAttackMud = AnimCallbacks.DirtPlumeParticle
 AnimCallbacks.MudSand = AnimCallbacks.DirtPlumeParticle
 
---- pret AnimWaveFromCenterOfTarget / AnimAirWaveCrescent / AnimSoundWave (pokefirered/src/battle_anim_sound.c:220, 270)
+--- pret AnimWaveFromCenterOfTarget / AnimAirWaveCrescent / AnimSoundWave (pokefirered/src/battle_anim_ice.c:822, pokefirered/src/battle_anim_flying.c:433)
 function AnimCallbacks.WaveFromCenterOfTarget(sprite)
   if not sprite._inited then
     sprite._inited = true

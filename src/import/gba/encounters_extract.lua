@@ -5,7 +5,7 @@ local Versions = require("src.import.gba.versions")
 
 local EncountersExtract = {}
 
-EncountersExtract.FORMAT_VERSION = 1
+EncountersExtract.FORMAT_VERSION = 2
 
 local function log(msg)
   print("[gba/encounters] " .. tostring(msg))
@@ -50,14 +50,27 @@ local function serialize_area(lines, name, area)
   lines[#lines + 1] = "    },\n"
 end
 
-local function serialize_entry(lines, key, entry)
-  lines[#lines + 1] = string.format("  [%q] = {\n", key)
-  lines[#lines + 1] = string.format("    mapGroup = %d,\n", entry.mapGroup or 0)
-  lines[#lines + 1] = string.format("    mapNum = %d,\n", entry.mapNum or 0)
+local function serialize_areas(lines, entry)
   serialize_area(lines, "land", entry.land)
   serialize_area(lines, "water", entry.water)
   serialize_area(lines, "rocks", entry.rocks)
   serialize_area(lines, "fishing", entry.fishing)
+end
+
+local function serialize_entry(lines, key, entry)
+  lines[#lines + 1] = string.format("  [%q] = {\n", key)
+  lines[#lines + 1] = string.format("    mapGroup = %d,\n", entry.mapGroup or 0)
+  lines[#lines + 1] = string.format("    mapNum = %d,\n", entry.mapNum or 0)
+  serialize_areas(lines, entry)
+  if entry.variants then
+    lines[#lines + 1] = "    variants = {\n"
+    for _, v in ipairs(entry.variants) do
+      lines[#lines + 1] = "      {\n"
+      serialize_areas(lines, v)
+      lines[#lines + 1] = "      },\n"
+    end
+    lines[#lines + 1] = "    },\n"
+  end
   lines[#lines + 1] = "  },\n"
 end
 
@@ -112,7 +125,15 @@ local function build_tables(entries)
       rocks = e.rocks,
       fishing = e.fishing,
     }
-    -- Last header wins for duplicate map keys (Alterating Cave sets).
+    local first = tables[gn]
+    if first then
+      -- pokefirered/src/wild_encounter.c:189
+      first.variants = first.variants or { {
+        land = first.land, water = first.water, rocks = first.rocks, fishing = first.fishing,
+      } }
+      first.variants[#first.variants + 1] = packed
+      goto continue
+    end
     tables[gn] = packed
     local alias = Versions.frMapFor(e.mapGroup, e.mapNum)
     if alias then
@@ -129,6 +150,7 @@ local function build_tables(entries)
         tables[alias:sub(7)] = packed
       end
     end
+    ::continue::
   end
   return tables
 end

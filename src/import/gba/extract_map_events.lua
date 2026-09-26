@@ -55,6 +55,7 @@ local function parse_objects(rom, ptr, count)
         mapNum = rom:u16(base + 12),
         mapGroup = rom:u16(base + 14),
       }
+      cloneTarget.mapId = Versions.frMapFor(cloneTarget.mapGroup, cloneTarget.mapNum)
     else
       elev = rom:get(base + 8)
       movementType = rom:get(base + 9)

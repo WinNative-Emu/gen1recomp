@@ -255,7 +255,29 @@ local function normalize_area(area, fallbackRate)
   return nil
 end
 
-local function table_for(mapId)
+local VAR_ALTERING_CAVE_WILD_SET = 0x4024
+
+local function wild_set_var()
+  local Sp = package.loaded["src.core.game3.scripting.space"]
+  local Flags = package.loaded["src.core.game3.scripting.flags"]
+  if Sp and Sp.store and Flags and Flags.getVar then
+    return tonumber(Flags.getVar(Sp.store, nil, VAR_ALTERING_CAVE_WILD_SET)) or 0
+  end
+  local ok, Runtime = pcall(require, "src.core.game3.runtime")
+  local session = ok and Runtime and Runtime.getSession and Runtime.getSession()
+  local vars = type(session) == "table" and session.vars
+  return type(vars) == "table" and tonumber(vars[VAR_ALTERING_CAVE_WILD_SET]) or 0
+end
+
+-- pokefirered/src/wild_encounter.c:192
+local function pick_variant(t)
+  if type(t) ~= "table" or type(t.variants) ~= "table" then return t end
+  local id = wild_set_var()
+  if id >= #t.variants then id = 0 end
+  return t.variants[id + 1] or t
+end
+
+local function resolve_table(mapId)
   if not mapId then return nil end
   local t = Encounters._tables[mapId]
   if t then return t end
@@ -298,6 +320,10 @@ local function table_for(mapId)
   end
 
   return nil
+end
+
+local function table_for(mapId)
+  return pick_variant(resolve_table(mapId))
 end
 
 function Encounters.tableFor(mapId)

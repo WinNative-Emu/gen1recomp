@@ -118,13 +118,42 @@ local function objectVisible(def)
   return true
 end
 
+-- include/constants/event_objects.h:195
+local OBJ_KIND_CLONE = 255
+
+-- pokefirered/src/overworld.c:410
+local function cloneTemplate(def)
+  local t = def.cloneTarget
+  if tonumber(def.kind) ~= OBJ_KIND_CLONE or type(t) ~= "table" then return nil end
+  local mapId = t.mapId
+  if not mapId then
+    local ok, MapCatalog = pcall(require, "src.import.gba.map_catalog")
+    if ok and type(MapCatalog) == "table" and MapCatalog.mapIdFor then
+      mapId = MapCatalog.mapIdFor(tonumber(t.mapGroup), tonumber(t.mapNum))
+    end
+  end
+  local Sp = Space()
+  local ev = mapId and Sp and Sp.bundle and Sp.bundle.events and Sp.bundle.events[mapId]
+  local defs = ev and (ev.objects or ev.objectEvents)
+  local tpl = type(defs) == "table" and defs[tonumber(t.localId) or 0]
+  if type(tpl) ~= "table" or tonumber(tpl.kind) == OBJ_KIND_CLONE then return nil end
+  return tpl
+end
+
+Objects.cloneTemplate = cloneTemplate
+
 local function newEventObject(def, neighbor)
   -- Shallow-copy template so setobjectxy / removeobject cannot poison the
   -- shared events.lua / mapDef.objects tables for the rest of the session.
   local src = def or {}
+  local tpl = cloneTemplate(src)
   def = {}
-  for k, v in pairs(src) do
+  for k, v in pairs(tpl or src) do
     def[k] = v
+  end
+  if tpl then
+    def.localId, def.index, def.x, def.y = src.localId, src.index, src.x, src.y
+    def.kind, def.cloneTarget = src.kind, src.cloneTarget
   end
   local lid = tonumber(def.localId or def.index) or 0
   local x = tonumber(def.x) or 0
