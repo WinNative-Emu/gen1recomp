@@ -9,6 +9,7 @@ local OwSprites = {}
 OwSprites._cache = nil
 OwSprites._manifest = nil
 OwSprites._loaded = {} -- [graphicsId] = { image, quads, w, h, frameCount, inanimate }
+OwSprites._reflectionLoaded = {}
 OwSprites._logged = false
 
 -- pret ANIM_STD: stand S/N/W; walk uses frames 3-8; east = west + hflip
@@ -20,6 +21,14 @@ local RUN_BASE = { down = 9, up = 12, left = 15, right = 15 }
 local RUN_A = { down = 10, up = 13, left = 16, right = 16 }
 local RUN_B = { down = 11, up = 14, left = 17, right = 17 }
 
+local EMPTY = {}
+
+local function fieldBlock()
+  local Profile = package.loaded["src.core.game3.profile"] or require("src.core.game3.profile")
+  local ok, row = pcall(Profile.forSession)
+  return ok and row and row.field or EMPTY
+end
+
 local function owRoot()
   -- Must follow Dataset.mountExtractRoots() — do not bake CACHE_ROOT at require.
   return (Extract.CACHE_ROOT or "data/generated/gba") .. "/ow"
@@ -28,6 +37,7 @@ end
 function OwSprites.install(cache)
   OwSprites._cache = cache
   OwSprites._loaded = {}
+  OwSprites._reflectionLoaded = {}
   OwSprites._manifest = nil
   OwSprites._logged = false
   if not cache then return end
@@ -40,6 +50,7 @@ end
 
 function OwSprites.invalidate()
   OwSprites._loaded = {}
+  OwSprites._reflectionLoaded = {}
   OwSprites._manifest = nil
   OwSprites._logged = false
 end
@@ -107,6 +118,12 @@ local function load_one(gid)
     height = h,
     frameCount = n,
     inanimate = meta.inanimate,
+    paletteTag = meta.paletteTag,
+    reflectionPaletteTag = meta.reflectionPaletteTag,
+    reflectionPaletteMappedTag = meta.reflectionPaletteMappedTag,
+    palette = meta.palette,
+    reflectionPalette = meta.reflectionPalette,
+    mappedReflectionPalette = meta.mappedReflectionPalette,
   }
 end
 
@@ -372,6 +389,13 @@ function OwSprites.pose(spr, facing, walkPhase, stepFlip, opts)
   end
 
   if opts and opts.running ~= nil and spr.frameCount >= 18 then
+    local runFrames = fieldBlock().runFrames
+    if runFrames then
+      local phase = runFrames[opts.running == 1 and 2 or 1]
+      local set = phase and (stepFlip and phase.a or phase.b)
+      local f = set and set[facing]
+      if f then return f, flip end
+    end
     if opts.running == 1 then
       return (stepFlip and RUN_A[facing] or RUN_B[facing]) or RUN_BASE[facing] or 9, flip
     end
@@ -406,6 +430,46 @@ function OwSprites.getDraw(graphicsId)
   return OwSprites.get(graphicsId)
 end
 
+local function paletteRgb(colors)
+  if type(colors) ~= "table" then return nil end
+  local out = {}
+  for i = 1, 15 do
+    local c = colors[i]
+    if c == nil then return nil end
+    c = tonumber(c) or 0
+    local r = c % 32
+    local g = math.floor(c / 32) % 32
+    local b = math.floor(c / 1024) % 32
+    out[#out + 1] = {
+      math.floor(r * 255 / 31 + 0.5),
+      math.floor(g * 255 / 31 + 0.5),
+      math.floor(b * 255 / 31 + 0.5),
+    }
+  end
+  return out
+end
+
+function OwSprites.getReflectionDraw(graphicsId)
+  graphicsId = tonumber(graphicsId)
+  if graphicsId == nil then return nil end
+  local cached = OwSprites._reflectionLoaded[graphicsId]
+  if cached ~= nil then return cached or nil end
+  local base = OwSprites.get(graphicsId)
+  if not base or not base.reflectionPaletteMappedTag then
+    OwSprites._reflectionLoaded[graphicsId] = false
+    return nil
+  end
+  local from = paletteRgb(base.palette)
+  local to = paletteRgb(base.mappedReflectionPalette)
+  if not (from and to) then
+    OwSprites._reflectionLoaded[graphicsId] = false
+    return nil
+  end
+  local reflected = recolour_sprite(base, from, to)
+  OwSprites._reflectionLoaded[graphicsId] = reflected or false
+  return reflected
+end
+
 --- Draw at world pixel position (cell top-left). Feet at bottom of sprite.
 -- opts.bow: use nurse bow frame (ANIM_NURSE_BOW).
 -- opts.fieldMove: use the arm-raise field move frame (opts.fieldMoveFrame).
@@ -427,13 +491,52 @@ function OwSprites.draw(graphicsId, px, py, camX, camY, facing, walkPhase, stepF
   return true
 end
 
-function OwSprites.playerGraphicsId(game)
-  local P = package.loaded["src.core.game3.player"]
+function OwSprites.avatars()
+  if not OwSprites._manifest and OwSprites._cache then
+    OwSprites.install(OwSprites._cache)
+  end
+  local m = OwSprites._manifest
+  return m and m.avatars or nil
+end
+
+-- pokeemerald/src/field_player_avatar.c:1256
+function OwSprites.avatarState(P)
+  if not P then return "NORMAL" end
+  if P.fieldMoveAnim and P.fieldMoveAnim > 0 then return "FIELD_MOVE" end
+  if P.underwater then return "UNDERWATER" end
+  if (P.surfing and not P.dismounting) or P.flyRide then return "SURFING" end
+  if P.biking then return P.bikeType == "acro" and "ACRO_BIKE" or "MACH_BIKE" end
+  if P.fishing then return "FISHING" end
+  if P.watering then return "WATERING" end
+  return "NORMAL"
+end
+
+-- pokeemerald/src/field_player_avatar.c:1241
+function OwSprites.avatarGraphicsId(state, isFemale, avatars, who)
+  avatars = avatars or OwSprites.avatars()
+  local rows = avatars and avatars[who or "player"]
+  if type(rows) ~= "table" then return nil end
+  local key = isFemale and "female" or "male"
+  local normal
+  for _, row in ipairs(rows) do
+    if row.state == state then return row[key] end
+    if row.state == "NORMAL" then normal = row[key] end
+  end
+  return normal
+end
+
+function OwSprites.playerGraphicsId(game, player)
+  local P = player or package.loaded["src.core.game3.player"]
   local save = game and game.save
   local session = game and game.session
   local gender = (session and session.gender)
     or (save and (save.gender or (save.player and save.player.gender)))
   local isFemale = (gender == "female" or gender == "F" or gender == 1)
+
+  local avatars = OwSprites.avatars()
+  if avatars then
+    return OwSprites.avatarGraphicsId(OwSprites.avatarState(P), isFemale, avatars)
+  end
 
   if P then
     if P.fieldMoveAnim and P.fieldMoveAnim > 0 then

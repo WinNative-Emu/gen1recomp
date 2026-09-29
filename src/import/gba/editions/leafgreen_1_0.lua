@@ -1586,6 +1586,7 @@ return {
   [0x351BC0] = 0x351BA0, -- maps.o:OneIsland_House2 + 0
   [0x3526A8] = 0x352688, -- :gMapGroups + 0
   [0x35B5D8] = 0x35B5B8, -- field_door.o:sDoorGraphics + 0
+  [0x35B934] = 0x35B914, -- :gReflectionEffectPaletteMap + 0
   [0x35B968] = 0x35B948, -- :gObjectEventPal_Player + 0
   [0x36D888] = 0x36D868, -- :gObjectEventPal_NpcWhite + 0
   [0x38A428] = 0x38A408, -- :gObjectEventPic_Blue + 0
@@ -1594,6 +1595,7 @@ return {
   [0x396B08] = 0x396AE8, -- :gObjectEventPic_SurfBlob + 0
   [0x398648] = 0x398628, -- :gFieldEffectObjectPic_CutGrass + 0
   [0x3986A8] = 0x398688, -- :gFieldEffectObjectPic_Ripple + 0
+  [0x398BA8] = 0x398B88, -- :gFieldEffectObjectPic_Arrow + 0
   [0x398FA8] = 0x398F88, -- :gFieldEffectObjectPalette0 + 0
   [0x398FC8] = 0x398FA8, -- :gFieldEffectObjectPalette1 + 0
   [0x399008] = 0x398FE8, -- :gFieldEffectObjectPic_GroundImpactDust + 0
@@ -1603,6 +1605,9 @@ return {
   [0x39D3C8] = 0x39D3A8, -- :gFieldEffectObjectPic_Bird + 0
   [0x39FDB0] = 0x39FD90, -- :gObjectEventGraphicsInfoPointers + 0
   [0x3A5158] = 0x3A5138, -- event_object_movement.o:sObjectEventSpritePalettes + 0
+  [0x3A5208] = 0x3A51E8, -- event_object_movement.o:gPlayerReflectionPaletteSets + 0
+  [0x3A5278] = 0x3A5258, -- event_object_movement.o:gSpecialObjectReflectionPaletteSets + 0
+  [0x3A5330] = 0x3A5310, -- event_object_movement.o:gObjectPaletteTagSets + 0
   [0x3A72A0] = 0x3A7280, -- scrcmd.o:sText_S + 0
   [0x3A72A2] = 0x3A7282, -- scrcmd.o:sText_IES + 0
   [0x3A7344] = 0x3A7324, -- start_menu.o:sStartMenuActionTable + 0
@@ -4726,7 +4731,7 @@ return {
   [0xE98FD8] = 0xE99058, -- :gNamingScreenPageSwapButton_Gfx + 0
   [0xE990D8] = 0xE99158, -- :gNamingScreenInputArrow_Gfx + 0
   [0xE990F8] = 0xE99178, -- :gNamingScreenUnderscore_Gfx + 0
-  [0xE99138] = 0xE991B8, -- :gTMCaseHM_Gfx + 32
+  [0xE99118] = 0xE99198, -- :gTMCaseHM_Gfx + 0
   [0xE99198] = 0xE99218, -- :gKantoTrainerCardBlue_Pal + 0
   [0xE991F8] = 0xE99278, -- :gKantoTrainerCard_Gfx + 0
   [0xE9A460] = 0xE9A4E0, -- :gSummaryScreen_Bg_Gfx + 0

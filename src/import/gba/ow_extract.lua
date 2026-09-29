@@ -8,7 +8,9 @@ local ExtractMapEvents = require("src.import.gba.extract_map_events")
 local OwExtract = {}
 
 OwExtract.MAGIC = "SVOW"
-OwExtract.FORMAT_VERSION = 1
+OwExtract.FORMAT_VERSION = 3
+
+OwExtract.REQUIRED = { "ow/manifest.lua", "ow/palette_manifest.lua" }
 
 local function u8(n)
   return string.char((tonumber(n) or 0) % 256)
@@ -46,7 +48,7 @@ function OwExtract.loadPaletteTable(rom, version)
     local off = tableOff + i * 8
     local dataPtr = rom:u32(off)
     local tag = rom:u16(off + 4)
-    if dataPtr == 0 and tag == 0 then break end
+    if dataPtr == 0 then break end
     local dataOff = gba_off(dataPtr)
     if dataOff and tag ~= 0 then
       local colors = {}
@@ -57,6 +59,62 @@ function OwExtract.loadPaletteTable(rom, version)
     end
   end
   return palsByTag
+end
+
+local PALETTE_TAG_NONE = 0xFFFF
+
+local function read_paired_palette_sets(rom, offset, version)
+  local sets = {}
+  for i = 0, 63 do
+    local row = offset + i * version.paired_palette_stride
+    local tag = rom:u16(row)
+    local dataPtr = rom:u32(row + 4)
+    if dataPtr == 0 then break end
+    local dataOff = gba_off(dataPtr)
+    if not dataOff then return nil end
+    local paletteTags = {}
+    for reflectionType = 0, version.paired_palette_count - 1 do
+      paletteTags[reflectionType] = rom:u16(dataOff + reflectionType * 2)
+    end
+    sets[tag] = paletteTags
+  end
+  return sets
+end
+
+function OwExtract.loadReflectionMappings(rom, version)
+  version = version or Versions.OW_REFLECTION
+  if not version then return nil end
+  local slotMap, paletteTagSets = {}, {}
+  for slot = 0, version.palette_map_count - 1 do
+    slotMap[slot] = rom:get(version.palette_map + slot)
+  end
+  for set = 0, version.palette_set_count - 1 do
+    local ptr = gba_off(rom:u32(version.palette_tag_sets + set * 4))
+    if not ptr then return nil end
+    local tags = {}
+    for slot = 0, version.palette_tag_slot_count - 1 do
+      tags[slot] = rom:u16(ptr + slot * 2)
+    end
+    paletteTagSets[set] = tags
+  end
+  local mappings = {
+    slotMap = slotMap,
+    paletteTagSets = paletteTagSets,
+    playerSets = read_paired_palette_sets(rom, version.player_palette_sets, version),
+    specialSets = read_paired_palette_sets(rom, version.special_palette_sets, version),
+  }
+  if not mappings.playerSets or not mappings.specialSets then return nil end
+  return mappings
+end
+
+function OwExtract.reflectionPaletteTag(info, mappings)
+  if not (info and mappings) then return nil end
+  local paired = mappings.playerSets[info.paletteTag]
+    or mappings.specialSets[info.paletteTag]
+  if paired then return paired[0] end
+  local reflectionSlot = mappings.slotMap[info.paletteSlot]
+  local defaultTags = mappings.paletteTagSets[0]
+  return defaultTags and defaultTags[reflectionSlot] or nil
 end
 
 local function read_graphics_info(rom, infoOff)
@@ -134,6 +192,18 @@ local function pic_table_len(rom, imagesOff, frameBytes, starts)
   return n
 end
 
+local function sym_frame_count(imagesOff)
+  local S = Versions.SYMS
+  if not S or not imagesOff then return nil end
+  for _, n in ipairs(S.namesAt(imagesOff)) do
+    if n:find("PicTable", 1, true) then
+      local ok, size = pcall(S.size, n)
+      if ok and size and size > 0 and size % 8 == 0 then return size / 8 end
+    end
+  end
+  return nil
+end
+
 --- Decode one 4bpp sprite frame (tile order: L→R, T→B 8×8) → indexed [w*h].
 local function decode_frame_4bpp(raw, width, height)
   local pixels = {}
@@ -201,7 +271,7 @@ local function load_frame_bytes(rom, dataPtr, nbytes)
 end
 
 --- Extract one graphicsId → { w, h, frameCount, frames (indexed), palette (BGR555) }.
-function OwExtract.extractOne(rom, graphicsId, palsByTag, version)
+function OwExtract.extractOne(rom, graphicsId, palsByTag, version, reflectionMappings)
   version = version or {}
   local pointers = version.ow_gfx_pointers or Versions.OW_GFX_POINTERS
   local num = version.num_obj_event_gfx or Versions.NUM_OBJ_EVENT_GFX
@@ -218,8 +288,13 @@ function OwExtract.extractOne(rom, graphicsId, palsByTag, version)
     return nil, "bad dimensions"
   end
   local imagesOff0 = gba_off(info.imagesPtr)
-  local starts = pic_table_starts(rom, pointers, num)
-  local frameCount = imagesOff0 and pic_table_len(rom, imagesOff0, math.floor(w * h / 2), starts) or 0
+  local rawBytes = math.floor(w * h / 2)
+  local exactFrames = sym_frame_count(imagesOff0)
+  local frameCount = exactFrames
+  if not frameCount then
+    local starts = pic_table_starts(rom, pointers, num)
+    frameCount = imagesOff0 and pic_table_len(rom, imagesOff0, rawBytes, starts) or 0
+  end
   if frameCount < 1 then frameCount = 1 end
 
   -- For Town Map (OBJ_EVENT_GFX_TOWN_MAP = 93) or 16x16 inanimate objects with 32x16 OAM allocation:
@@ -236,9 +311,10 @@ function OwExtract.extractOne(rom, graphicsId, palsByTag, version)
   for i = 0, frameCount - 1 do
     local dataPtr = rom:u32(imagesOff + i * 8)
     local frameSize = rom:u16(imagesOff + i * 8 + 4)
+    local foreign = exactFrames and frameSize ~= rawBytes
     if frameSize < 1 then frameSize = expected end
     if frameSize > expected * 4 then frameSize = expected end
-    local bytes = load_frame_bytes(rom, dataPtr, math.max(frameSize, expected))
+    local bytes = not foreign and load_frame_bytes(rom, dataPtr, math.max(frameSize, expected))
     if not bytes or #bytes < expected then
       -- pad / blank
       frames[i + 1] = {}
@@ -253,6 +329,9 @@ function OwExtract.extractOne(rom, graphicsId, palsByTag, version)
     pal = {}
     for c = 0, 15 do pal[c] = 0 end
   end
+  local rawReflectPal = palsByTag and palsByTag[info.reflectionPaletteTag] or nil
+  local reflectTag = rawReflectPal and OwExtract.reflectionPaletteTag(info, reflectionMappings) or nil
+  local reflectPal = reflectTag and palsByTag and palsByTag[reflectTag] or nil
 
   return {
     graphicsId = graphicsId,
@@ -262,6 +341,11 @@ function OwExtract.extractOne(rom, graphicsId, palsByTag, version)
     frames = frames,
     paletteTag = info.paletteTag,
     palette = pal,
+    reflectionPaletteTag = info.reflectionPaletteTag,
+    paletteSlot = info.paletteSlot,
+    reflectionPaletteMappedTag = reflectTag,
+    reflectionPalette = rawReflectPal,
+    mappedReflectionPalette = reflectPal,
     inanimate = info.inanimate,
   }
 end
@@ -297,7 +381,7 @@ function OwExtract.bakeRgba(sprite)
 end
 
 function OwExtract.encodeMeta(sprite)
-  return table.concat({
+  local out = {
     OwExtract.MAGIC,
     u8(OwExtract.FORMAT_VERSION),
     u8(sprite.inanimate and 1 or 0),
@@ -306,14 +390,22 @@ function OwExtract.encodeMeta(sprite)
     u16le(sprite.height),
     u16le(sprite.frameCount),
     u16le(sprite.paletteTag or 0),
-  })
+    u16le(sprite.reflectionPaletteTag or PALETTE_TAG_NONE),
+    u8(sprite.paletteSlot or 0xFF),
+    u16le(sprite.reflectionPaletteMappedTag or PALETTE_TAG_NONE),
+    u8((sprite.reflectionPalette and 1 or 0) + (sprite.mappedReflectionPalette and 2 or 0)),
+  }
+  for c = 0, 15 do out[#out + 1] = u16le(sprite.palette and sprite.palette[c] or 0) end
+  for c = 0, 15 do out[#out + 1] = u16le(sprite.reflectionPalette and sprite.reflectionPalette[c] or 0) end
+  for c = 0, 15 do out[#out + 1] = u16le(sprite.mappedReflectionPalette and sprite.mappedReflectionPalette[c] or 0) end
+  return table.concat(out)
 end
 
 function OwExtract.decodeMeta(blob)
   if type(blob) ~= "string" or #blob < 12 or blob:sub(1, 4) ~= OwExtract.MAGIC then
     return nil, "bad ow meta"
   end
-  return {
+  local meta = {
     formatVersion = blob:byte(5),
     inanimate = blob:byte(6) == 1,
     graphicsId = read_u16(blob, 7),
@@ -322,6 +414,24 @@ function OwExtract.decodeMeta(blob)
     frameCount = read_u16(blob, 13),
     paletteTag = read_u16(blob, 15),
   }
+  if meta.formatVersion >= 2 and #blob >= 118 then
+    meta.reflectionPaletteTag = read_u16(blob, 17)
+    meta.paletteSlot = blob:byte(19)
+    meta.reflectionPaletteMappedTag = read_u16(blob, 20)
+    local flags = blob:byte(22)
+    meta.palette = {}
+    meta.reflectionPalette = {}
+    meta.mappedReflectionPalette = {}
+    local off = 23
+    for c = 0, 15 do meta.palette[c] = read_u16(blob, off); off = off + 2 end
+    for c = 0, 15 do meta.reflectionPalette[c] = read_u16(blob, off); off = off + 2 end
+    for c = 0, 15 do meta.mappedReflectionPalette[c] = read_u16(blob, off); off = off + 2 end
+    if flags % 2 == 0 then meta.reflectionPalette = nil end
+    if math.floor(flags / 2) % 2 == 0 then meta.mappedReflectionPalette = nil end
+    if meta.reflectionPaletteTag == PALETTE_TAG_NONE then meta.reflectionPaletteTag = nil end
+    if meta.reflectionPaletteMappedTag == PALETTE_TAG_NONE then meta.reflectionPaletteMappedTag = nil end
+  end
+  return meta
 end
 
 --- Collect every OBJ_EVENT_GFX id (0 .. NUM-1).
@@ -362,6 +472,62 @@ function OwExtract.collectIsland1Ids(rom, version)
   return list
 end
 
+-- pokeemerald/src/field_player_avatar.c:234
+function OwExtract.readAvatars(rom, spec)
+  spec = spec or Versions.PLAYER_AVATAR_GFX
+  if not spec then return nil end
+  local genders = spec.genders
+  local function pair(off)
+    return { male = rom:get(off), female = rom:get(off + 1) }
+  end
+  local function states(off, n)
+    local out = {}
+    for s = 0, n - 1 do
+      out[s + 1] = pair(off + s * genders)
+      out[s + 1].state = spec.stateNames[s + 1] or tostring(s)
+    end
+    return out
+  end
+  local flags = { male = {}, female = {} }
+  for g, key in ipairs({ "male", "female" }) do
+    local base = spec.state_flags + (g - 1) * spec.state_flag_count * 2
+    for i = 0, spec.state_flag_count - 1 do
+      flags[key][i + 1] = { gfx = rom:get(base + i * 2), flag = rom:get(base + i * 2 + 1) }
+    end
+  end
+  return {
+    player = states(spec.player, spec.player_states),
+    rival = states(spec.rival, spec.rival_states),
+    linkFrlg = pair(spec.link_frlg),
+    linkRs = pair(spec.link_rs),
+    stateFlags = flags,
+  }
+end
+
+local function avatar_lines(av)
+  local out = { "  avatars = {\n" }
+  for _, key in ipairs({ "player", "rival" }) do
+    out[#out + 1] = ("    %s = {\n"):format(key)
+    for _, r in ipairs(av[key]) do
+      out[#out + 1] = ("      { state = %q, male = %d, female = %d },\n"):format(r.state, r.male, r.female)
+    end
+    out[#out + 1] = "    },\n"
+  end
+  for _, key in ipairs({ "linkFrlg", "linkRs" }) do
+    out[#out + 1] = ("    %s = { male = %d, female = %d },\n"):format(key, av[key].male, av[key].female)
+  end
+  out[#out + 1] = "    stateFlags = {\n"
+  for _, g in ipairs({ "male", "female" }) do
+    out[#out + 1] = ("      %s = {\n"):format(g)
+    for _, r in ipairs(av.stateFlags[g]) do
+      out[#out + 1] = ("        { gfx = %d, flag = %d },\n"):format(r.gfx, r.flag)
+    end
+    out[#out + 1] = "      },\n"
+  end
+  out[#out + 1] = "    },\n  },\n"
+  return table.concat(out)
+end
+
 --- Write ow/* sheets. opts.all=true extracts every OBJ_EVENT_GFX (firered default).
 function OwExtract.writeExtract(rom, cache, root, version, opts)
   root = root or "data/generated/gba"
@@ -369,6 +535,7 @@ function OwExtract.writeExtract(rom, cache, root, version, opts)
   local owRoot = root .. "/ow"
   version = version or Versions.lookup(rom.md5) or {}
   local palsByTag = OwExtract.loadPaletteTable(rom, version)
+  local reflectionMappings = OwExtract.loadReflectionMappings(rom, version.ow_reflection)
   local extractAll = opts.all
   if extractAll == nil then
     -- Standalone firered cache wants the full table; Island-1 demake can pass all=false.
@@ -382,7 +549,7 @@ function OwExtract.writeExtract(rom, cache, root, version, opts)
   }
   local okCount = 0
   for _, gid in ipairs(ids) do
-    local spr, err = OwExtract.extractOne(rom, gid, palsByTag, version)
+    local spr, err = OwExtract.extractOne(rom, gid, palsByTag, version, reflectionMappings)
     if spr then
       local rgba, aw, ah = OwExtract.bakeRgba(spr)
       local meta = OwExtract.encodeMeta(spr)
@@ -417,17 +584,79 @@ function OwExtract.writeExtract(rom, cache, root, version, opts)
         s.inanimate and "true" or "false", s.atlasW, s.atlasH)
     end
   end
-  lines[#lines + 1] = "  },\n}\n"
+  lines[#lines + 1] = "  },\n"
+  local avatars = OwExtract.readAvatars(rom)
+  if avatars then
+    manifest.avatars = avatars
+    lines[#lines + 1] = avatar_lines(avatars)
+  end
+  lines[#lines + 1] = "}\n"
   cache:write(owRoot .. "/manifest.lua", table.concat(lines))
+  local paletteLines = {
+    "return {\n",
+    "  format_version = 1,\n",
+    ("  meta_format_version = %d,\n"):format(OwExtract.FORMAT_VERSION),
+    ("  count = %d,\n"):format(okCount),
+    "  sprites = {\n",
+  }
+  for _, gid in ipairs(ids) do
+    if manifest.sprites[gid] then
+      paletteLines[#paletteLines + 1] = ("    [%d] = %d,\n"):format(gid, OwExtract.FORMAT_VERSION)
+    end
+  end
+  paletteLines[#paletteLines + 1] = "  },\n}\n"
+  cache:write(owRoot .. "/palette_manifest.lua", table.concat(paletteLines))
   print(string.format("[ow] extracted %d / %d object graphics → %s", okCount, #ids, owRoot))
+  manifest.count = okCount
+  manifest.total = #ids
   return manifest
+end
+
+function OwExtract.run(rom, cache, opts)
+  opts = opts or {}
+  local manifest = OwExtract.writeExtract(rom, cache, opts.cacheRoot, opts.version, { all = opts.all ~= false })
+  if opts.strict ~= false and manifest.count ~= manifest.total then
+    error(string.format("ow: extracted %d of %d object graphics", manifest.count, manifest.total), 0)
+  end
+  return { count = manifest.count, total = manifest.total, avatars = manifest.avatars ~= nil }
 end
 
 function OwExtract.ready(cache, root)
   root = root or "data/generated/gba"
   local manifest = cache and cache:read(root .. "/ow/manifest.lua")
-  return type(manifest) == "string"
-    and tonumber(manifest:match("ow_version%s*=%s*(%d+)")) == Versions.OW_VERSION
+  if type(manifest) ~= "string"
+      or tonumber(manifest:match("ow_version%s*=%s*(%d+)")) ~= Versions.OW_VERSION then
+    return false
+  end
+  if Versions.active() ~= "firered" and Versions.active() ~= "leafgreen" then return true end
+  local paletteManifest = cache:read(root .. "/ow/palette_manifest.lua")
+  if type(paletteManifest) ~= "string"
+      or tonumber(paletteManifest:match("meta_format_version%s*=%s*(%d+)")) ~= OwExtract.FORMAT_VERSION then
+    return false
+  end
+  local expected = tonumber(manifest:match("count%s*=%s*(%d+)"))
+  local total = tonumber(manifest:match("total%s*=%s*(%d+)"))
+  if not expected or expected < 1 or expected ~= total
+      or tonumber(paletteManifest:match("count%s*=%s*(%d+)")) ~= expected then
+    return false
+  end
+  local seen, count = {}, 0
+  for gidText, formatText in paletteManifest:gmatch("%[%s*(%d+)%s*%]%s*=%s*(%d+)%s*,") do
+    local gid, formatVersion = tonumber(gidText), tonumber(formatText)
+    if formatVersion ~= OwExtract.FORMAT_VERSION or seen[gid]
+        or not manifest:find("[" .. gid .. "] = {", 1, true) then
+      return false
+    end
+    local blob = cache:read(root .. "/ow/" .. gid .. ".meta")
+    local meta = OwExtract.decodeMeta(blob)
+    if type(blob) ~= "string" or #blob < 118 or not meta
+        or meta.formatVersion ~= OwExtract.FORMAT_VERSION or meta.graphicsId ~= gid then
+      return false
+    end
+    seen[gid] = true
+    count = count + 1
+  end
+  return count == expected
 end
 
 return OwExtract

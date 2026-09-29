@@ -28,6 +28,7 @@ local function load_pack()
     if chunk then
       local ok, pack = pcall(chunk)
       if ok and type(pack) == "table" then
+        Trainers.mergeDialogs(pack, cache)
         Trainers._pack = pack
         return pack
       end
@@ -35,6 +36,32 @@ local function load_pack()
   end
   Trainers._pack = false
   return nil
+end
+
+Trainers.DIALOGS_REL = "data/generated/gba/trainers/dialogs.lua"
+
+local DIALOG_KEYS = { "scriptKey", "introTextKey", "defeatTextKey", "victoryTextKey", "notEnoughTextKey" }
+
+function Trainers.mergeDialogs(pack, cache)
+  if type(pack) ~= "table" or type(pack.trainers) ~= "table" then return 0 end
+  local src = cache and cache.read and cache:read(Trainers.DIALOGS_REL)
+  if type(src) ~= "string" or src == "" then return 0 end
+  local chunk = load(src, "@" .. Trainers.DIALOGS_REL, "t", {})
+  local ok, rows = false, nil
+  if chunk then ok, rows = pcall(chunk) end
+  if not ok or type(rows) ~= "table" then return 0 end
+  local n = 0
+  for id, d in pairs(rows) do
+    local row = pack.trainers[id]
+    if type(row) == "table" and type(d) == "table" and next(row.dialogs or {}) == nil then
+      row.dialogs = d.dialogs or {}
+      for _, k in ipairs(DIALOG_KEYS) do
+        if row[k] == nil then row[k] = d[k] end
+      end
+      n = n + 1
+    end
+  end
+  return n
 end
 
 local function decompose_ai_flags(flags)
@@ -90,6 +117,8 @@ function Trainers.get(trainerId)
       scriptKey = row.scriptKey,
       introTextKey = row.introTextKey,
       defeatTextKey = row.defeatTextKey,
+      victoryTextKey = row.victoryTextKey,
+      notEnoughTextKey = row.notEnoughTextKey,
     }
   end
 
@@ -193,6 +222,28 @@ function Trainers.foeFromId(trainerId)
   }
 end
 
+local DIALOG_TEXT_KEYS = {
+  intro = "introTextKey", defeat = "defeatTextKey",
+  victory = "victoryTextKey", notEnough = "notEnoughTextKey",
+}
+
+local function live_dialogs(t)
+  local d = t.dialogs or {}
+  local Sp = package.loaded["src.core.game3.scripting.space"]
+  local vm = Sp and Sp.vm
+  if not (vm and vm.getText) then return d end
+  local out
+  for field, keyName in pairs(DIALOG_TEXT_KEYS) do
+    local key = t[keyName]
+    local ir = key and vm:getText(key)
+    if type(ir) == "table" then
+      out = out or setmetatable({}, { __index = d })
+      out[field] = ir
+    end
+  end
+  return out or d
+end
+
 --- ROM-derived trainer presentation info (class / name / pic / partySize / dialogs).
 -- opts.rivalName replaces the placeholder "TERRY" of the rival and champion
 -- classes when provided.
@@ -218,7 +269,7 @@ function Trainers.info(trainerId, opts)
     ai = t.ai,
     items = t.items,
     party = t.party,
-    dialogs = t.dialogs,
+    dialogs = live_dialogs(t),
   }
 
   -- pokefirered/src/battle_message.c:2078 names these classes by the player's
@@ -234,7 +285,7 @@ end
 --- Get dialog texts table: { intro, defeat, victory, notEnough }
 function Trainers.dialogs(trainerId)
   local t = Trainers.get(trainerId)
-  return t and t.dialogs or {}
+  return t and live_dialogs(t) or {}
 end
 
 --- FRLG intro string pieces for a trainer battle.
@@ -259,6 +310,8 @@ end
 
 --- Resolve encounter BGM song ID for a trainer (pret PlayTrainerEncounterMusic / include/constants/trainers.h & songs.h).
 function Trainers.getEncounterMusic(trainerId)
+  local perGame = require("src.core.game3.trainer_sight").encounterMusic(trainerId)
+  if perGame then return perGame end
   local t = Trainers.get(trainerId)
   if not t then return 285 end -- MUS_ENCOUNTER_BOY
   local musicCode = (tonumber(t.encounterMusic) or 0) % 128

@@ -22,8 +22,9 @@ CacheContract.VERSION_FORMAT = {
   -- data/pikachu/pikachu_pic_animation.asm:340
   yellow = "rom-cache-v12-yellow2:",
   -- v8: M4A tracks retain reachable patterns and explicit entry offsets.
-  firered = "rom-cache-v17-firered:",
-  leafgreen = "rom-cache-v2-leafgreen:",
+  firered = "rom-cache-v20-firered:",
+  leafgreen = "rom-cache-v5-leafgreen:",
+  emerald = "rom-cache-v1-emerald:",
 }
 CacheContract.MARKER_PATH = "rom-cache.complete"
 
@@ -243,6 +244,7 @@ CacheContract.VERSION_REQUIRED_FILES_OVERRIDE = {
     "data/generated/gba/intro/nidoran_f.png",
     "data/generated/gba/naming/manifest.lua",
     "data/generated/gba/ow/manifest.lua",
+    "data/generated/gba/ow/palette_manifest.lua",
     "data/generated/gba/ow/0.rgba",
     "data/generated/gba/ow/7.rgba",
     "data/generated/gba/pokemon/manifest.lua",
@@ -525,6 +527,7 @@ CacheContract.VERSION_REQUIRED_FILES_OVERRIDE = {
     -- src/data/field_effects/field_effect_objects.h:288, src/itemfinder.c:39
     "data/generated/gba/field_effects/ground_impact_dust.rgba",
     "data/generated/gba/field_effects/itemfinder_arrow_star.rgba",
+    "data/generated/gba/field_effects/arrow.rgba",
     -- src/field_effect.c:73, :77
     "data/generated/gba/field_effects/field_move_streaks_outdoors.rgba",
     "data/generated/gba/field_effects/field_move_streaks_indoors.rgba",
@@ -718,9 +721,47 @@ local function copy(values)
   return out
 end
 
+CacheContract.PLAN_CORE_FILES = {
+  "data/generated/gba/meta.json",
+  "data/generated/gba/maps.json",
+  "data/generated/gba/audio/meta.json",
+  "data/generated/gba/intro/meta.json",
+  "data/generated/maps.lua",
+  "data/generated/intro.lua",
+  "data/generated/audio.lua",
+}
+
+local composed = {}
+
+function CacheContract.planFilesFor(version)
+  if composed[version] then return composed[version] end
+  local Plans = require("src.import.gba.plans.registry")
+  local CachePaths = require("src.core.game3.cache_paths")
+  local files, seen = {}, {}
+  local function add(path)
+    if not seen[path] then
+      seen[path] = true
+      files[#files + 1] = path
+    end
+  end
+  for _, path in ipairs(CacheContract.PLAN_CORE_FILES) do add(path) end
+  for _, path in ipairs(Plans.required(Plans.of(version), CachePaths.CACHE_ROOT)) do add(path) end
+  composed[version] = files
+  return files
+end
+
+local function planComposed(version)
+  return CacheContract.VERSION_REQUIRED_FILES_OVERRIDE[version] == nil
+    and CacheContract.VERSION_FORMAT[version] ~= nil
+    and GameVersion.VERSIONS[version] ~= nil
+    and GameVersion.generation(version) == 3
+    and GameVersion.layout(version) ~= nil
+end
+
 function CacheContract.requiredFilesFor(version)
   local override = CacheContract.VERSION_REQUIRED_FILES_OVERRIDE[version]
   if override then return override, true end
+  if planComposed(version) then return CacheContract.planFilesFor(version), true end
   return CacheContract.REQUIRED_FILES, false
 end
 
@@ -822,7 +863,9 @@ end
 function CacheContract.cacheVersionCurrent(version, fs)
   if GameVersion.generation(version) ~= 3 then return true end
   fs = fs or require("src.import.CacheFs")
-  local okV, Versions = pcall(require, "src.import.gba.versions")
+  local okV, Versions = pcall(function()
+    return require("src.import.gba.versions").forGame(version)
+  end)
   if not okV or not Versions or not Versions.CACHE_VERSION then return true end
   local ok, raw = withVersionPrefix(version, fs, function()
     return fs.read("data/generated/gba/meta.json")

@@ -11,6 +11,10 @@ local _blendOpts = {}
 
 local band, rshift = bit.band, bit.rshift
 
+local function fallback_prefix()
+  return require("src.core.game3.battle.profile").get().animCacheFallback or nil
+end
+
 local AnimVm = {}
 
 AnimVm.Z = {
@@ -365,6 +369,11 @@ function AnimVm:soundCount()
 end
 
 function AnimVm:reset()
+  if self._hasCoordinateOverrides then
+    AnimCoords.setCoordinateOverrides(self._previousCoordinateOverrides)
+    self._previousCoordinateOverrides = nil
+    self._hasCoordinateOverrides = nil
+  end
   self.active = false
   self.pc = 1
   self.script = nil
@@ -415,6 +424,11 @@ local function finish(self)
   AnimTasks.reset()
   self._monbg = AnimCoords.idTable()
   AnimCoords.bind(nil)
+  if self._hasCoordinateOverrides then
+    AnimCoords.setCoordinateOverrides(self._previousCoordinateOverrides)
+    self._previousCoordinateOverrides = nil
+    self._hasCoordinateOverrides = nil
+  end
   if cb then pcall(cb) end
 end
 
@@ -465,6 +479,10 @@ local function begin(self, script, opts)
     rawset(self._speciesBySide, self._tgtId, opts.targetSpecies)
   end
   self._onEnd = opts.onEnd
+  if opts.coordinateOverrides then
+    self._previousCoordinateOverrides = AnimCoords.setCoordinateOverrides(opts.coordinateOverrides)
+    self._hasCoordinateOverrides = true
+  end
   self._turn = tonumber(opts.moveTurn or opts.turn) or 0
   self.statusAnimActive = opts.statusAnim and true or false
   self._phase = opts.phase or "cb1"
@@ -779,7 +797,7 @@ local function read_pack_bytes(file)
   local ok, Dataset = pcall(require, "src.core.game3.dataset")
   local cache = ok and Dataset.cache and Dataset.cache() or nil
   local rel = "data/generated/gba/pokemon/battle_anims/" .. file
-  return cache and cache.read and (cache:read(rel) or cache:read("firered/" .. rel))
+  return cache and cache.read and (cache:read(rel) or (fallback_prefix() and cache:read(fallback_prefix() .. rel)))
 end
 
 function AnimVm.sheetImage(vm, tag, w)
@@ -832,7 +850,8 @@ function AnimVm.animBgImage(vm, id)
   local ok, Dataset = pcall(require, "src.core.game3.dataset")
   local cache = ok and Dataset.cache and Dataset.cache() or nil
   local rel = "data/generated/gba/pokemon/battle_anims/" .. info.file
-  local bytes = cache and cache.read and (cache:read(rel) or cache:read("firered/" .. rel))
+  local bytes = cache and cache.read and (cache:read(rel)
+    or (fallback_prefix() and cache:read(fallback_prefix() .. rel)))
   if type(bytes) ~= "string" or #bytes == 0 then return nil end
   local okFd, fd = pcall(love.filesystem.newFileData, bytes, info.file)
   if not okFd then return nil end
@@ -1364,7 +1383,11 @@ OPS.waitforsprites = OPS.waitanimation
 
 OPS.nop = function() return true end
 OPS.nop2 = OPS.nop
-OPS.jumpifcontest = OPS.nop
+-- pokeemerald/src/battle_anim.c:1678
+OPS.jumpifcontest = function(vm, op)
+  if vm.ctx and vm.ctx.isContest and jump_label(vm, op.label) then return "jump" end
+  return true
+end
 OPS.stopsound = function()
   local ok, Audio = pcall(require, "src.core.game3.audio")
   if ok and Audio and Audio.stopSe then pcall(Audio.stopSe) end

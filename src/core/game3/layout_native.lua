@@ -45,16 +45,35 @@ function LayoutNative:cellAt(cx, cy)
   return { mid = mid, coll = 0xff, elev = 0 }
 end
 
+local baseCellAt = LayoutNative.cellAt
+
+local function field(self, cx, cy, name, missing, border)
+  if self.cellAt ~= baseCellAt then return self:cellAt(cx, cy)[name] end
+  local ov = self.overrides[cy * 1024 + cx]
+  if ov then return ov[name] end
+  local tw = self.trueWidth or self.width
+  local th = self.trueHeight or self.height
+  if cx >= 0 and cy >= 0 and cx < tw and cy < th then
+    local cell = self.cells[cy * self.width + cx + 1]
+    if cell then return cell[name] end
+    return missing
+  end
+  if border ~= nil then return border end
+  local bx, by = wrap_border(
+    cx, cy, tw, th, self.borderWidth, self.borderHeight)
+  return self.borderMids[by * self.borderWidth + bx + 1] or 0
+end
+
 function LayoutNative:midAt(cx, cy)
-  return self:cellAt(cx, cy).mid
+  return field(self, cx, cy, "mid", 0, nil)
 end
 
 function LayoutNative:collAt(cx, cy)
-  return self:cellAt(cx, cy).coll
+  return field(self, cx, cy, "coll", 0xff, 0xff)
 end
 
 function LayoutNative:elevAt(cx, cy)
-  return self:cellAt(cx, cy).elev
+  return field(self, cx, cy, "elev", 0, 0)
 end
 
 --- Flat 1-based COLL_* array for Collision.bindMap.
@@ -92,6 +111,52 @@ function LayoutNative:applyOverride(x, y, mid, coll, elev)
   if FieldView then
     FieldView._nativeDirty = true
   end
+end
+
+local function markDirty()
+  local FieldView = package.loaded["src.core.game3.field_view"]
+  if FieldView then
+    FieldView._nativeDirty = true
+  end
+end
+
+-- pokeemerald/src/battle_pyramid.c:1523
+function LayoutNative:stamp(src, ox, oy)
+  if type(src) ~= "table" or type(src.cells) ~= "table" then return 0 end
+  ox, oy = tonumber(ox) or 0, tonumber(oy) or 0
+  local sw = src.trueWidth or src.width or 0
+  local sh = src.trueHeight or src.height or 0
+  local n = 0
+  for y = 0, sh - 1 do
+    for x = 0, sw - 1 do
+      local c = src.cells[y * src.width + x + 1]
+      if c then
+        self.overrides[(oy + y) * 1024 + ox + x] = {
+          mid = c.mid or 0, coll = c.coll ~= nil and c.coll or 0xff, elev = c.elev or 0,
+        }
+        n = n + 1
+      end
+    end
+  end
+  markDirty()
+  return n
+end
+
+-- pokeemerald/src/fieldmap.c:357
+function LayoutNative:setMetatiles(rows)
+  local n = 0
+  for _, r in ipairs(rows or {}) do
+    local x, y = tonumber(r.x) or 0, tonumber(r.y) or 0
+    local cur = self:cellAt(x, y)
+    self.overrides[y * 1024 + x] = {
+      mid = tonumber(r.mid) or cur.mid or 0,
+      coll = r.coll ~= nil and r.coll or cur.coll,
+      elev = r.elev ~= nil and r.elev or cur.elev or 0,
+    }
+    n = n + 1
+  end
+  if n > 0 then markDirty() end
+  return n
 end
 
 function LayoutNative:clearOverrides()

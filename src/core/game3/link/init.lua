@@ -1,6 +1,13 @@
 local Game3Link = require("src.link.Game3Link")
+local Family = require("src.core.game3.link.family")
 
-local Link = {}
+local Link = setmetatable({}, {
+  __index = function(_, k)
+    -- pokeemerald/include/constants/vars.h:155
+    if k == "VAR_CABLE_CLUB_STATE" then return Family.cableClubVar(Family.activeVersion()) end
+    return nil
+  end,
+})
 
 -- pokefirered/include/constants/cable_club.h:5
 Link.USING = {
@@ -29,8 +36,6 @@ Link.LINKUP = {
   PARTNER_NOT_READY = 9,
 }
 
--- pokefirered/include/constants/vars.h:163
-Link.VAR_CABLE_CLUB_STATE = 0x406F
 Link.VAR_RESULT = 0x800D
 Link.VAR_0x8004 = 0x8004
 Link.VAR_0x8006 = 0x8006
@@ -43,7 +48,7 @@ Link.peerCards = {}
 local MAP_DYNAMIC_NUM = 0x7F
 local WARP_ID_NONE = 0xFF
 -- pokefirered/include/constants/songs.h:13
-local SE_EXIT = 9
+local SE = require("src.core.game3.se_ids")
 
 Link.link = nil
 Link.exitQueued = false
@@ -211,7 +216,7 @@ function Link.doCableClubWarp(ctx, adapters)
     Link._warpMap = nil
     return false
   end
-  if adapters and adapters.playSe then adapters.playSe(SE_EXIT) end
+  if adapters and adapters.playSe then adapters.playSe(SE.SE_EXIT) end
   local armedOn = Link._warpMap
   Link._warpMap = nil
   local mapId = Link.currentMap()
@@ -252,6 +257,7 @@ end
 
 function Link.callSpecial(ctx, adapters, id)
   local Natives = package.loaded["src.core.game3.scripting.natives"]
+  if Natives and Natives.ensureBound then Natives.ensureBound() end
   local handler = Natives and Natives.ALLOW and Natives.ALLOW["special:" .. id]
   if not handler then return false end
   handler(ctx, adapters)
@@ -286,7 +292,7 @@ end
 -- pokefirered/src/field_fadetransition.c:685 ReturnFromLinkRoom
 function Link.returnFromLinkRoom(ctx, adapters)
   Link.closeLink("return_from_link_room")
-  if adapters and adapters.playSe then adapters.playSe(SE_EXIT) end
+  if adapters and adapters.playSe then adapters.playSe(SE.SE_EXIT) end
   local s = Link.session()
   local dest = s and (s.warpDestination or s.dynamicWarp)
   return Link.warpToDest(ctx, adapters, dest, "warpsilent")
@@ -327,6 +333,7 @@ end
 
 function Link.attach(link)
   Link.link = link
+  if link.linkType == Game3Link.LINKTYPE.BATTLE_TOWER then Link._towerReconnectPending = false end
   Link._cardSent = false
   Link.peerCard = nil
   Link.peerCards = {}
@@ -336,6 +343,11 @@ function Link.attach(link)
     Link._cardSent = false
     Link.lastCloseReason = reason
     if Link._localClose then return end
+    -- pokeemerald/src/field_specials.c:3640
+    if link.linkType == Game3Link.LINKTYPE.BATTLE_TOWER and Link.inLinkRoom() then
+      Link._towerReconnectPending = true
+      return
+    end
     leaveLink(link)
     local Union = package.loaded["src.core.game3.link.union_room"]
     if Union and Union.isActive() and Union.onUnionRoomMap() then return end
@@ -403,7 +415,19 @@ end
 
 -- pokefirered/src/cable_club.c:222 CreateLinkupTask waits for the other machine
 function Link.beginConnect(_opts)
-  return Link.link ~= nil
+  _opts = _opts or {}
+  local live = Link.link
+  if live and live.isOpen and live:isOpen() then return true end
+  local session = _opts.session or Link.clientCall("roomSession")
+  if type(session) ~= "table" then return false end
+  local opened = Link.openRelay({
+    session = session,
+    client = _opts.client,
+    linkType = _opts.linkType,
+    timeout = _opts.timeout,
+    hello = _opts.hello,
+  })
+  return opened ~= nil
 end
 
 -- pokefirered/src/link.c:419 CloseLink
@@ -531,10 +555,7 @@ Link.ADAPTER_RULESET = "g3_link"
 Link._live = nil
 
 function Link.version()
-  local ok, GameVersion = pcall(require, "src.core.GameVersion")
-  local v = ok and GameVersion.get and GameVersion.get() or nil
-  if v == "leafgreen" then return "leafgreen" end
-  return "firered"
+  return Family.activeVersion()
 end
 
 function Link.liveProfile(rulesetId)
@@ -790,9 +811,18 @@ function Link.cardCaught(s)
   local dex = type(s.dex) == "table" and s.dex or nil
   if not dex then return 0 end
   local okD, Dex = pcall(require, "src.core.game3.dex")
+  local version = Family.activeVersion()
+  if okD and Dex and Dex.summaryCount and Family.of(version) == "rse" then
+    local store = Link.store() or {}
+    -- pokeemerald/src/trainer_card.c:719
+    local ok, n = pcall(Dex.summaryCount, { version = version, dex = dex,
+      flags = store.flags or s.flags, vars = store.vars or s.vars })
+    if ok and n then return n end
+    return 0
+  end
   if okD and Dex and Dex.countCaught then
     -- pokefirered/include/constants/flags.h:1398
-    local okF, national = pcall(flags().getFlag, Link.store(), nil, 0x840)
+    local okF, national = pcall(flags().getFlag, Link.store(), nil, Family.flag(version, "FLAG_SYS_NATIONAL_DEX"))
     local ok, n = pcall(Dex.countCaught, dex, okF and national and "national" or "kanto")
     if ok and n then return n end
   end
@@ -828,6 +858,11 @@ function Link.localTrainerCard()
     badges = card.badges,
     dex = s.dex,
     store = s.store,
+    version = Family.activeVersion(),
+    flags = type(s.store) == "table" and s.store.flags or s.flags,
+    vars = type(s.store) == "table" and s.store.vars or s.vars,
+    frontier = s.frontier,
+    hasAllPaintings = s.hasAllPaintings,
   }
 end
 
@@ -912,6 +947,7 @@ function Link.reset()
   Link._exits = nil
   Link._live = nil
   Link.connectPrompt = nil
+  Link._towerReconnectPending = false
 end
 
 package.loaded["src.core.game3.link"] = Link

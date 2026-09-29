@@ -6,7 +6,7 @@ local VAR_RESULT = 0x800D -- pokefirered/include/constants/vars.h:328
 local VAR_0x8004 = 0x8004 -- pokefirered/include/constants/vars.h:319
 
 local SCR_MENU_CANCEL = 0x7F -- pokefirered/include/constants/menu.h:4
-local SE_SELECT = 5 -- pokefirered/include/constants/songs.h:9
+local SE = require("src.core.game3.se_ids") -- pokefirered/include/constants/songs.h:9
 
 -- pokefirered/include/constants/menu.h:75
 local LISTMENU_BADGES = 0
@@ -132,6 +132,7 @@ local function windowMod()
   end
   return _window or nil
 end
+ListMenu.windowMod = windowMod
 
 local function textWidth(text)
   local FrlgFont = frlgFont()
@@ -168,7 +169,9 @@ end
 
 function Menu.showItems(kind, labels, layout, scroll, cursor, onPick)
   if not (layout and labels) then return false end
-  Menu.kind = kind
+  Menu.kind = layout.exchangeMenuId or kind
+  local Preview = require("src.ui.game3.screens").get("frontier_preview", require("src.core.game3.scripting.space").store)
+  if Preview then Preview.tutorOpen = Menu.kind == 9 or Menu.kind == 10 end
   Menu.labels = labels
   Menu.count = layout.count
   Menu.maxShowed = math.min(layout.maxShowed, layout.count)
@@ -200,6 +203,8 @@ end
 
 function Menu.close()
   Menu.open = false
+  local okP, Preview = pcall(function() return require("src.ui.game3.screens").get("frontier_preview") end)
+  if okP and Preview then Preview.tutorOpen = false; Preview.exchangeOpen = false end
   Menu._onPick = nil
   local okS, Stack = pcall(require, "src.ui.game3.stack")
   if okS and Stack then Stack.pop(STACK_ID) end
@@ -214,18 +219,18 @@ function Menu.move(delta)
   if delta < 0 then
     if Menu.row > 1 then
       Menu.row = Menu.row - 1
-      se(SE_SELECT)
+      se(SE.SE_SELECT)
     elseif Menu.scroll > 0 then
       Menu.scroll = Menu.scroll - 1
-      se(SE_SELECT)
+      se(SE.SE_SELECT)
     end
   elseif delta > 0 then
     if Menu.row < Menu.maxShowed and Menu.selection() + 1 < Menu.count then
       Menu.row = Menu.row + 1
-      se(SE_SELECT)
+      se(SE.SE_SELECT)
     elseif Menu.scroll + Menu.maxShowed < Menu.count then
       Menu.scroll = Menu.scroll + 1
-      se(SE_SELECT)
+      se(SE.SE_SELECT)
     end
   end
 end
@@ -237,7 +242,7 @@ function Menu.confirm()
   local keepOpen = Menu.keepOpen and index ~= (Menu.count - 1)
   local cb = Menu._onPick
   local scroll, row = Menu.scroll, Menu.row
-  se(SE_SELECT)
+  se(SE.SE_SELECT)
   Menu.close()
   if keepOpen then
     Menu.scroll, Menu.row = scroll, row
@@ -248,7 +253,7 @@ end
 function Menu.cancel()
   if not Menu.open then return end
   local cb = Menu._onPick
-  se(SE_SELECT)
+  se(SE.SE_SELECT)
   Menu.close()
   if cb then cb(SCR_MENU_CANCEL, false) end
 end
@@ -286,6 +291,7 @@ local function drawScrollArrows()
   end
 end
 
+
 function Menu.draw()
   if not (Menu.open and Menu.labels) then return end
   local Window = windowMod()
@@ -321,6 +327,9 @@ function Menu.draw()
     end
   end
   drawScrollArrows()
+  local Screens = require("src.ui.game3.screens")
+  local preview = Screens.get("frontier_preview", require("src.core.game3.scripting.space").store)
+  if preview and preview.draw then preview.draw(Menu) end
 end
 
 ListMenu._suspended = nil
@@ -358,9 +367,9 @@ function ListMenu.presentItems(ctx, key, labels, layout, onPick)
   return false
 end
 
-ListMenu.HANDLERS = {
+ListMenu.BY_NAME = {
   -- pokefirered/src/field_specials.c:1164
-  [Std.SPECIAL.ListMenu] = function(ctx)
+  ListMenu = function(ctx)
     local kind = varGet(ctx, VAR_0x8004)
     local scroll, cursor = 0, 0
     if kind == LISTMENU_SILPHCO_FLOORS then
@@ -371,11 +380,12 @@ ListMenu.HANDLERS = {
     return present(ctx, kind, scroll, cursor)
   end,
   -- pokefirered/src/field_specials.c:1469 ReturnToListMenu
-  [Std.SPECIAL.ReturnToListMenu] = function(ctx)
+  ReturnToListMenu = function(ctx)
     local state = ListMenu._suspended
     if not state then return false end
     return present(ctx, state.kind, state.scroll, state.row - 1)
   end,
 }
+Std.legacyHandlers(ListMenu)
 
 return ListMenu

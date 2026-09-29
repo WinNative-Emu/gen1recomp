@@ -20,9 +20,7 @@ local CONFIRM_PROMPT_DELAY = 120
 -- pokefirered/src/trade.c:2273
 local SELECTED_MOVE_FRAMES = 20
 -- pokefirered/include/constants/songs.h:281
-local MUS_GAME_CORNER = 273
--- pokefirered/include/constants/songs.h:9
-local SE_SELECT = 5
+local Song = require("src.core.game3.song_ids")
 -- pokefirered/src/pokemon_icon.c:938
 local ICON_ANIM_FRAMES = { [0] = 6, 8, 14, 22 }
 -- pokefirered/src/battle_interface.c:1844
@@ -33,6 +31,28 @@ local MENU_TEXT_COLORS = {
   shadow = { 115 / 255, 115 / 255, 115 / 255, 1 },
   bg = { 0, 0, 0, 0 },
 }
+
+local EMERALD_TEXT = {
+  gText_Trade_CommunicationStandby = "sText_CommunicationStandby",
+  gText_TradeHasBeenCanceled = "sText_TheTradeHasBeenCanceled",
+  gText_WaitingForFriendToFinish = "sText_WaitingForYourFriend",
+  gText_FriendWantsToTrade = "sText_YourFriendWantsToTrade",
+  gText_4Qmark = "sText_FourQuestionMarks",
+  gText_IsThisTradeOkay = "sText_IsThisTradeOkay",
+  gText_TradeAction_Summary = "sText_Summary",
+  gText_TradeAction_Trade = "sText_Trade",
+  gText_SavingDontTurnOffThePower2 = "gText_SavingDontTurnOffPower",
+}
+
+local function textKey(key)
+  local ok, profile = pcall(require, "src.core.game3.profile")
+  if ok and profile.family() == "rse" then return EMERALD_TEXT[key] or key end
+  return key
+end
+
+local function plain(key, ctx)
+  return RomText.plain(textKey(key), ctx)
+end
 
 -- pokefirered/src/trade.c:546
 local MSG = {
@@ -289,7 +309,7 @@ end
 -- pokefirered/src/trade.c:2339
 function LinkTradeMenu.movesLines(mon)
   local P = pokemon()
-  if P.isEgg(mon) then return { RomText.plain("gText_4Qmark") } end
+  if P.isEgg(mon) then return { plain("gText_4Qmark") } end
   local lines = {}
   local moves = (mon and mon.moves) or {}
   for i = 1, 4 do
@@ -318,7 +338,7 @@ end
 -- pokefirered/src/trade.c:1788
 local function moveCursor(dir)
   local nextPos = LinkTradeMenu.newCursorPosition(LinkTradeMenu.pos, dir)
-  if nextPos ~= LinkTradeMenu.pos then playSe(SE_SELECT) end
+  if nextPos ~= LinkTradeMenu.pos then playSe(Song.SE_SELECT) end
   setPos(nextPos)
 end
 
@@ -375,7 +395,7 @@ function LinkTradeMenu.show()
   LinkTradeMenu.open = true
   resetState()
   -- pokefirered/src/trade.c:853
-  LinkTradeMenu.message = RomText.plain(MSG.STANDBY)
+  LinkTradeMenu.message = plain(MSG.STANDBY)
   Stack.push("link_trade", LinkTradeMenu, { hideBelow = true, fullscreen = true })
   return true
 end
@@ -418,7 +438,7 @@ local function enterMenu()
   if hasGraphics() then
     local Audio = audio()
     -- pokefirered/src/trade.c:1049
-    if Audio and Audio.playSong and pcall(Audio.playSong, MUS_GAME_CORNER) then
+    if Audio and Audio.playSong and pcall(Audio.playSong, Song.MUS_GAME_CORNER) then
       LinkTradeMenu._song = true
     end
   end
@@ -471,13 +491,13 @@ local function tradeSelectedMon()
   local ok, code = LT.offer(LinkTradeMenu.pos + 1)
   if ok then
     -- pokefirered/src/trade.c:1813
-    LinkTradeMenu.message = RomText.plain(MSG.STANDBY)
+    LinkTradeMenu.message = plain(MSG.STANDBY)
     LinkTradeMenu.cursorVisible = false
     LinkTradeMenu.cb = "ready_wait"
     return true
   end
   local Trade = require("src.core.game3.scripting.natives_trade")
-  queueMessage(Trade.refusalText(code) or RomText.plain(MSG.MON_CANT_BE_TRADED))
+  queueMessage(Trade.refusalText(code) or plain(MSG.MON_CANT_BE_TRADED))
   LinkTradeMenu.cb = "trade_canceled"
   return false
 end
@@ -522,9 +542,9 @@ local function canceledMessage(LT)
   local leader = LT.isLeader()
   local r = LT.lastResult
   if (leader and r == "player_canceled") or (not leader and r == "partner_canceled") then
-    return RomText.plain(MSG.FRIEND_WANTS_TO_TRADE)
+    return plain(MSG.FRIEND_WANTS_TO_TRADE)
   end
-  return RomText.plain(MSG.CANCELED)
+  return plain(MSG.CANCELED)
 end
 
 local SELECTING = { selected_mons = true, okay_wait = true, confirm_prompt = true }
@@ -581,16 +601,16 @@ end
 local function menuInput(input, field)
   local cur = LinkTradeMenu[field]
   if input:wasPressed("a") then
-    playSe(SE_SELECT)
+    playSe(Song.SE_SELECT)
     return cur
   end
   if input:wasPressed("b") then return "b" end
   if input:wasPressed("up") and cur > 1 then
     LinkTradeMenu[field] = cur - 1
-    playSe(SE_SELECT)
+    playSe(Song.SE_SELECT)
   elseif input:wasPressed("down") and cur < 2 then
     LinkTradeMenu[field] = cur + 1
-    playSe(SE_SELECT)
+    playSe(Song.SE_SELECT)
   end
   return nil
 end
@@ -633,7 +653,7 @@ local function processMenuInput(input)
   elseif joyRept(input, "right") then moveCursor(DIR_RIGHT)
   end
   if not input:wasPressed("a") then return end
-  playSe(SE_SELECT)
+  playSe(Song.SE_SELECT)
   local pos = LinkTradeMenu.pos
   if pos < PARTY_SIZE then
     LinkTradeMenu.subCursor = 1
@@ -660,7 +680,7 @@ function LinkTradeMenu.handleInput(input)
     -- pokefirered/src/trade.c:1890
     local choice = menuInput(input, "subCursor")
     if choice == "b" then
-      playSe(SE_SELECT)
+      playSe(Song.SE_SELECT)
       redrawChooseAPokemonWindow()
     elseif choice == 1 then
       showSummary(0, LinkTradeMenu.pos)
@@ -671,12 +691,12 @@ function LinkTradeMenu.handleInput(input)
     -- pokefirered/src/trade.c:2043
     local choice = menuInput(input, "yesNoCursor")
     if choice == 1 then
-      LinkTradeMenu.message = RomText.plain(MSG.WAITING_FOR_FRIEND)
+      LinkTradeMenu.message = plain(MSG.WAITING_FOR_FRIEND)
       LinkTradeMenu.cursorVisible = false
       LinkTradeMenu.cb = "idle"
       trade().cancelSelect()
     elseif choice == 2 or choice == "b" then
-      playSe(SE_SELECT)
+      playSe(Song.SE_SELECT)
       redrawChooseAPokemonWindow()
     end
   elseif cb == "confirm_prompt" then
@@ -689,22 +709,22 @@ function LinkTradeMenu.handleInput(input)
       LT.confirm(true)
       -- pokefirered/src/trade.c:1976
       if LT.lastResult == LT.PLAYER_MON_INVALID then
-        queueMessage(RomText.plain(MSG.ONLY_MON2))
+        queueMessage(plain(MSG.ONLY_MON2))
       elseif LT.lastResult == LT.PARTNER_MON_INVALID then
-        queueMessage(RomText.plain(MSG.FRIENDS_MON_CANT_BE_TRADED))
+        queueMessage(plain(MSG.FRIENDS_MON_CANT_BE_TRADED))
       else
-        queueMessage(RomText.plain(MSG.STANDBY))
+        queueMessage(plain(MSG.STANDBY))
       end
     elseif choice == 2 or choice == "b" then
       LinkTradeMenu.confirming = false
       LinkTradeMenu.cb = "idle"
-      queueMessage(RomText.plain(MSG.STANDBY))
+      queueMessage(plain(MSG.STANDBY))
       trade().confirm(false)
     end
   elseif cb == "trade_canceled" then
     -- pokefirered/src/trade.c:2094
     if input:wasPressed("a") then
-      playSe(SE_SELECT)
+      playSe(Song.SE_SELECT)
       LinkTradeMenu.message = nil
       LinkTradeMenu.submenuVisible = false
       redrawPartyWindow(0)
@@ -726,7 +746,7 @@ local function exitWithFade(LT, toScene)
     LinkTradeMenu.exitStarted = false
     if not toScene and not LT.isLeader() then
       -- pokefirered/src/trade.c:1643
-      LinkTradeMenu.message = RomText.plain(MSG.WAITING_FOR_FRIEND)
+      LinkTradeMenu.message = plain(MSG.WAITING_FOR_FRIEND)
     end
   end
   if LinkTradeMenu.exitStarted then return end
@@ -838,7 +858,7 @@ end
 local function drawYesNo()
   -- pokefirered/src/trade.c:744
   Chrome.stdFrame(21, 13, 6, 4)
-  local labels = { RomText.plain("gText_Yes"), RomText.plain("gText_No") }
+  local labels = { plain("gText_Yes"), plain("gText_No") }
   for i, lab in ipairs(labels) do
     local y = 13 * T + 2 + (i - 1) * 14
     if i == LinkTradeMenu.yesNoCursor then Window.cursorPx(21 * T, y) end
@@ -849,7 +869,7 @@ end
 local function drawSubmenu()
   -- pokefirered/src/trade.c:1850
   Chrome.stdFrame(17, 15, 12, 4)
-  local labels = { RomText.plain("gText_TradeAction_Summary"), RomText.plain("gText_TradeAction_Trade") }
+  local labels = { plain("gText_TradeAction_Summary"), plain("gText_TradeAction_Trade") }
   for i, lab in ipairs(labels) do
     local y = 15 * T + (i - 1) * 16
     if i == LinkTradeMenu.subCursor then Window.cursorPx(17 * T, y) end
@@ -863,7 +883,7 @@ local BOTTOM_TEXT = {
   -- pokefirered/src/trade.c:1869
   cancel = function() return RomText.at("sActionTexts", 4) end,
   -- pokefirered/src/trade.c:1588
-  okay = function() return RomText.plain("gText_IsThisTradeOkay") end,
+  okay = function() return plain("gText_IsThisTradeOkay") end,
 }
 
 function LinkTradeMenu.draw()

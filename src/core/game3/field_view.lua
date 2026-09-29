@@ -4,6 +4,8 @@
 local Display = require("src.core.game3.display")
 local Versions = require("src.import.gba.versions")
 local GfxIds = require("src.core.game3.scripting.gfx_ids")
+local FieldModules = require("src.core.game3.field_modules")
+local Sem = require("src.core.game3.field_semantics")
 
 local FieldView = {}
 
@@ -31,8 +33,6 @@ FieldView._loggedNativeFallback = false
 
 -- pokefirered/src/field_screen_effect.c:18
 local FLASH_LEVEL_RADIUS = { [0] = 200, 72, 56, 40, 24 }
--- pokefirered/include/constants/flags.h:1333
-local FLAG_SYS_FLASH_ACTIVE = 0x806
 
 FieldView.MAX_FLASH_LEVEL = 4
 FieldView.flashLevel = 0
@@ -82,7 +82,10 @@ local function modPalettes() return getMod("Palettes", "src.world.gen2.Palettes"
 local function modFlags() return getMod("Flags", "src.core.game3.scripting.flags") end
 local function modDoors() return getMod("Doors", "src.core.game3.doors") end
 local function modHeal() return getMod("Heal", "src.core.game3.pokecenter_heal") end
-local function modSSAnne() return getMod("SSAnne", "src.core.game3.ss_anne_cutscene") end
+local function modSSAnne()
+  if not FieldModules.enabled("ssAnne") then return nil end
+  return getMod("SSAnne", "src.core.game3.ss_anne_cutscene")
+end
 local function modFieldWeather() return getMod("FieldWeather", "src.core.game3.field_weather") end
 local function modAssets() return getMod("Assets", "src.render.Assets") end
 local function modPlayer() return getMod("Player", "src.core.game3.player") end
@@ -434,6 +437,7 @@ local ELEVATION_TO_PRIORITY = {
 }
 
 local function actorPriority(a)
+  if a.oamPriority then return a.oamPriority end
   if a.kind == "player" then
     local PlayerMod = package.loaded["src.core.game3.player"]
     if PlayerMod and (PlayerMod.jumping or PlayerMod.surfHopping) then
@@ -573,7 +577,8 @@ local function collectGame3Actors(game, mapDef, camX, camY, px, py, facing, walk
       a.facing = eo.facing or "down"
       a.walkPhase = Objects.walkPhase(eo)
       a.stepFlip = eo.stepFlip and true or false
-      a.bow = (eo.bowFrames and eo.bowFrames > 0) or eo.raiseHand == true
+      -- pokeemerald/src/data/object_events/object_event_anims.h:602
+      a.bow = (eo.bowFrames and eo.bowFrames > 8 and eo.bowFrames <= 40) or eo.raiseHand == true
       a.frame = eo.customFrame
       a.sprite = eo.sprite or spriteNameForObj(eo.def or {})
       a.graphicsId = eo.graphicsId or (eo.def and (eo.def.graphicsId or eo.def.graphics))
@@ -661,6 +666,7 @@ local function collectGame3Actors(game, mapDef, camX, camY, px, py, facing, walk
     a.fishing = fishFrame ~= nil
     a.fishFrame = fishFrame
     a.running = PlayerMod and PlayerMod.runPose and PlayerMod.runPose() or nil
+    a.frame = PlayerMod and PlayerMod.acroFrame and PlayerMod.acroFrame() or nil
     a.sprite = playerSpriteName(game)
     a.graphicsId = useOw and OwSprites.playerGraphicsId(game) or nil
     a.priority = nil
@@ -795,6 +801,64 @@ local function ensure_batch(store, srcPair, texture, capacity)
   return batch
 end
 
+FieldView.VOID_FADE_FRAMES = 20
+local voidKeys = setmetatable({}, { __index = function(t, pair)
+  local k = "void|" .. pair
+  t[pair] = k
+  return k
+end })
+
+local function isVoidKey(k)
+  return type(k) == "string" and k:sub(1, 5) == "void|"
+end
+
+local function connectedTo(Map, def)
+  for _, n in ipairs(Map.neighborList or {}) do
+    if n.def == def then return true end
+  end
+  return false
+end
+
+local function beginVoidFade(Map, mapDef, camX, camY, voidMode)
+  local prev = FieldView._voidMapDef
+  if prev == mapDef then return end
+  FieldView._voidMapDef = mapDef
+  FieldView._voidFrom = nil
+  if not (prev and voidMode == "map" and FieldView._lastCamX and connectedTo(Map, prev)) then return end
+  local from = { under = {}, over = {}, bx = FieldView._nativeBx or 0, by = FieldView._nativeBy or 0,
+    dx = FieldView._lastCamX - camX, dy = FieldView._lastCamY - camY, t = 0 }
+  for _, store in ipairs({ { FieldView._nativeBatches, from.under }, { FieldView._nativeOverBatches, from.over } }) do
+    for k, b in pairs(store[1] or {}) do
+      if isVoidKey(k) then
+        store[2][k] = b
+        store[1][k] = nil
+      end
+    end
+  end
+  if next(from.under) then FieldView._voidFrom = from end
+  FieldView._nativeDirty = true
+end
+
+local function drawVoidFrom(batches, camX, camY)
+  local f = FieldView._voidFrom
+  if not f then return end
+  love.graphics.setColor(1, 1, 1, 1 - f.t / FieldView.VOID_FADE_FRAMES)
+  local x, y = f.bx * CELL - (camX + f.dx), f.by * CELL - (camY + f.dy)
+  for _, b in pairs(batches) do love.graphics.draw(b, x, y) end
+  love.graphics.setColor(1, 1, 1, 1)
+end
+
+local function drawLayer(batches, pair, ox, oy, fromBatches, camX, camY)
+  for k, b in pairs(batches) do
+    if isVoidKey(k) then love.graphics.draw(b, ox, oy) end
+  end
+  if fromBatches then drawVoidFrom(fromBatches, camX, camY) end
+  if batches[pair] then love.graphics.draw(batches[pair], ox, oy) end
+  for k, b in pairs(batches) do
+    if k ~= pair and not isVoidKey(k) then love.graphics.draw(b, ox, oy) end
+  end
+end
+
 --- Prefer native mid atlas when ready. Supports cross-pair connection seams
 -- (e.g. Route1 pallet_outdoor → Viridian viridian_outdoor) by batching per pair.
 -- Draws under-layer (BG3/BG1) only; call drawNativeOverTiles after sprites for BG2.
@@ -830,6 +894,7 @@ local function drawNativeTiles(mapDef, camX, camY, canvasW, canvasH)
     or require("src.core.game3.map")
   local VoidFill = require("src.core.game3.void_fill")
   local voidMode = VoidFill.normalize(VoidFill.mode)
+  beginVoidFade(Map, mapDef, camX, camY, voidMode)
 
   if FieldView._nativeDirty
       or FieldView._nativeVoid ~= voidMode
@@ -852,17 +917,8 @@ local function drawNativeTiles(mapDef, camX, camY, canvasW, canvasH)
       cellsByPair = {}
       FieldView._nativeCellsByPair = cellsByPair
     else
-      for k, list in pairs(cellsByPair) do
-        for i = #list, 1, -1 do list[i] = nil end
-      end
+      for _, list in pairs(cellsByPair) do list.n = 0 end
     end
-
-    local cellPool = FieldView._nativeCellPool
-    if not cellPool then
-      cellPool = {}
-      FieldView._nativeCellPool = cellPool
-    end
-    local poolIdx = 0
 
     local voidHas, voidPrimary = nil, nil
     if voidMode ~= "map" and voidMode ~= "black" then
@@ -871,10 +927,12 @@ local function drawNativeTiles(mapDef, camX, camY, canvasW, canvasH)
     end
     for row = 0, rows - 1 do
       for col = 0, cols - 1 do
-        local mid, srcPair, isVoid = layout:midAt(cx0 + col, cy0 + row), pair, false
+        local mid, srcPair, isVoid
         if Map.worldMidAt then
           mid, srcPair, isVoid = Map.worldMidAt(cx0 + col, cy0 + row, mapDef)
           srcPair = srcPair or pair
+        else
+          mid, srcPair, isVoid = layout:midAt(cx0 + col, cy0 + row), pair, false
         end
         local skip = false
         if isVoid and voidMode ~= "map" then
@@ -889,43 +947,47 @@ local function drawNativeTiles(mapDef, camX, camY, canvasW, canvasH)
           srcPair = pair
         end
         if not skip then
-          local list = cellsByPair[srcPair]
+          local key = (isVoid and voidMode == "map") and voidKeys[srcPair] or srcPair
+          local list = cellsByPair[key]
           if not list then
-            list = {}
-            cellsByPair[srcPair] = list
+            list = { n = 0, pair = srcPair }
+            cellsByPair[key] = list
           end
-          poolIdx = poolIdx + 1
-          local c = cellPool[poolIdx]
-          if not c then
-            c = {}
-            cellPool[poolIdx] = c
-          end
-          c.mid = mid
-          c.x = col * CELL
-          c.y = row * CELL
-          list[#list + 1] = c
+          local n = list.n + 1
+          list.n = n
+          list[n * 3 - 2], list[n * 3 - 1], list[n * 3] = mid, col * CELL, row * CELL
         end
       end
     end
-    for srcPair, cells in pairs(cellsByPair) do
-      local ts = NativeTileset.get(srcPair)
+    local visiblePairs = FieldView._nativeVisiblePairs
+    if not visiblePairs then
+      visiblePairs = {}
+      FieldView._nativeVisiblePairs = visiblePairs
+    else
+      for k in pairs(visiblePairs) do visiblePairs[k] = nil end
+    end
+    for key, cells in pairs(cellsByPair) do
+      local srcPair = cells.pair
+      if cells.n > 0 then visiblePairs[srcPair] = true end
+      local ts = cells.n > 0 and NativeTileset.get(srcPair)
       if ts and ts.image then
-        local batch = ensure_batch(FieldView._nativeBatches, srcPair, ts.image, capacity)
+        local batch = ensure_batch(FieldView._nativeBatches, key, ts.image, capacity)
         batch:clear()
         local overBatch = nil
         if ts.layered and ts.overImage then
           overBatch = ensure_batch(
-            FieldView._nativeOverBatches, srcPair, ts.overImage, capacity)
+            FieldView._nativeOverBatches, key, ts.overImage, capacity)
           overBatch:clear()
         end
-        for _, cell in ipairs(cells) do
-          local slot = NativeTileset.slotFor(ts, cell.mid)
+        for i = 1, cells.n * 3, 3 do
+          local x, y = cells[i + 1], cells[i + 2]
+          local slot = NativeTileset.slotFor(ts, cells[i])
           local q = NativeTileset.quad(ts, slot)
-          if q then batch:add(q, cell.x, cell.y) end
+          if q then batch:add(q, x, y) end
           if overBatch then
             local oq = NativeTileset.overQuad(ts, slot)
             if oq then
-              overBatch:add(oq, cell.x, cell.y)
+              overBatch:add(oq, x, y)
             end
           end
         end
@@ -934,7 +996,7 @@ local function drawNativeTiles(mapDef, camX, camY, canvasW, canvasH)
     local TilesetAnim = package.loaded["src.core.game3.tileset_anim"]
       or require("src.core.game3.tileset_anim")
     if TilesetAnim and TilesetAnim.setVisiblePairs then
-      TilesetAnim.setVisiblePairs(cellsByPair)
+      TilesetAnim.setVisiblePairs(visiblePairs)
     end
     FieldView._nativeBx = cx0
     FieldView._nativeBy = cy0
@@ -949,14 +1011,14 @@ local function drawNativeTiles(mapDef, camX, camY, canvasW, canvasH)
   FieldView._nativeOverOx = ox
   FieldView._nativeOverOy = oy
   FieldView._nativeOverPair = pair
-  if FieldView._nativeBatches[pair] then
-    love.graphics.draw(FieldView._nativeBatches[pair], ox, oy)
+  FieldView._nativeCamX, FieldView._nativeCamY = camX, camY
+  local from = FieldView._voidFrom
+  drawLayer(FieldView._nativeBatches, pair, ox, oy, from and from.under, camX, camY)
+  if from then
+    from.t = from.t + 1
+    if from.t >= FieldView.VOID_FADE_FRAMES then FieldView._voidFrom = nil end
   end
-  for srcPair, batch in pairs(FieldView._nativeBatches) do
-    if srcPair ~= pair then
-      love.graphics.draw(batch, ox, oy)
-    end
-  end
+  FieldView._lastCamX, FieldView._lastCamY = camX, camY
 
   if not FieldView._loggedNative then
     log("native mid atlas ON pair=" .. tostring(pair))
@@ -973,25 +1035,45 @@ local function drawNativeOverTiles()
   local ox = FieldView._nativeOverOx or 0
   local oy = FieldView._nativeOverOy or 0
   love.graphics.setColor(1, 1, 1, 1)
-  if pair and batches[pair] then
-    love.graphics.draw(batches[pair], ox, oy)
-  end
-  for srcPair, batch in pairs(batches) do
-    if srcPair ~= pair then
-      love.graphics.draw(batch, ox, oy)
-    end
-  end
+  local from = FieldView._voidFrom
+  drawLayer(batches, pair, ox, oy, from and from.over,
+    FieldView._nativeCamX or 0, FieldView._nativeCamY or 0)
+end
+
+local function rseFamily()
+  local Profile = package.loaded["src.core.game3.profile"] or require("src.core.game3.profile")
+  local ok, row = pcall(Profile.forSession)
+  return ok and row ~= nil and row.family == "rse"
+end
+
+-- pokeemerald/src/field_screen_effect.c:53
+local function flashRadii()
+  if not rseFamily() then return FLASH_LEVEL_RADIUS end
+  local ok, FxRse = pcall(require, "src.core.game3.field_effects_rse")
+  local m = ok and FxRse and FxRse.fc()
+  return m and m.flashRadii or FLASH_LEVEL_RADIUS
+end
+FieldView.flashRadii = flashRadii
+
+-- pokeemerald/src/field_screen_effect.c:54
+function FieldView.maxFlashLevel()
+  local t = flashRadii()
+  if t == FLASH_LEVEL_RADIUS then return FieldView.MAX_FLASH_LEVEL end
+  local n = 0
+  for k in pairs(t) do if k > n then n = k end end
+  return n
 end
 
 function FieldView.radiusForLevel(level)
   level = tonumber(level) or 0
-  return FLASH_LEVEL_RADIUS[level] or FLASH_LEVEL_RADIUS[0]
+  local t = flashRadii()
+  return t[level] or t[0]
 end
 
 -- pokefirered/src/overworld.c:966
 function FieldView.setFlashLevel(level)
   level = tonumber(level) or 0
-  if level < 0 or level > FieldView.MAX_FLASH_LEVEL then level = 0 end
+  if level < 0 or level > FieldView.maxFlashLevel() then level = 0 end
   FieldView.flashLevel = level
   FieldView._flashRadius = nil
   -- pokefirered/include/global.h:770 gSaveBlock1Ptr->flashLevel
@@ -1033,18 +1115,19 @@ function FieldView.setCameraPanning(x, y)
 end
 
 local function flashActive()
+  local Runtime = package.loaded["src.core.game3.runtime"]
+  local session = Runtime and Runtime.getSession and Runtime.getSession()
+  local flashFlag = Sem.flag(session, "flashActive")
   local Space = package.loaded["src.core.game3.scripting.space"]
   if Space and Space.store then
     local Flags = modFlags()
     if Flags and Flags.getFlag
-        and Flags.getFlag(Space.store, nil, FLAG_SYS_FLASH_ACTIVE) then
+        and Flags.getFlag(Space.store, nil, flashFlag) then
       return true
     end
   end
-  local Runtime = package.loaded["src.core.game3.runtime"]
-  local session = Runtime and Runtime.getSession and Runtime.getSession()
   local flags = session and session.flags
-  return (flags and flags[FLAG_SYS_FLASH_ACTIVE]) and true or false
+  return (flags and flags[flashFlag]) and true or false
 end
 
 -- pokefirered/src/overworld.c:958
@@ -1056,8 +1139,36 @@ end
 -- pokefirered/src/overworld.c:956
 function FieldView.defaultFlashLevel(game, mapId)
   if not mapIsCave(resolveMapDef(game, mapId)) then return 0 end
+  if rseFamily() then
+    -- pokeemerald/src/overworld.c:971
+    if flashActive() then return 1 end
+    return FieldView.maxFlashLevel() - 1
+  end
   if flashActive() then return 0 end
   return FieldView.MAX_FLASH_LEVEL
+end
+
+-- pokeemerald/src/field_screen_effect.c:994
+function FieldView.setPyramidLightRadius(radius)
+  FieldView.setFlashRadius(radius)
+end
+
+-- pokeemerald/src/battle_pyramid.c:1187
+function FieldView.setBgPaletteOverride(slot, pal16)
+  local NativeTileset = require("src.core.game3.tileset_native")
+  local prev = FieldView._bgPalOverride
+  if prev and (pal16 == nil or prev.slot ~= slot) then
+    NativeTileset.resetSlotPalette(prev.pair, prev.slot)
+    FieldView._bgPalOverride = nil
+  end
+  if pal16 == nil then return true end
+  local Map = package.loaded["src.core.game3.map"]
+  local def = Map and Map.currentDef and Map.currentDef()
+  local pair = def and (def.pair or (def.midLayout and def.midLayout.pair))
+  if not pair then return false end
+  if not NativeTileset.setSlotPalette(pair, slot, pal16) then return false end
+  FieldView._bgPalOverride = { pair = pair, slot = slot }
+  return true
 end
 
 function FieldView.setDefaultFlashLevel(game, mapId)
@@ -1217,8 +1328,14 @@ function FieldView.draw(game, canvasW, canvasH, opts)
     else fx = fx - CELL end
     local fTileX = math.floor(fx / CELL)
     local fTileY = math.floor(fy / CELL)
-    camX = (fTileX - 2) * CELL
-    camY = (fTileY - 4) * CELL
+    local off = ShopMenu.shopCameraOffset and ShopMenu.shopCameraOffset()
+    if off then
+      camX = (fTileX + off.x) * CELL
+      camY = (fTileY + off.y) * CELL
+    else
+      camX = (fTileX - 2) * CELL
+      camY = (fTileY - 4) * CELL
+    end
   end
 
   FieldView._billboard = opts.billboard
@@ -1271,6 +1388,11 @@ function FieldView.draw(game, canvasW, canvasH, opts)
       if Doors and Doors.draw then
         Doors.draw(camX, camY, canvasW, canvasH)
       end
+    end
+    local FieldWeather = modFieldWeather()
+    if FieldWeather and FieldWeather.drawBelow then
+      -- pokeemerald/src/field_weather_effect.c:1280
+      FieldWeather.drawBelow(camX, camY, canvasW, canvasH)
     end
   end
 
@@ -1395,6 +1517,8 @@ function FieldView.invalidate()
   FieldView._nativeBatch = nil
   FieldView._nativeBatches = nil
   FieldView._nativeOverBatches = nil
+  FieldView._voidFrom, FieldView._voidMapDef = nil, nil
+  FieldView._lastCamX, FieldView._lastCamY = nil, nil
   FieldView._nativeBx = nil
   FieldView._nativeBy = nil
   FieldView._nativePair = nil

@@ -15,13 +15,38 @@ Storage.TOTAL_BOX_MONS = 420
 Storage.PC_ITEMS_COUNT = 50
 Storage.MAX_ITEM_QTY = 999
 
-local VAR_PC_BOX_TO_SEND_MON = 0x4037 -- pokefirered/include/constants/vars.h:105
-local FLAG_SHOWN_BOX_WAS_FULL_MESSAGE = 0x843 -- pokefirered/include/constants/flags.h:1401
-local FLAG_SYS_NOT_SOMEONES_PC = 0x834 -- pokefirered/include/constants/flags.h:1386
+local function save_ids(session)
+  local row = require("src.core.game3.profile").forSession(session)
+  local names = row.save.storage
+  local C = require("src.core.game3.constants").of(row.id)
+  return C:require("vars", names.sendVar), C:require("flags", names.boxFullFlag),
+    C:require("flags", names.pcOwnerFlag)
+end
+
+function Storage.pcItemsCount(session)
+  return require("src.core.game3.profile").forSession(session).bag.pcItems
+end
 
 local function script_store(session)
   local Space = package.loaded["src.core.game3.scripting.space"]
   return (Space and Space.store) or (session and session.store) or nil
+end
+
+--- Close gaps in the party in place so mons fill slots 1..n in order.
+-- pokefirered/src/pokemon.c CompactPartySlots
+function Storage.compactParty(party)
+  if type(party) ~= "table" then return party end
+  local keys = {}
+  for k, m in pairs(party) do
+    local n = tonumber(k)
+    if n and m ~= nil then keys[#keys + 1] = { n = n, k = k } end
+  end
+  table.sort(keys, function(a, b) return a.n < b.n end)
+  local mons = {}
+  for i, e in ipairs(keys) do mons[i] = party[e.k] end
+  for _, e in ipairs(keys) do party[e.k] = nil end
+  for i, m in ipairs(mons) do party[i] = m end
+  return party
 end
 
 --- Create a fresh Storage instance (14 boxes, 30 slots each, 50-item PC).
@@ -232,7 +257,9 @@ function Storage.moveMon(session, srcLoc, srcIdx, destLoc, destIdx, srcBox, dest
   if not srcMon then return false, "src_empty" end
 
   -- Cannot leave party empty if withdrawing/moving away
-  if srcLoc == "party" and destLoc == "box" and not destMon and #session.party <= 1 then
+  local partyCount = 0
+  for _, m in pairs(session.party) do if m ~= nil then partyCount = partyCount + 1 end end
+  if srcLoc == "party" and destLoc == "box" and not destMon and partyCount <= 1 then
     return false, "last_pokemon"
   end
 
@@ -251,20 +278,6 @@ function Storage.moveMon(session, srcLoc, srcIdx, destLoc, destIdx, srcBox, dest
   -- Assign to src
   if srcLoc == "party" then
     session.party[srcIdx] = destMon
-    -- Clean up trailing nils in party array if moved without swap
-    if not destMon and srcIdx > #session.party then
-      local keys = {}
-      for k in pairs(session.party) do
-        if type(k) == "number" then keys[#keys + 1] = k end
-      end
-      table.sort(keys)
-      local newParty = {}
-      for _, k in ipairs(keys) do
-        local m = session.party[k]
-        if m then newParty[#newParty + 1] = m end
-      end
-      session.party = newParty
-    end
   elseif srcLoc == "box" then
     local box = storage.boxes[srcBox or storage.currentBox]
     box.mons[srcIdx] = destMon
@@ -289,6 +302,8 @@ function Storage.moveMon(session, srcLoc, srcIdx, destLoc, destIdx, srcBox, dest
   elseif srcLoc=="party" then
     Q.event(session,"DepositedMonInPC",{D0=srcName,D1=dstBoxName})
   else Q.event(session,"WithdrewMonFromPC",{D0=srcBoxName,D1=srcName}) end
+  -- A mon moved out of (or into) the middle of the party must not leave a gap.
+  Storage.compactParty(session.party)
   return true
 end
 
@@ -311,6 +326,7 @@ function Storage.sendMonToPC(session, mon)
   local Flags = require("src.core.game3.scripting.flags")
   local Queries = require("src.core.game3.scripting.natives_queries")
   local store = script_store(session)
+  local VAR_PC_BOX_TO_SEND_MON, FLAG_SHOWN_BOX_WAS_FULL_MESSAGE = save_ids(session)
   Queries.setPCBoxToSendMon(Flags.getVar(store, nil, VAR_PC_BOX_TO_SEND_MON))
   local intended = tonumber(Queries.pcBoxToSendMon) or 0
 
@@ -337,8 +353,7 @@ end
 -- pokefirered/src/field_specials.c:1985
 local function should_show_box_was_full()
   local Queries = require("src.core.game3.scripting.natives_queries")
-  local Std = require("src.core.game3.scripting.stdscripts")
-  local handler = Queries.HANDLERS and Queries.HANDLERS[Std.SPECIAL.ShouldShowBoxWasFullMessage]
+  local handler = Queries.BY_NAME and Queries.BY_NAME.ShouldShowBoxWasFullMessage
   if not handler then return false end
   local _, v = handler(nil)
   return (tonumber(v) or 0) ~= 0
@@ -350,6 +365,7 @@ function Storage.isDestinationBoxFull(session)
   local Flags = require("src.core.game3.scripting.flags")
   local Queries = require("src.core.game3.scripting.natives_queries")
   local store = script_store(session)
+  local VAR_PC_BOX_TO_SEND_MON, FLAG_SHOWN_BOX_WAS_FULL_MESSAGE = save_ids(session)
   Queries.setPCBoxToSendMon(Flags.getVar(store, nil, VAR_PC_BOX_TO_SEND_MON))
   local bId = Storage.findOpenSlot(storage)
   if not bId then return false end
@@ -366,6 +382,7 @@ function Storage.pcTransferMessage(session, name, boxWasFull)
   local Flags = require("src.core.game3.scripting.flags")
   local Queries = require("src.core.game3.scripting.natives_queries")
   local store = script_store(session)
+  local VAR_PC_BOX_TO_SEND_MON, _, FLAG_SYS_NOT_SOMEONES_PC = save_ids(session)
   name = tostring(name or "")
   local sent = box_name(storage, Flags.getVar(store, nil, VAR_PC_BOX_TO_SEND_MON))
   local shown = boxWasFull
@@ -433,7 +450,7 @@ function Storage.addPcItem(session, itemId, qty)
     end
     storage.items[foundIdx].qty = curQty + qty
   else
-    if #storage.items >= Storage.PC_ITEMS_COUNT then
+    if #storage.items >= Storage.pcItemsCount(session) then
       return false, "pc_items_full"
     end
     storage.items[#storage.items + 1] = { id = itemId, qty = qty }
