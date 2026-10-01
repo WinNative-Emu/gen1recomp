@@ -32,9 +32,14 @@ local function log(msg)
   print("[game3/collision] " .. tostring(msg))
 end
 
+local permsLoaded, permsMod
 local function permissions()
-  local ok, P = pcall(require, "src.world.gen2.Permissions")
-  return ok and P or nil
+  if not permsLoaded then
+    local ok, P = pcall(require, "src.world.gen2.Permissions")
+    permsMod = ok and P or nil
+    permsLoaded = true
+  end
+  return permsMod
 end
 
 local function resolveTileset(game, mapDef)
@@ -193,6 +198,31 @@ function Collision.installWarps(mapDef)
   end
 end
 
+--- Patch one cell of the bound native grid after a metatile write (what a
+-- full bindMap would rebuild for it) without re-deriving the whole map.
+-- Returns false when the caller must bindMap instead: another map is bound,
+-- the cell is off the grid, or a warp sits on it (installWarps derives warp
+-- activity and door repairs from the cell).
+function Collision.patchCell(mapId, mapDef, x, y)
+  if not (Collision._grid and mapDef and mapDef.midLayout) then return false end
+  if Collision._mapId ~= mapId or Collision._mapDef ~= mapDef then return false end
+  local layout = mapDef.midLayout
+  x, y = tonumber(x), tonumber(y)
+  if not (x and y) or x ~= math.floor(x) or y ~= math.floor(y) then return false end
+  local w, h = Collision._widthCells, Collision._heightCells
+  if w ~= layout.width or h ~= layout.height then return false end
+  if x < 0 or y < 0 or x >= w or y >= h then return false end
+  if x >= (layout.trueWidth or w) or y >= (layout.trueHeight or h) then return false end
+  for _, warp in ipairs(mapDef.warps or {}) do
+    if tonumber(warp.x) == x and tonumber(warp.y) == y then return false end
+  end
+  -- same value LayoutNative:collArray yields for this cell
+  local ov = layout.overrides and layout.overrides[y * 1024 + x]
+  local c = layout.cells and layout.cells[y * w + x + 1]
+  Collision._grid[y * w + x + 1] = (ov and ov.coll) or (c and c.coll) or 0xff
+  return true
+end
+
 function Collision.clear()
   Collision._grid = nil
   Collision._mapId = nil
@@ -218,6 +248,18 @@ end
 
 function Collision.behavior(cx,cy)
   return Collision.behaviorOn(Collision._mapDef, cx, cy)
+end
+
+local worldMap
+
+-- pokefirered/src/fieldmap.c:129
+function Collision.worldBehavior(cx, cy)
+  local def = Collision._mapDef
+  if not (def and def.midLayout) then return nil end
+  worldMap = worldMap or require("src.core.game3.map")
+  local mid, pair = worldMap.worldMidAt(cx, cy, def)
+  local behaviors = InteractionScripts.behaviors[pair]
+  return behaviors and behaviors[mid]
 end
 
 -- pokefirered/include/constants/metatile_behaviors.h:39

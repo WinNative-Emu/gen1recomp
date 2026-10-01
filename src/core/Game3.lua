@@ -677,7 +677,10 @@ function Game3:_cycleSpeed(dir)
   if self:speedLocked() then return end
   local GameSpeed = require("src.core.GameSpeed")
   local key = GameSpeed.optionKey(self:speedCategory())
-  self.options[key] = GameSpeed.cycle(self.options[key], dir)
+  local nextSpeed = GameSpeed.cycle(self.options[key], dir)
+  for _, c in ipairs(GameSpeed.CATEGORIES) do
+    self.options[GameSpeed.optionKey(c)] = nextSpeed
+  end
   self:writeOptions()
 end
 
@@ -1166,6 +1169,7 @@ local SOFT_RESET = {
   { "src.ui.game3.daycare_menu", closeFlag("open") },
   { "src.ui.game3.fame_checker", closeFlag("open") },
   { "src.ui.game3.move_relearner", closeFlag("open") },
+  { "src.ui.game3.rse.move_relearner", closeFlag("open") },
   { "src.ui.game3.egg_hatch", closeFlag("open") },
   { "src.ui.game3.evolution_scene", closeFlag("open") },
   { "src.ui.game3.diploma", closeFlag("open") },
@@ -1246,7 +1250,8 @@ local function clearFieldScreens()
   FieldView.setCameraPanning(0, 0)
 end
 
-function Game3:returnToTitle()
+function Game3:returnToTitle(opts)
+  opts = opts or {}
   self.questPlayback=nil
   Help.reset()
   Audio.stopAll()
@@ -1285,7 +1290,8 @@ function Game3:returnToTitle()
   end
   Boot.setSaveStatus(self.boot, saveStatus)
   Boot.setTextSpeed(self.boot, Options.block(self.options).textSpeed)
-  if not self.boot.custom then
+  if not self.boot.custom or opts.skipIntro then
+    if self.boot.custom then self.boot.custom.coldBoot = false end
     self.boot.phase = Boot.PHASE.TITLE
     self.boot.timer = 0
     Boot.enterTitle(self.boot)

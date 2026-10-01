@@ -224,6 +224,7 @@ function Ui.reset(opts)
   Ui._actionCursor = {}
   Ui._moveCursor = {}
   Ui._moveCursorMon = {}
+  Ui._swap = nil
   Ui._target = nil
   Ui._bounce = { hb = {}, mon = {} }
   Ui._preview = nil
@@ -961,8 +962,46 @@ local function move_count(mon)
   return n
 end
 
+-- pokeemerald/src/battle_controller_player.c:599
+local function move_swap_input(input, st, battler, id)
+  local MoveSwap = require("src.core.game3.battle.move_swap")
+  local sw = Ui._swap
+  local cur = (Ui._moveIndex or 1) - 1
+  if not sw then
+    if input:wasPressed("select") and MoveSwap.canStart(st, battler) then
+      Ui._swap = { cursor = MoveSwap.initialCursor(cur) }
+      return true
+    end
+    return false
+  end
+  if input:wasPressed("a") or input:wasPressed("select") then
+    play_select()
+    if sw.cursor ~= cur then MoveSwap.apply(battler, cur + 1, sw.cursor + 1) end
+    Ui._moveIndex = sw.cursor + 1
+    if id then Ui._moveCursor[id] = Ui._moveIndex end
+    Ui._swap = nil
+  elseif input:wasPressed("b") then
+    play_select()
+    Ui._swap = nil
+  else
+    local n = MoveSwap.moveCount(battler and battler.mon)
+    for _, dir in ipairs({ "left", "right", "up", "down" }) do
+      if input:wasPressed(dir) then
+        local nc = MoveSwap.step(sw.cursor, dir, n)
+        if nc ~= sw.cursor then
+          sw.cursor = nc
+          play_select()
+        end
+        break
+      end
+    end
+  end
+  return true
+end
+
 -- pokefirered/src/battle_main.c:2380
 local function open_move_menu()
+  Ui._swap = nil
   if is_double() then
     local id = Ui._active or 0
     local battler = active_battler()
@@ -1519,6 +1558,7 @@ local function handle_double_input(input)
     return true
   elseif Ui._mode == "moves" then
     local b = active_battler(st)
+    if move_swap_input(input, st, b, id) then return true end
     local n = move_count(b and b.mon)
     local c = (Ui._moveIndex or 1) - 1
     local nc = c
@@ -1656,6 +1696,7 @@ function Ui.handleInput(input)
     -- Input owned by BagMenu / PartyMenu via Battle.update
     return true
   elseif Ui._mode == "moves" then
+    if move_swap_input(input, Ui._st, Ui._st and Ui._st.player, nil) then return true end
     -- pokefirered/src/battle_controller_player.c:526
     local idx, moved = grid_nav(Ui._moveIndex, input, move_count(Ui._st and Ui._st.player and Ui._st.player.mon))
     if moved then
@@ -2130,6 +2171,19 @@ local function rse_window_colors(fgIdx, shadowIdx)
   }
 end
 
+-- The default (13, 15) window colours, rebuilt only when the manifest's
+-- palette table changes.  Callers must not modify the returned table
+-- (rse_pp_colors, which does, builds its own with rse_window_colors).
+local _defaultWinColors, _defaultWinPal = nil, nil
+local function rse_default_colors()
+  local pal = BattleChrome.manifest().windowTextPal or nil
+  if not _defaultWinColors or pal ~= _defaultWinPal then
+    _defaultWinColors = rse_window_colors()
+    _defaultWinPal = pal
+  end
+  return _defaultWinColors
+end
+
 -- pokeemerald/src/battle_message.c:3033
 local function rse_pp_colors(pp, maxPp)
   local pp2 = BattleChrome.manifest().ppTextPal or {}
@@ -2147,7 +2201,7 @@ local function rse_text(win, text, dx, opts)
   local useNarrow = opts.narrow == nil and narrow or opts.narrow
   F.draw(tostring(text or ""), x + (dx or 0), y, {
     font = useNarrow and "narrow" or nil,
-    colors = opts.colors or rse_window_colors(),
+    colors = opts.colors or rse_default_colors(),
   })
 end
 
@@ -2161,11 +2215,31 @@ local function draw_action_menu_rse(st)
   local mx, my = BattleChrome.textOrigin(W.ACTION_MENU)
   local c = Ui._menuIndex - 1
   local col, row = c % 2, math.floor(c / 2)
-  Window.cursorPx(8 * (7 * col + 16), my + 16 * row, { colors = rse_window_colors() })
+  Window.cursorPx(8 * (7 * col + 16), my + 16 * row, { colors = rse_default_colors() })
   for i = 1, 4 do
     local cc, rr = (i - 1) % 2, math.floor((i - 1) / 2)
-    battle_font().draw(tostring(labels[i] or ""), mx + 56 * cc, my + 16 * rr, { colors = rse_window_colors() })
+    battle_font().draw(tostring(labels[i] or ""), mx + 56 * cc, my + 16 * rr, { colors = rse_default_colors() })
   end
+end
+
+local function swap_cursor_colors(variant, base)
+  local clear = { 0, 0, 0, 0 }
+  if variant == 27 then return { fg = base.fg, shadow = clear, bg = base.bg } end
+  return { fg = base.shadow, shadow = clear, bg = base.bg }
+end
+
+-- pokeemerald/src/battle_controller_player.c:608
+local function draw_move_cursors(pos_of, base)
+  local cur = Ui._moveIndex - 1
+  local sw = Ui._swap
+  local p = pos_of(cur)
+  if not sw or sw.cursor == cur then
+    Window.cursorPx(p[1], p[2], { colors = base })
+    return
+  end
+  Window.cursorPx(p[1], p[2], { colors = swap_cursor_colors(29, base) })
+  local q = pos_of(sw.cursor)
+  Window.cursorPx(q[1], q[2], { colors = swap_cursor_colors(27, base) })
 end
 
 -- pokeemerald/src/battle_controller_player.c:1456
@@ -2173,14 +2247,19 @@ local function draw_move_menu_rse(st)
   local W = BattleChrome.WIN
   local ab = st and (is_double(st) and active_battler(st) or st.player)
   local mon = ab and ab.mon
-  local c = Ui._moveIndex - 1
   local _, cy = BattleChrome.textOrigin(W.MOVE_NAME_1)
-  Window.cursorPx(8 * (9 * (c % 2) + 1), cy + 16 * math.floor(c / 2), { colors = rse_window_colors() })
+  draw_move_cursors(function(c)
+    return { 8 * (9 * (c % 2) + 1), cy + 16 * math.floor(c / 2) }
+  end, rse_default_colors())
   for i = 1, 4 do
     local mv = mon and mon.moves and mon.moves[i]
     local label = "-"
     if mv and mv ~= 0 and mv ~= "" then label = Moves.displayName(mv) end
     rse_text(W.MOVE_NAME_1 + i - 1, label)
+  end
+  if Ui._swap then
+    rse_text(W.SWITCH_PROMPT, RomText.plain("gText_BattleSwitchWhich"))
+    return
   end
   local slot = Ui._moveIndex
   local mv = mon and mon.moves and mon.moves[slot]
@@ -2238,9 +2317,7 @@ local function draw_move_menu(st)
     { 8, 122 }, { 80, 122 },
     { 8, 138 }, { 80, 138 },
   }
-  local c = Ui._moveIndex - 1
-  local cp = cursorPos[c + 1] or cursorPos[1]
-  Window.cursorPx(cp[1], cp[2], { colors = FrlgFont.COLOR.NORMAL })
+  draw_move_cursors(function(c) return cursorPos[c + 1] or cursorPos[1] end, FrlgFont.COLOR.NORMAL)
   for i = 1, 4 do
     local mv = mon and mon.moves and mon.moves[i]
     -- pokefirered/src/data/text/move_names.h:2
@@ -2249,6 +2326,11 @@ local function draw_move_menu(st)
       label = Moves.displayName(mv)
     end
     draw_menu_text(label, positions[i][1], positions[i][2], { small = true, colors = FrlgFont.COLOR.NORMAL })
+  end
+  if Ui._swap then
+    draw_menu_text(RomText.plain("gText_BattleSwitchWhich"), 168, 122,
+      { small = false, colors = FrlgFont.COLOR.NORMAL })
+    return
   end
   local slot = Ui._moveIndex
   local mv = mon and mon.moves and mon.moves[slot]
@@ -2537,6 +2619,7 @@ function Ui.draw(w, h)
   -- 4. Player Mon (Z: 200)
   -- 5. In front of Player & Global Foreground (Z: 201 .. 999)
   local dbl = st and is_double(st)
+  if Anim.beginParticleFrame then Anim.beginParticleFrame() end
   if dbl then
     draw_double_mons(st, stage, Anim, screenFxActive)
   else
@@ -2556,6 +2639,7 @@ function Ui.draw(w, h)
   if screenFxActive then Anim.beginScreenEffect() end
   Anim.drawParticles(201, 999)
   end
+  if Anim.endParticleFrame then Anim.endParticleFrame() end
   draw_intro_ball(stage)
   -- pokefirered/src/pokeball.c:770
   BallOpen.draw()

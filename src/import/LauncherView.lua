@@ -1547,6 +1547,7 @@ end
 -- one visited, else Red.  Kept as a function so the mods/find/skins panels
 -- still answer "for which game" without a game tab being open.
 local function gameTabs(imp)
+  SecretGames.update()
   local launcher = type(imp) ~= "table" or imp.launcher and true or false
   local c = imp and imp._gameTabs
   if c and c.rev == SecretGames.rev and c.launcher == launcher then
@@ -6786,7 +6787,7 @@ local function drawTabLayer(imp, tabId, x, contentY, w, viewH, availH, m, dx)
   local budgetH = math.floor(viewH * (1 + PANEL_OVERSCAN))
   local panelW = math.max(0, w - Kit.scrollGutter(m.s))
   local contentH = buildTabPanel(imp, x, py + 5, panelW, availH - 5, budgetH - 5, m)
-  contentH = (contentH or (availH - 5)) + 5
+  contentH = (contentH or (availH - 5)) + 10
   imp._tabContentH[tabId] = contentH
   imp._tabScrollMax[tabId] = Kit.scrollExtent(contentH, viewH)
   at = clamp(at, 0, tabScrollMax(imp))

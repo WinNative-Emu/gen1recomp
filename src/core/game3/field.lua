@@ -207,6 +207,9 @@ function Field.update(_dt)
   local Ghosts = require("src.core.game3.ghosts")
   Ghosts.sync()
   Ghosts.update(game)
+  -- pre-load tileset pairs queued by a seamless world refresh, one per frame
+  local MapMod = package.loaded["src.core.game3.map"]
+  if MapMod and MapMod._warmQueue and MapMod.stepWarm then MapMod.stepWarm() end
 
   Field.pollMapChange(game)
   -- pokefirered/src/safari_zone.c:60 CB2_EndSafariBattle
@@ -509,6 +512,11 @@ end
 
 -- pokefirered/data/scripts/itemfinder.inc:1
 function Field.digUpUnderfootItem(game, hidden)
+  if require("src.core.game3.profile").family(Field._session) == "rse" then
+    -- pokeemerald/src/item_use.c:597
+    require("src.ui.game3.message").close()
+    return false
+  end
   if not hidden then return false end
   local Flags = require("src.core.game3.scripting.flags")
   local flag = hidden_flag(hidden)
@@ -549,14 +557,14 @@ function Field.useItemfinder(session, showOWMessage)
   })
 
   if not result then
-    local text = RomText.box("gText_NopeTheresNoResponse")
+    local text = RomText.box(Itemfinder.textKey("nothing", session))
     if showOWMessage then
       -- pokefirered/src/itemfinder.c:150
       Message.show(text, { session = session, done = function() Message.close() end })
     end
     return false, "itemfinder", text, nil
   end
-  local key = result.underfoot and "gText_ItemfinderShakingWildly" or "gText_ItemfinderResponding"
+  local key = Itemfinder.textKey(result.underfoot and "onTop" or "nearby", session)
   local text = RomText.box(key)
   if showOWMessage then
     Field.lock()
@@ -1702,6 +1710,50 @@ function Field.flyDestination(section)
   return baked[id]
 end
 
+-- pokefirered/src/overworld.c:289
+local function resetCyclingRoadAfterTravel()
+  local session = Field._session
+  if not session then return end
+  local Profile = require("src.core.game3.profile")
+  local Flags = require("src.core.game3.scripting.flags")
+  local Runtime = package.loaded["src.core.game3.runtime"]
+  local Space = package.loaded["src.core.game3.scripting.space"]
+  local profile = Profile.forSession(session)
+  local defs = Flags.forVersion(profile.id)
+  local roadName = profile.family == "rse"
+    and "FLAG_SYS_CYCLING_ROAD" or "FLAG_SYS_ON_CYCLING_ROAD"
+  local road = assert(defs.IDS[roadName])
+  local scene = profile.family ~= "rse" and assert(defs.VAR_IDS.VAR_MAP_SCENE_ROUTE16)
+  local live = Runtime and Runtime.getSession and Runtime.getSession()
+  local seen = {}
+  for _, store in ipairs({ session, session.store or false, Space and Space.store or false,
+      live or false, live and live.store or false }) do
+    if store and not seen[store] then
+      seen[store] = true
+      Flags.setFlag(store, nil, road, false)
+      if store.flags then store.flags[roadName] = nil end
+      if scene then
+        Flags.setVar(store, nil, scene, 0)
+        if store.vars then
+          store.vars[tostring(scene)] = nil
+          store.vars[string.format("0x%X", scene)] = nil
+          store.vars.VAR_MAP_SCENE_ROUTE16 = nil
+        end
+      end
+    end
+  end
+  Player.biking, Player.bikeType = false, nil
+  Player.surfing, Player.surfHopping = false, false
+  for _, s in ipairs({ session, live or false }) do
+    if s then s.biking, s.bikeType = false, nil end
+  end
+  local save = Field._game and Field._game.save
+  if save then
+    save.biking, save.bikeType = false, nil
+    if save.position then save.position.biking = false end
+  end
+end
+
 -- pokefirered/src/field_effect.c:1065 ReturnToFieldFromFlyMapSelect
 function Field.flyTo(section, mon, info)
   local dest = (info and info.dest)
@@ -1716,6 +1768,7 @@ function Field.flyTo(section, mon, info)
   local FieldEffects = require("src.core.game3.field_effects")
   local function land()
     local Map = require("src.core.game3.map")
+    resetCyclingRoadAfterTravel()
     Map.load(Field._mod, Field._game, dest.map, {
       x = dest.x, y = dest.y, facing = "down", depth1Connections = true,
     })
@@ -1801,8 +1854,7 @@ function Field.clearTempFieldEventData(game, mapId)
   local Flags = require("src.core.game3.scripting.flags")
   local Space = package.loaded["src.core.game3.scripting.space"]
   local session = Field._session
-  local ids = {}
-  for i = 1, #FieldMoves.TEMP_SYS_FLAGS do ids[i] = FieldMoves.TEMP_SYS_FLAGS[i] end
+  local ids = FieldMoves.tempSysFlags()
   local data = game and game.data and game.data.maps
   local def = mapId and data and data[mapId]
   -- pokefirered/src/overworld.c:803
@@ -1895,6 +1947,7 @@ end
 function Field.respawnAtHeal(opts)
   local session = Field._session
   if not session then return end
+  resetCyclingRoadAfterTravel()
   local HealLocations = require("src.core.game3.heal_locations")
   HealLocations.normalizeSession(session)
   local whiteOut = not (opts and opts.fieldMove)
@@ -2056,9 +2109,16 @@ function Field.setMetatile(x, y, metatile, isImpassable)
     layout:applyOverride(x, y, mid, coll, layout:elevAt(x, y))
     Field._overrideLayouts[mapId] = layout
     local Collision = require("src.core.game3.collision")
-    Collision.bindMap(game, mapId, mapDef)
+    if not (Collision.patchCell and Collision.patchCell(mapId, mapDef, x, y)) then
+      Collision.bindMap(game, mapId, mapDef)
+    end
+    -- applyOverride already invalidated the view cell (FieldView.invalidateLayoutCell).
     local FieldView = package.loaded["src.core.game3.field_view"]
-    if FieldView then FieldView._nativeDirty = true end
+    local LayoutNative = package.loaded["src.core.game3.layout_native"]
+    if FieldView and not (FieldView.invalidateLayoutCell and LayoutNative
+        and layout.applyOverride == LayoutNative.applyOverride) then
+      FieldView._nativeDirty = true
+    end
   end
   local world = game and (game.overworld or game.world)
   if world and world.map and world.map.setBlock then

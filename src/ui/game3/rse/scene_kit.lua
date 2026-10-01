@@ -169,6 +169,12 @@ local arrowArt
 
 -- pokeemerald/src/list_menu.c:1052
 function Kit.scrollArrow(dir, cx, cy, t)
+  local RseBag = require("src.ui.game3.rse.bag_chrome")
+  if RseBag.ARROWS[dir] and RseBag.ready() then return RseBag.drawArrow(dir, cx, cy, t) end
+  return Kit.glyphArrow(dir, cx, cy, t)
+end
+
+function Kit.glyphArrow(dir, cx, cy, t)
   if arrowArt == nil then
     local ok = pcall(function() require("src.ui.game3.list_menu").loadArrows() end)
     arrowArt = ok
@@ -461,6 +467,12 @@ function Printer:draw(x, y, opts)
   opts = opts or {}
   local colors = opts.colors or Kit.messageColors()
   local cx, cy = x, y
+  local clip = opts.clip
+  local sx, sy, sw, sh
+  if clip then
+    sx, sy, sw, sh = love.graphics.getScissor()
+    love.graphics.intersectScissor(clip[1], clip[2], clip[3], clip[4])
+  end
   for i, line in ipairs(self.lines) do
     local ly = y + (i - 1) * self.pitch - self.scrollY
     if line ~= "" then
@@ -470,6 +482,9 @@ function Printer:draw(x, y, opts)
       cx = x
     end
     cy = ly
+  end
+  if clip then
+    if sx then love.graphics.setScissor(sx, sy, sw, sh) else love.graphics.setScissor() end
   end
   if self.arrowFrame then
     local img = Kit.rgbaImage("data/generated/gba/chrome/fonts/down_arrow.rgba", 8, 48)

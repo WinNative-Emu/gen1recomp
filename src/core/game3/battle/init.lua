@@ -93,6 +93,17 @@ local function stop_low_hp_song()
   end
 end
 
+local function apply_low_hp(on)
+  if on and not Battle._lowHpSong then
+    Battle._lowHpSong = true
+    if Audio and Audio.playSe and SE then
+      Audio.playSe(SE.SE_LOW_HEALTH, { loop = true })
+    end
+  elseif not on then
+    stop_low_hp_song()
+  end
+end
+
 --- pret HandleLowHpMusicChange / HandleBattleLowHpMusicChange
 local function update_low_hp_music()
   local st = Battle._st
@@ -106,15 +117,16 @@ local function update_low_hp_music()
   local hp = math.floor(tonumber(pres and pres.displayHp) or tonumber(mon.hp) or 0)
   local maxHp = math.floor(tonumber(pres and pres.displayMaxHp) or tonumber(mon.maxHp) or 0)
   local red = hp_bar_red(hp, maxHp)
-  if red and not Battle._lowHpSong then
-    Battle._lowHpSong = true
-    if Audio and Audio.playSe and SE then
-      Audio.playSe(SE.SE_LOW_HEALTH, { loop = true })
-    end
-  elseif not red then
-    stop_low_hp_song()
+  if ModRuntime.wantsHook("battle.low_health_alarm") then
+    ModRuntime.call("battle.low_health_alarm", function(ctx)
+      apply_low_hp(ctx.on)
+    end, { on = red, battle = st })
+  else
+    apply_low_hp(red)
   end
 end
+
+Battle._updateLowHpMusic = update_low_hp_music
 
 local function party_menu_input(PartyMenu, input)
   local SummaryMenu = package.loaded["src.ui.game3.summary_menu"]
@@ -2958,14 +2970,14 @@ function D.commandUpdate(input)
     return
   end
   if Battle._refuseLinkItem(input) then return end
-  local BagMenu = require("src.ui.game3.bag_menu")
-  if BagMenu.isOpen and BagMenu.isOpen() then
-    if input then require("src.ui.game3.screens").handleInput("bag", BagMenu, input) end
-    return
-  end
   local PartyMenu = require("src.ui.game3.party_menu")
   if PartyMenu.isOpen and PartyMenu.isOpen() then
     if input then party_menu_input(PartyMenu, input) end
+    return
+  end
+  local BagMenu = require("src.ui.game3.bag_menu")
+  if BagMenu.isOpen and BagMenu.isOpen() then
+    if input then require("src.ui.game3.screens").handleInput("bag", BagMenu, input) end
     return
   end
   if Ui._mode == "bag" or Ui._mode == "party" then
@@ -3782,14 +3794,14 @@ update_body = function(dt, game)
 
   if Battle._phase == "command" and not Battle._auto then
     if refuse_link_item(input) then return end
-    local BagMenu = require("src.ui.game3.bag_menu")
-    if BagMenu.isOpen and BagMenu.isOpen() then
-      if input then require("src.ui.game3.screens").handleInput("bag", BagMenu, input) end
-      return
-    end
     local PartyMenu = require("src.ui.game3.party_menu")
     if PartyMenu.isOpen and PartyMenu.isOpen() then
       if input then party_menu_input(PartyMenu, input) end
+      return
+    end
+    local BagMenu = require("src.ui.game3.bag_menu")
+    if BagMenu.isOpen and BagMenu.isOpen() then
+      if input then require("src.ui.game3.screens").handleInput("bag", BagMenu, input) end
       return
     end
     if Ui._mode == "bag" or Ui._mode == "party" then

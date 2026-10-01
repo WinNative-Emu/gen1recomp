@@ -1311,6 +1311,12 @@ function Pokemon.swapMoves(mon, slotA, slotB)
     mon.pp[slotB] = ppA
   end
 
+  if type(mon.maxPp) == "table" then
+    local maxA = mon.maxPp[slotA]
+    mon.maxPp[slotA] = mon.maxPp[slotB]
+    mon.maxPp[slotB] = maxA
+  end
+
   -- 4. If parallel array mon.ppBonuses / mon.ppBonus / mon.ppUp exists
   if type(mon.ppBonuses) == "table" then
     local bA = mon.ppBonuses[slotA]
@@ -1502,8 +1508,17 @@ local function pic(store, kind, species, form, shiny)
   if shiny and species ~= Pokemon.SPECIES_EGG then kind = kind .. "_shiny" end
   local key = form > 0 and (species .. "_" .. form) or species
   if kind:find("_shiny", 1, true) then key = "shiny:" .. key end
-  if store[key] then return store[key] end
-  return pic_entry(store, key, read_pic(pic_rel(kind, species, form)))
+  local hit = store[key]
+  if hit then return hit end
+  -- false marks a pic file known to be missing, so draw loops that probe
+  -- backPic then frontPic every frame do not re-read the filesystem.
+  if hit == false then return nil end
+  local rgba = read_pic(pic_rel(kind, species, form))
+  if not rgba then
+    store[key] = false
+    return nil
+  end
+  return pic_entry(store, key, rgba)
 end
 
 Pokemon.SPECIES_SPINDA = 308
