@@ -232,6 +232,8 @@ local function writeback(session, battleParty, remap, result, save, opts)
         speed = src.speed or src.spe,
         spAtk = src.spAtk or src.spa,
         spDef = src.spDef or src.spd,
+        ability = src.ability,
+        abilityId = src.abilityId,
         _allowMoveRewrite = true,
       })
       -- pokefirered/src/battle_controller_player.c:1909
@@ -598,6 +600,11 @@ function BattleBridge.start(mod, game, foe, opts)
     if okA and Audio and Audio.playSong then
       Audio.playSong(battleSong)
     end
+  end
+
+  do
+    local StayMessage = package.loaded["src.ui.game3.message"]
+    if StayMessage and StayMessage.closeStay then StayMessage.closeStay() end
   end
 
   local function doStart()

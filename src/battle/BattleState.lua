@@ -355,7 +355,7 @@ end
 local function objPicPalette()
   local PaletteFX = require("src.render.PaletteFX")
   if not PaletteFX.usesSpriteObp() then return nil end
-  local colors, group = PaletteFX.ogObj()
+  local colors, group = PaletteFX.ogObjLit()
   if not colors then return nil end
   return { name = "obp1:" .. tostring(group), colors = colors }
 end
@@ -648,6 +648,7 @@ local function makeBattler(data, mon, isPlayer, save)
     -- while the tilemap still shows the prior condition until the next
     -- post-action HUD refresh (core.asm after Execute*Move)
     shownStatus = mon.status,
+    sleepTurns = mon.status == "SLP" and mon.sleepTurns or nil, -- engine/battle/core.asm:3331
     stages = {},
     -- volatile state; Transform/Conversion/Mimic override the cur* fields
     curStats = mon.stats,
@@ -2756,7 +2757,6 @@ function BattleState:oldManThrow()
   self.result = "run" -- nothing is kept; wBattleResult only ends the demo
   self:sayAuto(Strings("%s used\nPOKé BALL!", self.demoName or Strings("OLD MAN")))
   self:act(function()
-    require("src.core.Sound").play(self.data, "Ball_Toss")
     -- ItemUseBall's beat before the toss chain (like throwBall)
     self.nextInsert = (self.nextInsert or 0) + 1
     table.insert(self.queue, self.nextInsert, { wait = 20 })
@@ -3424,7 +3424,10 @@ function BattleState:applyAnimEffect(ev)
   local e = ev.effect
   if not e then return end
 
-  if e == "SFX_TINK" then
+  if e == "SFX_BALL_TOSS" then
+    -- pokered/engine/battle/animations.asm:694
+    require("src.core.Sound").play(self.data, "Ball_Toss")
+  elseif e == "SFX_TINK" then
     -- each ball shake opens with a tink (DoBallShakeSpecialEffects)
     require("src.core.Sound").play(self.data, "Tink")
 
@@ -4221,6 +4224,7 @@ function BattleState:preRechargeChecks(user, target)
   local mon = user.mon
   if mon.status == "SLP" then
     user.sleepTurns = (user.sleepTurns or 1) - 1
+    mon.sleepTurns = user.sleepTurns > 0 and user.sleepTurns or nil
     if user.sleepTurns <= 0 then
       mon.status = nil
       self:sayNext(self:romText("_WokeUpText", "%s\nwoke up!", displayName(user)))
@@ -5240,7 +5244,6 @@ function BattleState:safariAction(choice)
     st.balls = st.balls - 1
     self:sayAuto(Strings("%s used\nSAFARI BALL!", playerName))
     self:act(function()
-      require("src.core.Sound").play(self.data, "Ball_Toss")
       self.lastBall = "SAFARI_BALL"
       local caught, shakes = self:catchAttempt("SAFARI_BALL", self.safariCatchRate)
       Runtime.emit("battle.ball_thrown", {
@@ -5670,7 +5673,6 @@ function BattleState:throwBall(ball)
                                      self.data.items[ball].name))
   end
   self:act(function()
-    require("src.core.Sound").play(self.data, "Ball_Toss")
     if self.kind ~= "wild" then
       -- ThrowBallAtTrainerMon (item_effects.asm:2292-2303) still animates the
       -- toss: MoveAnimation routes TOSS_ANIM to TossBallAnimation, which takes
@@ -5947,7 +5949,7 @@ end
 local function ballObpSheet()
   local PaletteFX = require("src.render.PaletteFX")
   if not PaletteFX.usesSpriteObp() then return nil end
-  local colors, group = PaletteFX.ogObj()
+  local colors, group = PaletteFX.ogObjLit()
   if not colors then return nil end
   local SpriteRenderer = require("src.render.SpriteRenderer")
   local ok, img = pcall(SpriteRenderer.obpImage,

@@ -469,7 +469,9 @@ M.SS_ANNE_CAPTAINS_ROOM = {
       { "show_text", "_SSAnneCaptainsRoomCaptainIFeelMuchBetterText" },
       -- give-then-print like scripts/SSAnneCaptainsRoom.asm (GiveItem
       -- fills wStringBuffer; the received text reads it)
-      { "give_item", "HM_CUT", 1, false },
+      -- scripts/SSAnneCaptainsRoom.asm:77
+      { "give_item", "HM_CUT", 1, false,
+        "_SSAnneCaptainsRoomCaptainHM01NoRoomText", "Get_Key_Item" },
       { "show_text", "_SSAnneCaptainsRoomCaptainReceivedHM01Text" },
       { "set_flag", "EVENT_GOT_HM01" },
       -- pokeyellow scripts/SSAnneCaptainsRoom.asm:32-33
@@ -483,10 +485,10 @@ M.SS_ANNE_CAPTAINS_ROOM = {
 do
   local rows = M.SS_ANNE_CAPTAINS_ROOM.talk.TEXT_SSANNECAPTAINSROOM_CAPTAIN
   if not require("src.core.GameVersion").isYellow() then
-    for i, row in ipairs(rows) do
+    for _, row in ipairs(rows) do
       if row[1] == "give_item" then
         -- pokered scripts/SSAnneCaptainsRoom.asm:34-37
-        table.insert(rows, i, { "no_npc_face_player", true })
+        row[7] = true
         break
       end
     end
@@ -646,26 +648,14 @@ M.MR_FUJIS_HOUSE = {
 -- Snorlax (scripts/Route12.asm, Route16.asm)
 -- -------------------------------------------------------------------
 
--- each route has its own strings (text/Route12.asm, text/Route16.asm;
--- Route 16's sleeping line is the unnamed _Route16Text7).  Talking to
--- Snorlax before it's beaten always just shows the sleeping line --
--- Route12DefaultScript/Route16DefaultScript only special-case
--- EVENT_FIGHT_ROUTEnn_SNORLAX, which ItemUsePokeFlute sets when the
--- player USES the POKé FLUTE from the item-use menu while standing next
--- to Snorlax (see ItemEffects.lua's POKE_FLUTE branch); merely talking
--- to it with the flute in the bag does nothing.  From the woke-up text
--- on, snorlaxWake below mirrors Route12DefaultScript's fight branch /
--- Route12SnorlaxPostBattleScript (scripts/Route12.asm, Route16.asm):
--- HideObject runs BEFORE the battle (so Snorlax is gone even after a
--- blackout), then the battle, then the calmed-down/returned line only
--- when it was NOT caught (`ld a, [wBattleResult] / cp $2` skips it),
--- and EVENT_BEAT_ROUTEnn_SNORLAX on any non-blackout result.
+-- pokered/scripts/Route12.asm:24
+-- pokered/scripts/Route16.asm:24
 local function snorlaxWake(mapId, objName, beatFlag, wokeUpText, calmedText)
   return {
     { "show_text", wokeUpText },                    -- 1
     { "hide_object", mapId, objName },              -- 2 HideObject pre-battle
     { "static_battle", "SNORLAX", 30, beatFlag },   -- 3
-    { "check_battle_result", "win", "run" },        -- 4 not caught, not blackout
+    { "check_battle_result", "win" },
     { "jump_if_false", 7 },                         -- 5 end (skip calmed-down)
     { "show_text", calmedText },                    -- 6
   }
@@ -927,7 +917,7 @@ M.SILPH_CO_11F = {
       { "jump_if_true", 9 },                                                 -- 3
       { "show_text", "_SilphCo11FSilphPresidentText" },                      -- 4
       -- give-then-print like scripts/SilphCo11F.asm
-      { "give_item", "MASTER_BALL", 1, false },                              -- 5
+      { "give_item", "MASTER_BALL", 1, false, false, "Get_Key_Item" },       -- 5 scripts/SilphCo11F.asm:322
       { "show_text", "_SilphCo11FSilphPresidentReceivedMasterBallText" },    -- 6
       { "set_flag", "EVENT_GOT_MASTER_BALL" },                               -- 7
       { "jump", "end" },                                                     -- 8
