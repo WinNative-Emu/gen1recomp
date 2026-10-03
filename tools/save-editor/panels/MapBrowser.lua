@@ -18,8 +18,10 @@ local Gen = require("Gen")
 local PAL = Theme.PAL
 
 local MapBrowser = {}
+local Motion = require("Motion")
+local Chooser = require("Chooser")
 
-local CELL = 16   -- the walk grid; a cell is 16px of map art
+local CELL = 16 -- the walk grid; a cell is 16px of map art
 
 local function playerPos(S)
   local map, x, y = Gen.playerMap(S.save)
@@ -27,8 +29,12 @@ local function playerPos(S)
 end
 
 local function clampZoom(z)
-  if z < 1 then return 1 end
-  if z > 4 then return 4 end
+  if z < 0.03125 then
+    return 0.03125
+  end
+  if z > 4 then
+    return 4
+  end
   return z
 end
 
@@ -42,9 +48,122 @@ local function centerOn(S, cx, cy)
 end
 MapBrowser.centerOn = centerOn
 
+local function zoomTo(S, zoom)
+  local old = S.mapZoom or 2
+  local vw, vh = S._mapViewW or 0, S._mapViewH or 0
+  local cx = (S.mapCamX or 0) + vw / (2 * old)
+  local cy = (S.mapCamY or 0) + vh / (2 * old)
+  S.mapZoom = clampZoom(zoom)
+  S.mapCamX, S.mapCamY = cx - vw / (2 * S.mapZoom), cy - vh / (2 * S.mapZoom)
+  S.mapAutoFit = false
+end
+
+local function stepZoom(S, direction)
+  local zoom = S.mapZoom or 2
+  local levels = { 0.03125, 0.0625, 0.125, 0.25, 0.5, 0.75, 1, 1.5, 2, 2.5, 3, 3.5, 4 }
+  if direction > 0 then
+    for _, value in ipairs(levels) do
+      if value > zoom + 0.001 then zoomTo(S, value); return end
+    end
+  else
+    for i = #levels, 1, -1 do
+      if levels[i] < zoom - 0.001 then zoomTo(S, levels[i]); return end
+    end
+  end
+end
+
+function MapBrowser.fit(S, map)
+  local wc = map.widthCells or (map.width or 1) * 2
+  local hc = map.heightCells or (map.height or 1) * 2
+  S.mapZoom = clampZoom(math.min((S._mapViewW or 1) / (wc * CELL), (S._mapViewH or 1) / (hc * CELL)) * 0.96)
+  centerOn(S, wc / 2, hc / 2)
+  S.mapAutoFit = true
+end
+
+local function showPlayer(S)
+  local id = playerPos(S)
+  if id then
+    if S.mapId ~= id then MapBrowser.select(S, id) end
+    S._mapCenterPlayer = true
+  end
+end
+
+local function insideView(S, x, y)
+  local r = S._mapViewRect
+  return r and x >= r.x and x < r.x + r.w and y >= r.y and y < r.y + r.h
+end
+MapBrowser.contains = insideView
+
+local function panTo(S, x, y)
+  local d = S._mapDrag
+  if not d then return end
+  local dx, dy = x - d.mx, y - d.my
+  if not d.moved and math.abs(dx) + math.abs(dy) <= 10 then return end
+  d.moved = true
+  S.mapCamX, S.mapCamY = d.camX - dx / S.mapZoom, d.camY - dy / S.mapZoom
+  S.mapAutoFit = false
+end
+
+-- Keep the map point beneath the pinch midpoint fixed while zooming.
+function MapBrowser.touchpressed(S, id, x, y)
+  if S.tab ~= "map" or S.navPopup or S.editPopup or Motion.active()
+    or (S._mapStacked and S.mapSection ~= "view") or not insideView(S, x, y) then return false end
+  if S._mapPinch then return true end
+  S._mapTouches = S._mapTouches or {}
+  S._mapTouches[id] = { x = x, y = y }
+  local first, second
+  for key in pairs(S._mapTouches) do
+    if not first then first = key elseif not second then second = key end
+  end
+  if not second then return false end
+  local a, b = S._mapTouches[first], S._mapTouches[second]
+  local mx, my = (a.x + b.x) / 2, (a.y + b.y) / 2
+  local r = S._mapViewRect
+  S._mapPinch = {
+    first = first, second = second,
+    distance = math.max(1, math.sqrt((a.x - b.x)^2 + (a.y - b.y)^2)),
+    zoom = S.mapZoom,
+    wx = S.mapCamX + (mx - r.x) / S.mapZoom,
+    wy = S.mapCamY + (my - r.y) / S.mapZoom,
+  }
+  S._mapDrag, S.mapAutoFit = nil, false
+  return true
+end
+
+function MapBrowser.touchmoved(S, id, x, y)
+  local points = S._mapTouches
+  if not points or not points[id] then return false end
+  points[id].x, points[id].y = x, y
+  local pinch, r = S._mapPinch, S._mapViewRect
+  if not pinch then panTo(S, x, y); return false end
+  if not r then return false end
+  local a, b = points[pinch.first], points[pinch.second]
+  if not a or not b then return false end
+  local distance = math.sqrt((a.x - b.x)^2 + (a.y - b.y)^2)
+  S.mapZoom = clampZoom(pinch.zoom * distance / pinch.distance)
+  S.mapCamX = pinch.wx - ((a.x + b.x) / 2 - r.x) / S.mapZoom
+  S.mapCamY = pinch.wy - ((a.y + b.y) / 2 - r.y) / S.mapZoom
+  return true
+end
+
+function MapBrowser.touchreleased(S, id)
+  local points = S._mapTouches
+  if not points or not points[id] then return false end
+  points[id] = nil
+  local pinched = S._mapPinch ~= nil
+  S._mapPinch, S._mapDrag = nil, nil
+  return pinched
+end
+
+function MapBrowser.clearTouches(S)
+  S._mapTouches, S._mapPinch, S._mapDrag = nil, nil, nil
+end
+
 local function sortedMapIds(data)
   local ids = {}
-  for id in pairs(Gen.maps(data)) do ids[#ids + 1] = id end
+  for id in pairs(Gen.maps(data)) do
+    ids[#ids + 1] = id
+  end
   table.sort(ids)
   return ids
 end
@@ -61,9 +180,7 @@ local function goToWarp(S, warp)
   if Gen.of(S.save) == 3 or Gen.of(S.save) == 2 then
     local dest = def.destMap or def.map
     if dest then
-      S.mapId = dest
-      S.mapClickCell = nil
-      S._mapCenteredFor = dest
+      MapBrowser.select(S, dest)
       S.status = "Followed warp to " .. tostring(dest)
     else
       S.status = "Warp has no destination map"
@@ -71,8 +188,12 @@ local function goToWarp(S, warp)
     return
   end
   local fromMap = Gen.maps(S.data)[S.mapId]
-  if fromMap and OUTSIDE_TILESETS[fromMap.tileset]
-     and def.destMap ~= "LAST_MAP" and def.destMap ~= S.mapId then
+  if
+    fromMap
+    and OUTSIDE_TILESETS[fromMap.tileset]
+    and def.destMap ~= "LAST_MAP"
+    and def.destMap ~= S.mapId
+  then
     S.save.lastOutdoor = { id = S.mapId, x = def.x, y = def.y }
   end
   if def.destMap == "LAST_MAP" and not S.save.lastOutdoor then
@@ -87,6 +208,7 @@ local function goToWarp(S, warp)
   S.mapId = destMap
   S.mapClickCell = nil
   centerOn(S, dx, dy)
+  S.mapAutoFit = false
   -- claim the lazy first-draw centering below, so it does not immediately
   -- re-centre the destination map and lose the warp's landing cell
   S._mapCenteredFor = destMap
@@ -96,35 +218,43 @@ end
 -- Screen-space point inside the viewport -> map cell, or nil if the point is
 -- outside the viewport or off the edge of the map.
 local function cellAtScreen(S, map, Kit, vx, vy, vw, vh)
-  if Kit.mouseX < vx or Kit.mouseX >= vx + vw
-     or Kit.mouseY < vy or Kit.mouseY >= vy + vh then
+  if Kit.mouseX < vx or Kit.mouseX >= vx + vw or Kit.mouseY < vy or Kit.mouseY >= vy + vh then
     return nil
   end
   local wx = (Kit.mouseX - vx) / S.mapZoom + S.mapCamX
   local wy = (Kit.mouseY - vy) / S.mapZoom + S.mapCamY
   local cx, cy = math.floor(wx / CELL), math.floor(wy / CELL)
-  if not map:inBounds(cx, cy) then return nil end
+  if not map:inBounds(cx, cy) then
+    return nil
+  end
   return cx, cy
 end
 
 -- Wired from App.wheelmoved while the Map tab is active.
 function MapBrowser.wheelmoved(S, dy)
-  S.mapZoom = clampZoom((S.mapZoom or 2) + (dy > 0 and 0.25 or -0.25))
+  if dy ~= 0 then stepZoom(S, dy) end
 end
 
 local PAN_KEYS = {
-  up = { 0, -CELL }, w = { 0, -CELL },
-  down = { 0, CELL }, s = { 0, CELL },
-  left = { -CELL, 0 }, a = { -CELL, 0 },
-  right = { CELL, 0 }, d = { CELL, 0 },
+  up = { 0, -CELL },
+  w = { 0, -CELL },
+  down = { 0, CELL },
+  s = { 0, CELL },
+  left = { -CELL, 0 },
+  a = { -CELL, 0 },
+  right = { CELL, 0 },
+  d = { CELL, 0 },
 }
 
 -- Wired from App.keypressed while the Map tab is active.
 function MapBrowser.keypressed(S, key)
   local d = PAN_KEYS[key]
-  if not d then return end
+  if not d then
+    return
+  end
   S.mapCamX = (S.mapCamX or 0) + d[1]
   S.mapCamY = (S.mapCamY or 0) + d[2]
+  S.mapAutoFit = false
 end
 
 -- Select a map by id.  The camera is left to the first-draw centering in
@@ -133,6 +263,7 @@ function MapBrowser.select(S, id)
   S.mapId = id
   S.mapClickCell = nil
   S._mapCenteredFor = nil
+  MapBrowser.clearTouches(S)
   S.status = "Viewing " .. id
 end
 
@@ -176,7 +307,7 @@ local function drawOverlays(S, map)
   love.graphics.setColor(1, 1, 1, 1)
 end
 
-function MapBrowser.draw(S, Kit, x, y, w, h)
+local function drawSection(S, Kit, x, y, w, h)
   local s = Kit.scale
   local gap = 20 * s
   local pad = 16 * s
@@ -188,27 +319,67 @@ function MapBrowser.draw(S, Kit, x, y, w, h)
   -- not have it: the old layout answered by laying the viewport out at a
   -- negative width, which the scissor below rejected ("Can't set scissor
   -- with negative width and/or height") and took the whole editor down.
-  -- Portrait now stacks the three cards vertically -- list, viewport, spawn
-  -- inspector, each full width -- and every viewport dimension is clamped at
-  -- zero so no window shape can reach the scissor with a negative rect.
+  -- Phones open Maps / View / Spawn as sliding pages. Every viewport
+  -- dimension is clamped so no window shape creates a negative scissor.
   local listW = math.max(200 * s, math.min(260 * s, w * 0.2))
   local sideW = math.max(230 * s, math.min(300 * s, w * 0.22))
   local viewW = w - listW - sideW - 2 * gap
-  local stacked = h > w or viewW < 260 * s
-  local lr, vr, sr  -- list / viewport / spawn card rects
+  local stacked = S.mapFocused or h > w or viewW < 260 * s
+  S._mapStacked = stacked
+  local lr, vr, sr -- list / viewport / spawn card rects
+  local row, gapNav = Kit.controlH(), 6 * s
+  local labelW = 48 * s
+  local inlineZoom = stacked and w > h and w >= 5 * row + labelW + 6 * gapNav + 100 * s
   if stacked then
-    local capH = Kit.textHeight("caption")
-    -- list: caption, search field, three rows, pager, the goto button
-    local listH = math.min(math.max(0, h * 0.32),
-      2 * pad + capH + 8 * s + 32 * s + 10 * s + 3 * 30 * s + 10 * s
-      + 30 * s + 10 * s + 34 * s)
-    -- spawns: caption, three 62px rows, the hint line
-    local sideH = math.min(math.max(0, h * 0.34),
-      2 * pad + capH + 12 * s + 3 * (62 * s + 8 * s) - 8 * s + 6 * s + 30 * s)
-    lr = { x = x, y = y, w = w, h = listH }
-    vr = { x = x, y = y + listH + gap, w = w,
-           h = math.max(0, h - listH - sideH - 2 * gap) }
-    sr = { x = x, y = y + h - sideH, w = w, h = sideH }
+    S.mapSection = S.mapSection or "view"
+    local sections = { { "maps", "Maps" }, { "view", "View" }, { "spawn", "Spawn" } }
+    if Kit.iconButton(x, y, row, row, S.mapFocused and "chevron-left" or "expand",
+      S.mapFocused and "Back to editor" or "Focus map") then
+      S.mapFocused = not S.mapFocused
+      MapBrowser.clearTouches(S)
+      Kit.blur()
+    end
+    local navX, navW = x + row + gapNav, w - row - gapNav
+    if inlineZoom and S.mapSection == "view" then
+      navW = w - 5 * row - labelW - 6 * gapNav
+      Chooser.navigation(S, Kit, "mapSection", "Map section", sections, navX, y, navW, row)
+      local zx = navX + navW + gapNav
+      if Kit.stepper(zx, y, row, row, "minus") then
+        stepZoom(S, -1)
+      end
+      Kit.textCenter(
+        "small",
+        ("%d%%"):format(math.floor(S.mapZoom * 100 + 0.5)),
+        zx + row + gapNav,
+        y + (row - Kit.textHeight("small")) / 2,
+        labelW,
+        PAL.caption
+      )
+      zx = zx + row + labelW + 2 * gapNav
+      if Kit.stepper(zx, y, row, row, "plus") then stepZoom(S, 1) end
+      if Kit.iconButton(zx + row + gapNav, y, row, row, "grid-2x2", "Fit map") then
+        S._mapFitRequested = true
+      end
+      if Kit.iconButton(x + w - row, y, row, row, "map-pin", "Center on player") then
+        showPlayer(S)
+      end
+    else
+      Chooser.navigation(
+        S,
+        Kit,
+        "mapSection",
+        "Map section",
+        sections,
+        navX,
+        y,
+        math.min(navW, 360 * s),
+        row
+      )
+    end
+    y, h = y + row + gapNav, math.max(0, h - row - gapNav)
+    lr = { x = x, y = y, w = w, h = h }
+    vr = lr
+    sr = lr
   else
     lr = { x = x, y = y, w = listW, h = h }
     vr = { x = x + listW + gap, y = y, w = math.max(0, viewW), h = h }
@@ -216,73 +387,114 @@ function MapBrowser.draw(S, Kit, x, y, w, h)
   end
 
   -- --------------------------------------------------------- the map list
-  local listInner = lr.w - 2 * pad
-  Kit.card(lr.x, lr.y, lr.w, lr.h)
-  Kit.caption(lr.x + pad, lr.y + pad, "MAPS")
-  local qy = lr.y + pad + Kit.textHeight("caption") + 8 * s
-  S.mapQuery = Kit.textfield("map-query", lr.x + pad, qy, listInner, 32 * s,
-    S.mapQuery, "search maps...")
-
-  local ids = {}
-  for _, id in ipairs(sortedMapIds(S.data)) do
-    if S.mapQuery == "" or id:lower():find(S.mapQuery:lower(), 1, true) then
-      ids[#ids + 1] = id
+  if not stacked or S.mapSection == "maps" then
+    local listInner = lr.w - 2 * pad
+    Kit.card(lr.x, lr.y, lr.w, lr.h)
+    local compactList = lr.h < 260 * s
+    if not compactList then
+      Kit.caption(lr.x + pad, lr.y + pad, "MAPS")
     end
-  end
+    local qy = lr.y + pad + (compactList and 0 or Kit.textHeight("caption") + 8 * s)
+    S.mapQuery = Kit.textfield(
+      "map-query",
+      lr.x + pad,
+      qy,
+      compactList and (listInner - 88 * s) or listInner,
+      Kit.controlH(),
+      S.mapQuery,
+      "search maps..."
+    )
 
-  local gotoH = 34 * s
-  local gotoY = lr.y + lr.h - pad - gotoH
-  local pagerH = 30 * s
-  local pagerY = gotoY - 10 * s - pagerH
-  local listTop = qy + 32 * s + 10 * s
-  local mRowH = 26 * s
-  local mGap = 4 * s
-  local listBodyH = pagerY - 10 * s - listTop
-  local perPage = math.max(1, math.floor(listBodyH / (mRowH + mGap)))
-  S.mapListOffset = Ops.clamp(S.mapListOffset or 0, 0, math.max(0, #ids - perPage))
-  -- wheel and touch drag reach the list too (#715): App routes the wheel to
-  -- zoom on this tab, so the list rides Kit's drag path and the pager alone
-  -- on desktop -- on a phone the drag is the difference between "stuck" and
-  -- scrollable.
-  S.mapListOffset = Kit.scroll(lr.x + pad, listTop, listInner, listBodyH,
-    S.mapListOffset, #ids, perPage)
-
-  for i = 1, math.min(perPage, #ids - S.mapListOffset) do
-    local id = ids[S.mapListOffset + i]
-    local ry = listTop + (i - 1) * (mRowH + mGap)
-    if Kit.row(lr.x + pad, ry, listInner, mRowH, id == S.mapId, PAL.blue, 7 * s) then
-      MapBrowser.select(S, id)
+    local ids = {}
+    for _, id in ipairs(sortedMapIds(S.data)) do
+      if S.mapQuery == "" or id:lower():find(S.mapQuery:lower(), 1, true) then
+        ids[#ids + 1] = id
+      end
     end
-    Kit.text("tiny", Kit.ellipsize("tiny", id, listInner - 18 * s),
-      lr.x + pad + 9 * s, ry + (mRowH - Kit.textHeight("tiny")) / 2,
-      id == S.mapId and PAL.heading or PAL.muted)
-  end
-  if #ids == 0 then
-    Kit.text("mono", "no map matches", lr.x + pad + 9 * s, listTop + 8 * s, PAL.faint)
-  end
-  Kit.scrollbar(lr.x + pad, listTop, listInner, listBodyH,
-    S.mapListOffset, #ids, perPage)
-  S.mapListOffset = Kit.pager(lr.x + pad, pagerY, listInner, S.mapListOffset,
-    #ids, perPage)
-  if Kit.button(lr.x + pad, gotoY, listInner, gotoH, "Go to save location",
-      { font = "small", radius = 9 * s }) then
-    local pmap, px, py = playerPos(S)
-    if pmap then
-      MapBrowser.select(S, pmap)
-      Ops.say(S, ("Jumped to %s (%d,%d)"):format(pmap, px, py))
-    else
-      Ops.say(S, "No player location on this save")
+
+    local gotoH = Kit.controlH()
+    local gotoY = lr.y + lr.h - pad - gotoH
+    local pagerH = Kit.controlH()
+    local pagerY = gotoY - 10 * s - pagerH
+    local listTop = qy + Kit.controlH() + 10 * s
+    local mRowH = Kit.controlH()
+    local mGap = 4 * s
+    local listBodyH = (compactList and lr.y + lr.h - pad or pagerY - 10 * s) - listTop
+    local perPage = math.max(1, math.floor(listBodyH / (mRowH + mGap)))
+    -- wheel and touch drag reach the list too (#715): App routes the wheel to
+    -- zoom on this tab, so the list rides Kit's drag path and the pager alone
+    -- on desktop -- on a phone the drag is the difference between "stuck" and
+    -- scrollable.
+    local drawn, shift =
+      Kit.list(S, "mapListOffset", lr.x + pad, listTop, listInner, listBodyH, #ids, mRowH + mGap)
+
+    Kit.pushClip(lr.x + pad, listTop, listInner, math.max(0, listBodyH))
+    for i = 1, drawn do
+      local id = ids[S.mapListOffset + i]
+      local ry = listTop + (i - 1) * (mRowH + mGap) - shift
+      if Kit.row(lr.x + pad, ry, listInner, mRowH, id == S.mapId, PAL.blue, 7 * s) then
+        MapBrowser.select(S, id)
+        if stacked then
+          Motion.change(S, "mapSection", "view", 1)
+        end
+      end
+      Kit.text(
+        "tiny",
+        Kit.ellipsize("tiny", id, listInner - 18 * s),
+        lr.x + pad + 9 * s,
+        ry + (mRowH - Kit.textHeight("tiny")) / 2,
+        id == S.mapId and PAL.heading or PAL.muted
+      )
+    end
+    if #ids == 0 then
+      Kit.text("mono", "no map matches", lr.x + pad + 9 * s, listTop + 8 * s, PAL.faint)
+    end
+    Kit.popClip()
+    Kit.listScrollbar(S, "mapListOffset", lr.x + pad, listTop, listInner, listBodyH)
+    if not compactList then
+      S.mapListOffset = Kit.pager(lr.x + pad, pagerY, listInner, S.mapListOffset, #ids, perPage)
+    end
+    if
+      Kit.button(
+        compactList and lr.x + pad + listInner - 80 * s or lr.x + pad,
+        compactList and qy or gotoY,
+        compactList and 80 * s or listInner,
+        gotoH,
+        compactList and "Player" or "Go to save location",
+        { font = "small", radius = 9 * s }
+      )
+    then
+      local pmap, px, py = playerPos(S)
+      if pmap then
+        MapBrowser.select(S, pmap)
+        Ops.say(S, ("Jumped to %s (%d,%d)"):format(pmap, px, py))
+      else
+        Ops.say(S, "No player location on this save")
+      end
+    end
+
+    if stacked then
+      return
     end
   end
 
   -- ---------------------------------------------------------- the viewport
-  Kit.card(vr.x, vr.y, vr.w, vr.h)
-  local vpad = 18 * s
+  if not stacked or S.mapSection == "view" then
+    Kit.card(vr.x, vr.y, vr.w, vr.h)
+  end
+  local vpad = stacked and 8 * s or 18 * s
   local vx0 = vr.x + vpad
   local vinner = math.max(0, vr.w - 2 * vpad)
-  local headH = 28 * s
-  Kit.text("monoBig", tostring(S.mapId), vx0,
-    vr.y + vpad + (headH - Kit.textHeight("monoBig")) / 2, PAL.heading)
+  local headH = stacked and (Kit.textHeight("small") + 4 * s) or Kit.controlH()
+  if not stacked or S.mapSection == "view" then
+    Kit.text(
+      stacked and "small" or "monoBig",
+      Kit.ellipsize(stacked and "small" or "monoBig", tostring(S.mapId), vinner),
+      vx0,
+      vr.y + vpad + (headH - Kit.textHeight(stacked and "small" or "monoBig")) / 2,
+      PAL.heading
+    )
+  end
 
   local ok, map
   if Gen.of(S.save) == 3 then
@@ -352,7 +564,7 @@ function MapBrowser.draw(S, Kit, x, y, w, h)
                   end
                 end
               end
-            end
+            end,
           }
         end
       end
@@ -371,11 +583,14 @@ function MapBrowser.draw(S, Kit, x, y, w, h)
         ok, map = pcall(Map2.new, def, tileset or {})
         if ok and map and not map.renderer then
           local MapPreview = require("src.world.gen2.MapPreview")
-          S._g2MapBaker = S._g2MapBaker or MapPreview.baker({
-            tilesets = Gen.tilesets(S.data),
-            gen2Roofs = S.data.gen2Roofs, roofs = S.data.roofs,
-            gen2Palettes = S.data.gen2Palettes, palettes = S.data.palettes,
-          })
+          S._g2MapBaker = S._g2MapBaker
+            or MapPreview.baker({
+              tilesets = Gen.tilesets(S.data),
+              gen2Roofs = S.data.gen2Roofs,
+              roofs = S.data.roofs,
+              gen2Palettes = S.data.gen2Palettes,
+              palettes = S.data.palettes,
+            })
           map.renderer = MapPreview.renderer(S._g2MapBaker, map)
         end
       end
@@ -386,165 +601,258 @@ function MapBrowser.draw(S, Kit, x, y, w, h)
     ok, map = pcall(MapLoader.load, S.data, S.mapId)
   end
   if not ok then
-    Kit.text("mono", "Failed to load map: " .. tostring(map), vx0,
-      vr.y + vpad + headH + 20 * s, PAL.red)
+    Kit.text(
+      "mono",
+      "Failed to load map: " .. tostring(map),
+      vx0,
+      vr.y + vpad + headH + 20 * s,
+      PAL.red
+    )
     return
   end
 
-  local outdoor = Ops.isOutdoor(S, map)
-  local oLabel = outdoor and "OUTDOOR" or "INDOOR"
-  local oW = Kit.textWidth("tiny", oLabel) + 16 * s
-  local oX = vx0 + Kit.textWidth("monoBig", tostring(S.mapId)) + 14 * s
-  Theme.stroke(oX, vr.y + vpad + (headH - 20 * s) / 2, oW, 20 * s, 6 * s,
-    PAL.cardBorder, 0.3, 1)
-  Kit.textCenter("tiny", oLabel, oX,
-    vr.y + vpad + (headH - 20 * s) / 2 + (20 * s - Kit.textHeight("tiny")) / 2, oW,
-    outdoor and PAL.green or PAL.muted)
+  if not stacked or S.mapSection == "view" then
+    local outdoor = Ops.isOutdoor(S, map)
+    local oLabel = outdoor and "OUTDOOR" or "INDOOR"
+    local oW = Kit.textWidth("tiny", oLabel) + 16 * s
+    local oX = vx0 + Kit.textWidth("monoBig", tostring(S.mapId)) + 14 * s
+    if not stacked then
+      Theme.stroke(
+        oX,
+        vr.y + vpad + (headH - 20 * s) / 2,
+        oW,
+        20 * s,
+        6 * s,
+        PAL.cardBorder,
+        0.3,
+        1
+      )
+      Kit.textCenter(
+        "tiny",
+        oLabel,
+        oX,
+        vr.y + vpad + (headH - 20 * s) / 2 + (20 * s - Kit.textHeight("tiny")) / 2,
+        oW,
+        outdoor and PAL.green or PAL.muted
+      )
+    end
 
-  -- zoom cluster, right-aligned in the viewport header.  The centre button
-  -- is the one part with a long label; on a header too narrow to hold it
-  -- beside the title it is dropped (its job is covered by the list's "Go to
-  -- save location" plus the first-draw centering) rather than painted over
-  -- the map name (#715).
-  local centerW = 130 * s
-  local zBtn = 32 * s
-  local rightEdge = vx0 + vinner
-  local zoomW = 2 * zBtn + 56 * s + 12 * s
-  local pmap, px, py = playerPos(S)
-  local showCenter = vinner >= zoomW + 10 * s + centerW + 160 * s
-  if showCenter then
-    if Kit.button(rightEdge - centerW, vr.y + vpad, centerW, headH, "Center on player",
-        { kind = "accent", font = "small", radius = 7 * s }) then
-      if pmap == S.mapId then
-        centerOn(S, px, py)
+    -- zoom cluster, right-aligned in the viewport header.  The centre button
+    -- is the one part with a long label; on a header too narrow to hold it
+    -- beside the title it is dropped (its job is covered by the list's "Go to
+    -- save location" plus the first-draw centering) rather than painted over
+    -- the map name (#715).
+    local centerW = 130 * s
+    local zBtn = Kit.controlH()
+    local rightEdge = vx0 + vinner
+    local zoomW = 2 * zBtn + 56 * s + 12 * s
+    local pmap, px, py = playerPos(S)
+    local showCenter = not inlineZoom and vinner >= zoomW + 10 * s + centerW + 160 * s
+    if showCenter and not stacked then
+      if
+        Kit.button(
+          rightEdge - centerW,
+          vr.y + vpad,
+          centerW,
+          headH,
+          "Center on player",
+          { kind = "accent", font = "small", radius = 7 * s }
+        )
+      then
+        showPlayer(S)
         Ops.say(S, "Centred on the player")
-      else
-        Ops.say(S, "Player isn't on this map")
       end
     end
-  end
-  local zx = rightEdge - (showCenter and (centerW + 10 * s) or 0) - zoomW
-  if Kit.stepper(zx, vr.y + vpad, zBtn, headH, "-", { radius = 7 * s }) then
-    S.mapZoom = clampZoom(S.mapZoom - 0.5)
-  end
-  Kit.textCenter("mono", ("%.2fx"):format(S.mapZoom), zx + zBtn + 6 * s,
-    vr.y + vpad + (headH - Kit.textHeight("mono")) / 2, 56 * s, PAL.muted)
-  if Kit.stepper(zx + zBtn + 62 * s, vr.y + vpad, zBtn, headH, "+", { radius = 7 * s }) then
-    S.mapZoom = clampZoom(S.mapZoom + 0.5)
-  end
-
-  local legendH = 22 * s
-  local vy0 = vr.y + vpad + headH + 12 * s
-  local vh0 = math.max(0, (vr.y + vr.h - vpad - legendH - 10 * s) - vy0)
-  S._mapViewW, S._mapViewH = vinner, vh0
-
-  -- First draw of a map: park the camera somewhere meaningful rather than at
-  -- (0,0), which leaves a small map wedged in the top-left corner.  Deferred
-  -- to here because centerOn needs the viewport size, which only exists once
-  -- the panel has laid itself out.
-  if S._mapCenteredFor ~= S.mapId then
-    S._mapCenteredFor = S.mapId
-    if pmap == S.mapId then
-      centerOn(S, px, py)
-    else
-      centerOn(S, (map.widthCells or map.width or 10) / 2,
-        (map.heightCells or map.height or 10) / 2)
+    local zoomY = vr.y + vpad
+    local zx = rightEdge - (showCenter and (centerW + 10 * s) or 0) - zoomW
+    if not stacked then
+      if Kit.stepper(zx, zoomY, zBtn, headH, "minus", { radius = 7 * s }) then
+        stepZoom(S, -1)
+      end
+      Kit.textCenter(
+        "mono",
+        ("%.2fx"):format(S.mapZoom),
+        zx + zBtn + 6 * s,
+        zoomY + (headH - Kit.textHeight("mono")) / 2,
+        56 * s,
+        PAL.muted
+      )
+      if Kit.stepper(zx + zBtn + 62 * s, zoomY, zBtn, headH, "plus", { radius = 7 * s }) then
+        stepZoom(S, 1)
+      end
     end
-  end
 
-  Theme.col(PAL.bgBot, 1)
-  love.graphics.rectangle("fill", vx0, vy0, vinner, vh0, 12 * s, 12 * s)
-  Theme.stroke(vx0, vy0, vinner, vh0, 12 * s, PAL.cardBorder, 0.28, 1)
+    local legendH = stacked and (18 * s + (inlineZoom and 0 or row + 6 * s)) or 22 * s
+    local vy0 = zoomY + headH + (stacked and 6 or 12) * s
+    local vh0 = math.max(0, (vr.y + vr.h - vpad - legendH - 8 * s) - vy0)
+    local oldW, oldH = S._mapViewW, S._mapViewH
+    S._mapViewW, S._mapViewH = vinner, vh0
+    S._mapViewRect = { x = vx0, y = vy0, w = vinner, h = vh0 }
 
-  -- love_stub (headless tests) lacks push/pop/scale/scissor; skip the actual
-  -- render there but keep all click/button logic below running.  The size
-  -- guard is the #715 crash fix proper: an exhausted viewport (a window
-  -- shorter or narrower than the chrome) renders nothing instead of handing
-  -- LOVE a negative scissor rect.
-  if love.graphics.push and vinner > 0 and vh0 > 0 then
-    love.graphics.setScissor(math.floor(vx0), math.floor(vy0),
-      math.ceil(vinner), math.ceil(vh0))
-    love.graphics.push()
-    love.graphics.translate(vx0, vy0)
-    love.graphics.scale(S.mapZoom, S.mapZoom)
-    if map.renderer and map.renderer.draw then
-      map.renderer:draw(S.mapCamX, S.mapCamY)
-    else
-      local wc = map.widthCells or ((map.width or 8) * 2)
-      local hc = map.heightCells or ((map.height or 8) * 2)
-      for cy = 0, hc - 1 do
-        for cx = 0, wc - 1 do
-          if (cx + cy) % 2 == 0 then
-            love.graphics.setColor(0.18, 0.22, 0.32, 1)
-          else
-            love.graphics.setColor(0.14, 0.17, 0.26, 1)
+    -- First draw of a map: park the camera somewhere meaningful rather than at
+    -- (0,0), which leaves a small map wedged in the top-left corner.  Deferred
+    -- to here because centerOn needs the viewport size, which only exists once
+    -- the panel has laid itself out.
+    if S._mapCenteredFor ~= S.mapId then
+      S._mapCenteredFor = S.mapId
+      if stacked then
+        MapBrowser.fit(S, map)
+      elseif pmap == S.mapId then
+        centerOn(S, px + 0.5, py + 0.5)
+        S.mapAutoFit = false
+      else
+        centerOn(
+          S,
+          (map.widthCells or map.width or 10) / 2,
+          (map.heightCells or map.height or 10) / 2
+        )
+        S.mapAutoFit = false
+      end
+    elseif oldW and (oldW ~= vinner or oldH ~= vh0) then
+      if S.mapAutoFit then
+        MapBrowser.fit(S, map)
+      else
+        S.mapCamX = S.mapCamX + (oldW - vinner) / (2 * S.mapZoom)
+        S.mapCamY = S.mapCamY + (oldH - vh0) / (2 * S.mapZoom)
+      end
+    end
+    if S._mapFitRequested then
+      MapBrowser.fit(S, map)
+      S._mapFitRequested = nil
+    end
+    if S._mapCenterPlayer then
+      centerOn(S, px + 0.5, py + 0.5)
+      S._mapCenterPlayer, S.mapAutoFit = nil, false
+    end
+
+    if Kit.mouseDown and not Kit.blockClicks and not S._mapPinch
+      and (S._mapDrag or Kit.hit(vx0, vy0, vinner, vh0)) then
+      local d = S._mapDrag
+      if not d then
+        S._mapDrag = { mx = Kit.mouseX, my = Kit.mouseY, camX = S.mapCamX, camY = S.mapCamY }
+      else
+        panTo(S, Kit.mouseX, Kit.mouseY)
+      end
+    elseif not Kit.mouseDown or S._mapPinch then
+      S._mapDrag = nil
+    end
+
+    Theme.col(PAL.bgBot, 1)
+    love.graphics.rectangle("fill", vx0, vy0, vinner, vh0, 12 * s, 12 * s)
+    Theme.stroke(vx0, vy0, vinner, vh0, 12 * s, PAL.cardBorder, 0.28, 1)
+
+    -- love_stub (headless tests) lacks push/pop/scale/scissor; skip the actual
+    -- render there but keep all click/button logic below running.  The size
+    -- guard is the #715 crash fix proper: an exhausted viewport (a window
+    -- shorter or narrower than the chrome) renders nothing instead of handing
+    -- LOVE a negative scissor rect.
+    if love.graphics.push and vinner > 0 and vh0 > 0 then
+      Kit.pushClip(vx0, vy0, vinner, vh0)
+      love.graphics.push()
+      love.graphics.translate(vx0, vy0)
+      love.graphics.scale(S.mapZoom, S.mapZoom)
+      if map.renderer and map.renderer.draw then
+        love.graphics.setColor(1, 1, 1, 1)
+        map.renderer:draw(S.mapCamX, S.mapCamY)
+      else
+        local wc = map.widthCells or ((map.width or 8) * 2)
+        local hc = map.heightCells or ((map.height or 8) * 2)
+        for cy = 0, hc - 1 do
+          for cx = 0, wc - 1 do
+            if (cx + cy) % 2 == 0 then
+              love.graphics.setColor(0.18, 0.22, 0.32, 1)
+            else
+              love.graphics.setColor(0.14, 0.17, 0.26, 1)
+            end
+            love.graphics.rectangle(
+              "fill",
+              cx * CELL - S.mapCamX,
+              cy * CELL - S.mapCamY,
+              CELL,
+              CELL
+            )
           end
-          love.graphics.rectangle("fill",
-            cx * CELL - S.mapCamX, cy * CELL - S.mapCamY, CELL, CELL)
+        end
+        love.graphics.setColor(1, 1, 1, 1)
+      end
+      drawOverlays(S, map)
+      love.graphics.pop()
+      Kit.popClip()
+    end
+
+    -- click handling: warp cells jump the view, everything else selects
+    if Kit.mouseClicked and not Kit.blockClicks and not S._mapPinch then
+      local cx, cy = cellAtScreen(S, map, Kit, vx0, vy0, vinner, vh0)
+      if cx then
+        local warp = map:warpAtCell(cx, cy)
+        if warp then
+          goToWarp(S, warp)
+        else
+          S.mapClickCell = { cx = cx, cy = cy }
+          S.status = string.format("Selected cell (%d,%d) on %s", cx, cy, S.mapId)
         end
       end
-      love.graphics.setColor(1, 1, 1, 1)
     end
-    drawOverlays(S, map)
-    love.graphics.pop()
-    love.graphics.setScissor()
-  end
 
-  -- Touch pan (#715): arrows/WASD and the wheel are desktop-only inputs, so
-  -- a held pointer drags the camera directly.  A plain tap still selects a
-  -- cell via the click handling below; only movement while held pans.
-  if Kit.mouseDown and not Kit.blockClicks
-     and (S._mapDrag or Kit.hit(vx0, vy0, vinner, vh0)) then
-    local d = S._mapDrag
-    if not d then
-      S._mapDrag = { mx = Kit.mouseX, my = Kit.mouseY,
-                     camX = S.mapCamX, camY = S.mapCamY }
-    else
-      S.mapCamX = d.camX - (Kit.mouseX - d.mx) / S.mapZoom
-      S.mapCamY = d.camY - (Kit.mouseY - d.my) / S.mapZoom
-    end
-  elseif not Kit.mouseDown then
-    S._mapDrag = nil
-  end
-
-  -- click handling: warp cells jump the view, everything else selects
-  if Kit.mouseClicked then
-    local cx, cy = cellAtScreen(S, map, Kit, vx0, vy0, vinner, vh0)
-    if cx then
-      local warp = map:warpAtCell(cx, cy)
-      if warp then
-        goToWarp(S, warp)
-      else
-        S.mapClickCell = { cx = cx, cy = cy }
-        S.status = string.format("Selected cell (%d,%d) on %s", cx, cy, S.mapId)
+    -- legend + the current selection readout
+    local ly = vr.y + vr.h - vpad - (stacked and 18 * s or legendH) + 4 * s
+    local lx = vx0
+    local legend = {
+      { PAL.blue, "warp", false },
+      { PAL.red, "player", true },
+      { PAL.green, "lastHeal", false },
+      { PAL.yellow, "lastOutdoor", false },
+    }
+    if stacked then
+      if not inlineZoom then
+        local toolY = ly - row - 6 * s
+        local fitW = Kit.buttonWidth("Fit", { font = "small" }, row)
+        local percentW = Kit.textWidth("tiny", "400%") + 4 * s
+        local toolsW = 3 * row + fitW + percentW + 4 * gapNav
+        local tx = vx0 + (vinner - toolsW) / 2
+        if Kit.stepper(tx, toolY, row, row, "minus") then stepZoom(S, -1) end
+        Kit.textCenter("tiny", ("%d%%"):format(math.floor(S.mapZoom * 100 + 0.5)),
+          tx + row + gapNav, toolY + (row - Kit.textHeight("tiny")) / 2, percentW, PAL.caption)
+        tx = tx + row + percentW + 2 * gapNav
+        if Kit.stepper(tx, toolY, row, row, "plus") then stepZoom(S, 1) end
+        tx = tx + row + gapNav
+        if Kit.button(tx, toolY, fitW, row, "Fit", { font = "small" }) then MapBrowser.fit(S, map) end
+        if Kit.iconButton(tx + fitW + gapNav, toolY, row, row, "map-pin", "Center on player") then showPlayer(S) end
       end
-    end
-  end
-
-  -- legend + the current selection readout
-  local ly = vr.y + vr.h - vpad - legendH + 4 * s
-  local lx = vx0
-  local legend = {
-    { PAL.blue, "warp", false },
-    { PAL.red, "player", true },
-    { PAL.green, "lastHeal", false },
-    { PAL.yellow, "lastOutdoor", false },
-  }
-  for _, item in ipairs(legend) do
-    local box = 10 * s
-    if item[3] then
-      Theme.col(item[1], 1)
-      love.graphics.rectangle("fill", lx, ly + 2 * s, box, box)
+      Kit.text(
+        "tiny",
+        S.mapClickCell
+            and ("Selected (%d,%d) · set in Spawn"):format(S.mapClickCell.cx, S.mapClickCell.cy)
+          or "Pinch to zoom · drag to pan · tap a cell",
+        vx0,
+        ly,
+        PAL.caption
+      )
     else
-      Theme.stroke(lx, ly + 2 * s, box, box, 0, item[1], 1, 1.5 * s)
+      for _, item in ipairs(legend) do
+        local box = 10 * s
+        if item[3] then
+          Theme.col(item[1], 1)
+          love.graphics.rectangle("fill", lx, ly + 2 * s, box, box)
+        else
+          Theme.stroke(lx, ly + 2 * s, box, box, 0, item[1], 1, 1.5 * s)
+        end
+        Kit.text("tiny", item[2], lx + box + 6 * s, ly, PAL.muted)
+        lx = lx + box + 6 * s + Kit.textWidth("tiny", item[2]) + 16 * s
+      end
+      Kit.textRight(
+        "mono",
+        S.mapClickCell and ("selected (%d,%d)"):format(S.mapClickCell.cx, S.mapClickCell.cy)
+          or "click a cell to select it",
+        vx0 + vinner,
+        ly,
+        PAL.caption
+      )
     end
-    Kit.text("tiny", item[2], lx + box + 6 * s, ly, PAL.muted)
-    lx = lx + box + 6 * s + Kit.textWidth("tiny", item[2]) + 16 * s
+    if stacked then
+      return
+    end
   end
-  Kit.textRight("mono", S.mapClickCell
-      and ("selected (%d,%d)"):format(S.mapClickCell.cx, S.mapClickCell.cy)
-      or "click a cell to select it",
-    vx0 + vinner, ly, PAL.caption)
 
   -- ------------------------------------------------------ spawn inspector
   local sx0 = sr.x
@@ -560,54 +868,133 @@ function MapBrowser.draw(S, Kit, x, y, w, h)
     local healX = S.save.healX or 0
     local healY = S.save.healY or 0
     spawns = {
-      { key = "PLAYER", color = PAL.red, value = playerValue,
-        set = function() Ops.setPlayerHere(S) end },
-      { key = "LAST HEAL", color = PAL.green,
+      {
+        key = "PLAYER",
+        color = PAL.red,
+        value = playerValue,
+        set = function()
+          Ops.setPlayerHere(S)
+        end,
+      },
+      {
+        key = "LAST HEAL",
+        color = PAL.green,
         value = healMap and ("%s (%d,%d)"):format(healMap, healX, healY) or "unset",
-        set = function() Ops.setLastHeal(S) end },
+        set = function()
+          Ops.setLastHeal(S)
+        end,
+      },
     }
   elseif Gen.of(S.save) == 2 then
     spawns = {
-      { key = "PLAYER", color = PAL.red, value = playerValue,
-        set = function() Ops.setPlayerHere(S) end },
-      { key = "SPAWN", color = PAL.green,
+      {
+        key = "PLAYER",
+        color = PAL.red,
+        value = playerValue,
+        set = function()
+          Ops.setPlayerHere(S)
+        end,
+      },
+      {
+        key = "SPAWN",
+        color = PAL.green,
         value = tostring(S.save.spawn or "SPAWN_HOME"),
-        set = function() Ops.setLastHeal(S) end },
+        set = function()
+          Ops.setLastHeal(S)
+        end,
+      },
     }
   else
     local out = S.save.lastOutdoor
     local heal = S.save.lastHeal
     spawns = {
-      { key = "PLAYER", color = PAL.red, value = playerValue,
-        set = function() Ops.setPlayerHere(S) end },
-      { key = "LAST HEAL", color = PAL.green,
+      {
+        key = "PLAYER",
+        color = PAL.red,
+        value = playerValue,
+        set = function()
+          Ops.setPlayerHere(S)
+        end,
+      },
+      {
+        key = "LAST HEAL",
+        color = PAL.green,
         value = heal and ("%s (%d,%d)"):format(heal.map, heal.x, heal.y) or "unset",
-        set = function() Ops.setLastHeal(S) end },
-      { key = "LAST OUTDOOR", color = PAL.yellow,
+        set = function()
+          Ops.setLastHeal(S)
+        end,
+      },
+      {
+        key = "LAST OUTDOOR",
+        color = PAL.yellow,
         value = out and ("%s (%d,%d)"):format(out.id, out.x, out.y) or "unset",
-        set = function() Ops.setLastOutdoor(S, map) end },
+        set = function()
+          Ops.setLastOutdoor(S, map)
+        end,
+      },
     }
   end
-  local spawnH = 62 * s
+  local spawnH = math.max(80 * s, Kit.controlH() + 2 * Kit.textHeight("mono"))
+  local spawnTop = sTop
+  local spawnViewH = math.max(0, sr.y + sr.h - pad - spawnTop)
+  S.mapSpawnScroll = Kit.scrollPixels(
+    sx0 + pad,
+    spawnTop,
+    sInner,
+    spawnViewH,
+    S.mapSpawnScroll or 0,
+    #spawns * (spawnH + 8 * s) + 70 * s
+  )
+  Kit.pushClip(sx0 + pad, spawnTop, sInner, spawnViewH)
+  sTop = sTop - S.mapSpawnScroll
   for i, sp in ipairs(spawns) do
     local ry = sTop + (i - 1) * (spawnH + 8 * s)
     Theme.row(sx0 + pad, ry, sInner, spawnH, 10 * s, 0.6)
     Kit.text("tiny", sp.key, sx0 + pad + 12 * s, ry + 11 * s, sp.color)
     local setW = 70 * s
-    if Kit.button(sx0 + pad + sInner - 12 * s - setW, ry + 8 * s, setW, 26 * s,
-        "Set here", { kind = "accent", font = "tiny", radius = 7 * s,
-        enabled = S.mapClickCell ~= nil }) then
+    if
+      Kit.button(
+        sx0 + pad + sInner - 12 * s - setW,
+        ry + 8 * s,
+        setW,
+        Kit.controlH(),
+        "Set here",
+        { kind = "accent", font = "tiny", radius = 7 * s, enabled = S.mapClickCell ~= nil }
+      )
+    then
       sp.set()
     end
-    Kit.text("mono", Kit.ellipsize("mono", sp.value, sInner - 24 * s),
-      sx0 + pad + 12 * s, ry + spawnH - 10 * s - Kit.textHeight("mono"), PAL.muted)
+    Kit.text(
+      "mono",
+      Kit.ellipsize("mono", sp.value, sInner - 24 * s),
+      sx0 + pad + 12 * s,
+      ry + spawnH - 10 * s - Kit.textHeight("mono"),
+      PAL.muted
+    )
   end
 
   local noteY = sTop + #spawns * (spawnH + 8 * s) + 6 * s
-  Kit.textCenter("tiny",
-    "Click a cell first. Warp cells follow the warp instead of selecting. " ..
-    "Arrow keys / WASD pan, the wheel zooms.",
-    sx0 + pad, noteY, sInner, PAL.caption)
+  Kit.textWrapped(
+    "tiny",
+    "Select a cell in View, then set a spawn point here. Drag to pan; use the zoom controls to zoom.",
+    sx0 + pad,
+    noteY,
+    sInner,
+    PAL.caption
+  )
+  Kit.popClip()
 end
 
+function MapBrowser.draw(S, Kit, x, y, w, h)
+  local width, height = love.graphics.getDimensions()
+  local dpi = love.graphics.getDPIScale and love.graphics.getDPIScale() or 1
+  local windowKey = width .. "x" .. height .. "@" .. dpi
+  if S._mapWindowKey and S._mapWindowKey ~= windowKey and S._g2MapBaker then
+    require("src.world.gen2.MapPreview").clear(S._g2MapBaker)
+  end
+  S._mapWindowKey = windowKey
+  S._mapViewRect = nil
+  Motion.pages(S, Kit, "mapSection", x, y, w, h, drawSection)
+  if S._mapStacked and S.mapSection ~= "view" then S._mapViewRect = nil end
+end
 return MapBrowser

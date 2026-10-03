@@ -19,17 +19,62 @@ local PAL = Theme.PAL
 local Picker = {}
 
 local FIELD_ID = "item-picker"
+local FEEDBACK_SECONDS = 2.5
+
+local function feedback(S, Kit, changed, dest)
+  local p = S.itemPicker
+  if p then
+    p.feedback = {
+      text = changed and (dest == "pc" and "Added to PC" or "Added to Bag") or "Item not added",
+      good = changed,
+      at = love.timer and love.timer.getTime and love.timer.getTime() or Kit.time,
+    }
+  end
+  return changed
+end
+
+local function drawFeedback(p, Kit, x, y, w, h)
+  local toast = p.feedback
+  if not toast then return false end
+  local elapsed = math.max(0, Kit.time - toast.at)
+  if elapsed >= FEEDBACK_SECONDS then
+    p.feedback = nil
+    return false
+  end
+  local alpha = math.min(1, (FEEDBACK_SECONDS - elapsed) / 0.4)
+  local s, pad = Kit.scale, 8 * Kit.scale
+  local icon = 18 * s
+  local tw = math.min(w, Kit.textWidth("small", toast.text) + icon + 3 * pad)
+  local color = toast.good and PAL.green or PAL.red
+  Theme.fillRounded(x, y, tw, h, PAL.cardBody, 0.98 * alpha)
+  Theme.stroke(x, y, tw, h, Theme.radius(), color, 0.8 * alpha, 1)
+  Kit.icon(toast.good and "check" or "triangle-alert", x + pad, y + (h - icon) / 2, icon, color, alpha)
+  Kit.text("small", toast.text, x + icon + 2 * pad, y + (h - Kit.textHeight("small")) / 2, PAL.text, alpha)
+  return true
+end
 
 function Picker.results(S)
   local p = S.itemPicker
-  return Ops.itemSearch(S, p and p.query or "")
+  local hits = Ops.itemSearch(S, p and p.query or "")
+  if p and p.dest == "held" then
+    local filtered = {}
+    for _, id in ipairs(hits) do
+      if Ops.itemHoldable(S, id) then
+        filtered[#filtered + 1] = id
+      end
+    end
+    return filtered
+  end
+  return hits
 end
 
 -- Enter commits the top match into whichever destination the picker was
 -- opened for, which is the whole point of a search field.
 function Picker.commitFirst(S, Kit)
   local hits = Picker.results(S)
-  if not hits[1] then return Ops.say(S, "No item matches that") end
+  if not hits[1] then
+    return Ops.say(S, "No item matches that")
+  end
   return Picker.commit(S, Kit, hits[1])
 end
 
@@ -40,13 +85,24 @@ end
 function Picker.commit(S, Kit, id)
   local p = S.itemPicker
   local dest = (p and p.dest) or "bag"
-  if dest == "pc" then return Ops.addToPc(S, id) end
-  return Ops.addToBag(S, id)
+  if dest == "held" then
+    local changed = Ops.setHeldItem(S, S.editingMon, id)
+    if changed then
+      Ops.closeItemPicker(S, Kit)
+    end
+    return changed
+  end
+  if dest == "pc" then
+    return feedback(S, Kit, Ops.addToPc(S, id), dest)
+  end
+  return feedback(S, Kit, Ops.addToBag(S, id), dest)
 end
 
 function Picker.draw(S, Kit, width, height)
   local p = S.itemPicker
-  if not p then return end
+  if not p then
+    return
+  end
   local s = Kit.scale
 
   -- The click that opened the picker is still the frame's click: the panel
@@ -78,9 +134,19 @@ function Picker.draw(S, Kit, width, height)
   local closeW = PickerChrome.closeSize(Kit)
   local captionH = Kit.textHeight("caption")
   local headH = math.max(captionH, closeW)
-  Kit.caption(cx, cy + (headH - captionH) / 2, "ADD AN ITEM")
-  if Kit.button(x + w - pad - closeW, cy + (headH - closeW) / 2, closeW, closeW, "x",
-      { font = "small" }) then
+  if not drawFeedback(p, Kit, cx, cy, inner - closeW - 10 * s, headH) then
+    Kit.caption(cx, cy + (headH - captionH) / 2, "ADD AN ITEM")
+  end
+  if
+    Kit.iconButton(
+      x + w - pad - closeW,
+      cy + (headH - closeW) / 2,
+      closeW,
+      closeW,
+      "x",
+      "Close picker"
+    )
+  then
     Ops.closeItemPicker(S, Kit)
     return
   end
@@ -91,54 +157,69 @@ function Picker.draw(S, Kit, width, height)
   -- bottom that each mean "commit, and also pick a destination".
   local half = (inner - 8 * s) / 2
   local destH = math.max(PickerChrome.tapMin(Kit), math.floor(30 * s))
-  if Kit.chip(cx, cy, half, destH, "-> BAG", p.dest ~= "pc", PAL.green, PAL.steel) then
-    p.dest = "bag"
-  end
-  if Kit.chip(cx + half + 8 * s, cy, half, destH, "-> PC", p.dest == "pc",
-      PAL.green, PAL.steel) then
-    p.dest = "pc"
+  if p.dest == "held" then
+    Kit.text("small", "Choose a held item", cx, cy, PAL.caption)
+  else
+    if Kit.chip(cx, cy, half, destH, "Bag", p.dest ~= "pc", PAL.green, PAL.steel) then
+      p.dest = "bag"
+    end
+    if Kit.chip(cx + half + 8 * s, cy, half, destH, "PC", p.dest == "pc", PAL.green, PAL.steel) then
+      p.dest = "pc"
+    end
   end
   cy = cy + destH + 10 * s
 
   local fieldH = PickerChrome.fieldH(Kit)
-  p.query = Kit.textfield(FIELD_ID, cx, cy, inner, fieldH, p.query,
-    "type an item id")
+  p.query = Kit.textfield(FIELD_ID, cx, cy, inner, fieldH, p.query, "type an item name or id")
   cy = cy + fieldH + 10 * s
 
   local hits = Picker.results(S)
   local listH, rowH, rowGap, pagerH = PickerChrome.listMetrics(Kit, y, h, pad, cy)
   local perPage = math.max(1, math.floor((listH + rowGap) / (rowH + rowGap)))
-  p.offset = Theme.clamp(p.offset or 0, 0, math.max(0, #hits - perPage))
   -- wheel / touch drag scroll the modal list too; the shield is already
   -- lowered for this layer, so Kit.scroll works here and only here
-  p.offset = Kit.scroll(cx, cy, inner, listH, p.offset, #hits, perPage)
+  local drawn, shift = Kit.list(p, "offset", cx, cy, inner, listH, #hits, rowH + rowGap)
 
   if #hits == 0 then
     Kit.emptyBox(cx, cy, inner, listH, "Nothing matches that.")
   else
     Kit.pushClip(cx, cy, inner, listH)
-    for i = 1, perPage do
+    for i = 1, drawn do
       local id = hits[p.offset + i]
-      if not id then break end
-      local ry = cy + (i - 1) * (rowH + rowGap)
+      if not id then
+        break
+      end
+      local ry = cy + (i - 1) * (rowH + rowGap) - shift
       if Kit.row(cx, ry, inner, rowH, false, PAL.green, 9 * s) then
         Picker.commit(S, Kit, id)
       end
       -- how many the save already holds, so a second add is an informed one
-      local have = (S.save.inventory and S.save.inventory[id])
-        or (Ops.pcItems(S) or {})[id]
+      local have = (S.save.inventory and S.save.inventory[id]) or (Ops.pcItems(S) or {})[id]
       local tail = have and ("x%d"):format(have) or ""
       local tailW = Kit.textWidth("tiny", tail)
-      Kit.text("monoRow",
-        Kit.ellipsize("monoRow", id, inner - tailW - 30 * s), cx + 10 * s,
-        ry + (rowH - Kit.textHeight("monoRow")) / 2, PAL.text)
+      Kit.text(
+        "monoRow",
+        Kit.ellipsize(
+          "monoRow",
+          (S.data.items[id] and S.data.items[id].name) or id,
+          inner - tailW - 30 * s
+        ),
+        cx + 10 * s,
+        ry + (rowH - Kit.textHeight("monoRow")) / 2,
+        PAL.text
+      )
       if tail ~= "" then
-        Kit.textRight("tiny", tail, cx + inner - 10 * s,
-          ry + (rowH - Kit.textHeight("tiny")) / 2, PAL.caption)
+        Kit.textRight(
+          "tiny",
+          tail,
+          cx + inner - 10 * s,
+          ry + (rowH - Kit.textHeight("tiny")) / 2,
+          PAL.caption
+        )
       end
     end
     Kit.popClip()
-    Kit.scrollbar(cx, cy, inner, listH, p.offset, #hits, perPage)
+    Kit.listScrollbar(p, "offset", cx, cy, inner, listH)
   end
 
   p.offset = Kit.pager(cx, y + h - pad - pagerH, inner, p.offset, #hits, perPage)

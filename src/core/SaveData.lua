@@ -406,8 +406,9 @@ function SaveData.gameFolders()
   -- ROM cache) in the game folder next to the executable/source.  On
   -- Android/iOS the source is a read-only package with no such folder, so
   -- portable mode never applies there.
+  local osName
   if type(love.system) == "table" and type(love.system.getOS) == "function" then
-    local osName = love.system.getOS()
+    osName = love.system.getOS()
     if osName ~= "Windows" and osName ~= "Linux" and osName ~= "OS X" then
       return {}
     end
@@ -444,6 +445,20 @@ function SaveData.gameFolders()
   if appDir then candidates[#candidates + 1] = appDir end
   if sbd and sbd ~= "" then candidates[#candidates + 1] = sbd end
   if src and src ~= "" then candidates[#candidates + 1] = src end
+  -- A certificate trailer on a fused Windows executable can leave both
+  -- source paths empty. The native executable path still locates its marker.
+  if osName == "Windows" and (not src or src == "") and (not sbd or sbd == "")
+      and love.filesystem.isFused and love.filesystem.isFused()
+      and love.filesystem.getExecutablePath then
+    local ok, exe = pcall(love.filesystem.getExecutablePath)
+    if ok and type(exe) == "string" then
+      local dir = parentDir(exe:gsub("\\", "/"))
+      if dir and dir ~= "" then
+        if dir:match("^%a:$") then dir = dir .. "/" end
+        candidates[#candidates + 1] = dir
+      end
+    end
+  end
   return candidates
 end
 
@@ -657,12 +672,10 @@ function SaveData.defaultOptions()
     -- GitHub release checks for mods with a manifest "github" field
     -- (src/mods/ModUpdate.lua). Keyed by owner/repo; TTL is six hours.
     modUpdateCache = {},
-    -- Community mod indexes the player has chosen to browse
-    -- (src/mods/ModIndex.lua), in the order they added them.  Empty by
-    -- default and never populated automatically: adding an index is how a
-    -- player says they trust whoever publishes it, so the launcher asks
-    -- rather than shipping one.  Rows are { url, feed, base, fallback,
-    -- label }.
+    -- Player-added mod indexes, in their chosen order.  ModIndex.sources()
+    -- includes the permanent main index alongside these and reuses any
+    -- main-index row saved by an older launcher.  Rows are
+    -- { url, feed, base, fallback, label }.
     modIndexes = {},
     -- Parsed index listings keyed by feed URL; TTL is 24 hours, matching how
     -- often the feeds themselves rebuild.
@@ -2469,11 +2482,19 @@ function SaveData.runMigrations(save, modChains, activeMods)
   return save
 end
 
+local function rollTrainerId()
+  if love and love.math and love.math.random then
+    return love.math.random(0, 65535)
+  end
+  return math.random(0, 65535)
+end
+SaveData.rollTrainerId = rollTrainerId
+
 -- saves from before the trainer ID existed: backfill once on load
 -- (like the OT backfill for old saves)
 SaveData.addCoreMigration(1, function(save)
   if save.player and not save.player.id then
-    save.player.id = math.random(0, 65535)
+    save.player.id = rollTrainerId()
   end
 end)
 
@@ -3022,9 +3043,10 @@ function SaveData.newGame(boot)
       facing = facing,
       name = boot.playerName or "RED",
       rival = boot.rivalName or "BLUE",
-      -- 16-bit trainer ID rolled at new game (wPlayerID, filled from
-      -- hRandomAdd in OakSpeech)
-      id = math.random(0, 65535),
+      -- 16-bit trainer ID rolled at new game (wPlayerID). The cart copies
+      -- hRandomAdd/hRandomSub, which have been advancing since power-on;
+      -- love.math is the stream that has actually been advancing here.
+      id = rollTrainerId(),
     },
     flags = {},
     inventory = {},

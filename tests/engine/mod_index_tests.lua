@@ -48,6 +48,66 @@ do
   check(bad == nil and err ~= nil, "nil input soft-fails")
 end
 
+-- ------- permanent main source, including options saved before it was built in
+
+do
+  local oldSaveData = package.loaded["src.core.SaveData"]
+  local opts, writes = {}, 0
+  package.loaded["src.core.SaveData"] = {
+    loadOptions = function() return opts end,
+    saveOptions = function(saved) opts = saved; writes = writes + 1; return saved end,
+  }
+  local main = ModIndex.resolveSource("bryanthaboi/gen1recomp-mod-index")
+  local custom = ModIndex.resolveSource("other/community-index")
+  local cached = { checkedAt = 123, mods = { { id = "existing" } } }
+
+  local sources = ModIndex.sources()
+  eq(#sources, 1, "fresh options include the main index")
+  eq(sources[1].feed, main.feed, "the default uses the main feed")
+  eq(sources[1].fallback, main.fallback, "the default includes the raw fallback")
+  sources[1].feed = "changed by caller"
+  eq(ModIndex.sources()[1].feed, main.feed, "callers cannot alter the built-in definition")
+  eq(writes, 0, "reading sources does not rewrite options")
+
+  for _, url in ipairs({ "bryanthaboi/gen1recomp-mod-index",
+      "https://github.com/bryanthaboi/gen1recomp-mod-index",
+      main.base, main.base:sub(1, -2), main.feed }) do
+    local savedMain = ModIndex.resolveSource(url)
+    savedMain.url = url
+    opts = { modIndexes = { custom, savedMain, main },
+      modIndexCache = { [main.feed] = cached } }
+    sources = ModIndex.sources()
+    eq(#sources, 2, "an already-added main index is listed once: " .. url)
+    eq(sources[1], custom, "the existing source precedence is preserved")
+    eq(sources[2], savedMain, "the first saved main-index row is reused")
+    eq(sources[2].url, url, "the player's original URL is preserved")
+    eq(ModIndex.readCache(main.feed), cached, "the existing main-index cache survives")
+    local added, addErr = ModIndex.addSource(url)
+    check(added == nil and addErr ~= nil, "the built-in source cannot be added again")
+    local removed, removeErr = ModIndex.removeSource(main.feed)
+    check(removed == nil and removeErr ~= nil, "an older main-index row cannot be removed")
+    eq(opts.modIndexCache[main.feed], cached, "blocked removal keeps its cache")
+  end
+  eq(writes, 0, "duplicate additions and blocked removals do not write options")
+
+  opts = { modIndexes = { custom }, modIndexCache = { [custom.feed] = cached } }
+  sources = ModIndex.sources()
+  eq(#sources, 2, "existing custom-only options gain the default")
+  eq(sources[1], custom, "adding the default preserves custom-source precedence")
+  eq(sources[2].feed, main.feed, "the missing main source is appended")
+  check(ModIndex.isBuiltIn(main.feed), "the main index is protected")
+  check(not ModIndex.isBuiltIn(custom.feed), "a custom index remains removable")
+  check(ModIndex.removeSource(custom.feed), "a custom source can still be removed")
+  eq(opts.modIndexCache[custom.feed], nil, "custom-source removal clears its cache")
+  eq(#ModIndex.sources(), 1, "removing the last custom source leaves the main index")
+  check(ModIndex.addSource("other/community-index") ~= nil, "custom sources can still be added")
+  eq(#ModIndex.sources(), 2, "the added custom source appears beside the main index")
+
+  package.loaded["src.core.SaveData"].loadOptions = function() error("unavailable options") end
+  eq(ModIndex.sources()[1].feed, main.feed, "the main index remains available if options cannot load")
+  package.loaded["src.core.SaveData"] = oldSaveData
+end
+
 do
   local base = "https://bryanthaboi.github.io/gen1recomp-mod-index/"
   eq(ModIndex.joinUrl(base, "data/mods/bryanthaboi@nuzlocke/thumbnail.png"),
@@ -352,6 +412,20 @@ end
 -- ------- search / filter
 
 do
+  local index = ModIndex.parse(feed({
+    { id = "untamed_advanced", title = "Untamed Advanced",
+      games = { "firered", "leafgreen", "emerald" }, categories = { "GAMEPLAY" } },
+  }))
+  for _, game in ipairs({ "gen3", "firered", "leafgreen", "emerald" }) do
+    local rows = ModIndex.filter(index.mods, { game = game, query = "untamed" })
+    eq(#rows, 1, "Untamed Advanced appears when filtering by " .. game)
+    eq(rows[1] and rows[1].id, "untamed_advanced", "the filtered listing is Untamed Advanced")
+  end
+  eq(#ModIndex.filter(index.mods, { game = "gen2", query = "untamed" }), 0,
+    "Untamed Advanced remains excluded from unsupported generations")
+end
+
+do
   local mods = {
     { id = "nuzlocke", title = "Nuzlocke", author = "bryanthaboi",
       summary = "one catch per area", categories = { "GAMEPLAY" },
@@ -388,12 +462,12 @@ do
   }
   eq(#ModIndex.filter(mods, {}), 4, "no game filter keeps every listing")
   local gen1 = ModIndex.filter(mods, { game = "gen1" })
-  eq(#gen1, 3, "gen1 keeps the Gen 1 mods, the all-games mod and the silent one")
+  eq(#gen1, 2, "gen1 keeps the Gen 1 mods and the all-games mod")
   eq(gen1[1].id, "gen1only", "feed order survives the game filter")
   local gen2 = ModIndex.filter(mods, { game = "gen2" })
-  eq(#gen2, 3, "gen2 drops the Gen 1-only mod")
+  eq(#gen2, 2, "gen2 keeps only explicitly matching listings")
   eq(gen2[1].id, "goldonly", "and keeps the one that names a Gen 2 game")
-  eq(#ModIndex.filter(mods, { game = "red" }), 3,
+  eq(#ModIndex.filter(mods, { game = "red" }), 2,
     "a single version reads the generation's mods too")
   eq(ModIndex.filter(mods, { game = "gold" })[1].id, "goldonly",
     "and a Gen 2 version keeps a mod that names only that game")
@@ -404,7 +478,7 @@ do
   for _, entry in ipairs(gen2) do
     if entry.id == "silent" then silentSeen = true end
   end
-  check(silentSeen, "a listing with no games stays in every game's list")
+  check(not silentSeen, "a listing with no games is excluded by a game filter")
 
   local carts = {
     { id = "johto", kind = "cart", base = "gold" },
@@ -414,6 +488,34 @@ do
     "a cart is filtered by the game it plays as")
   eq(#ModIndex.filter(carts, { game = "gen1" }), 1,
     "and only that game")
+end
+
+do
+  local mods = {
+    { id = "red_audio", games = { "red" }, categories = { "AUDIO" } },
+    { id = "gen2_art", games = { "gen2" }, categories = { "ART" } },
+    { id = "missing_games", categories = { "ART" } },
+    { id = "empty_games", games = {}, categories = { "ART" } },
+    { id = "unknown_games", games = { "nonsense" }, categories = { "ART" } },
+    { id = "missing_category", games = { "red" } },
+    { id = "empty_categories", games = { "red" }, categories = {} },
+  }
+  eq(#ModIndex.filter(mods, { game = "emerald" }), 0,
+    "a game with no declared matches has no results")
+  eq(#ModIndex.filter(mods, { game = "gen2", category = "ART" }), 1,
+    "combined filters require both declared game and category matches")
+  eq(#ModIndex.filter(mods, { game = "gen2", category = "AUDIO" }), 0,
+    "an empty game and category intersection stays empty")
+  eq(#ModIndex.filter(mods, { game = "gen2", query = "missing_games" }), 0,
+    "search cannot restore undeclared game compatibility")
+  eq(#ModIndex.filter(mods, { category = "ART" }), 4,
+    "category filtering requires that category without assuming a game filter")
+  eq(#ModIndex.filter(mods, { category = "AUDIO" }), 1,
+    "missing or empty category metadata is excluded")
+  eq(#ModIndex.filter(mods, { category = "TOOLS" }), 0,
+    "a category with no declared matches has no results")
+  eq(#ModIndex.filter(mods, { game = "all" }), 7,
+    "clearing game filters restores listings with unknown compatibility")
 end
 
 do
@@ -585,4 +687,4 @@ do
     "a cartless feed offers no base games")
 end
 
-print("ok mod_index_tests")
+T.finish("mod index")
