@@ -38,6 +38,7 @@ local Prize = require("src.battle.gen2.Prize")
 local Runtime = require("src.mods.Runtime")
 local Screens = require("src.ui.Screens")
 local Sound = require("src.core.Sound")
+local WaitPlaySFX = require("src.ui.gen2.WaitPlaySFX")
 -- Only for Sprites_Sine / Sprites_Cosine: ../pokecrystal/engine/math/sine.asm
 local SpriteAnims = require("src.ui.gen2.SpriteAnims")
 -- Only for playerPic: the player.sprite raiser both generations share.
@@ -1379,7 +1380,7 @@ function BattleState:stepExpBurst(anim)
     burst.left = (Sound.waitFramesFor and Sound.waitFramesFor(SFX_END_OF_EXP_BAR))
       or 0
   end
-  burst.left = burst.left - 1
+  burst.left = burst.left - WaitPlaySFX.step(self.game)
   if burst.left > 0 and Sound.isPlaying(SFX_END_OF_EXP_BAR) then return true end
   self.expBurst = nil
   -- ../pokecrystal/engine/battle/core.asm:7540
@@ -1867,6 +1868,17 @@ function BattleState:advanceQueue()
     -- cart.  Gen 2 has no "What will X do?" line, and printing one here only
     -- got it clipped mid-word by the menu box drawn over its right half.
     self.message = nil
+    return
+  end
+  -- ../pokecrystal/home/text.asm:887
+  if event.kind == "text-pause" then
+    self.message, self.typedText, self.typer = nil, nil, nil
+    self.messageTimer = 0
+    local input = self.game and self.game.input
+    if input and input.isDown and (input:isDown("a") or input:isDown("b")) then
+      return self:advanceQueue()
+    end
+    self.messageDelay = TEXT_PAUSE_FRAMES
     return
   end
   -- HandleEnemyMonFaint / HandlePlayerMonFaint run their side's
@@ -2752,7 +2764,7 @@ function BattleState:update(_dt)
         self.waitSfxLeft = Sound.waitFramesFor
           and Sound.waitFramesFor(self.waitSfx) or 180
       end
-      self.waitSfxLeft = self.waitSfxLeft - 1
+      self.waitSfxLeft = self.waitSfxLeft - WaitPlaySFX.step(self.game)
       if Sound.isPlaying(self.waitSfx) then
         if self.waitSfxLeft > 0 then return end
         if Sound.stop then Sound.stop(self.waitSfx) end
@@ -4116,6 +4128,7 @@ function BattleState:applyPartyItem(itemId, action, mon, slot, partySlot)
   local menu = stack and stack.top and stack:top()
   if not (menu and menu.showItemResult) then menu = nil end
   local before = (mon and mon.hp) or 0
+  local statusBefore = mon and mon.status
   local result
   if action == "pp" then
     result = ItemEffects.usePpItem(itemId, mon, slot, data)
@@ -4141,6 +4154,11 @@ function BattleState:applyPartyItem(itemId, action, mon, slot, partySlot)
     self.messageTimer = MESSAGE_FRAMES
     self.phase = "resolving"
     return
+  end
+  -- pokecrystal/engine/items/item_effects.asm:1448
+  if mon == self.battle.player and (statusBefore or FULL_MASK_HEALERS[itemId])
+      and not mon.status then
+    self.battle:volatile(mon).nightmare = nil
   end
   self:consumeItem(itemId)
   if menu then
