@@ -150,8 +150,18 @@ function NamingScreen:enter()
   end
 end
 
+-- engine/menus/naming_screen.asm:88
+local REPROMPT_WHITE_FRAMES = 45
+
 function NamingScreen:confirm()
   local name = table.concat(self.glyphs)
+  if name == "" and self.presets and #self.presets > 0 then
+    -- engine/movie/oak_speech/oak_speech2.asm:20
+    self.row, self.col = 1, 1
+    self.anim = 0
+    self.whiteout = REPROMPT_WHITE_FRAMES
+    return
+  end
   if name == "" then
     -- An empty confirm (START, or the ED cell with nothing typed) must not
     -- invent a letter (#833).  DisplayNamingScreen seeds wStringBuffer with
@@ -163,10 +173,10 @@ function NamingScreen:confirm()
     -- .playerCancelled and keeps the old nick, which is why an explicit
     -- opts.default still wins here.  Player/rival naming
     -- (oak_speech2.asm ChoosePlayerName) re-opens on '@' and never accepts an
-    -- empty result; the port keeps its preset fallback for that.
+    -- empty result.
     -- Contract for callers: "" means NO name -- BattleState:askNicknameUI and
     -- Commands.give_pokemon both guard on #name > 0 before setting nickname.
-    name = (self.presets and self.presets[1]) or self.default or ""
+    name = self.default or ""
   end
   Sound.play(self.game.data, "Press_AB")
   self.game.stack:pop()
@@ -193,6 +203,10 @@ function NamingScreen:jumpToEnd()
 end
 
 function NamingScreen:update(dt)
+  if (self.whiteout or 0) > 0 then
+    self.whiteout = self.whiteout - 1
+    return
+  end
   -- engine/menus/naming_screen.asm:131
   self.anim = (self.anim or 0) + 1
   local GRID = self:grid()
@@ -252,6 +266,7 @@ function NamingScreen:draw()
   if self.choosing then return end
   love.graphics.setColor(1, 1, 1, 1)
   love.graphics.rectangle("fill", 0, 0, 160, 144)
+  if (self.whiteout or 0) > 0 then return end
   love.graphics.setColor(0, 0, 0, 1)
   -- engine/menus/naming_screen.asm:453
   if self.mon then

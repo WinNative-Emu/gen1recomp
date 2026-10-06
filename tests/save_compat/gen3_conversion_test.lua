@@ -106,7 +106,9 @@ do
   local s2, err2 = SaveConvert.importSav(rs, "firered", "firered")
   eq(s2, nil, "FireRed refuses a Ruby/Sapphire save")
   eq(err2, Gen3Save.MSG.rs, "FireRed names Ruby/Sapphire")
-  check(require("src.core.GameVersion").VERSIONS.ruby == nil, "no Ruby GameVersion exists")
+  check(require("src.core.GameVersion").VERSIONS.ruby ~= nil, "Ruby is its own GameVersion")
+  local rsBlocks = Gen3Save.forVersion("ruby").readBlocks(rs)
+  check(rsBlocks ~= nil and #rsBlocks.sb1 == 0x3AC0, "the Ruby codec reads the RS-shaped image with the RS layout")
 end
 
 do

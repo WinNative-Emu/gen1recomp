@@ -1604,14 +1604,14 @@ end
 
 
 def rom_text_caches(repo):
-    """FireRed / LeafGreen / Emerald scripts/text.lua caches this machine has imported."""
+    """Native Gen 3 scripts/text.lua caches this machine has imported."""
     roots = [repo]
     user_root = _love_user_data_root()
     if user_root:
         roots.append(user_root)
     found = []
     for root in roots:
-        for version in ("firered", "leafgreen", "emerald"):
+        for version in ("firered", "leafgreen", "ruby", "sapphire", "emerald"):
             base = os.path.join(root, version, "data", "generated", "gba")
             text = os.path.join(base, "scripts", "text.lua")
             if os.path.isfile(text):
@@ -1620,7 +1620,7 @@ def rom_text_caches(repo):
 
 
 def harvest_rom_text(repo, caches=None):
-    """Every ROM text label of the imported FireRed / LeafGreen / Emerald caches.
+    """Every ROM text label of the imported native Gen 3 caches.
     Returns [(label_literal, english_literal, [(legacy_key_literal, suffix_literal)]), ...]."""
     rows = {}
     for text, words in (rom_text_caches(repo) if caches is None else caches):

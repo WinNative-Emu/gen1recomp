@@ -1,3 +1,5 @@
+local CacheBlob = require("src.import.CacheBlob")
+
 -- src/region_map.c:393-427
 
 local RegionMapExtract = {}
@@ -553,12 +555,12 @@ local function baked(cache, rel)
     if d and #d > 8 then return true end
   end
   if love and love.filesystem and love.filesystem.read then
-    local d = love.filesystem.read(rel)
+    local d = CacheBlob.readFs(rel)
     if d and #d > 8 then return true end
   end
   local f = io.open(rel, "rb")
   if f then
-    local d = f:read("*a")
+    local d = CacheBlob.decode(rel, f:read("*a"))
     f:close()
     if d and #d > 8 then return true end
   end

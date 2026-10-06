@@ -615,6 +615,16 @@ local function pick(save, fields)
   return out
 end
 
+local function hasNativeMixBytes(value)
+  if type(value) ~= "table" then return false end
+  if type(value._recordMixNativeBytes) == "table" then return true end
+  for _, child in pairs(value) do
+    if type(child) == "table" and hasNativeMixBytes(child) then return true end
+  end
+  return false
+end
+local NATIVE_MIX_SECTIONS = { secretBases = true, tvShows = true, oldMan = true, frontierRecords = true }
+
 function Rse.writeSections(codec, encoded, template, save, sections)
   local newBuf = codec.newBuf
   local w1, w2 = newBuf(#encoded.sb1, encoded.sb1), newBuf(#encoded.sb2, encoded.sb2)
@@ -628,17 +638,23 @@ function Rse.writeSections(codec, encoded, template, save, sections)
       if present then
         local t1, t2 = newBuf(#encoded.sb1, w1:str()), newBuf(#encoded.sb2, w2:str())
         local tx = context(codec, encoded, t1, t2, notes)
+        local nativeCross = (codec.L.FAMILY == "emerald" or codec.L.FAMILY == "rs")
+          and NATIVE_MIX_SECTIONS[s.name] and hasNativeMixBytes(want)
+        local cross = nativeCross and require("src.core.game3.link.rs_record_cross_bytes")
+        if nativeCross then cross.beforeSection(tx, s.name, want) end
         s.write(tx, want)
+        if nativeCross then cross.afterSection(tx, s.name, want) end
         local changed = true
         if base then
           local back = s.read(context(codec, { sb1 = t1:str(), sb2 = t2:str() }))
-          changed = not same(back, s.read(base))
+          changed = nativeCross or not same(back, s.read(base))
         end
         if changed then w1, w2 = t1, t2 end
       end
     end
   end
-  return { sb2 = w2:str(), sb1 = w1:str(), storage = encoded.storage, notes = notes }
+  return { sb2 = w2:str(), sb1 = w1:str(), storage = encoded.storage, notes = notes,
+    nativeRecordMixMail = codec.L.FAMILY == "emerald" and hasNativeMixBytes(save.mail) }
 end
 
 local function splice(s, off, part)
@@ -668,7 +684,8 @@ function Rse.keepUnchanged(codec, encoded, template)
   end
   local M = L.MAIL
   local mlen = M.count * M.size
-  if b:sub(M.off + 1, M.off + mlen) ~= a:sub(M.off + 1, M.off + mlen) then
+  if L.FAMILY ~= "rs" and not encoded.nativeRecordMixMail
+      and b:sub(M.off + 1, M.off + mlen) ~= a:sub(M.off + 1, M.off + mlen) then
     local same_ = true
     for i = 0, M.count - 1 do
       local o = M.off + i * M.size
@@ -715,12 +732,12 @@ function Rse.cartRoamer(r, old)
     cute = num(r.cute), smart = num(r.smart), tough = num(r.tough), active = r.active and 1 or 0 }
 end
 
-function Rse.augment(codec, save, c, blocks)
+function Rse.augment(codec, save, c, blocks, sections)
   save.rivalName = nil
   -- pokeemerald/src/random.c:8
   save.rng = { value = 0, value2 = 0, wild = 0 }
   save.roamer = Rse.portRoamer(c.roamer)
-  Rse.readSections(codec, blocks, save)
+  Rse.readSections(codec, blocks, save, sections)
   if type(save.modData) == "table" then
     save.modData.fameChecker, save.modData.trainerTower = nil, nil
     if type(save.modData.cartImport) == "table" then
@@ -756,7 +773,7 @@ for _, name in ipairs({ "tv_shows", "records", "town", "frlg_extra" }) do
   require("src.save_convert.gen3_port.sections." .. name)(Rse)
 end
 
-function Rse.install(codec)
+function Rse.install(codec, sections)
   local toPortSave, fromPortSave = codec.toPortSave, codec.fromPortSave
 
   function codec.importPort(bytes, version)
@@ -764,7 +781,7 @@ function Rse.install(codec)
     local cart, blocks = codec.decode(bytes)
     if not cart then return nil, codec.message(blocks, #bytes) end
     if not codec.mapFor(cart.location.group, cart.location.num) then return nil, codec.MSG.corrupt end
-    local save, note = codec.stampImport(Rse.augment(codec, toPortSave(cart, version), cart, blocks), bytes, cart, version)
+    local save, note = codec.stampImport(Rse.augment(codec, toPortSave(cart, version), cart, blocks, sections), bytes, cart, version)
     return save, nil, note
   end
 
@@ -787,7 +804,7 @@ function Rse.install(codec)
   function codec.exportPort(save, opts)
     local c, blocks = codec.fromPortSave(save, opts)
     if not c then return nil, blocks end
-    local encoded = Rse.writeSections(codec, codec.encodeBlocks(c, blocks), blocks, save)
+    local encoded = Rse.writeSections(codec, codec.encodeBlocks(c, blocks), blocks, save, sections)
     if blocks then encoded = Rse.keepUnchanged(codec, encoded, blocks) end
     for _, n in ipairs(c.notes or {}) do encoded.notes[#encoded.notes + 1] = n end
     return codec.finishFlash(c, blocks, encoded), #encoded.notes > 0 and table.concat(encoded.notes, " ") or nil

@@ -11,6 +11,7 @@ local GameVersion = require("src.core.GameVersion")
 local ExtractScripts = {}
 
 ExtractScripts.CACHE_SUB = "scripts"
+ExtractScripts.RS_BRAILLE_FORMAT = 1
 
 ExtractScripts.REQUIRED = {
   "scripts/scripts.lua",
@@ -178,9 +179,14 @@ local function decode_braille(bytes)
   return out
 end
 
-local function read_braille_ir(rom, gbaPtr, skip)
+local function read_braille_ir(rom, gbaPtr, skip, keepFormat)
   local off = rom:ptrOffset(gbaPtr)
   if not off then return nil end
+  local format
+  if keepFormat and (skip or 0) > 0 then
+    format = {}
+    for i = 0, skip - 1 do format[#format + 1] = rom:get(off + i) or 0 end
+  end
   off = off + (skip or 0)
   local bytes = {}
   for i = 0, TEXT_MAX - 1 do
@@ -189,7 +195,12 @@ local function read_braille_ir(rom, gbaPtr, skip)
     bytes[#bytes + 1] = b
     if b == 0xFF then break end
   end
-  return decode_braille(bytes)
+  local ir = decode_braille(bytes)
+  if format then
+    -- pokeruby/src/scrcmd.c:1421
+    table.insert(ir, 1, { t = "ext", cmd = "brailleformat", args = format })
+  end
+  return ir
 end
 
 ExtractScripts.BRAILLE_CHARMAP = BRAILLE_CHARMAP
@@ -221,6 +232,7 @@ local function data_label_stop(game)
   if Versions.GAME ~= game or not Versions.SYMS then return nil end
   local S = Versions.SYMS
   return function(off)
+    if Versions.SCRIPT_DATA_OFFSETS and Versions.SCRIPT_DATA_OFFSETS[off] then return true end
     local names = S.namesAt(off)
     if #names == 0 then return false end
     local data = false
@@ -322,7 +334,8 @@ function ExtractScripts.bfsFromSeeds(rom, seedPtrs)
           local tk = Opcodes.key(tp)
           -- pokeemerald/src/scrcmd.c:1494
           local ir = read_braille_ir(rom, tp,
-            row.op == "braillemessage" and opset.brailleFormatSize or 0)
+            row.op == "braillemessage" and opset.brailleFormatSize or 0,
+            opset.game == "ruby")
           if ir then text[tk] = ir end
           row.ptr = tk
           row[1] = tk
@@ -549,6 +562,9 @@ local function write_tables(cache, root, scripts, text, movements, events, metaE
   if metaExtra and metaExtra.movement then
     parts[#parts + 1] = string.format(',"movement":%q', metaExtra.movement)
   end
+  if Opcodes.active().game == "ruby" then
+    parts[#parts + 1] = string.format(',"brailleFormat":%d', ExtractScripts.RS_BRAILLE_FORMAT)
+  end
   parts[#parts + 1] = "}\n"
   cache:write(base .. "/meta.json", table.concat(parts))
   return true
@@ -644,6 +660,8 @@ function ExtractScripts.ready(cache, cacheRoot)
   return type(meta) == "string"
     and tonumber(meta:match('"cache_version":(%d+)')) == Versions.CACHE_VERSION
     and meta:find('"movement":"canonical"', 1, true) ~= nil
+    and (Opcodes.active().game ~= "ruby"
+      or tonumber(meta:match('"brailleFormat":(%d+)')) == ExtractScripts.RS_BRAILLE_FORMAT)
 end
 
 --- Cache contract: ready extract has events+scripts+text.

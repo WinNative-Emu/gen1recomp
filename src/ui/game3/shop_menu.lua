@@ -27,7 +27,10 @@ ShopMenu.ROOT = {
 local VISIBLE = 6
 
 local function rse_shop(session)
-  if require("src.core.game3.profile").family(session) ~= "rse" then return nil end
+  local Profile = require("src.core.game3.profile")
+  local profile = Profile.forSession(session)
+  if profile.ui and profile.ui.shopMenu then return require(profile.ui.shopMenu) end
+  if Profile.family(session) ~= "rse" then return nil end
   return require("src.ui.game3.rse.shop_menu")
 end
 

@@ -106,9 +106,9 @@ local function fieldFree()
   return Dive._task == nil
 end
 
-local function startScript(label)
+local function startScript(label, alt)
   local Space = package.loaded["src.core.game3.scripting.space"]
-  local key = Space.scriptKey(label)
+  local key = Space.scriptKey(label) or (alt and Space.scriptKey(alt))
   if not key then error("dive: script " .. label .. " is not in the script cache", 0) end
   return Space.startScript(key) and true or false
 end
@@ -131,7 +131,8 @@ function Dive.tryEmerge()
   if not Dive.isUnderwaterMap((currentDef())) then return false end
   local code = Dive.trySetDiveWarp(sess)
   if code ~= 1 then return false end
-  return startScript("EventScript_UseDiveUnderwater")
+  -- pokeruby/src/field_control_avatar.c:533
+  return startScript("EventScript_UseDiveUnderwater", "S_UseDiveUnderwater")
 end
 
 function Dive.isActive()

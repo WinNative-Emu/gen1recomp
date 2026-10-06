@@ -138,10 +138,10 @@ local champGame = { save = { flags = {} } }
 champ.onEnter(champGame, champOw)
 eq(#champQueued, 2, "CHAMPIONS_ROOM.onEnter queues entrance walk + rival script")
 local walk = champQueued[1] and champQueued[1].script
-check(walk and walk[1][1] == "move_player" and walk[1][2] == "up" and walk[1][3] == 1
+check(walk and walk[1][1] == "move_player" and walk[1][2] == "up" and walk[1][3] == 3
         and walk[2][1] == "move_player" and walk[2][2] == "right" and walk[2][3] == 1
-        and walk[3][1] == "move_player" and walk[3][2] == "up" and walk[3][3] == 3,
-      "entrance walk is RivalEntrance_RLEMovement (up 1, right 1, up 3)")
+        and walk[3][1] == "move_player" and walk[3][2] == "up" and walk[3][3] == 1,
+      "entrance walk is RivalEntrance_RLEMovement (up 3, right 1, up 1)")
 check(champQueued[2] and champQueued[2].script == rows,
       "second queue is TEXT_CHAMPIONSROOM_RIVAL script rows")
 check(champQueued[2] and champQueued[2].extra

@@ -398,6 +398,7 @@ function StartMenu.draw()
   local maxVisible = (d and d.maxVisible) or StartMenu.MAX_VISIBLE or 8
   local visibleCount = math.min(#StartMenu.ENTRIES, maxVisible)
   local scroll = StartMenu._scrollOffset or 0
+  local nativeCursorX, nativeCursorY
 
   for r = 1, visibleCount do
     local i = scroll + r
@@ -407,10 +408,12 @@ function StartMenu.draw()
     local yPx = Window.menuRowPx(topPx, r)
     if d and d.rowPitch then yPx = topPx + d.textY + (r - 1) * d.rowPitch end
     if not StartMenu._confirmExit and i == StartMenu.cursor then
-      Window.cursorPx(leftPx, yPx)
+      if d and d.drawCursor then nativeCursorX, nativeCursorY = leftPx, yPx
+      else Window.cursorPx(leftPx, yPx) end
     end
-    Window.printPx(e.label, leftPx + Window.CURSOR_WIDTH, yPx)
+    Window.printPx(e.label, leftPx + (d and d.textX or Window.CURSOR_WIDTH), yPx)
   end
+  if nativeCursorX then d.drawCursor(nativeCursorX, nativeCursorY) end
 
   local n = #StartMenu.ENTRIES
   if n > visibleCount and not StartMenu._confirmExit then

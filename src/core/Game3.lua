@@ -15,6 +15,7 @@ local MapIds = require("src.core.game3.map_ids")
 local Profile = require("src.core.game3.profile")
 local Runtime = require("src.core.game3.runtime")
 local Audio = require("src.core.game3.audio")
+local Warm = require("src.core.game3.warm")
 local Options = require("src.core.game3.options")
 local Dataset = require("src.core.game3.dataset")
 local Display = require("src.core.game3.display")
@@ -75,19 +76,22 @@ function Game3:_enterField(session, reason, opts)
   Options.bind(session, self.options)
   -- Continue restores stream; new_game already seeded inside Schema.newGame.
   local Rng = lazyReq("src.core.game3.rng")
+  local perturbField = Schema.rulesFor(session.version).PERTURB_FIELD_RNG ~= false
   if reason == "continue" then
     if not Rng.restoreFromSession(session) then
       -- Legacy saves without rng: soft-reset-ish reseed.
-      local tid = Rng.seedNewGame()
-      if session.trainerId == nil then session.trainerId = tid end
+      if perturbField then
+        local tid = Rng.seedNewGame()
+        if session.trainerId == nil then session.trainerId = tid end
+      end
       Rng.captureToSession(session)
     else
       -- On GBA FRLG, continuing from title screen seeds/perturbs gRngValue with timer TM0
-      Rng.perturb()
+      if perturbField then Rng.perturb() end
     end
   elseif session.rng then
     Rng.restoreFromSession(session)
-    Rng.perturb()
+    if perturbField then Rng.perturb() end
   end
   self.save = Schema.toSaveTable(session)
   self.phase = "field"
@@ -114,6 +118,10 @@ function Game3:_enterField(session, reason, opts)
   -- pokefirered/src/fieldmap.c:100
   Runtime.start(nil, self, session, { reason = reason or "new_game" })
   Map._nextEnterVia = nil
+  pcall(function() require("src.core.game3.prewarm").session(session) end)
+  local Syms = package.loaded["src.import.gba.syms"]
+  if Syms and Syms.reset then Syms.reset() end
+  collectgarbage("collect")
   if fieldCallback then require(fieldCallback).execute() end
   if reason == "continue" then
     if lazyReq("src.core.game3.profile").family(session) == "rse" then
@@ -130,7 +138,7 @@ end
 
 function Game3:load(opts)
   local activeVersion = lazyReq("src.core.GameVersion").get()
-  lazyReq("src.import.gba.versions").select(activeVersion)
+  lazyReq("src.import.gba.versions").selectCache(activeVersion, Dataset.cache())
   lazyReq("src.core.game3.se_ids").select(activeVersion)
   lazyReq("src.core.game3.song_ids").select(activeVersion)
   lazyReq("src.core.game3.items_data").ensureModel()
@@ -333,6 +341,9 @@ function Game3:_loadMods(opts)
   -- launcher preloaded (every enabled mod's lang/strings.lua, whatever game
   -- it targets) stayed in place for the whole FireRed session.
   lazyReq("src.core.Strings").load(self.data)
+  local Pipelines = lazyReq("src.render.Pipelines")
+  Pipelines.install(self.data)
+  Pipelines.applyOptions(self.options)
   local okC, Gen3Compat = pcall(lazyReq, "src.mods.Gen3Compat")
   if okC and type(Gen3Compat) == "table" and Gen3Compat.applyMerged then
     local okA, err = pcall(Gen3Compat.applyMerged, self)
@@ -361,6 +372,10 @@ function Game3:writeOptions()
 end
 Game3.persistOptions = Game3.writeOptions
 
+function Game3:restartWithMods()
+  lazyReq("src.core.HostShell").restart()
+end
+
 function Game3:applyOptions(opts)
   opts = opts or self.options or {}
   self.options = opts
@@ -381,7 +396,9 @@ function Game3:applyOptions(opts)
   end)
   try("src.render.Tilt", "applyOptions", opts)
   try("src.render.Letterbox", "applyOptions", opts)
+  try("src.render.Pipelines", "applyOptions", opts)
   try("src.render.Zoom", "applyOptions", opts)
+  local shaderfxCleared = try("src.render.ShaderFX", "applyOptions", opts)
   try("src.core.VideoMode", "applyOptions", opts)
   try("src.core.Orientation", "applyOptions", opts)
   local FaithfulRes = lazyReq("src.core.FaithfulRes")
@@ -397,6 +414,7 @@ function Game3:applyOptions(opts)
   local caps = try("src.core.Performance", "applyOptions", opts)
   if type(caps) == "table" then
     if not caps.tilt then try("src.render.Tilt", "setLevel", 0) end
+    if not caps.shaderfx then try("src.render.ShaderFX", "deactivate") end
     local okZ, Zoom = pcall(lazyReq, "src.render.Zoom")
     if okZ and Zoom then
       Zoom.allowSurvey = caps.survey
@@ -407,15 +425,18 @@ function Game3:applyOptions(opts)
     end
   end
   if self.touchControls then
+    local g3 = type(opts.game3) == "table" and opts.game3 or nil
     self.touchControls:applyOptions({
-      touchControls = opts.touchControls,
-      haptics = opts.haptics,
-      hotbar = opts.hotbar,
+      touchControls = (g3 and g3.touchControls) or opts.touchControls,
+      haptics = (g3 and g3.haptics) or opts.haptics,
+      hotbar = (g3 and g3.hotbar ~= nil) and g3.hotbar or opts.hotbar,
+      generation = 3,
     })
   end
   if self.input and opts.bindings then
     self.input:applyBindings(opts.bindings)
   end
+  if shaderfxCleared then self:writeOptions() end
 end
 
 -- pokefirered/src/main.c:325
@@ -587,7 +608,9 @@ function Game3:fixedUpdate(dt)
   if self.session then Audio.applyOptions(self.session) end
 
   local Rng = lazyReq("src.core.game3.rng")
-  Rng.step()
+  local custom = self.phase == "boot" and self.boot and self.boot.custom
+  local ownRng = custom and custom.mods.params.sceneOwnsRng
+  if not (ownRng and ownRng[self.boot.phase]) then Rng.step() end
 
   if self.phase == "boot" and self.boot then
     local action = Boot.update(self.boot, self.input, dt)
@@ -734,7 +757,11 @@ function Game3:update(dt)
   if self._audioAccum > 0.25 then self._audioAccum = 0 end
   local okT, errT = pcall(function() lazyReq("src.render.Tilt").update(dt) end)
   if not okT then s9log("tilt", errT) end
+  local okP, errP = pcall(function() lazyReq("src.render.Pipelines").update(dt) end)
+  if not okP then s9log("pipelines", errP) end
   pcall(function() lazyReq("src.core.DiscordPresence").update(dt) end)
+  local okW, errW = pcall(Warm.step)
+  if not okW then s9log("warm", errW) end
   Game3.stepGC()
 end
 
@@ -882,7 +909,25 @@ function Game3:_hotkey(key)
     self:zoomStep(1)
     return true
   end
-  return false
+  return self:pipelineHotkey(key)
+end
+
+function Game3:pipelineGate()
+  if not self:zoomGateOK() then return nil, nil end
+  if Runtime.uiBusy and Runtime.uiBusy() then return nil, self end
+  return self, self
+end
+
+function Game3:pipelineHotkey(key)
+  local Pipelines = lazyReq("src.render.Pipelines")
+  local top, world = self:pipelineGate()
+  if not Pipelines.hotkey(key, top, world) then return false end
+  if type(self.options) == "table" then
+    Pipelines.syncOptions(self.options)
+    lazyReq("src.render.Tilt").setLevel(self.options.tilt or 0)
+    self:writeOptions()
+  end
+  return true
 end
 
 function Game3:keypressed(key)
@@ -980,10 +1025,15 @@ function Game3:saveGame()
     local s = Runtime.getSession()
     if s then self.session = s end
   end
+  local storageUi = package.loaded["src.ui.game3.box_storage_ui"]
+  if storageUi and storageUi._session == self.session and storageUi.hasPendingMon
+      and storageUi.hasPendingMon() then return false end
   pcall(function()
     lazyReq("src.core.game3.scripting.space").persistSession(nil, self)
   end)
   if FieldModules.enabled("questLog", self.session) then QuestRecorder.save(self) end
+  local P = package.loaded["src.core.game3.player"]
+  if P and P.facing and not P.moving and P.cellX == self.session.x and P.cellY == self.session.y then self.session.facing = P.facing end
   local save = Schema.toSaveTable(self.session)
   if SaveData.buildMeta then
     save.meta = SaveData.buildMeta(
@@ -1166,6 +1216,7 @@ end
 -- pokefirered/src/main.c:480
 local SOFT_RESET = {
   { "src.core.game3.battle.init", "reset" },
+  { "src.core.game3.battle.level_up_streaks", "reset" },
   { "src.core.game3.battle_bridge", "reset" },
   { "src.core.game3.battle_transition", "abort" },
   { "src.core.game3.task", "clear" },
@@ -1210,11 +1261,38 @@ local SOFT_RESET = {
   { "src.ui.game3.summary_menu", closeFlag("open") },
   { "src.ui.game3.pokedex", closeFlag("open") },
   { "src.ui.game3.option_menu", closeFlag("open") },
+  { "src.ui.game3.rs.option_menu", "close" },
+  { "src.ui.game3.rs.bag_menu", "reset" },
+  { "src.ui.game3.rs.berry_tag", "reset" },
+  { "src.ui.game3.rs.mail_reader", "reset" },
+  { "src.ui.game3.rs.mail_composer", "reset" },
+  { "src.ui.game3.rs.trendy_phrase", "reset" },
+  { "src.ui.game3.rs.easy_chat_editor", "reset" },
+  { "src.ui.game3.rs.egg_hatch", "reset" },
+  { "src.ui.game3.rs.summary_menu", "reset" },
+  { "src.ui.game3.rs.pokenav.init", "reset" },
+  { "src.ui.game3.rs.diploma", "reset" },
+  { "src.ui.game3.rs.trainer_card", "reset" },
+  { "src.ui.game3.rs.battle_tower_records", "reset" },
+  { "src.ui.game3.rs.link_records", "reset" },
+  { "src.ui.game3.rs.cable_lobby", "reset" },
+  { "src.ui.game3.rs.credits", "reset" },
+  { "src.ui.game3.rs.glass_workshop", "reset" },
+  { "src.core.game3.rse.weather_flash_rs", "reset" },
+  { "src.core.game3.rs.enigma", "reset" },
+  { "src.ui.game3.rs.daycare_party", "reset" },
+  { "src.ui.game3.rs.daycare_level_menu", "reset" },
+  { "src.core.game3.rse.orb_effect_rs", "reset" },
+  { "src.core.game3.rse.battle_tower_rs", "reset" },
+  { "src.core.game3.rse.secret_base_battle_rs", "reset" },
+  { "src.core.game3.rse.fan_club_lifecycle_rs", "resetCache" },
+  { "src.core.game3.rse.tv", "resetData" },
+  { "src.core.game3.rs.tv_daily", "resetData" },
   { "src.ui.game3.save_menu", closeFlag("open") },
   { "src.ui.game3.trainer_card", closeFlag("open") },
   { "src.ui.game3.pc_menu", closeFlag("open") },
   { "src.ui.game3.item_pc", closeFlag("open") },
-  { "src.ui.game3.box_storage_ui", closeFlag("open") },
+  { "src.ui.game3.box_storage_ui", "reset" },
   { "src.ui.game3.region_map", closeFlag("open") },
   { "src.ui.game3.daycare_menu", closeFlag("open") },
   { "src.ui.game3.fame_checker", closeFlag("open") },
@@ -1227,6 +1305,7 @@ local SOFT_RESET = {
   { "src.ui.game3.teachy_tv", closeFlag("open") },
   { "src.ui.game3.slot_machine", closeFlag("open") },
   { "src.ui.game3.mod_manager", closeFlag("open") },
+  { "src.ui.game3.shaderfx_menu", "close" },
   { "src.ui.game3.prize_corner", "reset" },
   { "src.ui.game3.stat_growth", closeFlag("_open") },
   { "src.ui.game3.release_seq", function(m) m.active = false; m.onComplete = nil end },
@@ -1256,17 +1335,25 @@ local SOFT_RESET = {
   { "src.ui.game3.rse.cable_car", "reset" },
   { "src.ui.game3.rse.rayquaza_scene", "reset" },
   { "src.ui.game3.rse.decoration", "reset" },
+  { "src.ui.game3.rs.decoration", "reset" },
   { "src.core.game3.rse.secret_base", "reset" },
   { "src.ui.game3.rse.pokeblock_case", "reset" },
+  { "src.ui.game3.rs.pokeblock_case", "reset" },
   { "src.ui.game3.rse.use_pokeblock", "reset" },
+  { "src.ui.game3.rs.use_pokeblock", "reset" },
+  { "src.ui.game3.rs.move_relearner", "reset" },
   { "src.ui.game3.rse.pokeblock_feed", "reset" },
   { "src.ui.game3.rse.berry_tag", "reset" },
   { "src.ui.game3.rse.berry_blender", "reset" },
+  { "src.ui.game3.rs.berry_blender", "reset" },
   { "src.ui.game3.rse.slot_machine", "reset" },
   { "src.ui.game3.rse.roulette", "reset" },
   { "src.ui.game3.rse.contest", "reset" },
+  { "src.ui.game3.rse.contest_party", "reset" },
   { "src.ui.game3.rse.contest_results", "reset" },
   { "src.ui.game3.rse.contest_painting", "reset" },
+  { "src.ui.game3.rs.contest_painting", "reset" },
+  { "src.ui.game3.rs.shop_menu", "reset" },
   { "src.ui.game3.rse.contest_entry_pic", "reset" },
   { "src.ui.game3.rse.frontier_pass", "reset" },
   { "src.ui.game3.rse.frontier_records", "reset" },

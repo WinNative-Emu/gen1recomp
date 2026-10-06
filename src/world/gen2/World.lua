@@ -6709,7 +6709,7 @@ end
 -- list standing -- engine/events/overworld.asm:556, :578 over
 -- engine/pokemon/mon_menu.asm:624.
 function World:openFlyMap(mon, opts)
-  local points = self:flyPoints()
+  local points, flyRegion = self:flyPoints()
   if #points == 0 then return false end
   -- Loaded on demand and through pcall: a headless run has no love, and this
   -- is the only place in the world that reaches for a screen module by hand.
@@ -6720,6 +6720,7 @@ function World:openFlyMap(mon, opts)
         save = self.game.save,
         currentLandmark = self:currentLandmarkId(),
         fly = points,
+        flyRegion = flyRegion,
         -- (../pokecrystal/engine/pokegear/pokegear.asm:2708-2721).
         flyMon = mon,
         onFly = function(spawnId)

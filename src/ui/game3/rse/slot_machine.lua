@@ -54,9 +54,9 @@ local function winRange(a, b) return a * 256 + b end
 -- pokeemerald/include/constants/game_stat.h:32
 local GAME_STAT_SLOT_JACKPOTS = 28
 
-function UI.new(opts)
+function UI.new(opts, class)
   opts = opts or {}
-  local self = setmetatable({}, UI)
+  local self = setmetatable({}, class or UI)
   self.opts = opts
   self.man = opts.manifest or Slots.loadTables(opts.cache)
   self.T = self.man.tables
@@ -2137,10 +2137,10 @@ end
 local Host = {}
 UI.Host = Host
 
-function UI.open(opts)
+function UI.open(opts, constructor)
   local Stack = require("src.ui.game3.stack")
   local SceneKit = require("src.ui.game3.rse.scene_kit")
-  local screen = UI.new(opts)
+  local screen = (constructor or UI.new)(opts)
   Host._screen = screen
   Host._step = SceneKit.stepper()
   local userDone = opts and opts.onDone

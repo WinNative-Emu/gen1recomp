@@ -94,13 +94,14 @@ local wild = BattleState.newWild(game, "RATTATA", 2)
 wild.onFinish = function() end
 wild:enter()
 
-eq(wild.introBalls, true, "the wild intro opens the DrawAllPokeballs window")
--- introBalls is a plain field, not a queue row, so it cannot displace the
--- wild cry PrintBeginningBattleText plays before PrintText (#303)
+check(wild.introBalls ~= true, "the DrawAllPokeballs window is not open at enter")
+-- engine/battle/common_text.asm:11
 check(wild.queue[1] and wild.queue[1].fn ~= nil,
       "the cry act is still the first queue row (#303)")
-check(wild.queue[2] and wild.queue[2].text == wild.introText,
-      "the intro text is still the second queue row")
+check(wild.queue[2] and wild.queue[2].fn ~= nil,
+      "DrawAllPokeballs is the second queue row")
+check(wild.queue[3] and wild.queue[3].text == wild.introText,
+      "the intro text is the third queue row")
 
 -- let the silhouette slide land so the intro box is genuinely up (the slide
 -- now runs 80 frames at 2px/frame, matching the original ~2px/frame)
@@ -174,8 +175,9 @@ local game2 = makeGame({ Pokemon.new(Data, "BULBASAUR", 50) })
 local tr = BattleState.newTrainer(game2, "OPP_YOUNGSTER", 1)
 tr.onFinish = function() end
 tr:enter()
+check(tr.introBalls ~= true, "the trainer window is not open at enter")
+for _ = 1, 140 do tr:update(1 / 60) end
 eq(tr.introBalls, true, "the trainer intro opens the same window")
-for _ = 1, 85 do tr:update(1 / 60) end
 
 local ok3, err3, rows3 = snapshotHUD(tr)
 check(ok3, "drawHUDs runs during the trainer intro: " .. tostring(err3))

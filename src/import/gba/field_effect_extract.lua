@@ -308,8 +308,10 @@ function FieldEffectExtract.runRse(rom, cache, opts)
   for i = 0, F.count - 1 do
     local off = G.ptr(rom, F.templates + i * 4)
     if off then
-      local symbol = G.symName(S, off, TEMPLATE_PREFIX) or G.symName(S, off)
-      local name = G.snake((symbol or ("object_" .. i)):gsub("^" .. TEMPLATE_PREFIX, ""))
+      local prefix = F.template_prefix or TEMPLATE_PREFIX
+      local symbol = G.symName(S, off, prefix) or G.symName(S, off)
+      local name = G.snake((symbol or ("object_" .. i)):gsub("^" .. prefix, ""))
+      name = F.names and F.names[i] or name
       local e = rseObject(rom, S, G, cache, root, name, off, byTag, slots, symbol)
       e.index = i
       objects[#objects + 1] = e
@@ -369,8 +371,13 @@ function FieldEffectExtract.ready(cache, cacheRoot)
   if type(body) ~= "string" or #body == 0 then return false end
   local chunk = load(body, "=objects", "t", {})
   local ok, m = pcall(chunk or error)
-  return ok and type(m) == "table" and m.format == FieldEffectExtract.RSE_FORMAT
-    and m.count == Versions.FIELD_EFFECT_OBJECTS.count
+  if not (ok and type(m) == "table" and m.format == FieldEffectExtract.RSE_FORMAT
+    and m.count == Versions.FIELD_EFFECT_OBJECTS.count) then return false end
+  for _, file in ipairs(Versions.FIELD_EFFECT_OBJECTS.requiredFiles or {}) do
+    local data = cache:read(rseRoot({cacheRoot = cacheRoot}) .. "/" .. file)
+    if type(data) ~= "string" or #data == 0 then return false end
+  end
+  return true
 end
 
 return FieldEffectExtract

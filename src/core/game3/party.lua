@@ -193,7 +193,9 @@ function Party.giveMon(session, species, level, nickname, opts)
   end
 
   local Rng = require("src.core.game3.rng")
-  local personality = Rng.Random32()
+  local personality = opts and tonumber(opts.fixedPersonality)
+  if personality == nil then personality = Rng.Random32() end
+  personality = personality % 0x100000000
   local iv1 = Rng.Random()
   local iv2 = Rng.Random()
   local ivs = {

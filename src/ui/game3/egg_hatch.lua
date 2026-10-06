@@ -9,6 +9,7 @@ local Oam = require("src.core.game3.oam")
 local SE = require("src.core.game3.se_ids")
 local RomText = require("src.core.game3.rom_text")
 local BattleChrome = require("src.ui.game3.battle_chrome")
+local CacheBlob = require("src.import.CacheBlob")
 
 local EggHatch = {}
 
@@ -70,13 +71,13 @@ local function read_bytes(path)
   if love and love.filesystem and love.filesystem.getInfo then
     local info = love.filesystem.getInfo(path)
     if info then
-      local data = love.filesystem.read(path)
+      local data = CacheBlob.readFs(path)
       if data and #data > 0 then return data end
     end
   end
   local f = io.open(path, "rb")
   if f then
-    local d = f:read("*a")
+    local d = CacheBlob.decode(path, f:read("*a"))
     f:close()
     if d and #d > 0 then return d end
   end

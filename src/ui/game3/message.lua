@@ -8,6 +8,12 @@ local Display = require("src.core.game3.display")
 
 local Message = {}
 
+local RS_AUTO = "src.ui.game3.rs.field_auto_scroll_message"
+local function rsPrinter()
+  local p = package.loaded[RS_AUTO]
+  return p and p.ownsFrame() and p or nil
+end
+
 Message.open = false
 Message._pages = nil
 Message._page = 1
@@ -35,6 +41,27 @@ end
 
 local placeholderCache = {}
 
+-- pokeemerald/src/strings.c:6
+local function cartPlaceholders(extracted)
+  local Extract = require("src.import.gba.text_placeholders_extract")
+  local RomText = require("src.core.game3.rom_text")
+  local function value(name)
+    local label = Extract.SYMBOLS[name]
+    if label and RomText.has(label) then return RomText.plain(label) end
+    return extracted[name]
+  end
+  local out, byGender = {}, {}
+  for name, v in pairs(extracted) do out[name] = v end
+  for name in pairs(Extract.SYMBOLS) do out[name] = value(name) end
+  for name, pair in pairs(extracted.byGender or {}) do byGender[name] = pair end
+  for name, pair in pairs(Extract.BY_GENDER) do
+    byGender[name] = { male = out[pair.male], female = out[pair.female] }
+  end
+  out.byGender = byGender
+  return out
+end
+Message.cartPlaceholders = cartPlaceholders
+
 -- pokeemerald/src/string_util.c:456
 TextIR.setContextProvider(function(kind, dialect, ctx)
   if kind == "gender" then
@@ -60,13 +87,15 @@ TextIR.setContextProvider(function(kind, dialect, ctx)
   local GameVersion = require("src.core.GameVersion")
   local s = liveSession()
   local id = (s and s.version) or GameVersion.get() or ""
+  local Sp = package.loaded["src.core.game3.scripting.space"]
+  local bundle = Sp and Sp.bundle
   local hit = placeholderCache[id]
-  if hit then return hit end
+  if hit and hit.bundle == bundle then return hit.values end
   local okC, CacheFs = pcall(require, "src.import.CacheFs")
   local t = okC and CacheFs.loadActive(dialect.placeholders) or nil
   if type(t) == "table" then
-    placeholderCache[id] = t
-    return t
+    placeholderCache[id] = { bundle = bundle, values = cartPlaceholders(t) }
+    return placeholderCache[id].values
   end
   return nil
 end)
@@ -120,6 +149,11 @@ function Message.frameKind()
 end
 
 function Message.show(text, opts)
+  local p = rsPrinter()
+  if p then
+    if p.isPrinting() then return Message end
+    p.close()
+  end
   if type(opts) == "function" then
     opts = { done = opts }
   elseif type(opts) ~= "table" then
@@ -128,6 +162,7 @@ function Message.show(text, opts)
   Message.open = true
   Message._stay = opts.stay and true or false
   Message._hold = opts.hold and true or false
+  Message._autoScroll = false
   Message._held = false
   Message._done = opts.done
   Message._choice = nil
@@ -192,7 +227,10 @@ function Message.show(text, opts)
   if Message._frame == "braille" then ctx.maxWidth = 4096 end
 
   local plain
-  if type(text) == "table" then
+  if Message._frame == "braille" then
+    -- pokeruby/src/scrcmd.c:1433
+    plain = type(text) == "table" and TextIR.toPlain(text, ctx) or tostring(text or "")
+  elseif type(text) == "table" then
     plain = TextIR.toTextBox(text, ctx)
   else
     local ir = TextIR.fromAscii(tostring(text or ""))
@@ -214,24 +252,35 @@ function Message.showStay(text, opts)
 end
 
 function Message.currentPage()
+  local p = rsPrinter()
+  if p then return p.text() or "" end
   if not Message._pages then return "" end
   return Message._pages[Message._page] or ""
 end
 
 function Message.isOpen()
-  return Message.open
+  return rsPrinter() ~= nil or Message.open
 end
 
 function Message.isWaiting()
+  local p = rsPrinter()
+  if p then return not p.isPrinting() end
   return Message.open and Message._waiting
 end
 
 function Message.isTyping()
+  local p = rsPrinter()
+  if p then return p.isPrinting() end
   return Message.open and not Message._waiting
+end
+
+function Message.isRsFieldAutoScroll()
+  return rsPrinter() ~= nil
 end
 
 --- Instantly finish the current page reveal.
 function Message.skipReveal()
+  if rsPrinter() then return end
   if not Message.open then return end
   Message._revealed = Message._total
   Message._delay = 0
@@ -239,8 +288,10 @@ function Message.skipReveal()
 end
 
 function Message.advance()
+  if rsPrinter() then return end
   if not Message.open then return end
   if Message._choice then return end
+  if Message._autoScroll and Message._waiting and Message._page < #Message._pages then return end
 
   -- While typing: first A/B finishes the page (pret canABSpeedUpPrint).
   if not Message._waiting then
@@ -273,6 +324,8 @@ function Message.isHeld()
 end
 
 function Message.close()
+  local p = rsPrinter()
+  if p then p.close() end
   local done = Message._done
   Message.open = false
   Message._pages = nil
@@ -281,6 +334,7 @@ function Message.close()
   Message._stay = false
   Message._hold = false
   Message._held = false
+  Message._autoScroll = false
   Message._choice = nil
   Message._revealed = 0
   Message._total = 0
@@ -303,8 +357,19 @@ function Message.reset()
 end
 
 function Message.tick()
+  local p = rsPrinter()
+  if p then
+    p.tick()
+    Message._waiting = not p.isPrinting()
+    return
+  end
   if Message.open and Message._waiting then
     Message._arrowTicks = (Message._arrowTicks or 0) + 1
+    -- pokeemerald/src/text.c:854
+    if Message._autoScroll and Message._page < #Message._pages and Message._arrowTicks >= 50 then
+      Message._page = Message._page + 1
+      beginPage()
+    end
   end
   if not Message.open or Message._waiting then return end
   if Message._revealed >= Message._total then
@@ -330,13 +395,25 @@ function Message.tick()
   end
 end
 
+-- pokeemerald/src/scrcmd.c:1292
+function Message.setAutoScroll()
+  if rsPrinter() or not Message.open then return false end
+  Message._autoScroll = true
+  -- pokeemerald/src/menu.c:476
+  Message._speedIdx = 1
+  return true
+end
+
 --- Hold A/B to run at fast speed (field message canABSpeedUpPrint).
 function Message.setSpeedUp(held)
+  if rsPrinter() then return end
   Message._speedUp = held and true or false
 end
 
 --- Draw dialogue frame + text (and optional prompt).
 function Message.draw()
+  local p = rsPrinter()
+  if p then return p.draw() end
   if not Message.open then return end
   if Message._frame == "sign" then
     Chrome.signFrame()
@@ -345,6 +422,10 @@ function Message.draw()
     Chrome.dialogueFrame()
   elseif Message._frame == "battle" then
     -- Battle textbox chrome is drawn by battle Ui; text only here.
+  elseif Message._frame == "braille" and braille() and braille().window() then
+    local w = braille().window()
+    -- pokeruby/src/text_window.c:158
+    Chrome.stdFrame(w.left + 1, w.top + 1, w.right - w.left - 1, w.bottom - w.top - 1)
   else
     Chrome.dialogueFrame()
   end
@@ -354,6 +435,8 @@ end
 --- Draw dialogue text (and optional prompt) into the content window.
 -- Caller draws frame first unless using Message.draw().
 function Message.drawText()
+  local p = rsPrinter()
+  if p then return p.drawText() end
   if not Message.open then return end
   local page = Message.currentPage() or ""
   local baseX, baseY, maxW
@@ -370,6 +453,11 @@ function Message.drawText()
   if Message._frame == "braille" then
     -- pokefirered/src/scrcmd.c:1566
     local B = braille()
+    local win = B and B.window()
+    if win then
+      -- pokeruby/src/scrcmd.c:1433
+      baseX, baseY = win.textX * Display.TILE, win.textY * Display.TILE
+    end
     if B then
       B.drawText(page, baseX, baseY, {
         maxWidth = maxW,
@@ -390,8 +478,9 @@ function Message.drawText()
   local rse = Chrome.arrowSpec()
   if rse then
     -- pokeemerald/src/text.c:792
-    if Message._waiting and not Message._held and (rse.lastPage or Message._page < #Message._pages) then
-      local n = math.floor((Message._arrowTicks or 0) / ((rse.delay or 0) + 1))
+    if Message._waiting and not Message._held and not Message._autoScroll
+        and (rse.lastPage or Message._page < #Message._pages) then
+      local n = math.floor((Message._arrowTicks or 0) / (rse.period or ((rse.delay or 0) + 1)))
       Chrome.promptArrow(endX or baseX, endY or baseY, n)
     end
     return
@@ -410,6 +499,30 @@ function Message.drawText()
     end
     Chrome.promptArrow(ax, ay, frame)
   end
+end
+
+-- pokeruby/src/field_message_box.c:144
+function Message.rsFieldMessageBoxMode()
+  local p = rsPrinter()
+  if p then return p.mode() end
+  if not Message.open then return 0 end
+  if not Message._waiting then return 1 end
+  if Message._pages and Message._page < #Message._pages then return 1 end
+  return 0
+end
+
+function Message.showRsFieldAutoScroll(presentation, onPrinted)
+  local profile = require("src.core.game3.profile").forSession()
+  if profile.id ~= "ruby" and profile.id ~= "sapphire" then return false end
+  if Message.rsFieldMessageBoxMode() ~= 0 then return false end
+  local p = require(RS_AUTO)
+  local prepared = p.prepare(presentation, onPrinted)
+  Message._done = nil
+  Message.close()
+  p.open(prepared)
+  Message.open, Message._stay, Message._frame = true, true, "dialogue"
+  Message._pages, Message._page, Message._waiting = nil, 1, false
+  return true
 end
 
 return Message

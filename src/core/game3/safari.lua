@@ -312,7 +312,13 @@ function Safari.takeStep(session, game)
   if cfg then
     -- pokeemerald/src/safari_zone.c:75
     for _, f in pairs(state.feeders or {}) do
-      if (tonumber(f.stepCounter) or 0) > 0 then f.stepCounter = f.stepCounter - 1 end
+      if (tonumber(f.stepCounter) or 0) > 0 then
+        f.stepCounter = f.stepCounter - 1
+        if f.stepCounter == 0 then
+          f.x, f.y, f.mapNum = 0, 0, 0
+          f.pokeblock = require("src.core.game3.rse.pokeblock").empty()
+        end
+      end
     end
     state.steps = math.max(0, (tonumber(state.steps) or 0) - 1)
     if state.steps ~= 0 then return false end

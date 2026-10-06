@@ -4,6 +4,7 @@ local Residuals = require("src.core.game3.battle.residuals")
 local Rules = require("src.core.game3.battle.rules")
 local StatusChip = require("src.core.game3.battle.status")
 local Moves = require("src.core.game3.battle.moves")
+local BattleProfile = require("src.core.game3.battle.profile")
 
 local Handlers = {}
 Handlers._installed = false
@@ -269,7 +270,8 @@ function Handlers.registerAll()
   Residuals.register("nightmare", function(ctx)
     local ad, b = ctx.adapter, ctx.target
     if not b or not b.expNightmare or ad:hp(b) <= 0 then return end
-    if not ad:hasStatus(b, "SLP") then
+    -- pokeruby/src/battle_util.c:990
+    if BattleProfile.rule(ad._st, "nightmareRequiresSleep") ~= false and not ad:hasStatus(b, "SLP") then
       b.expNightmare = nil
       return
     end
@@ -540,12 +542,17 @@ function Handlers.futureSightHit(ad, tok, target)
     return
   end
   local dmg = tonumber(tok.damage) or 1
-  local r = ad:roll(85, 100)
-  dmg = math.floor(dmg * r / 100)
-  if dmg == 0 then dmg = 1 end
   local Hit = require("src.core.game3.battle.effects.hit")
   local hung
-  dmg, hung = Hit.adjustDamage(M, target, dmg)
+  local adjustment = require("src.core.game3.battle.profile").rule(ad._st, "damageAdjustment")
+  if adjustment then
+    dmg, hung = adjustment.adjust(M, target, dmg, "normal2")
+  else
+    local r = ad:roll(85, 100)
+    dmg = math.floor(dmg * r / 100)
+    if dmg == 0 then dmg = 1 end
+    dmg, hung = Hit.adjustDamage(M, target, dmg)
+  end
   ad:playAnim("general", tok.doomDesire and "DOOM_DESIRE_HIT" or "FUTURE_SIGHT_HIT", attacker, target)
   Hit.dealDamage(M, dmg, { physical = false })
   if hung == "endured" then

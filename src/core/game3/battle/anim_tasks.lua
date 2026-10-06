@@ -4712,7 +4712,7 @@ AnimTasks._clear = clear_task
 AnimTasks._stub = stub_task
 AnimTasks._Sin = Sin
 AnimTasks._Cos = Cos
-for _, group in ipairs({ "g1", "g2", "g3", "g4", "g5" }) do
+for _, group in ipairs({ "g1", "g2", "g3", "g4", "g5", "rs", "rs_sound" }) do
   local ok, mod = pcall(require, "src.core.game3.battle.anim_port." .. group .. "_tasks")
   if ok and type(mod) == "function" then mod = mod(AnimTasks) end
   if ok and type(mod) == "table" then

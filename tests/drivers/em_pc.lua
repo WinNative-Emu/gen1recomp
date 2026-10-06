@@ -125,6 +125,8 @@ return function(game)
   U.tap(game, "a")
   U.wait(10)
   check(#session.party == 2 and box1.mons[1] == nil, "Zigzagoon withdrawn back to the party")
+  local BoxUI = require("src.ui.game3.box_storage_ui")
+  waitFor(function() return not (BoxUI._presentation and BoxUI._presentation:busy()) end, 120)
   U.tap(game, "b")
   U.wait(10)
 

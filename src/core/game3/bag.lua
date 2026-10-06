@@ -472,6 +472,22 @@ function Bag.add(bag, id, qty)
   return placed == qty, placed
 end
 
+-- pokeruby/src/item_menu.c:895
+function Bag.removeSlot(bag, pocket, index, qty)
+  bag = ensure(bag)
+  local slots = bag and bag.pockets and bag.pockets[pocket]
+  index = math.floor(tonumber(index) or 0)
+  qty = math.max(1, math.floor(tonumber(qty) or 1))
+  local slot = slots and slots[index]
+  if not slot or (tonumber(slot.qty) or 0) < qty then return false end
+  slot.qty = slot.qty - qty
+  if slot.qty == 0 then table.remove(slots, index) end
+  bag.pockets[pocket] = compact(slots)
+  sort_pocket(pocket, bag.pockets[pocket])
+  rebuild_stacks(bag)
+  return true
+end
+
 function Bag.remove(bag, id, qty)
   local Py, ps = pyramidBag(bag)
   if Py then return Py.bagRemove(ps, id, qty or 1) end

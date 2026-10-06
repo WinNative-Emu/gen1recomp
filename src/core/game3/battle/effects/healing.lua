@@ -2,6 +2,7 @@
 
 local H = require("src.core.game3.battle.effects._helpers")
 local Rules = require("src.core.game3.battle.rules")
+local BattleProfile = require("src.core.game3.battle.profile")
 
 local Healing = {}
 
@@ -78,10 +79,7 @@ function Healing.rest(ctx)
   if hp >= maxHp then return hp_full(ctx, user) end
   local hadStatus = ad:status(user) ~= nil
   ad:clearStatus(user)
-  user.status = "SLP"
-  if user.mon then user.mon.status = "SLP" end
-  -- pokefirered/src/battle_script_commands.c:6480
-  user.sleepTurns = 3
+  ad:applyStatus(user, "SLP", user, { force = true, turns = 3 })
   if hadStatus then
     ad:sayText("STRINGID_PKMNSLEPTHEALTHY", { atk = user })
   else
@@ -129,20 +127,24 @@ function Healing.healBell(ctx)
   local ad, user = ctx.adapter, ctx.user
   local move = ctx.move or {}
   local isBell = tonumber(move.numId) == 215 or move.id == "HEAL_BELL"
+  local policy = BattleProfile.rule(ad._st, "partyStatusHealPolicy")
+  if policy then return policy.healBell(ctx, isBell) end
   local State = require("src.core.game3.battle.state")
   local active = State.partyMon(user)
   local blocked = isBell and ad:abilityOf(user) == "SOUNDPROOF"
+  -- pokeruby/src/battle_script_commands.c:8073
+  local clearNightmare = BattleProfile.rule(ad._st, "partyStatusHealClearsNightmare") ~= false
   -- battle_script_commands.c:8015-8016
   if not blocked then
     ad:clearStatus(user)
-    user.expNightmare = nil
+    if clearNightmare then user.expNightmare = nil end
   end
   local partner = ad._st and ad._st.double and ad:partnerOf(user) or nil
   local partnerBlocked = partner and isBell and ad:abilityOf(partner) == "SOUNDPROOF"
   -- pokefirered/src/battle_script_commands.c:8023
   if partner and not partnerBlocked then
     ad:clearStatus(partner)
-    partner.expNightmare = nil
+    if clearNightmare then partner.expNightmare = nil end
   end
   local partnerMon = partner and State.partyMon(partner)
   for _, mon in ipairs(ad:partyMons(user)) do
@@ -178,8 +180,8 @@ function Healing.painSplit(ctx)
   local tHp = ad:hp(ctx.target)
   local avg = math.floor((uHp + tHp) / 2)
   H.attackAnim(ctx)
-  ad:setHp(ctx.user, math.min(ad:maxHp(ctx.user), avg))
-  ad:setHp(ctx.target, math.min(ad:maxHp(ctx.target), avg))
+  ad:setHp(ctx.user, math.min(ad:maxHp(ctx.user), avg), {healthbar = true})
+  ad:setHp(ctx.target, math.min(ad:maxHp(ctx.target), avg), {healthbar = true})
   ad:sayText("STRINGID_SHAREDPAIN")
 end
 

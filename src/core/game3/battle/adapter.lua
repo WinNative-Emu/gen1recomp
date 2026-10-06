@@ -2,6 +2,7 @@
 
 local State = require("src.core.game3.battle.state")
 local Rules = require("src.core.game3.battle.rules")
+local BattleProfile = require("src.core.game3.battle.profile")
 local ModRuntime = require("src.mods.Runtime")
 
 local Adapter = {}
@@ -121,6 +122,14 @@ function Adapter.fill(st, extra)
 end
 
 function Adapter.new(battleState, sayFn)
+  local faintPolicy = BattleProfile.rule(battleState, "faintFriendshipPolicy")
+  local resultsPolicy = battleState.resultPolicy or BattleProfile.of(battleState).results
+  if resultsPolicy then
+    battleState.resultPolicy = resultsPolicy
+    if not battleState.battleResults or not battleState.battleResults._rsInitialized then
+      battleState.battleResults = resultsPolicy.new(battleState.battleResults)
+    end
+  end
   local a = {
     _st = battleState,
     _say = sayFn or function() end,
@@ -248,6 +257,12 @@ function Adapter.new(battleState, sayFn)
       local Engine = package.loaded["src.core.game3.battle.engine"]
       if Engine and Engine.cancelMultiTurnMoves then Engine.cancelMultiTurnMoves(battler) end
     end
+    self:pushEvent({
+      kind = "status_apply",
+      battler = id_of(battler),
+      side = side_of(battler),
+      status = status,
+    })
     -- pokefirered/src/battle_script_commands.c:2110
     if ModRuntime.wants("battle.status_inflicted") then
       ModRuntime.emit("battle.status_inflicted", {
@@ -264,6 +279,11 @@ function Adapter.new(battleState, sayFn)
     battler.toxicCounter = nil
     battler.sleepTurns = nil
     if battler.mon then battler.mon.status = nil end
+    self:pushEvent({
+      kind = "status_clear",
+      battler = id_of(battler),
+      side = side_of(battler),
+    })
   end
   function a:stages(battler) return battler and battler.stages end
   function a:changeStages(battler, changes)
@@ -291,10 +311,41 @@ function Adapter.new(battleState, sayFn)
     })
   end
 
+  function a:setFaintScriptBattlers(attacker, target)
+    if faintPolicy then faintPolicy.setScriptBattlers(self, attacker, target) end
+  end
+  function a:prepareFaintStep(battler, phase)
+    if faintPolicy then faintPolicy.prepareStep(self, battler, phase) end
+  end
+  function a:recordHealthbarDamage(battler, amount)
+    if not resultsPolicy or not battler then return end
+    resultsPolicy.healthbar(self._st.battleResults, {
+      controllerBusy = false, noEffect = false,
+      hasSubstitute = (battler.substituteHP or 0) > 0,
+      substituteHP = battler.substituteHP or 0, ignoreSubstitute = true,
+      side = battler.side == "player" and 0 or 1,
+      damage = math.floor(tonumber(amount) or 0),
+    })
+  end
+  function a:recordFaintResult(battler)
+    if not resultsPolicy or not battler or not battler.mon
+        or not self:isFainted(battler) or battler._rsResultFaint then return end
+    local id = State.idOf(battler)
+    local counted = resultsPolicy.tryFaint(self._st.battleResults, {
+      checkOnly = false, selector = 0, target = id,
+      battlers = {[id] = {absent = State.isAbsent(self._st, id), hp = self:hp(battler),
+        side = battler.side == "player" and 0 or 1,
+        species = require("src.core.game3.pokemon").speciesOf(battler.mon)}},
+    })
+    if counted then battler._rsResultFaint = true end
+  end
   function a:applyHpLoss(battler, amount, opts)
     if not battler or not battler.mon then return 0 end
     local before = self:hp(battler)
+    if before > 0 then battler._rsResultFaint = nil end
+    if not opts or opts.healthbar ~= false then self:recordHealthbarDamage(battler, amount) end
     local lost = State.applyHpLoss(battler, amount)
+    if faintPolicy and before > 0 and self:hp(battler) <= 0 then faintPolicy.capture(self, battler) end
     self:recordHp(battler, before, self:hp(battler), opts and opts.hit and "hit" or "hp")
     return lost
   end
@@ -302,37 +353,56 @@ function Adapter.new(battleState, sayFn)
     if not battler or not battler.mon then return 0 end
     local before = self:hp(battler)
     local gained = State.heal(battler, amount)
+    if self:hp(battler) > 0 then battler._rsResultFaint = nil end
     self:recordHp(battler, before, self:hp(battler), "hp")
     return gained
   end
-  function a:setHp(battler, value)
+  function a:setHp(battler, value, opts)
     if not battler or not battler.mon then return end
     local before = self:hp(battler)
     local maxHp = self:maxHp(battler)
     value = math.floor(tonumber(value) or 0)
     if value < 0 then value = 0 end
     if maxHp > 0 and value > maxHp then value = maxHp end
+    if opts and opts.healthbar then self:recordHealthbarDamage(battler, before - value) end
     battler.mon.hp = value
     if value <= 0 then battler.fainted = true else battler.fainted = false end
+    if before > 0 or value > 0 then battler._rsResultFaint = nil end
+    if faintPolicy and before > 0 and value <= 0 then faintPolicy.capture(self, battler) end
     self:recordHp(battler, before, value, "hp")
   end
   function a:isFainted(battler) return State.isFainted(battler) end
-  function a:emitFaint(battler)
+  function a:prepareFaintAnnouncement(battler, script)
+    self:recordFaintResult(battler)
+    if faintPolicy and battler and battler.side == "player" and battler.mon
+        and self:isFainted(battler) and not battler._faintFriendship then
+      battler._faintFriendship = true
+      faintPolicy.apply(self, battler, script)
+    end
+  end
+  function a:emitFaint(battler, script)
     if battler then
       battler.fainted = true
       if battler.mon then battler.mon.hp = 0 end
+      self:recordFaintResult(battler)
       -- pokefirered/src/battle_script_commands.c:2878
       if battler.side == "player" and battler.mon and not battler._faintFriendship then
         battler._faintFriendship = true
-        local Pokemon = require("src.core.game3.pokemon")
-        local foeLevel = 0
-        for _, foe in ipairs(State.foes(self._st, battler)) do
-          local lv = tonumber(foe.mon and foe.mon.level) or 0
-          if lv > foeLevel then foeLevel = lv end
+        if faintPolicy then
+          faintPolicy.apply(self, battler, script)
+        else
+          local Pokemon = require("src.core.game3.pokemon")
+          local foeLevel = 0
+          for _, foe in ipairs(State.foes(self._st, battler)) do
+            local lv = tonumber(foe.mon and foe.mon.level) or 0
+            if lv > foeLevel then foeLevel = lv end
+          end
+          Pokemon.adjustFriendshipOnBattleFaint(battler.mon, tonumber(battler.mon.level),
+            foeLevel, { mapSec = Pokemon.currentMapSec(self._st.session) })
         end
-        Pokemon.adjustFriendshipOnBattleFaint(battler.mon, tonumber(battler.mon.level),
-          foeLevel, { mapSec = Pokemon.currentMapSec(self._st.session) })
       end
+      -- pokeruby/src/battle_script_commands.c:3157
+      self:clearStatus(battler)
       -- pokefirered/src/battle_script_commands.c:2831
       if ModRuntime.wants("battle.fainted") and battler._modFainted ~= (battler.mon or true) then
         battler._modFainted = battler.mon or true
@@ -350,6 +420,9 @@ function Adapter.new(battleState, sayFn)
     self._say(text)
   end
   function a:sayText(id, fill)
+    if faintPolicy and fill and (id == "STRINGID_ATTACKERFAINTED" or id == "STRINGID_TARGETFAINTED") then
+      self:prepareFaintAnnouncement(fill.atk or fill.def)
+    end
     local BattleText = require("src.core.game3.battle.battle_text")
     fill = Adapter.fill(self._st, fill)
     local text = BattleText.get(id, fill)
@@ -421,8 +494,8 @@ function Adapter.new(battleState, sayFn)
     if id and id > 0 then
       if ABILITY_BY_ID[id] then return ABILITY_BY_ID[id] end
       local ok, Pokemon = pcall(require, "src.core.game3.pokemon")
-      if ok and Pokemon and Pokemon.abilityName then
-        local n = Pokemon.abilityName(id)
+      if ok and Pokemon and Pokemon.romAbilityName then
+        local n = Pokemon.romAbilityName(id)
         if n and n ~= "" and not n:match("^ABILITY") then
           return (tostring(n):upper():gsub("%s+", "_"))
         end

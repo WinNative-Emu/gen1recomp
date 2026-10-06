@@ -280,7 +280,7 @@ local function drawTree()
   drawLines()
   love.graphics.draw(treeImage(), 0, 0)
   local W = M().treeWindows
-  local title = textOf(M().text.battleTourney)
+  local title = st.treeTitle
   local tw = W[3]
   drawSpaced(title, tw.left * 8 + centerX(title, 0x70, "short", 2), tw.top * 8 + 1,
     colors(COLOR.DYNAMIC_5, COLOR.DYNAMIC_4), "short", 2)
@@ -425,12 +425,12 @@ local function drawMatchCard(card, ox, oy)
   local W = M().cardWindows
   local c = colors(COLOR.DYNAMIC_5, COLOR.DYNAMIC_4)
   local d = card.data
-  local wt = textOf(M().text.wins[d.win.id + 1], { d.win.var1, d.win.var2 })
+  local wt = textOf(d.winIr, { d.win.var1, d.win.var2 })
   winText(W[9], wt, 0, 0, c, "normal", 0, ox, oy)
   local left, right = d.sides[1], d.sides[2]
   winText(W[7], left.name, centerX(left.name, 0x40, "short", 2), 2, c, "short", 2, ox, oy)
   winText(W[8], right.name, centerX(right.name, 0x40, "short", 2), 2, c, "short", 2, ox, oy)
-  local mn = textOf(M().text.matchNumbers[d.matchNo + 1])
+  local mn = textOf(d.matchNoIr)
   winText(W[6], mn, centerX(mn, 0xA0, "short", 0), 2, c, "short", 0, ox, oy)
   drawPic(picFor(left.trainerId), ox + 48, oy + 88, left.lost)
   drawPic(picFor(right.trainerId), ox + 192, oy + 88, right.lost)
@@ -443,7 +443,17 @@ end
 
 local function makeCard(kind, id)
   if kind == "trainer" then return { kind = kind, id = id, data = trainerCardData(id) } end
-  return { kind = kind, id = id, data = matchCardData(id) }
+  local data = matchCardData(id)
+  local Dome = require("src.core.game3.rse.frontier.dome")
+  -- pokeemerald/src/battle_dome.c:4931, :4977
+  data.winIr = Dome.tableText(M().text.wins, "sBattleDomeWinTexts", data.win.id + 1)
+  data.matchNoIr = Dome.tableText(M().text.matchNumbers, "sBattleDomeMatchNumberTexts", data.matchNo + 1)
+  return { kind = kind, id = id, data = data }
+end
+
+-- pokeemerald/src/battle_dome.c:5415
+local function treeTitle()
+  return textOf(require("src.core.game3.rom_text").irOr("gText_BattleTourney", M().text.battleTourney))
 end
 
 local function drawCard(card, ox, oy)
@@ -541,6 +551,7 @@ function UI.showTree(opts)
   st.cursor = opts.cursor or 0
   st.frame, st.bg2y, st.bg3y = 0, 0, 11
   buildTree(st.mode)
+  st.treeTitle = treeTitle()
   st.phase = "fadein"
   fadeIn()
   push()
@@ -596,6 +607,7 @@ local function backToTree()
   st.mode = rt.mode
   st.bg2y, st.bg3y = 0, 11
   buildTree(st.mode)
+  st.treeTitle = st.treeTitle or treeTitle()
   st.phase = "fadein"
   fadeIn()
 end

@@ -16,6 +16,7 @@ local SummaryData = require("src.core.game3.summary_data")
 local Strings = require("src.core.Strings")
 local RomText = require("src.core.game3.rom_text")
 local ItemsData = require("src.core.game3.items_data")
+local Screens = require("src.ui.game3.screens")
 
 local SummaryMenu = { isMenu = true }
 
@@ -181,11 +182,24 @@ local function moves_for_mon(mon)
 end
 
 function SummaryMenu.isOpen()
+  if SummaryMenu._nativeDelegate then return SummaryMenu._nativeDelegate.isOpen() end
   return SummaryMenu.open
 end
 
 function SummaryMenu.openMenu(party, startIndex, opts)
   opts = opts or {}
+  local delegate = Screens.redirect("summary", SummaryMenu, opts.playerState or opts.session)
+  SummaryMenu._nativeDelegate = delegate
+  if delegate then
+    local forwarded = {}; for key, value in pairs(opts) do forwarded[key] = value end
+    forwarded.bridge = SummaryMenu
+    if opts.onSelectMove then
+      forwarded.onSelectMove = function(slot)
+        return opts.onSelectMove(slot and slot - 1 or nil)
+      end
+    end
+    return delegate.openMenu(party, startIndex, forwarded)
+  end
   SummaryMenu.open = true
   SummaryMenu._party = party or {}
   SummaryMenu._cursor = startIndex or 1
@@ -225,6 +239,7 @@ function SummaryMenu.openMenu(party, startIndex, opts)
 end
 
 function SummaryMenu.close()
+  if SummaryMenu._nativeDelegate then return SummaryMenu._nativeDelegate.close() end
   SummaryMenu.open = false
   SummaryMenu._slide.active = false
   SummaryMenu._swapSlot = nil
@@ -366,6 +381,7 @@ local function step_frame()
 end
 
 function SummaryMenu.update(dt)
+  if SummaryMenu._nativeDelegate then return SummaryMenu._nativeDelegate.update(dt) end
   dt = tonumber(dt) or (1 / 60)
   SummaryMenu._tick = (SummaryMenu._tick or 0) + dt * 60
   while SummaryMenu._tick >= 0.999 do
@@ -446,6 +462,7 @@ local function page_flip_input(input, dir)
 end
 
 function SummaryMenu.handleInput(input)
+  if SummaryMenu._nativeDelegate then return SummaryMenu._nativeDelegate.handleInput(input) end
   if not input then return end
   local slide = SummaryMenu._slide
   if slide.active then
@@ -888,23 +905,27 @@ local function draw_page_skills(mon)
   -- Party stores ability as numeric id (e.g. 65 = OVERGROW); resolve to name.
   local abilityId = tonumber(mon.abilityId) or tonumber(mon.ability)
   local ability = mon.abilityName
+  local abilityNameTranslated = false
   if type(mon.ability) == "string" and mon.ability ~= "" and not tonumber(mon.ability) then
     ability = mon.ability
   end
   if (not ability or ability == "") and abilityId and abilityId > 0 then
     ability = Pokemon.abilityName(abilityId)
+    abilityNameTranslated = true
   end
   if not ability or ability == "" then
     local aid = Pokemon.abilityId and Pokemon.abilityId(Pokemon.speciesOf(mon), mon.personality or 0)
     if aid and aid > 0 then
       abilityId = aid
       ability = Pokemon.abilityName(aid)
+      abilityNameTranslated = true
     end
   end
   ability = ability or "—"
   local ax, ay = cxy("abilityName", 74, 129)
-  -- No registry renames abilities; a translation reaches the name through Strings().
-  draw_text(Strings(tostring(ability)), ax, ay, 80, "NORMAL")
+  local abilityText = tostring(ability)
+  if not abilityNameTranslated then abilityText = Strings(abilityText) end
+  draw_text(abilityText, ax, ay, 80, "NORMAL")
   local desc = SummaryData.abilityDescription(abilityId, tostring(ability))
   local ad = coords().abilityDesc or { x = 10, y = 143, w = 232 }
   draw_text(desc, ad.x or 10, ad.y or 143, ad.w or 232, "NORMAL")
@@ -1249,6 +1270,7 @@ local function draw_detail_flip(mon, shiny)
 end
 
 function SummaryMenu.draw()
+  if SummaryMenu._nativeDelegate then return SummaryMenu._nativeDelegate.draw() end
   if not SummaryMenu.open then return end
   local mon = current_mon()
   if not mon then return end

@@ -451,7 +451,7 @@ function Damage.calc(attacker, defender, moveId, opts)
     if taken <= 0 then
       return 0, { move = move, effectiveness = eff, critical = false, physical = physical, failed = true }
     end
-    return (flags.immune and 0 or taken * 2), {
+    return (flags.immune and not opts.deferAdjustment and 0 or taken * 2), {
       move = move, effectiveness = eff, critical = false, physical = physical,
       typeFlags = flags, setDamage = true,
     }
@@ -460,7 +460,7 @@ function Damage.calc(attacker, defender, moveId, opts)
     if taken <= 0 then
       return 0, { move = move, effectiveness = eff, critical = false, physical = physical, failed = true }
     end
-    return (flags.immune and 0 or taken * 2), {
+    return (flags.immune and not opts.deferAdjustment and 0 or taken * 2), {
       move = move, effectiveness = eff, critical = false, physical = physical,
       typeFlags = flags, setDamage = true,
     }
@@ -488,7 +488,7 @@ function Damage.calc(attacker, defender, moveId, opts)
     fixedAmount = opts.fixedDamage
   end
   if fixedAmount then
-    if flags.immune then
+    if flags.immune and not opts.deferAdjustment then
       return 0, fixed_info(move, 0, flags, physical)
     end
     return fixedAmount, fixed_info(move, eff, flags, physical)
@@ -562,13 +562,13 @@ function Damage.calc(attacker, defender, moveId, opts)
   end
 
   -- pokefirered/src/battle_script_commands.c:1558
-  if dmg ~= 0 and not opts.noRandom then
+  if dmg ~= 0 and not opts.noRandom and not opts.deferAdjustment then
     local roll = tonumber(opts.forceRoll) or roll_from(rng, 85, 100)
     dmg = math.floor(dmg * roll / 100)
     if dmg == 0 then dmg = 1 end
   end
 
-  if effectByte == EffectIds.FALSE_SWIPE and (defender.substituteHP or 0) <= 0 then
+  if effectByte == EffectIds.FALSE_SWIPE and not opts.deferAdjustment and (defender.substituteHP or 0) <= 0 then
     local curHp = tonumber(dMon.hp) or 1
     if dmg >= curHp then dmg = math.max(0, curHp - 1) end
   end

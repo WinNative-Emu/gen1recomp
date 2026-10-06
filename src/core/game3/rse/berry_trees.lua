@@ -43,7 +43,11 @@ local function berryCount(list)
 end
 
 -- pokeemerald/src/berry.c:980
-function BerryTrees.info(berry)
+function BerryTrees.info(berry, session)
+  if tonumber(berry) == 43 then
+    local installed = require("src.core.game3.rs.enigma").info(session)
+    if installed then return installed end
+  end
   local list = assert(BerryTrees.berries(), "berry trees: data/generated/gba/berries/berries.lua missing from the cache")
   berry = tonumber(berry) or 0
   if berry == 0 or berry > berryCount(list) then berry = 1 end
@@ -115,15 +119,15 @@ function BerryTrees.yieldInternal(max, min, water, random)
 end
 
 -- pokeemerald/src/berry.c:1236
-function BerryTrees.calcYield(tree, random)
-  local b = BerryTrees.info(tree.berry)
+function BerryTrees.calcYield(tree, random, session)
+  local b = BerryTrees.info(tree.berry, session)
   return BerryTrees.yieldInternal(tonumber(b.maxYield) or 0, tonumber(b.minYield) or 0,
     BerryTrees.stagesWatered(tree), random or lazyReq("src.core.game3.rng").Random)
 end
 
 -- pokeemerald/src/berry.c:1250
-function BerryTrees.stageDuration(berry)
-  return (tonumber(BerryTrees.info(berry).stageDuration) or 0) * 60
+function BerryTrees.stageDuration(berry, session)
+  return (tonumber(BerryTrees.info(berry, session).stageDuration) or 0) * 60
 end
 
 -- pokeemerald/src/berry.c:1116
@@ -139,10 +143,10 @@ function BerryTrees.plant(id, berry, stage, allowGrowth, session, random)
   local tree = blank()
   trees[tonumber(id) or 0] = tree
   tree.berry = tonumber(berry) or 0
-  tree.minutesUntilNextStage = BerryTrees.stageDuration(tree.berry)
+  tree.minutesUntilNextStage = BerryTrees.stageDuration(tree.berry, session)
   tree.stage = tonumber(stage) or 0
   if tree.stage == BerryTrees.STAGE_BERRIES then
-    tree.berryYield = BerryTrees.calcYield(tree, random)
+    tree.berryYield = BerryTrees.calcYield(tree, random, session)
     tree.minutesUntilNextStage = tree.minutesUntilNextStage * 4
   end
   if not allowGrowth then tree.stopGrowth = true end
@@ -162,12 +166,12 @@ function BerryTrees.clear(session)
 end
 
 -- pokeemerald/src/berry.c:1048
-function BerryTrees.grow(tree, random)
+function BerryTrees.grow(tree, random, session)
   if tree.stopGrowth then return false end
   local s = tree.stage
   if s == BerryTrees.STAGE_NO_BERRY then return false end
   if s == BerryTrees.STAGE_FLOWERING then
-    tree.berryYield = BerryTrees.calcYield(tree, random)
+    tree.berryYield = BerryTrees.calcYield(tree, random, session)
     tree.stage = s + 1
   elseif s == BerryTrees.STAGE_PLANTED or s == BerryTrees.STAGE_SPROUTED or s == BerryTrees.STAGE_TALLER then
     tree.stage = s + 1
@@ -185,13 +189,14 @@ end
 
 -- pokeemerald/src/berry.c:1078
 function BerryTrees.timeUpdate(session, minutes, random)
-  local trees = BerryTrees.state(defaultSession(session))
+  session = defaultSession(session)
+  local trees = BerryTrees.state(session)
   minutes = tonumber(minutes) or 0
   for i = 0, BerryTrees.COUNT - 1 do
     local tree = trees[i]
     if type(tree) == "table" and (tonumber(tree.berry) or 0) ~= 0 and (tonumber(tree.stage) or 0) ~= 0
         and not tree.stopGrowth then
-      if minutes >= BerryTrees.stageDuration(tree.berry) * 71 then
+      if minutes >= BerryTrees.stageDuration(tree.berry, session) * 71 then
         trees[i] = blank()
       else
         local time = minutes
@@ -201,8 +206,8 @@ function BerryTrees.timeUpdate(session, minutes, random)
             break
           end
           time = time - tree.minutesUntilNextStage
-          tree.minutesUntilNextStage = BerryTrees.stageDuration(tree.berry)
-          if not BerryTrees.grow(tree, random) then break end
+          tree.minutesUntilNextStage = BerryTrees.stageDuration(tree.berry, session)
+          if not BerryTrees.grow(tree, random, session) then break end
           if tree.stage == BerryTrees.STAGE_BERRIES then
             tree.minutesUntilNextStage = tree.minutesUntilNextStage * 4
           end

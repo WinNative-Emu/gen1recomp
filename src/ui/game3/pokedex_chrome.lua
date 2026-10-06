@@ -5,6 +5,7 @@
 local Display = require("src.core.game3.display")
 local Extract = require("src.import.gba.extract_island1")
 local PokedexData = require("src.core.game3.pokedex_data")
+local CacheBlob = require("src.import.CacheBlob")
 
 local PokedexChrome = {}
 
@@ -38,10 +39,10 @@ local function read_bytes(rel)
     if type(d) == "string" and #d > 0 then return d end
   end
   if love and love.filesystem and love.filesystem.read then
-    local d = love.filesystem.read(rel)
+    local d = CacheBlob.readFs(rel)
     if type(d) == "string" and #d > 0 then return d end
     local alt = "data/generated/gba/" .. (rel:gsub("^data/generated/gba/", ""))
-    d = love.filesystem.read(alt)
+    d = CacheBlob.readFs(alt)
     if type(d) == "string" and #d > 0 then return d end
   end
   local candidates = {
@@ -51,7 +52,7 @@ local function read_bytes(rel)
   for _, p in ipairs(candidates) do
     local f = io.open(p, "rb")
     if f then
-      local d = f:read("*a")
+      local d = CacheBlob.decode(p, f:read("*a"))
       f:close()
       if d and #d > 0 then return d end
     end
@@ -182,8 +183,16 @@ function PokedexChrome.getMarkerBlend()
   return c[1] / 16, c[2] / 16
 end
 
+local SMALL_OPTS, NORMAL_OPTS = { small = true }, {}
+
+local function controlInfoOpts()
+  local FrlgFont = require("src.ui.game3.frlg_font")
+  local spec = FrlgFont.sync and FrlgFont.sync()
+  return (spec and spec.nativeLayout == "rs") and NORMAL_OPTS or SMALL_OPTS
+end
+
 function PokedexChrome.measureControlInfo(str)
-  return require("src.ui.game3.frlg_font").measure(str, { small = true })
+  return require("src.ui.game3.frlg_font").measure(str, controlInfoOpts())
 end
 
 --- Draw control info text right-aligned ending at rightX (default 236), at y (default 146)
@@ -200,7 +209,7 @@ local CONTROL_INFO_COLORS = { fg = { 1, 1, 1, 1 }, shadow = { 98/255, 98/255, 98
 --- Draw control info text left-aligned starting at startX, at y (default 146)
 function PokedexChrome.drawControlInfoLeft(str, startX, y)
   require("src.ui.game3.frlg_font").draw(str, startX, y or 146, {
-    small = true,
+    small = controlInfoOpts().small,
     colors = CONTROL_INFO_COLORS,
   })
 end

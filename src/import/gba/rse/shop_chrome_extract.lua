@@ -41,6 +41,8 @@ local function menu_bg(gfx, banks, map)
   return table.concat(chunks)
 end
 
+M.menuBg = menu_bg
+
 function M.run(rom, cache, opts)
   opts = opts or {}
   local root = (opts.cacheRoot or "data/generated/gba") .. "/" .. M.CACHE_SUB

@@ -1239,6 +1239,24 @@ local function itemQty(inv, id)
 end
 Ops.itemQty = itemQty
 
+-- engine/items/inventory.asm:64
+local function splits(S, id)
+  return Gen.ofState(S) == 1 and Bag.slotsFor(id, Ops.STACK_MAX + 1, S.data) > 1
+end
+
+local function stackTarget(S, id, have)
+  if splits(S, id) then
+    return math.max(1, Bag.slotsFor(id, have, S.data)) * Ops.STACK_MAX
+  end
+  return Ops.stackMax(S)
+end
+
+local function rowCount(S, pc, id, slot)
+  for _, row in ipairs(Ops.stackRows(S, pc)) do
+    if row.id == id and row.slot == slot then return row.count, row end
+  end
+end
+
 local function changeG3(S, pc, id, quantity)
   if not id then return Ops.say(S, "Pick an item first") end
   if not G3.change(S.data, S.save, pc, { { id = id, qty = quantity } }) then
@@ -1280,18 +1298,22 @@ function Ops.addToBag(S, id)
     :format(Bag.slots(S.save, S.data, pocket), capacity, pocket))
 end
 
-function Ops.bagAdjust(S, id, delta)
+function Ops.bagAdjust(S, id, delta, slot)
   if not id then return Ops.say(S, "No bag row selected") end
   S.save.inventory = S.save.inventory or {}
   local have = itemQty(S.save.inventory, id)
   if Gen.ofState(S) == 3 then return changeG3(S, false, id, math.max(0, G3.quantity(S.data, S.save, false, id) + delta)) end
   if delta > 0 then
-    if have >= Ops.stackMax(S) then
+    if have >= Ops.stackMax(S) and not splits(S, id) then
       return Ops.say(S, ("%s is already at x%d"):format(tostring(id), Ops.stackMax(S)))
     end
-    Bag.add(S.save, id, delta, S.data)
+    if not Bag.add(S.save, id, delta, S.data) then
+      local pocket = Bag.pocketOf(id, S.data)
+      return Ops.say(S, ("No room for %d more %s (%d/%d %s slots)"):format(delta, tostring(id),
+        Bag.slots(S.save, S.data, pocket), Bag.capacity(S.data, pocket), pocket))
+    end
   else
-    Bag.remove(S.save, id, -delta)
+    Bag.remove(S.save, id, -delta, S.data, slot)
     if not S.save.inventory[id] then
       return Ops.mark(S, ("Removed the last %s from the bag"):format(tostring(id)))
     end
@@ -1299,12 +1321,17 @@ function Ops.bagAdjust(S, id, delta)
   return Ops.mark(S, ("%s x%d"):format(tostring(id), itemQty(S.save.inventory, id)))
 end
 
-function Ops.bagDrop(S, id)
+function Ops.bagDrop(S, id, slot)
   if not id then return Ops.say(S, "No bag row selected") end
   S.save.inventory = S.save.inventory or {}
   local qty = itemQty(S.save.inventory, id)
   if Gen.ofState(S) == 3 then return changeG3(S, false, id, 0) end
-  Bag.remove(S.save, id, qty)
+  local row = slot and rowCount(S, false, id, slot)
+  if row and row < qty then
+    Bag.remove(S.save, id, row, S.data, slot)
+    return Ops.mark(S, ("Dropped %d %s (%d left in the bag)"):format(row, tostring(id), qty - row))
+  end
+  Bag.remove(S.save, id, qty, S.data)
   return Ops.mark(S, ("Dropped all %d %s"):format(qty, tostring(id)))
 end
 
@@ -1339,17 +1366,18 @@ function Ops.bagMax(S, id)
   if not Ops.itemStacks(S, id) then
     return Ops.say(S, ("%s has no quantity to max"):format(tostring(id)))
   end
-  if have >= Ops.stackMax(S) then
+  local target = stackTarget(S, id, have)
+  if have >= target then
     return Ops.say(S, ("%s is already at x%d"):format(tostring(id), Ops.stackMax(S)))
   end
-  Bag.add(S.save, id, Ops.stackMax(S) - have, S.data)
-  return Ops.mark(S, ("%s x%d"):format(tostring(id), Ops.stackMax(S)))
+  Bag.add(S.save, id, target - have, S.data)
+  return Ops.mark(S, ("%s x%d"):format(tostring(id), target))
 end
 
 function Ops.bagCanMax(S, id)
   if id ~= nil then
     local have = Gen.ofState(S) == 3 and G3.quantity(S.data, S.save, false, id) or itemQty(S.save.inventory, id)
-    return have > 0 and have < Ops.stackMax(S) and Ops.itemStacks(S, id)
+    return have > 0 and have < stackTarget(S, id, have) and Ops.itemStacks(S, id)
   end
   for _, rowId in ipairs(Bag.order(S.save, S.data)) do
     if Ops.bagCanMax(S, rowId) then return true end
@@ -1365,8 +1393,9 @@ function Ops.bagMaxAll(S)
   local n = 0
   for _, id in ipairs(ids) do
     local have = itemQty(S.save.inventory, id)
-    if have > 0 and have < Ops.stackMax(S) and Ops.itemStacks(S, id) then
-      Bag.add(S.save, id, Ops.stackMax(S) - have, S.data)
+    local target = stackTarget(S, id, have)
+    if have > 0 and have < target and Ops.itemStacks(S, id) then
+      Bag.add(S.save, id, target - have, S.data)
       n = n + 1
     end
   end
@@ -1430,8 +1459,24 @@ end
 
 function Ops.pcOrder(S)
   local ids = {}
-  for id in pairs(Ops.pcItems(S)) do ids[#ids + 1] = id end
+  local gen1 = Gen.ofState(S) == 1
+  for id, n in pairs(Ops.pcItems(S)) do
+    for _ = 1, gen1 and math.max(1, Bag.slotsFor(id, n, S.data)) or 1 do ids[#ids + 1] = id end
+  end
   return itemRows(S, ids, S.pcSort)
+end
+
+function Ops.stackRows(S, pc)
+  local order = pc and Ops.pcOrder(S) or Bag.order(S.save, S.data)
+  local store = pc and Ops.pcItems(S) or S.save.inventory
+  if Gen.ofState(S) == 1 then
+    return Bag.stackRows(store, order, S.data, pc and S.save.pcStacks or S.save.bagStacks)
+  end
+  local rows = {}
+  for i, id in ipairs(order) do
+    rows[i] = { id = id, slot = 1, index = i, count = store[id] }
+  end
+  return rows
 end
 
 function Ops.pcSort(S, mode)
@@ -1490,16 +1535,27 @@ function Ops.addToPc(S, id)
   return Ops.mark(S, ("%s x%d in PC storage"):format(tostring(id), pc[id]))
 end
 
-function Ops.pcAdjust(S, id, delta)
+function Ops.pcAdjust(S, id, delta, slot)
   if Gen.ofState(S) == 3 then return changeG3(S, true, id, math.max(0, G3.quantity(S.data, S.save, true, id) + delta)) end
   if not id then return Ops.say(S, "No PC row selected") end
   local pc = Ops.pcItems(S)
   local cur = itemQty(pc, id)
   if not pc[id] and cur <= 0 then return Ops.say(S, ("%s is not in PC storage"):format(tostring(id))) end
-  if delta > 0 and cur >= slotMax(S, id) then
+  if delta < 0 and splits(S, id) then
+    Bag.pcRemove(S.save, id, -delta, S.data, slot)
+    if not pc[id] then
+      return Ops.mark(S, ("Removed %s from PC storage"):format(tostring(id)))
+    end
+    return Ops.mark(S, ("%s x%d in PC storage"):format(tostring(id), pc[id]))
+  end
+  local split = delta > 0 and splits(S, id)
+  if delta > 0 and cur >= slotMax(S, id) and not split then
     return Ops.say(S, ("%s is already at x%d"):format(tostring(id), slotMax(S, id)))
   end
-  local nextQty = clamp(cur + delta, 0, math.max(cur, slotMax(S, id)))
+  if split and not pcStacksFree(S, id, delta) then
+    return Ops.say(S, ("PC item storage is full (%d stacks)"):format(pcCapacity(S)))
+  end
+  local nextQty = split and cur + delta or clamp(cur + delta, 0, math.max(cur, slotMax(S, id)))
   if nextQty <= 0 then
     pc[id] = nil
     return Ops.mark(S, ("Removed %s from PC storage"):format(tostring(id)))
@@ -1508,12 +1564,17 @@ function Ops.pcAdjust(S, id, delta)
   return Ops.mark(S, ("%s x%d in PC storage"):format(tostring(id), pc[id]))
 end
 
-function Ops.pcDrop(S, id)
+function Ops.pcDrop(S, id, slot)
   if Gen.ofState(S) == 3 then return changeG3(S, true, id, 0) end
   if not id then return Ops.say(S, "No PC row selected") end
   local pc = Ops.pcItems(S)
   local qty = itemQty(pc, id)
-  pc[id] = nil
+  local row = slot and rowCount(S, true, id, slot)
+  if row and row < qty then
+    Bag.pcRemove(S.save, id, row, S.data, slot)
+    return Ops.mark(S, ("Dropped %d %s (%d left in PC storage)"):format(row, tostring(id), qty - row))
+  end
+  Bag.pcRemove(S.save, id, qty, S.data)
   return Ops.mark(S, ("Dropped all %d %s from PC storage"):format(qty, tostring(id)))
 end
 
@@ -1529,22 +1590,23 @@ function Ops.pcMax(S, id)
   if not Ops.itemStacks(S, id) then
     return Ops.say(S, ("%s has no quantity to max"):format(tostring(id)))
   end
-  if cur >= Ops.stackMax(S) then
+  local target = stackTarget(S, id, cur)
+  if cur >= target then
     return Ops.say(S, ("%s is already at x%d"):format(tostring(id), Ops.stackMax(S)))
   end
-  pc[id] = Ops.stackMax(S)
-  return Ops.mark(S, ("%s x%d in PC storage"):format(tostring(id), Ops.stackMax(S)))
+  pc[id] = target
+  return Ops.mark(S, ("%s x%d in PC storage"):format(tostring(id), target))
 end
 
 function Ops.pcCanMax(S, id)
   local pc = Ops.pcItems(S)
   if id ~= nil then
     local have = Gen.ofState(S) == 3 and G3.quantity(S.data, S.save, true, id) or itemQty(pc, id)
-    return have > 0 and have < Ops.stackMax(S) and Ops.itemStacks(S, id)
+    return have > 0 and have < stackTarget(S, id, have) and Ops.itemStacks(S, id)
   end
   for rowId, val in pairs(pc) do
     local qty = itemQty(pc, rowId)
-    if qty > 0 and qty < Ops.stackMax(S) and Ops.itemStacks(S, rowId) then
+    if qty > 0 and qty < stackTarget(S, rowId, qty) and Ops.itemStacks(S, rowId) then
       return true
     end
   end
@@ -1557,8 +1619,9 @@ function Ops.pcMaxAll(S)
   local n = 0
   for id, val in pairs(pc) do
     local qty = itemQty(pc, id)
-    if qty > 0 and qty < Ops.stackMax(S) and Ops.itemStacks(S, id) then
-      pc[id] = Ops.stackMax(S)
+    local target = stackTarget(S, id, qty)
+    if qty > 0 and qty < target and Ops.itemStacks(S, id) then
+      pc[id] = target
       n = n + 1
     end
   end

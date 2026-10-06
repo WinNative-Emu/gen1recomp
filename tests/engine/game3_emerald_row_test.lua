@@ -8,7 +8,7 @@ local GameVersion = require("src.core.GameVersion")
 local SHA = "f3ae088181bf583e55daf962a92bb46f4f1d07b7"
 
 eq(GameVersion.forSha1(SHA), "emerald", "the Emerald sha1 resolves to emerald")
-eq(GameVersion.ORDER[9], "emerald", "emerald is ORDER index 9")
+eq(GameVersion.ORDER[#GameVersion.ORDER], "emerald", "emerald is the last ORDER entry")
 for i, id in ipairs({ "red", "blue", "yellow", "gold", "silver", "crystal", "firered", "leafgreen" }) do
   eq(GameVersion.ORDER[i], id, "ORDER keeps " .. id .. " at index " .. i)
 end

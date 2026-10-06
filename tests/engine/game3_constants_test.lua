@@ -14,7 +14,7 @@ local fr = Constants.of("firered")
 
 check(Constants.of("leafgreen") == fr, "leafgreen shares the firered tables")
 check(not pcall(Constants.of, "red"), "a non-gba id has no constant tables")
-check(not pcall(Constants.of, "ruby"), "an unported game errors instead of falling back")
+check(not pcall(Constants.of, "unknown"), "an unregistered game errors instead of falling back")
 eq(Constants.active({ version = "emerald" }), em, "active reads session.version")
 
 eq(em.flags.byName.FLAG_BADGE01_GET, 0x867, "em FLAG_BADGE01_GET")

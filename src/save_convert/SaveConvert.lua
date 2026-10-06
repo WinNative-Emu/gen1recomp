@@ -513,7 +513,7 @@ local function cacheEdition(meta)
   local edition = meta:match('"version_id"%s*:%s*"([^"]+)"')
     or meta:match('"version"%s*:%s*"([^"]+)"')
     or meta:match('"import_id"%s*:%s*"([^"]+)"')
-  return edition and (edition:match("^firered") or edition:match("^leafgreen") or edition:match("^emerald"))
+  return edition and (edition:match("^firered") or edition:match("^leafgreen") or edition:match("^emerald") or edition:match("^ruby") or edition:match("^sapphire"))
 end
 
 local function gen3CacheBytes(gameVersion, rel)

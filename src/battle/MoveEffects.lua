@@ -522,11 +522,14 @@ end
 -- engine/battle/core.asm ApplyDamageToEnemyPokemon
 local function drainHalf(label, text)
   return function(ctx)
+    -- engine/battle/core.asm:4899
+    if ctx.brokeSub then return end
     local heal = math.max(1, math.floor(ctx.totalDealt / 2))
     ctx.battle.lastDamage = heal
     local mon = ctx.user.mon
     mon.hp = math.min(mon.stats.hp, mon.hp + heal)
-    ctx.drain()
+    -- engine/battle/move_effects/drain_hp.asm:81
+    ctx.battle:drainNext(ctx.user, mon.hp)
     -- `text` arrives as a source string (Strings.source at the call
     -- site keeps it in the catalog); the ROM's own line wins when the
     -- import carries it, and both are resolved here, at use time
@@ -606,11 +609,12 @@ MoveEffects.full = {
 
   RECOIL_EFFECT = {
     afterDamage = function(ctx)
+      -- engine/battle/core.asm:4899
+      if ctx.brokeSub then return end
       -- engine/battle/move_effects/recoil.asm
       local recoil = math.max(1, math.floor(ctx.totalDealt
                                             / (ctx.moveInst.struggle and 2 or 4)))
-      ctx.say(romText(ctx.battle.data, "_HitWithRecoilText", "%s's\nhit with recoil!", displayName(ctx.user)))
-      ctx.battle:applyDamage(ctx.user, recoil)
+      ctx.battle:applyRecoil(ctx.user, recoil)
     end,
   },
   DRAIN_HP_EFFECT = {

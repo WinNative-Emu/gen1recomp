@@ -41,14 +41,7 @@ function Art.label(imp, skin, original)
   imp._gbaLabels = imp._gbaLabels or {}
   if imp._gbaLabels[skin.cacheKey] then return imp._gbaLabels[skin.cacheKey] end
   local source = externalLabel(imp) or original
-  if not source then
-    if not imp._gbaDefaultLabel then
-      local image = love.graphics.newImage("assets/labels/gba-green-blue.png")
-      local w, h = image:getDimensions()
-      imp._gbaDefaultLabel = { image = image, width = w, height = h }
-    end
-    source = imp._gbaDefaultLabel
-  end
+  if not source then return nil end
   local label = canvas(512, 260, function(g)
     local c = skin.color
     for y = 0, 259 do

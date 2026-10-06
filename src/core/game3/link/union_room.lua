@@ -213,6 +213,7 @@ end
 Union.plazaMap = plazaMap
 
 function Union.isUnionMap(id)
+  if not Family.hasWireless() then return false end
   if type(id) ~= "string" then return false end
   return id == Union.MAP or id == plazaMap().MAP_ID
 end
@@ -1359,7 +1360,7 @@ function Union.linkGroupFlow(ctx, adapters, role)
   local L = link()
   local group = L.getVar(ctx, L.VAR_0x8004)
   -- pokeemerald/src/union_room.c:397
-  if Family.of() == "rse" and group == Union.LINK_GROUP.BATTLE_TOWER then
+  if Family.of() == "rse" and Family.hasWireless() and group == Union.LINK_GROUP.BATTLE_TOWER then
     local okU, Util = pcall(require, "src.core.game3.rse.frontier.util")
     local okD, D = pcall(require, "src.core.game3.rse.frontier.trainers")
     local f = okU and Util.frontier and Util.frontier(L.session()) or nil
@@ -1368,7 +1369,9 @@ function Union.linkGroupFlow(ctx, adapters, role)
       L.setVar(ctx, L.VAR_0x8004, group)
     end
   end
-  local spec = Union.GROUP_ACTIVITY[group] or Union.GROUP_ACTIVITY[0]
+  local spec = Union.GROUP_ACTIVITY[group]
+  if not spec and not Family.hasWireless() then return false, linkupResult(ctx, L.LINKUP.FAILED) end
+  spec = spec or Union.GROUP_ACTIVITY[0]
   Union.activity = spec.activity
   linkupResult(ctx, L.LINKUP.ONGOING)
   if L.adapterConnected() then
@@ -2294,6 +2297,12 @@ Union.COLOSSEUM_SEATS_BY_FAMILY = {
 }
 Union.COLOSSEUM_SEATS = setmetatable({}, {
   __index = function(_, seat)
+    if Family.isRubySapphire(Family.activeVersion()) then
+      return ({
+        [0] = { x = 3, y = 5, script = "SingleBattleColosseum_EventScript_1A436F" },
+        [1] = { x = 10, y = 5, script = "SingleBattleColosseum_EventScript_1A4379" },
+      })[seat]
+    end
     local rows = Union.COLOSSEUM_SEATS_BY_FAMILY[Family.of()] or Union.COLOSSEUM_SEATS_BY_FAMILY.frlg
     return rows[seat]
   end,

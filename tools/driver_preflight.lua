@@ -92,7 +92,9 @@ end
 
 local fs = { prefix = "" }
 function fs.exists(rel) return isFile(saveDir .. "/" .. fs.prefix .. rel) end
-function fs.read(rel) return readFile(saveDir .. "/" .. fs.prefix .. rel) end
+function fs.read(rel)
+  return require("src.import.CacheBlob").decode(rel, readFile(saveDir .. "/" .. fs.prefix .. rel))
+end
 
 if not identityOnly and sourceTreeHasData() then
   print("READY source tree")

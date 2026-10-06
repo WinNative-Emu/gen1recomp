@@ -133,6 +133,10 @@ end
 
 function M.run(rom, cache, opts)
   local c = K.context(rom, cache, opts, M.SUB)
+  return M.runContext(c)
+end
+
+function M.runContext(c)
   local S = c.S
 
   -- pokeemerald/src/roulette.c:471

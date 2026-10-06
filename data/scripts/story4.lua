@@ -867,20 +867,19 @@ M.SAFFRON_CITY = {
 -- -------------------------------------------------------------------
 
 local function e4ExitSeal(flag, closedBlock, openBlock, dontRunText, autoFlag)
+  local function door(game, ow)
+    ow:replaceBlock(2, 0, game.save.flags[flag] and openBlock or closedBlock)
+  end
   local seal = function(game, ow)
-    local open = game.save.flags[flag]
-    ow:replaceBlock(2, 0, open and openBlock or closedBlock)
+    door(game, ow)
     -- the auto walk-in on first (south) entry (LoreleiScriptWalkIntoRoom)
     if autoFlag and not game.save.flags[autoFlag] and ow.player.cellY >= 10 then
       game.save.flags[autoFlag] = true
       ow:scriptMove(ow.player, "up", 6)
     end
   end
-  -- onVictory re-runs the seal so the door opens right after the
-  -- battle, like pokered's post-battle map reload
   return {
     onEnter = seal,
-    onVictory = seal,
     -- retreating toward the entrance gets "Don't run away!" and a
     -- shove back up (the entrance coords rows in each room script)
     onStep = function(game, ow, x, y)
@@ -892,14 +891,14 @@ local function e4ExitSeal(flag, closedBlock, openBlock, dontRunText, autoFlag)
       end))
       return true
     end,
-  }
+  }, door
 end
 
 -- Lorelei/Bruno/Agatha EndBattleScript (pokered): EndTrainerBattle then
 -- DisplayTextID -> TalkToTrainer, which prints the AfterBattle text on a
 -- win.  engageTrainer only shows the won line, so wrap talk like Lance /
 -- Game Corner Rocket and push header.after immediately after a win.
-local function e4LeaderTalk(afterLabel)
+local function e4LeaderTalk(afterLabel, door)
   return function(game, ow, npc, done)
     done = done or function() end
     if ow:trainerDefeated(npc) then
@@ -912,26 +911,33 @@ local function e4LeaderTalk(afterLabel)
         done()
         return
       end
+      -- scripts/AgathasRoom.asm:2
+      local function reopen()
+        door(game, ow)
+        done()
+      end
       local after = text(game)[afterLabel]
-      if after then push(game, after, done) else done() end
+      if after then push(game, after, reopen) else reopen() end
     end)
   end
 end
 
-M.LORELEIS_ROOM = e4ExitSeal("EVENT_BEAT_LORELEIS_ROOM_TRAINER_0", 0x24, 0x05,
+local loreleiDoor, brunoDoor, agathaDoor
+M.LORELEIS_ROOM, loreleiDoor = e4ExitSeal("EVENT_BEAT_LORELEIS_ROOM_TRAINER_0", 0x24, 0x05,
   "_LoreleisRoomLoreleiDontRunAwayText", "EVENT_AUTOWALKED_INTO_LORELEIS_ROOM")
 M.LORELEIS_ROOM.talk = {
-  TEXT_LORELEISROOM_LORELEI = e4LeaderTalk("_LoreleisRoomLoreleiAfterBattleText"),
+  TEXT_LORELEISROOM_LORELEI = e4LeaderTalk("_LoreleisRoomLoreleiAfterBattleText",
+                                           loreleiDoor),
 }
-M.BRUNOS_ROOM = e4ExitSeal("EVENT_BEAT_BRUNOS_ROOM_TRAINER_0", 0x24, 0x05,
+M.BRUNOS_ROOM, brunoDoor = e4ExitSeal("EVENT_BEAT_BRUNOS_ROOM_TRAINER_0", 0x24, 0x05,
   "_BrunosRoomBrunoDontRunAwayText", "EVENT_AUTOWALKED_INTO_BRUNOS_ROOM")
 M.BRUNOS_ROOM.talk = {
-  TEXT_BRUNOSROOM_BRUNO = e4LeaderTalk("_BrunoAfterBattleText"),
+  TEXT_BRUNOSROOM_BRUNO = e4LeaderTalk("_BrunoAfterBattleText", brunoDoor),
 }
-M.AGATHAS_ROOM = e4ExitSeal("EVENT_BEAT_AGATHAS_ROOM_TRAINER_0", 0x3b, 0x0e,
+M.AGATHAS_ROOM, agathaDoor = e4ExitSeal("EVENT_BEAT_AGATHAS_ROOM_TRAINER_0", 0x3b, 0x0e,
   "_AgathasRoomAgathaDontRunAwayText", "EVENT_AUTOWALKED_INTO_AGATHAS_ROOM")
 M.AGATHAS_ROOM.talk = {
-  TEXT_AGATHASROOM_AGATHA = e4LeaderTalk("_AgathaAfterBattleText"),
+  TEXT_AGATHASROOM_AGATHA = e4LeaderTalk("_AgathaAfterBattleText", agathaDoor),
 }
 
 -- -------------------------------------------------------------------
@@ -953,21 +959,15 @@ M.AGATHAS_ROOM.talk = {
 --   (5,11)/(6,11) the doorway -> CheckAndSetEvent
 --                 EVENT_LANCES_ROOM_LOCK_DOOR: first crossing seals
 --                 the door behind the player with SFX_GO_INSIDE
---   (24,16)       the entrance staircase -> WalkToLance: an auto-walk
---                 landing on (6,11). Vanilla WalkToLance_RLEList is
---                 up 12 / left 12 / down 7 / left 6 and skips collision
---                 through void tiles; our camera follows that literally
---                 and briefly shows the empty upper chamber (reads as
---                 "Gary's room"). We keep the same landing cell but
---                 route along the open-door floor corridor instead.
+--   (24,16)       the entrance staircase -> WalkToLance
 -- -------------------------------------------------------------------
 
--- Floor corridor (24,16) -> (6,11) with EVENT_LANCES_ROOM_LOCK_DOOR
--- unset (entrance blocks $31/$32). Exposed for parity tests.
-local LANCE_WALK_IN = {
-  { "down", 2 }, { "left", 6 }, { "down", 5 }, { "left", 10 },
-  { "up", 9 }, { "left", 2 }, { "up", 3 },
-}
+-- scripts/LancesRoom.asm:111
+-- home/overworld.asm:1845
+local function lanceWalkInRoute(yellow)
+  return { { "left", 6 }, { "down", 7 }, { "left", 12 }, { "up", yellow and 13 or 12 } }
+end
+local LANCE_WALK_IN = lanceWalkInRoute(false)
 
 local function lanceEntranceBlocks(game, ow)
   local locked = game.save.flags.EVENT_LANCES_ROOM_LOCK_DOOR
@@ -983,15 +983,17 @@ local function lanceLockDoor(game, ow)
 end
 
 local function lanceWalkIn(game, ow)
+  local route = lanceWalkInRoute(require("src.core.GameVersion").isYellow())
   local i = 0
   local function step()
     i = i + 1
-    local seg = LANCE_WALK_IN[i]
+    local seg = route[i]
     if not seg then
-      -- lands on (6,11); vanilla's per-frame coord poll then locks the
-      -- door at once. scriptMove landings do not fire onStep, so lock
-      -- here.
-      lanceLockDoor(game, ow)
+      -- scripts/LancesRoom.asm:82
+      local p = ow.player
+      if (p.cellX == 5 or p.cellX == 6) and p.cellY == 11 then
+        lanceLockDoor(game, ow)
+      end
       return
     end
     ow:scriptMove(ow.player, seg[1], seg[2], step)
@@ -1001,6 +1003,7 @@ end
 
 M.LANCES_ROOM = {
   walkInRoute = LANCE_WALK_IN,
+  walkInRouteFor = lanceWalkInRoute,
   onEnter = function(game, ow)
     lanceEntranceBlocks(game, ow)
     -- the warp arrival lands ON the staircase trigger, and onStep only
@@ -1019,7 +1022,6 @@ M.LANCES_ROOM = {
         if npc.def and npc.def.name == "LANCESROOM_LANCE" then lance = npc break end
       end
       if not lance or ow:trainerDefeated(lance) then return false end
-      lance:facePlayer(ow.player)
       -- LancesRoomLanceEndBattleScript DisplayTextID -> TalkToTrainer
       -- after-battle text (rival became champion first). engageTrainer
       -- only shows the won line, so push the after text on a win.

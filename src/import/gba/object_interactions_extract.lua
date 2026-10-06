@@ -87,29 +87,67 @@ E.RSE_CODE_ROOTS={
   'EventScript_UseSurf','EventScript_UseWaterfall','EventScript_CannotUseWaterfall',
   'EventScript_UseDive','EventScript_FallDownHole',
 }
+-- pokeruby/src/field_control_avatar.c:453
+E.RS_INTERACTIONS={
+  {'TELEVISION','EventScript_TV','north','Event_TV'},
+  {'PC','EventScript_PC'},
+  {'CLOSED_SOOTOPOLIS_DOOR','EventScript_ClosedSootopolisDoor',nil,'ClosedSootopolisDoorScript'},
+  {'CABLE_BOX_RESULTS_1','EventScript_CableBoxResults',nil,'gUnknown_081A4363'},
+  {'POKEBLOCK_FEEDER','EventScript_PokeBlockFeeder',nil,'gUnknown_081C346A'},
+  {'TRICK_HOUSE_PUZZLE_DOOR','Route110_TrickHousePuzzle_EventScript_Door'},
+  {'REGION_MAP','EventScript_RegionMap'},
+  {'RUNNING_SHOES_INSTRUCTION','EventScript_RunningShoesManual',nil,'S_RunningShoesManual'},
+  {'PICTURE_BOOK_SHELF','EventScript_PictureBookShelf',nil,'EventScript_PictureBookshelf'},
+  {'BOOKSHELF','EventScript_BookShelf',nil,'EventScript_Bookshelf'},
+  {'POKEMON_CENTER_BOOKSHELF','EventScript_PokemonCenterBookShelf',nil,'EventScript_PokemonCenterBookshelf'},
+  {'VASE','EventScript_Vase'},
+  {'TRASH_CAN','EventScript_EmptyTrashCan'},
+  {'SHOP_SHELF','EventScript_ShopShelf'},
+  {'BLUEPRINT','EventScript_Blueprint'},
+  {'SECRET_BASE_PC','SecretBase_EventScript_PC','elevation'},
+  {'SECRET_BASE_REGISTER_PC','SecretBase_EventScript_RecordMixingPC','elevation'},
+  {'SECRET_BASE_SAND_ORNAMENT','SecretBase_EventScript_SandOrnament','elevation'},
+  {'SECRET_BASE_TV_SHIELD','SecretBase_EventScript_ShieldOrToyTV','elevation'},
+}
+E.RS_CODE_ROOTS={
+  {'EventScript_UseSurf'},
+  {'EventScript_UseWaterfall','S_UseWaterfall'},
+  {'EventScript_CannotUseWaterfall','S_CannotUseWaterfall'},
+  {'EventScript_UseDive','UseDiveScript'},
+  {'S_UseDiveUnderwater'},
+  {'EventScript_FallDownHole'},
+  {'EventScript_FallDownHoleMtPyre'},
+  {'EventScript_HiddenItemScript','EventScript_HiddenItem'},
+}
 function E.readScriptsRse(game)
   local S=require('src.import.gba.syms').of(game)
   local seeds,aliases={},{}
-  local function add(name)
+  local function add(name,native)
     if aliases[name] then return end
-    local ptr=0x08000000+S.off(name)
+    local ptr=0x08000000+S.off(native or name)
     seeds[#seeds+1]=ptr;aliases[name]=Opcodes.key(ptr)
   end
-  for _,row in ipairs(E.RSE_INTERACTIONS) do add(row[2]) end
-  for _,name in ipairs(E.RSE_CODE_ROOTS) do add(name) end
-  return seeds,aliases
+  local rs=game:match('^ruby') or game:match('^sapphire')
+  local interactions=rs and E.RS_INTERACTIONS or E.RSE_INTERACTIONS
+  for _,row in ipairs(interactions) do add(row[2],row[4]) end
+  if rs then
+    for _,row in ipairs(E.RS_CODE_ROOTS) do add(row[1],row[2]) end
+  else
+    for _,name in ipairs(E.RSE_CODE_ROOTS) do add(name) end
+  end
+  return seeds,aliases,interactions
 end
 function E.readRse(rom,version)
   local Family=require('src.import.gba.family')
   local MB=require('src.core.game3.mb')
   local F=Family.active()
   local Mb=assert(MB.translator(F.game),'no behavior translator for '..tostring(F.game))
-  local seeds,aliases=E.readScriptsRse(F.game)
+  local seeds,aliases,interactions=E.readScriptsRse(Versions.BUILD or F.game)
   local bfs=require('src.import.gba.extract_scripts').bfsFromSeeds(rom,seeds)
   for alias,key in pairs(aliases) do bfs.scripts[alias]=assert(bfs.scripts[key],'unseeded interaction script '..alias) end
   local pack={version=1,scripts=bfs.scripts,text=bfs.text,movements=bfs.movements}
   pack.interactions={}
-  for _,row in ipairs(E.RSE_INTERACTIONS) do
+  for _,row in ipairs(interactions) do
     pack.interactions[MB.require(row[1])]={script=row[2],facing=row[3]=='north' and 'up' or nil,
       sameElevation=row[3]=='elevation' or nil}
   end

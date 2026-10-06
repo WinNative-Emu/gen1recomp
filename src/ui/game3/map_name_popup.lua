@@ -6,8 +6,10 @@ local Chrome = require("src.ui.game3.chrome")
 local MapSectionsExtract = require("src.import.gba.map_sections_extract")
 local Strings = require("src.core.Strings")
 local RomText = require("src.core.game3.rom_text")
+local Rs = require("src.ui.game3.rs.map_name_popup")
 
 local MapNamePopup = {}
+MapNamePopup.Rs = Rs
 
 -- State Machine Constants
 local STATE_IDLE = 0
@@ -153,7 +155,7 @@ local function rsePrint()
     local idx = pyramid.location(sess) == pyramid.LOCATION.TOP and #headers or
       (tonumber(pyramid.frontier(sess).curChallengeBattleNum) or 0) + 1
     local ref = headers[idx]
-    if ref then name = require("src.core.game3.scripting.text_ir").toPlain(ref.ir) end
+    if ref then name = require("src.core.game3.scripting.text_ir").toPlain(RomText.refIr(ref)) end
   elseif sec == rseConstants():id("region_map_sections", "MAPSEC_SECRET_BASE") then
     -- pokeemerald/src/secret_base.c:735
     local sb = R.system("secretBase")
@@ -299,6 +301,7 @@ end
 
 function MapNamePopup.show(mapDef, opts)
   opts = opts or {}
+  if Rs.matches() then return Rs.show(mapDef, opts) end
   if themed() then return Rse.show(mapDef, opts) end
   if isFlagSuppressed() then return false end
 
@@ -368,6 +371,7 @@ end
 
 --- Dismiss active popup immediately (e.g. on dialogue open, battle, or indoor warp)
 function MapNamePopup.dismiss()
+  Rs.dismiss()
   Rse.dismiss()
   if MapNamePopup._state ~= STATE_IDLE then
     MapNamePopup._state = STATE_IDLE
@@ -380,11 +384,12 @@ end
 
 --- Check if popup is currently visible/animating
 function MapNamePopup.isActive()
-  return MapNamePopup._state ~= STATE_IDLE or Rse.task ~= nil
+  return MapNamePopup._state ~= STATE_IDLE or Rse.task ~= nil or Rs.task ~= nil
 end
 
 --- Frame tick (60 FPS / dt-based)
 function MapNamePopup.update(dt)
+  if Rs.task then Rs.update(dt) end
   if Rse.task then Rse.update(dt) end
   if MapNamePopup._state == STATE_IDLE then return end
 
@@ -430,6 +435,7 @@ end
 
 --- Draw 1:1 FireRed location banner
 function MapNamePopup.draw()
+  if Rs.task then Rs.draw() end
   if Rse.task then Rse.draw() end
   if MapNamePopup._state == STATE_IDLE or MapNamePopup._tPos <= 0 then
     return

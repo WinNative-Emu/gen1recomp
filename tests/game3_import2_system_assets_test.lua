@@ -35,6 +35,7 @@ local MysteryGiftExtract = require("src.import.gba.mystery_gift_extract")
 local TrainerTowerExtract = require("src.import.gba.trainer_tower_extract")
 local TutorExtract = require("src.import.gba.tutor_extract")
 local AltLayouts = require("src.import.gba.alt_layouts")
+local CacheBlob = require("src.import.CacheBlob")
 
 local SHEETS = {
   { "fame_checker/bg.rgba", 240, 160 },
@@ -160,7 +161,7 @@ print("[info] FireRed cache at " .. root)
 local function readFile(rel)
   local f = io.open(root .. "/" .. rel, "rb")
   if not f then return nil end
-  local d = f:read("*a")
+  local d = CacheBlob.decode(root .. "/" .. rel, f:read("*a"))
   f:close()
   return d
 end

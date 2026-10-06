@@ -179,5 +179,9 @@ grep -qxF "tools/rom_manifest_leafgreen.json" "$temp_dir/love-listing.txt" \
   || fail "shared payload is missing tools/rom_manifest_leafgreen.json"
 grep -qxF "tools/rom_manifest_emerald.json" "$temp_dir/love-listing.txt" \
   || fail "shared payload is missing tools/rom_manifest_emerald.json"
+grep -qxF "tools/rom_manifest_ruby.json" "$temp_dir/love-listing.txt" \
+  || fail "shared payload is missing tools/rom_manifest_ruby.json"
+grep -qxF "tools/rom_manifest_sapphire.json" "$temp_dir/love-listing.txt" \
+  || fail "shared payload is missing tools/rom_manifest_sapphire.json"
 
 say "Linux arm64 self-test passed"

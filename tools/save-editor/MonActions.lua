@@ -342,7 +342,7 @@ function A.randomize(S, mon)
 		end
 		local v = Gen.versionOf(S.save, S.version)
 		local isRse = require("src.core.GameVersion").layout(v) == "rse"
-		local constants = require("src.core.game3.constants").of(isRse and "emerald" or "firered")
+		local constants = require("src.core.game3.constants").of(v)
 		local sections = constants.region_map_sections.byName
 		local safari = row.location == sections.MAPSEC_SAFARI_ZONE or row.location == sections.MAPSEC_KANTO_SAFARI_ZONE
 		if safari then

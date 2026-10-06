@@ -6,7 +6,7 @@
 --   POKEPORT_DRIVER=tests/drivers/battle_intro_bug317_test.lua POKEPORT_IDENTITY=bug317 SHOT_DIR=/tmp/shots love .
 return function(game)
   local U = dofile("tests/drivers/util.lua")
-  local DIR = os.getenv("SHOT_DIR") or "/tmp/shots"
+  local DIR = os.getenv("POKEPORT_SHOT_DIR") or os.getenv("SHOT_DIR") or "/tmp/shots"
   local Pokemon = require("src.pokemon.Pokemon")
   local BattleState = require("src.battle.BattleState")
   local HudTiles = require("src.render.HudTiles")
@@ -19,8 +19,10 @@ return function(game)
   local TRAINER = "ROUTE3_YOUNGSTER1"
   local STAND = { x = 13, y = 6, facing = "left" }
 
+  local fails = 0
   local function check(label, ok)
     U.log(ok and "PASS" or "FAIL", label)
+    if not ok then fails = fails + 1 end
     return ok
   end
 
@@ -103,8 +105,9 @@ return function(game)
   local wild = BattleState.newWild(game, "RATTATA", 3)
   wild.onFinish = function() end
   if ow then ow:pushBattle(wild) end
-  for _ = 1, 400 do
-    if game.stack:top() == wild and (wild.introSlide or 0) == 0 then break end
+  for _ = 1, 600 do
+    if game.stack:top() == wild and (wild.introSlide or 0) == 0
+       and wild.current and wild.current.text == wild.introText then break end
     U.wait(1)
   end
   check("the wild battle reached the screen",
@@ -226,8 +229,9 @@ return function(game)
     if ow then ow:pushBattle(battle) end
   end
 
-  for _ = 1, 400 do
-    if game.stack:top() == battle and (battle.introSlide or 0) == 0 then break end
+  for _ = 1, 600 do
+    if game.stack:top() == battle and (battle.introSlide or 0) == 0
+       and battle.current and battle.current.text == battle.introText then break end
     U.wait(1)
   end
   check("a trainer battle is on screen", liveBattle() ~= nil)
@@ -249,7 +253,5 @@ return function(game)
   U.log("own edge before its send-out text prints (#317).")
   U.log("Screenshots of the wild half: " .. DIR .. "/bug317_*.png")
 
-  while true do
-    coroutine.yield()
-  end
+  love.event.quit(fails == 0 and 0 or 1)
 end

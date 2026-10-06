@@ -250,7 +250,7 @@ function Trade.tradeMail(entry)
 end
 
 -- pokefirered/src/trade_scene.c:2456 CreateInGameTradePokemonInternal
-function Trade.createTradeMon(tradeIdx, level)
+function Trade.createTradeMon(tradeIdx, level, opts)
   local entry = Trade.entry(tonumber(tradeIdx) or -1)
   if not entry then return nil end
   level = math.max(1, math.min(100, tonumber(level) or 5))
@@ -259,7 +259,7 @@ function Trade.createTradeMon(tradeIdx, level)
   local Party = require("src.core.game3.party")
   local nickname, otName = Strings(entry.nickname), Strings(entry.otName)
   local scratch = { party = {}, name = otName, trainerId = entry.otId }
-  local ok, _, mon = Party.giveMon(scratch, entry.species, level, nickname)
+  local ok, _, mon = Party.giveMon(scratch, entry.species, level, nickname, opts)
   if not (ok and mon) then return nil end
 
   mon.personality = entry.personality

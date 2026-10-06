@@ -33,6 +33,7 @@ print("[info] FireRed cache at " .. cacheRoot)
 local ExtractScripts = require("src.import.gba.extract_scripts")
 local Objects = require("src.core.game3.objects")
 local Field = require("src.core.game3.field")
+local CacheBlob = require("src.import.CacheBlob")
 
 Space.bundle = ExtractScripts.loadBundle(Cache.cache(), cacheRoot, { allowIncomplete = true })
 check(Space.bundle ~= nil, "script bundle loads")
@@ -163,7 +164,7 @@ if gym then
     local f = io.open(cacheRoot .. "/native/" .. pairName .. "/mids.idx", "rb")
     local packed = {}
     if f then
-      local idx = NativePack.decodeIdx(f:read("*a"))
+      local idx = NativePack.decodeIdx(CacheBlob.decode(cacheRoot .. "/native/" .. pairName .. "/mids.idx", f:read("*a")))
       f:close()
       for _, mid in ipairs(idx and idx.midIds or {}) do packed[mid] = true end
     end
@@ -192,7 +193,7 @@ if gym then
       local f = io.open(cacheRoot .. "/native/" .. pairName .. "/mids.idx", "rb")
       local packed = {}
       if f then
-        local idx = NativePack.decodeIdx(f:read("*a"))
+        local idx = NativePack.decodeIdx(CacheBlob.decode(cacheRoot .. "/native/" .. pairName .. "/mids.idx", f:read("*a")))
         f:close()
         for _, mid in ipairs(idx and idx.midIds or {}) do packed[mid] = true end
       end

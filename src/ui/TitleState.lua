@@ -516,13 +516,15 @@ function ContinueInfo:draw()
     math.max(96, 40 + (#Font.split(playerLabel) + 1) * 8), 72)
   local badges = require("src.inventory.Badges").count(self.game.data, save)
   Font.draw(Strings("BADGES"), 40, 88)
-  Font.draw(("%2d"):format(badges), 128, 88)
+  -- engine/menus/main_menu.asm:370
+  Font.draw(("%2d"):format(badges), 17 * 8, 11 * 8)
   local owned = 0
   for _ in pairs(save.pokedex and save.pokedex.owned or {}) do
     owned = owned + 1
   end
   Font.draw(Strings("POKéDEX"), 40, 104)
-  Font.draw(("%3d"):format(owned), 120, 104)
+  -- engine/menus/main_menu.asm:372
+  Font.draw(("%3d"):format(owned), 16 * 8, 13 * 8)
   local t = math.floor(save.playTime or 0)
   Font.draw(Strings("TIME"), 40, 120)
   Font.draw(("%3d:%02d"):format(math.floor(t / 3600),

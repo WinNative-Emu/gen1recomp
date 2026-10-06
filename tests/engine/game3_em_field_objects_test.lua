@@ -227,7 +227,11 @@ check(Doors.getDoorEntryAt("EM_TEST", 5, 8) ~= nil, "Petalburg gym door behavior
 doorBeh = MB.id("NORMAL")
 eq(Doors.getDoorEntryAt("EM_TEST", 5, 8), nil, "a non-door behavior never animates")
 local snd = Doors.getSoundForWarp("EM_TEST", 5, 8, nil, true)
-eq(snd, SE.SE_SLIDING_DOOR, "no door entry falls back to the sliding door sound")
+eq(snd, SE.SE_DOOR, "EM missing door entry falls back to the native normal door sound")
+GameVersion.set("ruby")
+SE.select("ruby")
+snd = Doors.getSoundForWarp("EM_TEST", 5, 8, nil, true)
+eq(snd, SE.SE_SLIDING_DOOR, "RS missing door entry retains the native sliding door sound")
 Collision.behaviorOn = savedOn
 package.loaded["src.core.game3.map"] = savedMap
 Doors._manifestLoaded, Doors._manifest = false, nil

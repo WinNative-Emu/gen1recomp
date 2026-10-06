@@ -970,8 +970,8 @@ function Renderer:endFrame(zones, worldZones)
   local extendedBlackBand = false
   local bandR, bandG, bandB = 1, 1, 1
   if not self.worldActive then
-    local ok, Game = pcall(require, "src.core.Game")
-    local stack = ok and Game and Game.stack
+    local Game = package.loaded["src.core.Game"]
+    local stack = type(Game) == "table" and Game.stack
     local base = stack and stack.visibleBase and stack:visibleBase()
     local state = base and stack.states and stack.states[base]
     local ownState = self.surroundState
@@ -1214,8 +1214,8 @@ function Renderer:endFrame(zones, worldZones)
   -- field, so never cover it with the native back-sprite fallback.
   if self.extendedWorldBand and not self.worldOverride
      and not FaithfulRes.scaleCap() then
-    local ok, Game = pcall(require, "src.core.Game")
-    love.graphics.setColor(PaletteFX.paperShade(ok and Game and Game.data))
+    local Game = package.loaded["src.core.Game"]
+    love.graphics.setColor(PaletteFX.paperShade(type(Game) == "table" and Game.data or nil))
     love.graphics.rectangle("fill", uox, vuy, uvpw, vuh)
     love.graphics.setColor(1, 1, 1, 1)
   end

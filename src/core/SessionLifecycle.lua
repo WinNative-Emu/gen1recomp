@@ -23,6 +23,8 @@ end
 function SessionLifecycle.endMountedSession(version)
   local stream = package.loaded["src.core.game3.asset_stream"]
   if stream then stream.shutdown() end
+  local audio = package.loaded["src.core.game3.audio"]
+  if audio and audio.shutdown then audio.shutdown() end
   local Assets = require("src.render.Assets")
   if Assets.releaseSession then Assets.releaseSession() end
   if version then

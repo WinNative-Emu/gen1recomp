@@ -647,10 +647,12 @@ function Field.tryCoordEvents(game, cx, cy)
         if cur ~= want then
           -- not this trigger
         else
+          lazyReq("src.core.game3.link.link_players").forceSeatFacing(cx, cy)
           Space.startScript(ev.scriptKey, nil, facingDir)
           return true
         end
       else
+        lazyReq("src.core.game3.link.link_players").forceSeatFacing(cx, cy)
         Space.startScript(ev.scriptKey, nil, facingDir)
         return true
       end
@@ -898,12 +900,32 @@ function Field.interact(game)
   local FieldMoves = lazyReq("src.core.game3.field_moves")
   local party = Field._session and Field._session.party
 
+  -- pokeemerald/src/overworld.c:2372
+  local LinkPlayers = package.loaded["src.core.game3.link.link_players"]
+  if LinkPlayers and LinkPlayers.tryInteract(fx, fy) then return true end
+
   -- 1) EventObject (nurse behind counter uses doubled cell; Cut tree / Rock / Boulder)
   local ox, oy = facing_object_cell(fx, fy, P.facing)
   local eo = Objects.at(ox, oy)
+  if not eo then
+    local under = Objects.at(P.cellX, P.cellY)
+    local Faraway = package.loaded["src.core.game3.faraway_island"]
+    if under and (under.copy or (Faraway and Faraway.isMew and Faraway.isMew(under))) then
+      eo = under
+      ox, oy = P.cellX, P.cellY
+    end
+  end
   if eo and eo.def then
     local gfx = eo.def.graphicsId or eo.def.gfx
     local FP = lazyReq("src.core.game3.profile").forSession(Field._session)
+    local ramOnlyScript
+    local function hasNpcScript()
+      if eo.def.scriptKey then return true end
+      if not Space.vm or (FP.id ~= "ruby" and FP.id ~= "sapphire") then return false end
+      local lid = eo.localId or eo.def.localId or eo.def.index or 0
+      ramOnlyScript = require("src.core.game3.rs.ram_script").select(Field._session, Space.vm, lid, nil)
+      return ramOnlyScript ~= nil
+    end
     -- pokeemerald/data/scripts/field_move_scripts.inc:60
     if FP.field and FP.field.fieldMoveScripts and eo.def.scriptKey then gfx = nil end
     if gfx == FieldMoves.GFX_IDS.CUT_TREE then
@@ -957,7 +979,7 @@ function Field.interact(game)
         Message.show(res.text)
         return true
       end
-    elseif eo.def.scriptKey then
+    elseif hasNpcScript() then
       local lid = eo.localId or eo.def.localId or eo.def.index or 0
       local talkTo = Compat and Compat.talkToWrapper and Compat.talkToWrapper()
       if talkTo and talkTo(Compat.resolve("src.world.OverworldController"), eo) then
@@ -967,7 +989,9 @@ function Field.interact(game)
       local function talk()
         Objects.freeze(lid)
         Objects.facePlayer(lid, game)
-        Space.startScript(eo.def.scriptKey, lid, facingDir)
+        local script = eo.def.scriptKey or ramOnlyScript
+        if eo.def.scriptKey and Space.vm then script = require("src.core.game3.rs.ram_script").select(Field._session, Space.vm, lid, script) end
+        Space.startScript(script, lid, facingDir)
       end
       if ModRuntime.wantsHook("world.talk") then
         ModRuntime.call("world.talk", talk, game, eo)
@@ -1295,6 +1319,21 @@ function Field.executeFieldMove(payload)
       onPick = function(section) Field.flyTo(section, payload.mon) end,
       onClose = function() Field.locked = false end,
     })
+  elseif act == "braille_rs_strength" or act == "braille_rs_fly" then
+    Field.locked = true
+    showMon(function()
+      local session = Field._session
+      local Braille = lazyReq("src.core.game3.braille_field_rs")
+      if Braille.isRs(session) then
+        -- fldeff_strength.c:91
+        if act == "braille_rs_strength" then
+          if Braille.shouldDoStrength(session) then Braille.doStrength(session) end
+        else
+          Braille.doFly(session)
+        end
+      end
+      Field.locked = false
+    end)
   elseif act == "braille_regirock" or act == "braille_registeel" then
     Field.locked = true
     -- pokeemerald/src/braille_puzzles.c:264
@@ -1390,11 +1429,18 @@ function Field.executeFieldMove(payload)
         Field.locked = false
       end)
     end)
-  elseif act == "dig" then
+  elseif act == "dig" or act == "braille_rs_dig" then
     Field.locked = true
     -- pokefirered/src/fldeff_dig.c:32
     showMon(function()
       local Session = Field._session
+      -- pokeruby/src/rom6.c:202
+      local RsBraille = lazyReq("src.core.game3.braille_field_rs")
+      if RsBraille.isRs(Session) and RsBraille.shouldDoDig(Session) then
+        RsBraille.doDig(Session)
+        Field.locked = false
+        return
+      end
       -- pokeemerald/src/fldeff_dig.c:54
       if lazyReq("src.core.game3.constants").versionOf(Session) == "emerald" then
         local BrailleField = lazyReq("src.core.game3.braille_field")

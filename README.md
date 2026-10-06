@@ -1,6 +1,6 @@
 # G1R Deluxe aka Gen1Recomp
 
-A native LÖVE2D recreation of Poke Red, Blue, Yellow, Gold, Silver, Crystal, FireRed, LeafGreen, and Emerald.
+A native LÖVE2D recreation of Poke Red, Blue, Yellow, Gold, Silver, Crystal, FireRed, LeafGreen, Ruby, Sapphire, and Emerald.
 The engine and map behavior are hand-written Lua; game data and graphics are 
 decoded from a ROM supplied by the player.
 
@@ -61,7 +61,7 @@ And before you say, "that's not a recomp", you're wrong. Recomp is an acronym. *
 ## What this is
 
 G1R Deluxe aka Gen1Recomp is a native LÖVE2D recreation of Pokemon Red, Blue, Yellow, Gold,
-Silver, Crystal, FireRed, LeafGreen, and Emerald. The engine and map behavior are
+Silver, Crystal, FireRed, LeafGreen, Ruby, Sapphire, and Emerald. The engine and map behavior are
 hand-written Lua, ported from the [pret](https://github.com/pret)
 disassemblies & C. Game data, graphics, and audio programs are decoded on first
 launch from a ROM you supply.
@@ -70,7 +70,7 @@ The project does not include a ROM, emulate the Game Boy, transpile assembly,
 or download a disassembly. Your ROM is verified, used during import, and
 released from memory. It is never copied into the cache, and later launches
 load the private generated cache without asking for it again. Music, sound
-effects, and cries are synthesized while the game runs. All nine games can be
+effects, and cries are synthesized while the game runs. All eleven games can be
 imported side by side. Gen 2 support is still under construction.
 
 ## Quick Start
@@ -84,7 +84,7 @@ imported side by side. Gen 2 support is still under construction.
 4. Repeat for any other game you own. Each one gets its own tab in the launcher.
 
 Only the canonical US English ROMs below are accepted. The importer checks the
-SHA-1 before creating any game data. FireRed, LeafGreen, and Emerald support is in beta.
+SHA-1 before creating any game data. FireRed, LeafGreen, Ruby, Sapphire, and Emerald support is in beta.
 
 | Game | Revision | ROM size | SHA-1 |
 | --- | --- | --- | --- |
@@ -100,6 +100,12 @@ SHA-1 before creating any game data. FireRed, LeafGreen, and Emerald support is 
 | LeafGreen | 1.0 | 16 MiB | `574fa542ffebb14be69902d1d36f1ec0a4afd71e` |
 | LeafGreen | 1.1 | 16 MiB | `7862c67bdecbe21d1d69ce082ce34327e1c6ed5e` |
 | Emerald | 1.0 | 16 MiB | `f3ae088181bf583e55daf962a92bb46f4f1d07b7` |
+| Ruby | 1.0 | 16 MiB | `f28b6ffc97847e94a6c21a63cacf633ee5c8df1e` |
+| Ruby | 1.1 | 16 MiB | `610b96a9c9a7d03d2bafb655e7560ccff1a6d894` |
+| Ruby | 1.2 | 16 MiB | `5b64eacf892920518db4ec664e62a086dd5f5bc8` |
+| Sapphire | 1.0 | 16 MiB | `3ccbbd45f8553c36463f13b938e833f652b793e4` |
+| Sapphire | 1.1 | 16 MiB | `4722efb8cd45772ca32555b98fd3b9719f8e60a9` |
+| Sapphire | 1.2 | 16 MiB | `89b45fb172e6b55d51fc0e61989775187f6fe63c` |
 
 **Platform notes:** [Linux](docs/platforms/linux.md),
 [iOS](docs/platforms/ios.md), [Xbox Dev Mode](docs/platforms/xbox.md),

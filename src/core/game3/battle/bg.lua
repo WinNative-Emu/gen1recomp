@@ -11,6 +11,10 @@ local ENV_MODULES = {
 }
 
 function BattleBg.env(family)
+  if family == nil then
+    local bp = require("src.core.game3.battle.profile").get()
+    if bp.environmentModule then return require(bp.environmentModule) end
+  end
   family = family or require("src.core.game3.profile").family()
   local module = ENV_MODULES[family]
   if not module then error("battle bg: no environment module for family '" .. tostring(family) .. "'") end
@@ -75,6 +79,21 @@ local function frlgSheetKey(env, id)
   if have.building then return "building" end
   if have.grass then return "grass" end
   return primary
+end
+
+function BattleBg.resolveOpts(opts)
+  local terrain = opts.terrain
+  -- pokefirered/src/battle_main.c:689
+  if terrain == nil and (opts.mapBehavior ~= nil or opts.mapType ~= nil) then
+    terrain = BattleBg.resolveFromBehavior(opts.mapBehavior, opts.mapKind, opts.mapType)
+  end
+  if terrain == nil and opts.mapKind then
+    terrain = BattleBg.resolveFromMapKind(opts.mapKind)
+  end
+  if terrain == nil then
+    terrain = BattleBg.TERRAIN.BUILDING
+  end
+  return terrain
 end
 
 function BattleBg.sheetKey(id)

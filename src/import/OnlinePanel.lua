@@ -3520,7 +3520,7 @@ function OnlinePanel.inviteUsable(imp, invite)
   if OnlinePanel.inviteEngine(invite) == 3 and invite.activity ~= "watch"
       and invite.activity ~= "tournament"
       and not OnlinePanel.engineVersionFor(imp, 3) then
-    return false, Strings("%s plays FireRed or LeafGreen. Import one to answer.", name)
+    return false, Strings("%s plays a Game Boy Advance game. Import one to answer.", name)
   end
   return true, nil
 end

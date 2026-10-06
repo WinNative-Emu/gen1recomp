@@ -1634,7 +1634,8 @@ end
 
 do
   local interp = arg and arg[-1] or "luajit"
-  for _, suite in ipairs({ "tests/save_editor_gen3_tests.lua", "tests/save_editor_gen3_persistence_tests.lua" }) do
+  for _, suite in ipairs({ "tests/save_editor_gen3_tests.lua", "tests/save_editor_gen3_persistence_tests.lua",
+      "tests/save_editor_split_stack_bug2671_test.lua" }) do
     local r = os.execute(interp .. " " .. suite)
     check(r == true or r == 0, suite .. " passes")
   end

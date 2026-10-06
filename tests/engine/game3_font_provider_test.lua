@@ -17,7 +17,7 @@ Font.reset()
 check(Font.impl("firered") == FrlgFont, "firered resolves the profile-named frlg_font")
 check(Font.impl(nil) == FrlgFont, "nil resolves the active game's implementation")
 check(Font.active() == FrlgFont, "active() is the active game's implementation")
-check(Font.impl("ruby") == FrlgFont, "an overlay-less RSE id falls back to FireRed's font")
+check(Font.impl("not-a-game") == FrlgFont, "an unregistered id falls back to the active FireRed font")
 
 eq(Font.CELL, FrlgFont.CELL, "CELL forwards")
 eq(Font.GLYPH_HEIGHT, FrlgFont.GLYPH_HEIGHT, "GLYPH_HEIGHT forwards")
@@ -50,7 +50,7 @@ check(Font.measure == replacement.measure, "a forwarded function follows the reg
 
 Font.reset()
 check(Font.impl("firered") == replacement, "registrations survive reset")
-check(Font.impl("ruby") == FrlgFont, "the FireRed fallback still answers for an overlay-less id")
+check(Font.impl("not-a-game") == FrlgFont, "the FireRed fallback still answers for an unregistered id")
 
 check(Font.unregister("firered") == true, "unregister returns true")
 Font.reset()

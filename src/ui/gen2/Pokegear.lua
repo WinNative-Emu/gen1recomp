@@ -1068,7 +1068,11 @@ function Pokegear.new(game, opts)
     -- FlyMap's defaults: the Johto map opens on JOHTO_FLYPOINT (New Bark
     -- Town) and the Kanto one on NUM_FLYPOINTS - 1 (Indigo Plateau), not on
     -- wherever the player is standing.
-    self.flyIndex = (self:region() == "kanto") and #self.fly or 1
+    self.flyRegion = opts.flyRegion
+      or ((self:region() == "kanto"
+        and FieldMoves.hasVisitedSpawn(self.save, "SPAWN_INDIGO"))
+        and "kanto" or "johto")
+    self.flyIndex = (self.flyRegion == "kanto") and #self.fly or 1
   end
 
   -- _TownMap (../pokecrystal/engine/pokegear/pokegear.asm:1757): the same map,
@@ -2308,6 +2312,7 @@ function Pokegear:drawMap()
   -- PokegearMap_CheckRegion); the name box follows the CURSOR, which the
   -- d-pad may have walked somewhere else entirely.
   local region = self:region()
+  if self.fly and self.flyRegion then region = self.flyRegion end
   local current = self:mapLandmark()
   self:drawTilemap(self.gfx and self.gfx.maps and self.gfx.maps[region])
   local G = love.graphics
@@ -2347,6 +2352,8 @@ function Pokegear:drawMap()
   -- landmark macro stores x + 8 / y + 16, which is OAM space; the extractor
   -- already took the offsets back off, so these coordinates are screen ones.
   local player = self:playerLandmark()
+  -- engine/pokegear/pokegear.asm:2264
+  if self.fly and region ~= self:region() then player = nil end
   if player and player.x and player.y then
     if not self:drawPlayerIcon(player.x, player.y) then
       G.setColor(0, 0, 0, 1)

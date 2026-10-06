@@ -1,5 +1,6 @@
 local Lz77 = require("src.import.gba.lz77")
 local LuaWriter = require("src.import.LuaWriter")
+local CacheBlob = require("src.import.CacheBlob")
 
 local bit = rawget(_G, "bit") or require("bit")
 local band, bxor, rshift = bit.band, bit.bxor, bit.rshift
@@ -51,40 +52,9 @@ local function chunk(kind, data)
   return be32(#data) .. kind .. data .. be32(crc32(kind .. data))
 end
 
-local function adler32(s)
-  local a, b = 1, 0
-  for i = 1, #s do
-    a = (a + s:byte(i)) % 65521
-    b = (b + a) % 65521
-  end
-  return b * 65536 + a
-end
-
-local function zlibStored(raw)
-  local parts = { "\120\1" }
-  local n = #raw
-  local pos = 1
-  repeat
-    local len = math.min(65535, n - pos + 1)
-    local final = (pos + len > n) and 1 or 0
-    parts[#parts + 1] = string.char(final, len % 256, math.floor(len / 256),
-      (65535 - len) % 256, math.floor((65535 - len) / 256))
-    parts[#parts + 1] = raw:sub(pos, pos + len - 1)
-    pos = pos + len
-  until pos > n
-  parts[#parts + 1] = be32(adler32(raw))
-  return table.concat(parts)
-end
-
 local function zlib(raw)
-  local love = rawget(_G, "love")
-  if love and love.data and love.data.compress then
-    local ok, out = pcall(love.data.compress, "string", "zlib", raw)
-    if ok and type(out) == "string" then return out end
-  end
-  return zlibStored(raw)
+  return CacheBlob.deflate(raw, 9)
 end
-K.zlibStored = zlibStored
 
 local function scanlines(w, h, idx)
   local rows = {}

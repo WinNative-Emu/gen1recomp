@@ -149,7 +149,7 @@ end
 -- the party ball rows DrawAllPokeballs puts up with the intro text, moved
 -- out to the wide screen's own corners
 local function drawIntroBalls(battle)
-  if not battle.introBalls then return end
+  if battle.introBalls ~= true then return end
   if battle.enemyParty and
       (battle.kind == "trainer" or battle.kind == "link") then
     battle:drawBallRow(battle.enemyParty, 88, 40, -8)

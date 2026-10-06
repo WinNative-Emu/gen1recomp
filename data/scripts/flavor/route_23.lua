@@ -1,31 +1,11 @@
--- Route 23's badge-gate guards (pokered scripts/Route23.asm).  Each
--- guard/swimmer stands beside the staircase to Victory Road and, when
--- talked to, checks whether the player holds the badge matching that
--- step; the automatic walk-into-the-guard blocking script
--- (Route23DefaultScript / Route23CheckForBadgeScript) is not ported
--- here -- only the talk-triggered text_asm bodies, which share that
--- same subroutine (Route23CheckForBadgeScript) and text
--- (Route23YouDontHaveTheBadgeYetText / Route23OhThatIsTheBadgeText,
--- pokered/text/Route23.asm _Route23YouDontHaveTheBadgeYetText /
--- _Route23OhThatIsTheBadgeText).  Once shown the badge, pokered sets
--- EVENT_PASSED_<BADGE>_CHECK so the walk-through gate (when ported)
--- won't re-ask; we mirror that with set_flag for fidelity even though
--- no onStep gate currently reads it.
-
+-- scripts/Route23.asm:153
 local M = {}
 
--- rows: check_item(badge) -> have it? show "Oh! That is the X!" and
--- set EVENT_PASSED_X_CHECK : show "You don't have the X yet!"
+-- scripts/Route23.asm:195
 local function badgeGuard(badge, passFlag)
-  local subs = { RAM = badge }
-  return {
-    { "check_item", badge },                                        -- 1
-    { "jump_if_true", 5 },                                          -- 2
-    { "show_text", "_Route23YouDontHaveTheBadgeYetText", subs },     -- 3
-    { "jump", 7 },                                                  -- 4 (end)
-    { "show_text", "_Route23OhThatIsTheBadgeText", subs },          -- 5
-    { "set_flag", passFlag },                                       -- 6
-  }
+  return function(game, ow, npc, done)
+    ow:route23BadgeCheck(badge, passFlag, done)
+  end
 end
 
 -- Route23SetVictoryRoadBoulders (pokered scripts/Route23.asm:8): every entry

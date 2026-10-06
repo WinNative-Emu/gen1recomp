@@ -519,6 +519,8 @@ end
 
 -- pokeemerald/src/pokedex.c:4387
 function FieldRse.hasAllHoennMons(sess)
+  local id = require("src.core.game3.constants").versionOf(sess)
+  if id == "ruby" or id == "sapphire" then return require("src.core.game3.profiles.rs.pokedex").completedHoenn(sess) end
   local Dex = require("src.core.game3.dex")
   local caught = sess and sess.dex and (sess.dex.caught or sess.dex.owned) or {}
   local need = Dex.regionalMax() - 2
@@ -1127,6 +1129,9 @@ local STORY = {
   HasAllHoennMons = function()
     return boolRet(FieldRse.hasAllHoennMons(Rse.session()))
   end,
+  CompletedHoennPokedex = function()
+    return boolRet(FieldRse.hasAllHoennMons(Rse.session()))
+  end,
   -- pokeemerald/src/trainer_card.c:663
   CountPlayerTrainerStars = function()
     return false, FieldRse.countTrainerStars(Rse.session())
@@ -1373,7 +1378,10 @@ local FAN_CLUB = {
     local dex = sess and sess.dex
     local national = Rse.specialVar(ctx, VAR_0x8004) ~= 0
     local seen, caught = 0, 0
-    for species = 1, 440 do
+    local id = require("src.core.game3.constants").versionOf(sess)
+    if id == "ruby" or id == "sapphire" then
+      seen, caught = require("src.core.game3.profiles.rs.pokedex").counts(sess, national)
+    else for species = 1, 440 do
       local ok, nat = pcall(Pokemon.national, species)
       local counted
       if national then
@@ -1385,7 +1393,7 @@ local FAN_CLUB = {
         if Dex.isSeen(dex, species) then seen = seen + 1 end
         if Dex.isCaught(dex, species) then caught = caught + 1 end
       end
-    end
+    end end
     Rse.setSpecialVar(ctx, 0x8005, seen)
     Rse.setSpecialVar(ctx, 0x8006, caught)
     local okN, enabled = pcall(Dex.nationalEnabled, sess)

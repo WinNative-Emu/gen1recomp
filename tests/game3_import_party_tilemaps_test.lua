@@ -2,6 +2,7 @@
 -- src/data/party_menu.h:111
 
 package.path = "./?.lua;./?/init.lua;" .. package.path
+local CacheBlob = require("src.import.CacheBlob")
 
 local failed = 0
 local function check(cond, msg)
@@ -25,7 +26,7 @@ end
 local function slurp(path)
   local f = io.open(path, "rb")
   if not f then return nil end
-  local d = f:read("*a")
+  local d = CacheBlob.decode(path, f:read("*a"))
   f:close()
   return d
 end

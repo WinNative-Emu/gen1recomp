@@ -137,10 +137,73 @@ check(Player.facing == "down", "and the player is not turned")
 
 print("[test] 6. a Continue entry skips ON_WARP_INTO_MAP too")
 warpTo("FR_PALLET_TOWN", 12, 20, "down")
+session.objectEvents = { mapId = BEDROOM, list = {} }
 warpTo(BEDROOM, 4, 1, "down", { enterVia = "continue" })
 check(var(VAR_MAP_SCENE_PLAYERS_HOUSE_2F) == 0,
   "CB2_ContinueSavedGame reaches the field through CB2_ReturnToField, got "
   .. var(VAR_MAP_SCENE_PLAYERS_HOUSE_2F))
+check(session.objectEvents == nil, "the Continue entry consumes the saved object events")
+
+print("[test] 6b. a snapshot for another map (continue-game warp) warps in like CB2_LoadMap")
+warpTo("FR_PALLET_TOWN", 12, 20, "down")
+session.objectEvents = { mapId = "FR_PALLET_TOWN", list = {} }
+warpTo(BEDROOM, 4, 1, "down", { enterVia = "continue" })
+check(var(VAR_MAP_SCENE_PLAYERS_HOUSE_2F) == 1,
+  "a continue-game warp runs the target's ON_WARP_INTO_MAP, got " .. var(VAR_MAP_SCENE_PLAYERS_HOUSE_2F))
+check(session.objectEvents == nil, "and the foreign snapshot is dropped")
+
+print("[test] 6c. a save from before object events were saved runs ON_WARP_INTO_MAP once")
+warpTo("FR_PALLET_TOWN", 12, 20, "down")
+session.objectEvents = nil
+warpTo(BEDROOM, 4, 1, "down", { enterVia = "continue" })
+check(var(VAR_MAP_SCENE_PLAYERS_HOUSE_2F) == 1,
+  "the legacy Continue places the scene like a warp in, got " .. var(VAR_MAP_SCENE_PLAYERS_HOUSE_2F))
+
+print("[test] 6d. Continue restores the saved object events over the templates")
+local Schema = require("src.core.game3.save_schema_firered")
+local SaveData = require("src.core.SaveData")
+local PALLET = "FR_PALLET_TOWN"
+warpTo(BEDROOM, 4, 1, "down")
+warpTo(PALLET, 12, 20, "down")
+local oak = Objects.find(3)
+check(oak ~= nil and oak.hidden == true, "Oak starts hidden by his template flag")
+local oakFlag = oak and tonumber(oak.def and oak.def.flag) or 0
+check(oakFlag ~= 0 and flag(oakFlag) == true, "and that flag is set")
+local untouched = Objects.snapshot()
+local u1 = untouched and untouched.list[1]
+check(type(untouched) == "table" and untouched.mapId == PALLET and #untouched.list == 1 and u1 and u1.l == 1
+  and u1.x == 5 and u1.y == 15 and u1.m == 7 and u1.f == "up" and u1.h == nil,
+  "only the contextually placed NPC gets a row on an untouched map, got " .. tostring(untouched and #untouched.list))
+Objects.addObject(3)
+Objects.setObjectXY(3, 11, 9)
+Objects.turnObject(3, 4)
+Objects.removeObject(1)
+local disk = SaveData.decode(SaveData.encode(Schema.toSaveTable(session)))
+local snap = disk and disk.objectEvents
+check(type(snap) == "table" and snap.mapId == PALLET and #snap.list == 2,
+  "the save carries only the changed object events, got " .. tostring(snap and #snap.list))
+local rows = {}
+for _, r in ipairs(snap and snap.list or {}) do rows[r.l] = r end
+check(rows[3] ~= nil and rows[3].x == 11 and rows[3].y == 9 and rows[3].hx == 11 and rows[3].hy == 9
+  and rows[3].f == "right" and rows[3].h == nil and rows[3].m == nil and rows[3].e == nil and rows[3].i == nil,
+  "Oak's row carries cell, home and facing with short keys and nothing at its template value")
+check(rows[1] ~= nil and rows[1].h == 1 and rows[1].x == nil and rows[1].f == nil,
+  "the removed NPC's row is just the hidden mark")
+warpTo(BEDROOM, 4, 1, "down")
+session.objectEvents = Schema.fromSaveTable(disk).objectEvents
+warpTo(PALLET, 12, 20, "down", { enterVia = "continue" })
+oak = Objects.find(3)
+check(oak ~= nil and oak.visible == true and oak.hidden ~= true,
+  "addobject's Oak survives Continue although his flag is set")
+check(oak ~= nil and oak.cellX == 11 and oak.cellY == 9,
+  "at the saved cell, got " .. tostring(oak and oak.cellX) .. "," .. tostring(oak and oak.cellY))
+check(oak ~= nil and oak.facing == "right", "facing the saved way, got " .. tostring(oak and oak.facing))
+local removed = Objects.find(1)
+check(removed ~= nil and removed.hidden == true, "a removeobject'd NPC without a flag stays removed")
+warpTo(BEDROOM, 4, 1, "down")
+warpTo(PALLET, 12, 20, "down")
+oak = Objects.find(3)
+check(oak ~= nil and oak.hidden == true, "an ordinary warp back still builds from the templates")
 
 print("[test] 7. the Elite Four rooms share the same turn-north ON_WARP_INTO_MAP")
 local LORELEI = "FR_POKEMON_LEAGUE_LORELEIS_ROOM"

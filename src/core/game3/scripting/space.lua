@@ -227,7 +227,8 @@ function Space.activate(mod, mapId, game, world)
     Space.deactivate(mod)
   end
   load_sidecar(mod, game)
-  Flags.onMapLoad(Space.store)
+  local MapMod = package.loaded["src.core.game3.map"]
+  Flags.onMapLoad(Space.store, MapMod ~= nil and MapMod._nextEnterVia == "continue")
   local bundle = Space.ensureBundle(mod)
   local adapters = Adapters.host(mod, game, world)
   adapters.lookupMovement = function(key)
@@ -454,11 +455,13 @@ function Space.runEnterScripts(mod, mapId, game, world, opts)
   if not ev then return Space.vm end
   local vm = Space.vm
   local ms = ev.mapScripts or {}
+  local profileId = Profile.forSession(resolve_session(mod, game)).id
+  local rsContinue = opts.enterVia == "continue" and (profileId == "ruby" or profileId == "sapphire")
   if opts.keepScript and vm:isRunning() then
     -- pokeemerald/src/overworld.c:807
     Space._inTransition = true
     local ok, err = pcall(function()
-      if run_immediately(ms.onTransition) then Space.refreshObjectGraphics() end
+      if not rsContinue and run_immediately(ms.onTransition) then Space.refreshObjectGraphics() end
       -- pokeemerald/src/fieldmap.c:62
       if Profile.family(resolve_session(mod, game)) == "rse" then
         lazyReq("src.core.game3.rse.init").call("secretBase", "onMapLoad", nil, nil, resolve_session(mod, game), nil,
@@ -477,7 +480,7 @@ function Space.runEnterScripts(mod, mapId, game, world, opts)
   -- pokefirered/src/event_object_movement.c:1813
   Space._inTransition = true
   local ok, err = pcall(function()
-    if ms.onTransition and type(ms.onTransition) == "string" then
+    if not rsContinue and ms.onTransition and type(ms.onTransition) == "string" then
       vm:start(ms.onTransition)
       -- Drain short transition scripts so ON_FRAME can run this enter.
       for _ = 1, 64 do
@@ -502,6 +505,9 @@ function Space.runEnterScripts(mod, mapId, game, world, opts)
   -- pokefirered/src/overworld.c:2148
   if not (opts.seamless or opts.enterVia == "continue") then
     Space.runOnWarpIntoMap(mapId)
+  elseif opts.enterVia == "continue" and Profile.family(resolve_session(mod, game)) == "rse" then
+    -- pokeruby/src/overworld.c:1713
+    lazyReq("src.core.game3.rotating_gate").initPuzzleAndGraphics()
   end
   -- ON_FRAME (Bill intro etc.) — defer while Gen2 MAPSETUP is still white.
   if not vm:isRunning() then
@@ -536,7 +542,13 @@ function Space.runOnFrame()
   if not Space.active or not Space.vm then return end
   local ev = Space.bundle and Space.bundle.events and Space.bundle.events[Space.mapId]
   local key = check_script_table(ev and ev.mapScripts and ev.mapScripts.onFrame)
-  if key then Space.vm:start(key) end
+  if key then
+    -- pokeruby/src/script.c:333
+    Space.vm.ctx.fieldControlsLocked = true
+    local Field = package.loaded["src.core.game3.field"]
+    if Field and Field.lock then Field.lock() end
+    Space.vm:start(key)
+  end
 end
 
 --- Resolve graphics / graphicsVar → sprite for object defs at spawn.
@@ -732,7 +744,8 @@ function Space.install(mod)
       end
     end
     -- Direct Gen2 World:setMap (ferry/warps often skip the facade).
-    local ok, World = pcall(lazyReq, "src.world.gen2.World")
+    local World = package.loaded["src.world.gen2.World"]
+    local ok = type(World) == "table"
     if ok and World and World.setMap and not World._game3SetMap then
       local prevW = World.setMap
       World.setMap = function(self, mapId, ...)
@@ -784,7 +797,8 @@ function Space.install(mod)
 
   -- Gen2 World:busy must see game3 scripts or frozeNpcs clears mid-dialog.
   do
-    local ok, World = pcall(lazyReq, "src.world.gen2.World")
+    local World = package.loaded["src.world.gen2.World"]
+    local ok = type(World) == "table"
     if ok and World and World.busy and not World._game3Busy then
       local prevBusy = World.busy
       World.busy = function(self)

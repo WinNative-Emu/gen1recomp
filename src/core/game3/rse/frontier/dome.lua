@@ -617,10 +617,16 @@ local function setStr(ctx, adapters, n, v)
   Util.setStringVar(ctx, adapters, n, v)
 end
 
+local function tableText(list, name, i)
+  local RomText = require("src.core.game3.rom_text")
+  return RomText.irOr(RomText.key(name, i - 1), list[i])
+end
+Dome.tableText = tableText
+
 -- pokeemerald/src/battle_dome.c:2564
 function Dome.roundText(sess)
   local f = Util.frontier(sess)
-  return Data.dome().text.rounds[(tonumber(f.curChallengeBattleNum) or 0) + 1]
+  return tableText(Data.dome().text.rounds, "gRoundsStringTable", (tonumber(f.curChallengeBattleNum) or 0) + 1)
 end
 
 -- pokeemerald/src/battle_dome.c:3028
@@ -1033,7 +1039,8 @@ function Dome.trainerCard(sess, tid)
       card.species[i] = facilityMon(sess, f.domeMonIds[tid + 1][i]).species
     end
   end
-  card.potential = M.text.potential[(trainerId == D.TRAINER_FRONTIER_BRAIN) and Dome.TRAINERS_COUNT + 1 or tid + 1]
+  card.potential = tableText(M.text.potential, "sBattleDomePotentialTexts",
+    (trainerId == D.TRAINER_FRONTIER_BRAIN) and Dome.TRAINERS_COUNT + 1 or tid + 1)
   local pts = {}
   for k = 0, Dome.NUM_MOVE_POINT_TYPES - 1 do pts[k] = 0 end
   for i = 0, D.PARTY_SIZE - 1 do
@@ -1061,8 +1068,8 @@ function Dome.trainerCard(sess, tid)
     style = style + 1
   end
   card.style = style
-  card.styleText = M.text.styles[style + 1]
-  card.statText = M.text.stats[Dome.statTextId(sess, tid) + 1]
+  card.styleText = tableText(M.text.styles, "sBattleDomeOpponentStyleTexts", style + 1)
+  card.statText = tableText(M.text.stats, "sBattleDomeOpponentStatsTexts", Dome.statTextId(sess, tid) + 1)
   return card
 end
 

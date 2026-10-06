@@ -11,7 +11,6 @@ local SE = require("src.core.game3.se_ids")
 local INIT_FRAMES = 50       -- Task_SSAnneInit countdown
 local SMOKE_INTERVAL = 70    -- Task_SSAnneRun smoke puff period
 local SLIDE_SPEED_DIV = 5    -- 1 pixel movement every 5 frames (x = data[2] / 5)
-local TRAVEL_DISTANCE = 216  -- pixels to travel until boat is fully off-screen
 local FINISH_FRAMES = 40     -- Task_SSAnneFinish delay after exit horn
 
 SSAnneCutscene._active = false
@@ -56,6 +55,18 @@ local function loadGfx()
       SSAnneCutscene._smokeQuads = sheet.quads
     end
   end
+end
+
+local function screenOrigin()
+  local P = package.loaded["src.core.game3.player"]
+  local px = P and (P.cellX or 0) * 16 or 0
+  local py = P and (P.cellY or 0) * 16 or 0
+  return px - 112, py - 72
+end
+
+local function boatScreenX(eo)
+  local ox = screenOrigin()
+  return (eo.px or (eo.cellX * 16)) + 8 - ox
 end
 
 function SSAnneCutscene.isActive()
@@ -117,33 +128,41 @@ function SSAnneCutscene.step()
     SSAnneCutscene._runTimer1 = SSAnneCutscene._runTimer1 + 1
     SSAnneCutscene._runTimer2 = SSAnneCutscene._runTimer2 + 1
 
-    -- Smoke puff creation every 70 frames
+    -- pokefirered/src/ss_anne.c:112
     if SSAnneCutscene._runTimer1 == SMOKE_INTERVAL then
       SSAnneCutscene._runTimer1 = 0
-      table.insert(SSAnneCutscene._smokes, {
-        timer = 0,
-        x2 = 0,
-        frame = 0,
-        animEnded = false,
-        boatOffsetAtSpawn = SSAnneCutscene._boatOffset,
-      })
+      if not eo or boatScreenX(eo) - SSAnneCutscene._boatOffset + 49 >= -32 then
+        table.insert(SSAnneCutscene._smokes, {
+          timer = 0,
+          x2 = 0,
+          frame = 0,
+          animEnded = false,
+          boatOffsetAtSpawn = SSAnneCutscene._boatOffset,
+        })
+      end
     end
 
-    -- Boat movement: x = data[2] / 5 (1 pixel every 5 frames)
-    SSAnneCutscene._boatOffset = math.floor(SSAnneCutscene._runTimer2 / SLIDE_SPEED_DIV)
-    if eo then
-      eo.raiseX = -SSAnneCutscene._boatOffset
+    -- pokefirered/src/ss_anne.c:119
+    local departed = eo and boatScreenX(eo) - SSAnneCutscene._boatOffset < -120
+    if not departed then
+      SSAnneCutscene._boatOffset = math.floor(SSAnneCutscene._runTimer2 / SLIDE_SPEED_DIV)
+      if eo then
+        eo.raiseX = -SSAnneCutscene._boatOffset
+      end
     end
 
-    -- Update wake sprite
+    -- pokefirered/src/ss_anne.c:159
     if SSAnneCutscene._wake then
       local w = SSAnneCutscene._wake
       if math.floor(w.timer / 6) < 22 then
         w.timer = w.timer + 1
       end
       w.x2 = math.floor(w.timer / 6)
-      -- 12 ticks per frame, looping between frame 0 and frame 1
-      w.frame = (math.floor(w.timer / 12) % 2 == 0) and 0 or 1
+      w.anim = (w.anim or 0) + 1
+      w.frame = (math.floor((w.anim - 1) / 12) % 2 == 0) and 0 or 1
+      if eo and boatScreenX(eo) - SSAnneCutscene._boatOffset + 80 + w.x2 < -18 then
+        SSAnneCutscene._wake = nil
+      end
     end
 
     -- Update smoke sprites
@@ -168,8 +187,7 @@ function SSAnneCutscene.step()
     end
     SSAnneCutscene._smokes = activeSmokes
 
-    -- Exit check: when boat moves completely off-screen
-    if SSAnneCutscene._boatOffset >= TRAVEL_DISTANCE then
+    if departed then
       -- Final horn sound
       playSe(SE.SE_SS_ANNE_HORN)
       SSAnneCutscene._phase = "finish"
@@ -204,16 +222,13 @@ function SSAnneCutscene.drawWake(camX, camY)
   local eo = Objects and Objects.find and Objects.find(1)
   if not eo then return end
 
-  local curBoatPx = (eo.px or (eo.cellX * 16)) - SSAnneCutscene._boatOffset
-  local boatPy = eo.py or (eo.cellY * 16)
-  local boatLeft = curBoatPx - camX - 56
-  local boatTop = boatPy - camY - 48
-
+  local _, oy = screenOrigin()
   local w = SSAnneCutscene._wake
   local q = SSAnneCutscene._wakeQuads[w.frame or 0]
   if q then
-    local wx = boatLeft + 106 + (w.x2 or 0)
-    local wy = boatTop + 24
+    -- pokefirered/src/ss_anne.c:153
+    local wx = (eo.px or (eo.cellX * 16)) - SSAnneCutscene._boatOffset + 80 + (w.x2 or 0) - camX
+    local wy = oy + 109 - 16 - camY
     love.graphics.setColor(1, 1, 1, 1)
     love.graphics.draw(SSAnneCutscene._wakeImage, q, wx, wy)
   end
@@ -228,15 +243,13 @@ function SSAnneCutscene.drawSmoke(camX, camY)
   local eo = Objects and Objects.find and Objects.find(1)
   if not eo then return end
 
-  local boatPy = eo.py or (eo.cellY * 16)
-  local boatTop = boatPy - camY - 48
-
+  local _, oy = screenOrigin()
   for _, s in ipairs(SSAnneCutscene._smokes) do
     local q = SSAnneCutscene._smokeQuads[s.frame or 0]
     if q then
-      local spawnBoatLeft = (eo.px or (eo.cellX * 16)) - s.boatOffsetAtSpawn - camX - 56
-      local sx = spawnBoatLeft + 78 + (s.x2 or 0)
-      local sy = boatTop + 2
+      -- pokefirered/src/ss_anne.c:185
+      local sx = (eo.px or (eo.cellX * 16)) - s.boatOffsetAtSpawn + 49 + (s.x2 or 0) - camX
+      local sy = oy + 78 - 8 - camY
       love.graphics.setColor(1, 1, 1, 1)
       love.graphics.draw(SSAnneCutscene._smokeImage, q, sx, sy)
     end

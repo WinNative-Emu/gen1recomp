@@ -96,7 +96,7 @@ function Mail.copy(record)
   for i = 1, MAIL_WORDS_COUNT do
     words[i] = tonumber(record.words and record.words[i]) or EC_WORD_UNDEFINED
   end
-  return {
+  local out = {
     words = words,
     playerName = tostring(record.playerName or ""),
     trainerId = tonumber(record.trainerId) or 0,
@@ -104,6 +104,15 @@ function Mail.copy(record)
     itemId = tonumber(record.itemId) or ITEM_NONE,
     design = tonumber(record.design),
   }
+  if type(record._rsNativeBytes) == "table" then
+    out._rsNativeBytes = {}; for i, v in ipairs(record._rsNativeBytes) do out._rsNativeBytes[i] = v end
+  end
+  if type(record._recordMixNativeBytes) == "table" then
+    out._recordMixNativeBytes = {}
+    for i, v in ipairs(record._recordMixNativeBytes) do out._recordMixNativeBytes[i] = v end
+  end
+  if record._rsNewMail then out._rsNewMail = true end
+  return out
 end
 
 function Mail.isEmpty(record)
@@ -164,6 +173,8 @@ function Mail.giveMailToMon(session, mon, itemId)
       record.species = Mail.speciesToMailSpecies(mon.species or mon.speciesId, mon.personality)
       record.itemId = itemId
       record.design = Mail.designOf(itemId)
+      local policy = require("src.core.game3.profile").forSession(session).mail
+      if policy and policy.newRecord then policy.newRecord(session, record) end
       mon.mail = id
       set_held_item(mon, itemId)
       return id
@@ -227,7 +238,8 @@ function Mail.export(session)
     out[i] = Mail.copy(pool[i])
     if not Mail.isEmpty(out[i]) then used = true end
   end
-  if not used then return nil end
+  local policy = require("src.core.game3.profile").forSession(session).mail
+  if not used and not (policy and policy.exportEmpty) then return nil end
   return out
 end
 

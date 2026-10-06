@@ -555,9 +555,11 @@ end
 -- picker crashes; standing in Kanto before that shows the Johto map.
 function FieldMoves.flyPoints(save, landmarks, region)
   local first, last = 1, FieldMoves.KANTO_FLYPOINT - 1
+  local shown = "johto"
   if region == "kanto"
       and FieldMoves.hasVisitedSpawn(save, "SPAWN_INDIGO") then
     first, last = FieldMoves.KANTO_FLYPOINT, #FieldMoves.FLYPOINTS
+    shown = "kanto"
   end
   local out = {}
   local table_ = landmarks and landmarks.landmarks
@@ -573,7 +575,7 @@ function FieldMoves.flyPoints(save, landmarks, region)
       }
     end
   end
-  return out
+  return out, shown
 end
 
 -- ------------------------------------------------------------ menu paths

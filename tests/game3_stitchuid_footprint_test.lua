@@ -39,11 +39,12 @@ Pokemon.install(nil)
 
 local DIR = root .. "/pokemon/pokedex/footprints"
 local NUM_SPECIES = require("src.import.gba.versions").NUM_SPECIES or 412
+local CacheBlob = require("src.import.CacheBlob")
 
 local function file_bytes(rel)
   local f = io.open(DIR .. "/" .. rel, "rb")
   if not f then return nil end
-  local d = f:read("*a")
+  local d = CacheBlob.decode(DIR .. "/" .. rel, f:read("*a"))
   f:close()
   if type(d) == "string" and #d > 0 then return d end
   return nil

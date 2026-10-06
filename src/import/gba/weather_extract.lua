@@ -172,8 +172,31 @@ function WeatherExtract.runRse(rom, cache, root)
   local types = {}
   for i = 0, W.color_map_types_size - 1 do types[i + 1] = rom:get(W.color_map_types + i) end
   out.color_map_types = types
-  write_cache(cache, root .. "/drought_colors.bin", rom:readString(W.drought_colors, W.drought_colors_size))
-  out.drought = { file = "drought_colors.bin", tables = W.drought_colors_size / 0x2000, entries = 0x1000 }
+  local drought, tableCount
+  if W.drought_compressed then
+    -- pokeruby/src/field_weather.c:999
+    local Lz = require("src.import.gba.lz77")
+    local previous, parts = {}, {}
+    for t, off in ipairs(W.drought_compressed) do
+      local data = Lz.decompress(function(i) return rom:get(i) end, off)
+      assert(Lz.len(data) == 0x2000, "RS drought palette has an invalid decompressed size")
+      local row, bytes = {}, {}
+      for i = 0, 0xFFF do
+        local delta = data[i * 2 + 1] + data[i * 2 + 2] * 256
+        local value = t == 1 and (i == 0 and 0x421 or (delta + row[i - 1]) % 65536)
+          or (delta + previous[i]) % 65536
+        row[i] = value
+        bytes[i + 1] = string.char(value % 256, math.floor(value / 256))
+      end
+      previous = row
+      parts[t] = table.concat(bytes)
+    end
+    drought, tableCount = table.concat(parts), #parts
+  else
+    drought, tableCount = rom:readString(W.drought_colors, W.drought_colors_size), W.drought_colors_size / 0x2000
+  end
+  write_cache(cache, root .. "/drought_colors.bin", drought)
+  out.drought = { file = "drought_colors.bin", tables = tableCount, entries = 0x1000 }
   out.cycles = {}
   for name, c in pairs(W.cycles) do
     local list = {}

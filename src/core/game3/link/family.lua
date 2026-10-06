@@ -7,6 +7,14 @@ end
 local GameVersion = require("src.core.GameVersion")
 
 local Family = {}
+local Rs = require("src.core.game3.link.rs")
+
+Family.isRubySapphire = Rs.is
+Family.trainerId = Rs.trainerId
+
+function Family.hasWireless(version)
+  return not Rs.is(version or Family.activeVersion())
+end
 
 -- pokeemerald/include/constants/global.h:8
 Family.VERSION = { SAPPHIRE = 1, RUBY = 2, EMERALD = 3, FIRE_RED = 4, LEAF_GREEN = 5 }
@@ -101,11 +109,12 @@ local wireCache = {}
 
 function Family.wires(version)
   local family = Family.of(version)
-  local cached = wireCache[family]
+  local key = Rs.is(version or Family.activeVersion()) and "rs" or family
+  local cached = wireCache[key]
   if cached then return cached end
   local acts = Family.activity(version)
   local byWire, byActivity = {}, {}
-  for wire, name in pairs(Family.WIRES[family] or Family.WIRES.frlg) do
+  for wire, name in pairs(key == "rs" and Rs.wires or (Family.WIRES[family] or Family.WIRES.frlg)) do
     local id = acts[name]
     if id then
       byWire[wire] = id
@@ -113,7 +122,7 @@ function Family.wires(version)
     end
   end
   cached = { byWire = byWire, byActivity = byActivity }
-  wireCache[family] = cached
+  wireCache[key] = cached
   return cached
 end
 
@@ -187,6 +196,23 @@ function Family.versionForCart(code)
   return nil
 end
 
+-- pokeruby/link.c:296
+-- pokefirered/link.c:351
+function Family.nativeLinkField2(version)
+  if type(version) ~= "string" or not Family.isGame3(version) then
+    local code = tonumber(version)
+    if not code or code ~= math.floor(code) then return nil end
+    if code >= Family.VERSION_TAG and code <= Family.VERSION_TAG + Family.VERSION.LEAF_GREEN then
+      code = code - Family.VERSION_TAG
+    end
+    if code < Family.VERSION.SAPPHIRE or code > Family.VERSION.LEAF_GREEN then return nil end
+    version = Family.versionForCart(code)
+  end
+  if version == "ruby" or version == "sapphire" then return 0 end
+  if version == "emerald" or version == "firered" or version == "leafgreen" then return 0x8000 end
+  return nil
+end
+
 function Family.familyForCart(code)
   code = (tonumber(code) or 0) % 0x100
   if code == Family.VERSION.FIRE_RED or code == Family.VERSION.LEAF_GREEN then return "frlg" end
@@ -203,16 +229,19 @@ function Family.activity(version)
 end
 
 function Family.groupActivity(version, group)
+  if Rs.is(version or Family.activeVersion()) and not Rs.groups[tonumber(group)] then return nil end
   local family = Family.of(version)
   local row = (Family.GROUP_ACTIVITY[family] or Family.GROUP_ACTIVITY.frlg)[tonumber(group) or -1]
   if not row then return nil end
+  local min, max = row.min, row.max
+  if Rs.is(version or Family.activeVersion()) then min, max = Rs.groupRange(group) end
   return { activity = Family.activity(version)[row.activity], name = row.activity,
-           min = row.min, max = row.max }
+           min = min, max = max }
 end
 
 function Family.mapId(version, key)
   version = version or Family.activeVersion()
-  local suffix = Family.MAPS[key]
+  local suffix = (Rs.is(version) and Rs.maps or Family.MAPS)[key]
   if not suffix then error("link family: no map " .. tostring(key), 2) end
   local row = profileOf(version)
   local prefix = row and row.map and row.map.enginePrefix or "FR_"
@@ -262,12 +291,13 @@ end
 function Family.linkPlayerGfx(viewerVersion, partnerVersion, gender)
   viewerVersion = viewerVersion or Family.activeVersion()
   local row = Family.LINK_PLAYER_GFX[Family.of(viewerVersion)] or Family.LINK_PLAYER_GFX.frlg
-  local pair = row[partnerKind(partnerVersion)] or row.frlg
+  local pair = Rs.is(viewerVersion) and Rs.playerGfx or (row[partnerKind(partnerVersion)] or row.frlg)
   local name = pair[tonumber(gender) == 1 and 2 or 1]
   return constants(viewerVersion):require("event_objects", name), name
 end
 
 function Family.linkBattleSongs(version)
+  if Rs.is(version or Family.activeVersion()) then return Rs.songs end
   return Family.LINK_BATTLE_SONGS[Family.of(version)] or Family.LINK_BATTLE_SONGS.frlg
 end
 
@@ -304,6 +334,7 @@ end
 
 function Family.canLinkNationally(session, version)
   version = version or (type(session) == "table" and session.version) or Family.activeVersion()
+  if Rs.is(version) then return false end
   local name = Family.PROGRESS_FLAG[Family.of(version)]
   if not name then return false end
   return flagSet(storeOf(session), Family.flag(version, name))
@@ -312,7 +343,8 @@ end
 -- pokeemerald/src/link.c:324 InitLocalLinkPlayer
 function Family.localLinkPlayer(session, version)
   version = version or (type(session) == "table" and session.version) or Family.activeVersion()
-  local flags = Family.nationalDex(session, version) and Family.PROGRESS_NATIONAL or 0
+  -- pokeruby/src/link.c:296
+  local flags = not Rs.is(version) and Family.nationalDex(session, version) and Family.PROGRESS_NATIONAL or 0
   if Family.canLinkNationally(session, version) then
     flags = flags + Family.PROGRESS_LINK_NATIONALLY
   end
@@ -322,6 +354,7 @@ function Family.localLinkPlayer(session, version)
     progressFlags = flags,
     family = Family.of(version),
     versionId = version,
+    language = 2,
   }
 end
 
@@ -386,6 +419,8 @@ local PROGRESS = {
 
 function Family.gameProgressForLinkTrade(family, mine, partner)
   if type(partner) ~= "table" then return Family.TRADE.BOTH_PLAYERS_READY end
+  local code = low8(type(mine) == "table" and mine.version)
+  if code == Family.VERSION.RUBY or code == Family.VERSION.SAPPHIRE then return Family.TRADE.BOTH_PLAYERS_READY end
   local fn = PROGRESS[family] or PROGRESS.frlg
   return fn(type(mine) == "table" and mine or {}, partner)
 end
@@ -472,6 +507,7 @@ function Family.canTradeSelectedMon(version, party, monIdx, opts)
   version = version or Family.activeVersion()
   opts = type(opts) == "table" and opts or {}
   party = type(party) == "table" and party or {}
+  if Rs.is(version) then return Rs.canTrade(party, monIdx, opts.partyCount) end
   if Family.of(version) == "rse" then
     return canTradeRse(party, monIdx, opts, version)
   end
@@ -545,6 +581,7 @@ end
 
 function Family.textKey(key, version)
   if type(key) ~= "string" then return key end
+  if Rs.is(version or Family.activeVersion()) then return key end
   local map = Family.TEXT_KEYS[Family.of(version)]
   if not map then return key end
   local exact = map[key]

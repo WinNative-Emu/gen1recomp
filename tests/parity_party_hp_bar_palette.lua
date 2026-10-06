@@ -100,9 +100,7 @@ for _, mode in ipairs({ "gbc", "redpp" }) do
     eq(z.colors, want,
        ("row %d (%d/48 HP) carries the %s block palette%s")
          :format(i, l.hp, l.pal, tag))
-    -- 05,YY - 11,YY shifted one tile right, because this port draws the bar at
-    -- tile 5 where party_menu.asm:71-76 draws it at 4; still cap + six fill
-    eq(z.x, 48, ("row %d bar block starts at tile 6%s"):format(i, tag))
+    eq(z.x, 40, ("row %d bar block starts at tile 5%s"):format(i, tag))
     eq(z.w, 56, ("row %d bar block is seven tiles wide%s"):format(i, tag))
     eq(z.y, (i * 2 - 1) * 8, ("row %d bar block sits on its HP row%s"):format(i, tag))
     eq(z.h, 8, ("row %d bar block is one tile tall%s"):format(i, tag))
@@ -161,7 +159,7 @@ do
     eq(bar.gray, true, ("row %d draws a gray fill when a zone pass will run")
                          :format(i))
     -- the placement the sgbPalettes rects above are keyed to
-    eq(bar.tx, 5, ("row %d bar starts at tile 5"):format(i))
+    eq(bar.tx, 4, ("row %d bar starts at tile 4"):format(i))
     eq(bar.ty, i * 2 - 1, ("row %d bar sits on its HP row"):format(i))
     -- wHPBarType 2: the party menu closes with the $6C nub, not the
     -- player-battle double bar (home/pokemon.asm DrawHPBar "Right")

@@ -18,13 +18,16 @@ for i, row in ipairs(rows) do
 end
 T.check(askRow ~= nil, "found the ask row")
 T.eq(rows[askRow + 1][1], "jump_if_false", "the ask is followed by its jump")
-T.same(rows[askRow + 2], { "show_text", "_OaksLabMonEnergeticText" },
-  "the energetic line is the row right after the NO jump")
-T.eq(rows[askRow + 3][1], "text_sound",
+T.same(rows[askRow + 2],
+  { "hide_object", "OAKS_LAB", "OAKSLAB_CHARMANDER_POKE_BALL" },
+  "the ball hides right after the NO jump")
+T.same(rows[askRow + 3], { "show_text", "_OaksLabMonEnergeticText" },
+  "the energetic line follows the ball hide")
+T.eq(rows[askRow + 4][1], "text_sound",
   "the sound cue stays on the RECEIVED line, not the energetic one")
-T.eq(rows[askRow + 4][1], "show_text",
+T.eq(rows[askRow + 5][1], "show_text",
   "and the received-mon text follows the sound cue")
-T.eq(rows[askRow + 4][2], "_OaksLabReceivedMonText",
+T.eq(rows[askRow + 5][2], "_OaksLabReceivedMonText",
   "specifically the received-mon text")
 
 -- jump_if_true (row 2): the EVENT_GOT_STARTER short-circuit must land on

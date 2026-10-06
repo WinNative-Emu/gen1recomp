@@ -1,4 +1,5 @@
 local Kit = require("src.ui.game3.rse.scene_kit")
+local CacheBlob = require("src.import.CacheBlob")
 
 local Gfx = {}
 
@@ -11,7 +12,7 @@ local function readCache(path)
   local okC, CacheFs = pcall(require, "src.import.CacheFs")
   local data = okC and CacheFs and CacheFs.read and CacheFs.read(path) or nil
   if not data and love and love.filesystem and love.filesystem.getInfo(path) then
-    data = love.filesystem.read(path)
+    data = CacheBlob.readFs(path)
   end
   return data
 end
@@ -20,6 +21,15 @@ Gfx.readCache = readCache
 function Gfx.manifest()
   if manifest then return manifest end
   manifest = assert(Kit.loadLua(Gfx.SUB .. "/manifest.lua"), "rse pokedex manifest missing from the cache")
+  if manifest.assetLayout == "rs" then
+    local detail = assert(Kit.loadLua("data/generated/gba/rse/pokedex_detail/manifest.lua"), "native RS pokedex detail pack missing")
+    assert(detail.assetLayout == "rs", "native RS pokedex detail pack has the wrong layout")
+    for key, value in pairs(detail) do
+      if key == "gfx" or key == "maps" or key == "palettes" then
+        for name, row in pairs(value) do manifest[key][name] = row end
+      elseif key ~= "files" then manifest[key] = value end
+    end
+  end
   return manifest
 end
 

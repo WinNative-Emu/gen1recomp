@@ -149,6 +149,9 @@ local HEAL_FLASH_MAP_GBC = { [0] = 0, [1] = 0, [2] = 1, [3] = 2 }
 
 -- engine/overworld/healing_machine.asm:13-14
 local HEAL_OBP1_MAP = { [0] = 0, [1] = 0, [2] = 2, [3] = 3 }
+
+-- home/fade.asm:67
+local OBP_IDENTITY = { [0] = 0, [1] = 1, [2] = 2, [3] = 3 }
 -- engine/overworld/healing_machine.asm:50
 local HEAL_OBP1_FLASH_MAP = { [0] = 0, [1] = 2, [2] = 0, [3] = 3 }
 
@@ -2658,9 +2661,8 @@ function OverworldState:tryBookshelf(fx, fy)
     Game.stack:push(TextBox.new(Game, t._ElevatorText
       or Strings("An elevator!")))
   elseif kind == "statues" then
-    -- IndigoPlateauStatues: the plaque, then one of the two lines
-    -- keyed by the statue's column (XCoord bit 0)
-    local line = (self.player.cellX % 2 == 0) and t._IndigoPlateauStatuesText2
+    -- engine/events/hidden_events/indigo_plateau_statues.asm:5
+    local line = (self.player.cellX % 2 == 1) and t._IndigoPlateauStatuesText2
                  or t._IndigoPlateauStatuesText3
     Game.stack:push(TextBox.new(Game,
       (t._IndigoPlateauStatuesText1 or romText(Game.data, "_IndigoPlateauStatuesText1", "INDIGO PLATEAU")) .. "\f"
@@ -3735,6 +3737,24 @@ function OverworldState:openOaksPC(onDone)
   end))
 end
 
+-- audio/pokedex_rating_sfx.asm:26
+local DEX_RATING_SFX = {
+  { 10, "Denied" },
+  { 40, "Pokedex_Rating" },
+  { 60, "Get_Item1" },
+  { 90, "Caught_Mon" },
+  { 120, "Level_Up" },
+  { 150, "Get_Key_Item" },
+  { math.huge, "Get_Item2" },
+}
+
+-- audio/pokedex_rating_sfx.asm:1
+function OverworldState.dexRatingSfx(owned)
+  for _, row in ipairs(DEX_RATING_SFX) do
+    if owned < row[1] then return row[2] end
+  end
+end
+
 -- Prof. Oak's dex rating service (engine/events/pokedex_rating.asm):
 -- the completion line with seen AND owned counts, then the per-decade
 -- rating text.
@@ -3761,7 +3781,14 @@ function OverworldState:dexRating(onDone)
   -- the box to the plain A/B path once the jingle has sounded.
   Game.stack:push(TextBox.new(Game, completion .. "\f" .. rating, onDone, {
     auto = { wait = true, sound = function()
-      return require("src.core.Sound").play(Game.data, "Pokedex_Rating")
+      local Sound = require("src.core.Sound")
+      local name = OverworldState.dexRatingSfx(owned)
+      local src = Sound.play(Game.data, name)
+      -- audio/pokedex_rating_sfx.asm:13
+      if src and not Sound.ducksMusic(Game.data, name) then
+        require("src.core.Music").duckForFanfare(src)
+      end
+      return src
     end },
   }))
 end
@@ -4930,13 +4957,12 @@ function OverworldState:checkBadgeGate()
           end
           return false
         end
-        -- Route22GateGuardNoBoulderbadgeText plays SFX_DENIED
-        require("src.core.Sound").play(Game.data, "Denied")
+        -- scripts/Route22Gate.asm:79
         Game.stack:push(TextBox.new(Game,
-          (t["_" .. g.failText] or Strings("You don't have the\nBOULDERBADGE yet!"))
-          .. (t._Route22GateGuardICantLetYouPassText or ""), function()
+          TextBox.strip(t["_" .. g.failText] or Strings("You don't have the\nBOULDERBADGE yet!"))
+          .. TextBox.PAUSE .. (t._Route22GateGuardICantLetYouPassText or ""), function()
             self:scriptMove(p, "down", 1, nil, { collide = true })
-          end))
+          end, { pauseSounds = { "Denied" }, pauseSoundWait = true }))
         return true
       end
     end
@@ -4947,28 +4973,36 @@ function OverworldState:checkBadgeGate()
     for _, guard in ipairs(g.guards) do
       if p.cellY == guard.y and (not guard.maxX or p.cellX <= guard.maxX)
          and not Game.save.flags[guard.event] then
-        local badgeName = Game.data.items[guard.badge]
-                          and Game.data.items[guard.badge].name or guard.badge
-        if Game.save.inventory[guard.badge] then
-          Flags.set(Game.save, guard.event)
-          -- Route23OhThatIsTheBadgeText carries sound_get_item_1
-          local text = (t["_" .. g.passText] or
-                        Strings("Oh! That is the\n{RAM}!")):gsub("{RAM:wNameBuffer}", badgeName)
-          Game.stack:push(TextBox.new(Game, text,
-            nil, TextBox.soundOpts(Game, "Get_Item1")))
-          return false
-        end
-        -- Route23YouDontHaveTheBadgeYetText plays SFX_DENIED
-        require("src.core.Sound").play(Game.data, "Denied")
-        local text = (t["_" .. g.failText] or
-                      Strings("You don't have the\n{RAM} yet!")):gsub("{RAM:wNameBuffer}", badgeName)
-        Game.stack:push(TextBox.new(Game, text, function()
-          self:scriptMove(p, "down", 1, nil, { collide = true })
-        end))
-        return true
+        return not self:route23BadgeCheck(guard.badge, guard.event)
       end
     end
   end
+  return false
+end
+
+-- scripts/Route23.asm:195
+function OverworldState:route23BadgeCheck(badge, event, onDone)
+  local gates = Game.data.field.badgeGates
+  local g = gates and gates[self.map.id] or {}
+  local t = Game.data.text
+  local badgeName = Game.data.items[badge] and Game.data.items[badge].name or badge
+  if Game.save.inventory[badge] then
+    Flags.set(Game.save, event)
+    -- scripts/Route23.asm:237
+    local text = (t["_" .. (g.passText or "Route23OhThatIsTheBadgeText")] or
+                  Strings("Oh! That is the\n{RAM}!")):gsub("{RAM:wNameBuffer}", badgeName)
+    Game.stack:push(TextBox.new(Game,
+      TextBox.strip(text) .. TextBox.PAUSE .. (t._Route23GoRightAheadText or ""),
+      onDone, { pauseSounds = { "Get_Item1" }, pauseSoundWait = true }))
+    return true
+  end
+  -- scripts/Route23.asm:229
+  local text = (t["_" .. (g.failText or "Route23YouDontHaveTheBadgeYetText")] or
+                Strings("You don't have the\n{RAM} yet!")):gsub("{RAM:wNameBuffer}", badgeName)
+  Game.stack:push(TextBox.new(Game, text, function()
+    -- scripts/Route23.asm:123
+    self:scriptMove(self.player, "down", 1, onDone, { collide = true })
+  end, TextBox.soundOpts(Game, "Denied")))
   return false
 end
 
@@ -6014,6 +6048,40 @@ local function fieldFxImage(path, image, group)
   return SpriteRenderer.obpImage(path, colors, name)
 end
 
+-- engine/overworld/dust_smoke.asm:21
+local OBP1_FLASH = { [0] = 0, [1] = 0, [2] = 0, [3] = 2 }
+local FLASH_GRAYS = PaletteFX.permute(PaletteFX.GRAYS, OBP1_FLASH)
+local fieldFxFlashColors = setmetatable({}, { __mode = "k" })
+local fieldFxFlashNames = {}
+
+local function fieldFxFlashImage(path, group)
+  local colors, key = FLASH_GRAYS, "gray"
+  if PaletteFX.usesGbcPack() then
+    local pack = PaletteFX.worldPack()
+    local obj = pack and pack.spritePalettes and pack.spritePalettes[group]
+    if obj then
+      colors = fieldFxFlashColors[obj]
+      if not colors then
+        colors = PaletteFX.permute(obj, OBP1_FLASH)
+        fieldFxFlashColors[obj] = colors
+      end
+      key = group
+    end
+  end
+  local version = GameVersion.get()
+  local names = fieldFxFlashNames[version]
+  if not names then
+    names = {}
+    fieldFxFlashNames[version] = names
+  end
+  local name = names[key]
+  if not name then
+    name = "fieldfxflash:" .. version .. ":" .. key
+    names[key] = name
+  end
+  return SpriteRenderer.obpImage(path, colors, name)
+end
+
 -- the Cut/boulder dust puff: the smoke tile drawn 2x2 over the cell,
 -- flickering (AnimateBoulderDust XORs the OBJ palette every step)
 local function fxDust(self, cam)
@@ -6027,12 +6095,19 @@ local function fxDust(self, cam)
     end
     if self.smokeImg then
       local da = self.dustAnim
-      local img = fieldFxImage(smoke.path, self.smokeImg, da.boulder and 7 or 6)
+      local group = da.boulder and 7 or 6
+      local flash
+      if da.boulder then
+        flash = da.faded
+      else
+        -- engine/overworld/cut2.asm:68
+        flash = da.frames % 2 == 1
+      end
+      local img = flash and fieldFxFlashImage(smoke.path, group)
+        or fieldFxImage(smoke.path, self.smokeImg, group)
       local dx = da.x * 16 + (da.ox or 0) - cam.x
       local dy = da.y * 16 + (da.oy or 0) - cam.y
-      local flicker = math.floor(da.frames / 4) % 2 == 0
-      if da.boulder then flicker = not da.faded end
-      love.graphics.setColor(1, 1, 1, flicker and 1 or 0.55)
+      love.graphics.setColor(1, 1, 1, 1)
       for i = 0, 1 do
         for j = 0, 1 do
           love.graphics.draw(img, dx + i * 8, dy + j * 8)
@@ -6068,8 +6143,9 @@ local function fxCutTree(self, cam)
   local off = (ca.total or 8) - ca.frames
   local dx = ca.x * 16 - cam.x
   local dy = ca.y * 16 - cam.y
-  local flicker = ca.frames % 2 == 0
-  love.graphics.setColor(1, 1, 1, flicker and 1 or 0.55)
+  -- engine/overworld/cut2.asm:18
+  if ca.frames % 2 == 1 then img = fieldFxFlashImage(tree.path, 6) end
+  love.graphics.setColor(1, 1, 1, 1)
   love.graphics.draw(img, self.cutTreeQuads[1], dx + off, dy)
   love.graphics.draw(img, self.cutTreeQuads[2], dx - off, dy + 8)
   love.graphics.setColor(1, 1, 1, 1)
@@ -6223,22 +6299,31 @@ local function entityDrawOrder(a, b)
   return a.pikachuFollower == true and b.pikachuFollower ~= true
 end
 
--- Tall-grass feet overdraw queue for the flat path: each distinct grass
--- cell an entity stands on or steps into, in first-queued order.  A
--- scratch pair of coordinate arrays reused every frame (the queue holds a
--- few cells, so the duplicate check is a short linear scan) instead of a
--- "cx:cy" string key and a { cx, cy } table per cell per frame.
-local function queueGrass(self, q, cx, cy)
-  if cx == nil or cy == nil or not self.map:isGrassCell(cx, cy) then
-    return
-  end
+-- engine/overworld/movement.asm:90
+local function grassStrip(self, e)
+  local map = self.map
+  local inGrass = (e.cellX ~= nil and e.cellY ~= nil
+                   and map:isGrassCell(e.cellX, e.cellY))
+               or (e.targetX ~= nil and e.targetY ~= nil
+                   and map:isGrassCell(e.targetX, e.targetY))
+  if not inGrass then return nil end
+  local sprite, px, py = nil, e.px, e.py
+  if e.pose then sprite, px, py = e:pose() end
+  return map.renderer.feetStrip(px or 0, py or 0, sprite)
+end
+
+local function queueGrass(self, q, e)
+  local x0, y0, x1, y1 = grassStrip(self, e)
+  if not x0 then return end
   local n = q.n
-  local xs, ys = q.x, q.y
+  local qx0, qy0, qx1, qy1 = q.x0, q.y0, q.x1, q.y1
   for i = 1, n do
-    if xs[i] == cx and ys[i] == cy then return end
+    if qx0[i] == x0 and qy0[i] == y0 and qx1[i] == x1 and qy1[i] == y1 then
+      return
+    end
   end
   n = n + 1
-  xs[n], ys[n] = cx, cy
+  qx0[n], qy0[n], qx1[n], qy1[n] = x0, y0, x1, y1
   q.n = n
 end
 
@@ -6289,7 +6374,7 @@ function OverworldState:drawWorld()
     -- home/fade.asm:52-58
     -- home/fade.asm:65-73
     local fadeObp = fade.obp0 and fade:obp0() or fadeBgp
-    PaletteFX.setFadeObp(Transition.shadeMapFor(fadeObp))
+    PaletteFX.setFadeObp(Transition.shadeMapFor(fadeObp) or OBP_IDENTITY)
     fade.paletteStepped = true
   elseif self.emote and self.emote.bgp and not battleOverWorld then
     -- engine/pikachu/pikachu_pic_animation.asm:847
@@ -6498,10 +6583,10 @@ function OverworldState:drawWorld()
     local grassColors = PaletteFX.usesSpriteObp()
       and PaletteFX.pal(Game.data, self:paletteNameFor(self.map)) or nil
     local boulderDust = self.dustAnim and self.dustAnim.boulder
-    local grass = self.grassScratch
+    local grass = self.grassStripScratch
     if not grass then
-      grass = { n = 0, x = {}, y = {} }
-      self.grassScratch = grass
+      grass = { n = 0, x0 = {}, y0 = {}, x1 = {}, y1 = {} }
+      self.grassStripScratch = grass
     end
     grass.n = 0
     if boulderDust then fxDust(self, cam) end
@@ -6517,18 +6602,18 @@ function OverworldState:drawWorld()
       if not ((self.flyAnim or self.flyArrive or self.playerHidden)
               and e == self.player) and not self:oamCulled(e) then
         e:draw(cam.x, cam.y)
-        queueGrass(self, grass, e.cellX, e.cellY)
-        queueGrass(self, grass, e.targetX, e.targetY)
+        queueGrass(self, grass, e)
       end
     end
     love.graphics.setColor(1, 1, 1, 1)
-    local gxs, gys = grass.x, grass.y
+    local shake = bgY - cam.y
     for i = 1, grass.n do
-      local cx, cy = gxs[i], gys[i]
-      self.map.renderer:drawCellBottom(cx, cy, cam.x, bgY)
+      local x0, y0 = grass.x0[i], grass.y0[i] + shake
+      local x1, y1 = grass.x1[i], grass.y1[i] + shake
+      self.map.renderer:drawStrip(x0, y0, x1, y1, cam.x, bgY)
       if grassColors then
-        self.map.renderer:markCellBottomRedraw(cx, cy,
-                                               cam.x, bgY, grassColors)
+        self.map.renderer:markStripRedraw(x0, y0, x1, y1,
+                                          cam.x, bgY, grassColors)
       end
     end
     fxHeal(self, cam)
@@ -6588,18 +6673,15 @@ function OverworldState:drawWorld()
                        function() e:draw(cam.x, cam.y) end)
         -- tall-grass feet overdraw glued to the sprite: same anchor + depth
         -- so it keeps hiding the feet, color-0-keyed palette so its white
-        -- gaps still show the sprite through (drawCellBottomRaw lets the
+        -- gaps still show the sprite through (drawStripRaw lets the
         -- billboard own the shader; bgY keeps the elevator-shake offset).
-        if self.map:isGrassCell(e.cellX, e.cellY) then
+        local x0, y0, x1, y1 = grassStrip(self, e)
+        if x0 then
+          local shake = bgY - cam.y
           self:billboard(fx, fy, vw, vh, colors, true, function()
             love.graphics.setColor(1, 1, 1, 1)
-            self.map.renderer:drawCellBottomRaw(e.cellX, e.cellY, cam.x, bgY)
-          end)
-        end
-        if e.targetX and self.map:isGrassCell(e.targetX, e.targetY) then
-          self:billboard(fx, fy, vw, vh, colors, true, function()
-            love.graphics.setColor(1, 1, 1, 1)
-            self.map.renderer:drawCellBottomRaw(e.targetX, e.targetY, cam.x, bgY)
+            self.map.renderer:drawStripRaw(x0, y0 + shake, x1, y1 + shake,
+                                           cam.x, bgY)
           end)
         end
       end

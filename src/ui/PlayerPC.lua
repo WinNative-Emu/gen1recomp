@@ -6,6 +6,7 @@
 -- move one); toss discards after a YES/NO confirm.  Follows the
 -- BoxMenu/BagMenu list idioms.
 
+local Bag = require("src.inventory.Bag")
 local ChoiceBox = require("src.ui.ChoiceBox")
 local ListMenu = require("src.ui.ListMenu")
 local Menu = require("src.ui.Menu")
@@ -23,49 +24,19 @@ local function itemName(game, id)
   return def and def.name or id
 end
 
-local function pcOrder(game)
-  local save, pc = game.save, game.save.pcItems
-  local order = type(save.pcOrder) == "table" and save.pcOrder or {}
-  local kept, seen = {}, {}
-  for _, id in ipairs(order) do
-    if pc[id] and not seen[id] then kept[#kept + 1], seen[id] = id, true end
-  end
-  local added = {}
-  for id in pairs(pc) do if not seen[id] then added[#added + 1] = id end end
-  table.sort(added, function(a, b)
-    local da, db = game.data.items[a], game.data.items[b]
-    local ia = da and (da.index or da.itemId) or math.huge
-    local ib = db and (db.index or db.itemId) or math.huge
-    if ia ~= ib then
-      if type(ia) == type(ib) then return ia < ib end
-      return tostring(ia) < tostring(ib)
-    end
-    if type(a) == type(b) then return a < b end
-    return tostring(a) < tostring(b)
-  end)
-  for _, id in ipairs(added) do kept[#kept + 1] = id end
-  for i = #order, 1, -1 do order[i] = nil end
-  for i, id in ipairs(kept) do order[i] = id end
-  save.pcOrder = order
-  return order
-end
-
-local function buildItems(game, store, order)
+local function buildItems(game, rows)
   local items = {}
-  local ids = order
-  if not ids then
-    ids = {}
-    for id in pairs(store) do table.insert(ids, id) end
-    table.sort(ids)
-  end
-  for _, id in ipairs(ids) do
-    if store[id] then
+  for _, row in ipairs(rows) do
+    local id = row.id
+    if row.count ~= nil then
       local def = game.data.items[id]
       local keyItem = (def and def.keyItem) or id:find("^HM_") ~= nil
       table.insert(items, {
         value = id,
         label = itemName(game, id),
-        count = not keyItem and store[id] or nil,
+        count = not keyItem and row.count or nil,
+        slot = row.slot,
+        stack = row.count,
       })
     end
   end
@@ -104,19 +75,11 @@ local function askQuantity(game, list, count, id, cb)
   }))
 end
 
--- refresh the chosen row's count from `store` (or drop the row)
-local function refreshRow(list, store, id)
-  for i, it in ipairs(list.items) do
-    if it.value == id then
-      if store[id] then
-        it.count = store[id]
-      else
-        table.remove(list.items, i)
-        list.index, list.scroll = 1, 0 -- engine/items/inventory.asm:131
-      end
-      break
-    end
+local function refreshRows(list, items)
+  if #items < #list.items then
+    list.index, list.scroll = 1, 0 -- engine/items/inventory.asm:131
   end
+  list.items = items
   list.index = math.max(1, math.min(list.index, #list.items))
 end
 
@@ -166,7 +129,7 @@ local function withdraw(game)
       "There is nothing\nstored."), nil, { noSound = true }))
     return
   end
-  game.stack:push(pcList(game, buildItems(game, pc, pcOrder(game)), {
+  game.stack:push(pcList(game, buildItems(game, Bag.pcRows(game.save, game.data)), {
     kind = "pc_item_withdraw",
     messageBox = true,
     -- players_pc.asm:151-152 WhatToWithdrawText, printed before the list
@@ -176,39 +139,30 @@ local function withdraw(game)
     onChoose = function(item, list)
       if leftOnCancel(item, list) then return end
       list.hollowIndex = list.index -- home/list_menu.asm:91
-      askQuantity(game, list, pc[item.value] or 1, item.value, function(qty)
-        local Bag = require("src.inventory.Bag")
+      askQuantity(game, list, item.stack or pc[item.value] or 1, item.value, function(qty)
         if not Bag.add(game.save, item.value, qty, game.data) then
           list.footer = Strings("You can't carry\nany more items.")
           return
         end
-        pc[item.value] = pc[item.value] - qty
-        if pc[item.value] <= 0 then
-          pc[item.value] = nil
-          pcOrder(game)
-        end
+        Bag.pcRemove(game.save, item.value, qty, game.data, item.slot)
         Sound.play(game.data, "Withdraw_Deposit")
         list:showCompletion(romText(game.data, "_WithdrewItemText",
           "Withdrew\n%s.{PROMPT}", itemName(game, item.value)),
-          function() refreshRow(list, pc, item.value) end) -- engine/menus/players_pc.asm:191
+          function() refreshRows(list, buildItems(game, Bag.pcRows(game.save, game.data))) end) -- engine/menus/players_pc.asm:191
       end)
     end,
   }))
 end
 
 -- wNumBoxItems capacity: 50 stacks (PC_ITEM_CAPACITY)
-local function pcFull(game, pc, id)
-  if pc[id] then return false end -- growing an existing stack is fine
+local function storeInPC(game, pc, id, qty)
   local cap = game.data.field.pcItemCap or 50
-  local stacks = 0
-  for _ in pairs(pc) do stacks = stacks + 1 end
-  return stacks >= cap
+  return Bag.pcAdd(game.save, id, qty, game.data, cap)
 end
 
 local function deposit(game)
   local pc = game.save.pcItems
   local inv = game.save.inventory
-  local Bag = require("src.inventory.Bag")
   -- engine/menus/players_pc.asm:99 wListPointer = wNumBagItems, so deposit order == bag order
   local order = Bag.order(game.save, game.data)
   -- players_pc.asm:90-95: an empty bag never reaches the list
@@ -217,7 +171,7 @@ local function deposit(game)
       "You have nothing\nto deposit."), nil, { noSound = true }))
     return
   end
-  game.stack:push(pcList(game, buildItems(game, inv, order), {
+  game.stack:push(pcList(game, buildItems(game, Bag.rows(game.save, game.data)), {
     kind = "pc_item_deposit",
     messageBox = true,
     -- players_pc.asm:97-98 WhatToDepositText, printed before the list
@@ -227,21 +181,18 @@ local function deposit(game)
     onChoose = function(item, list)
       if leftOnCancel(item, list) then return end
       list.hollowIndex = list.index -- home/list_menu.asm:91
-      askQuantity(game, list, inv[item.value] or 1, item.value, function(qty)
-        if pcFull(game, pc, item.value) then
+      askQuantity(game, list, item.stack or inv[item.value] or 1, item.value, function(qty)
+        if not storeInPC(game, pc, item.value, qty) then
           list.footer = Strings("No room left to\nstore items.")
           return
         end
-        if not pc[item.value] then
-          local order = pcOrder(game)
-          order[#order + 1] = item.value
-        end
-        require("src.inventory.Bag").remove(game.save, item.value, qty)
-        pc[item.value] = (pc[item.value] or 0) + qty
+        Bag.remove(game.save, item.value, qty, game.data, item.slot)
         Sound.play(game.data, "Withdraw_Deposit")
         list:showCompletion(romText(game.data, "_ItemWasStoredText",
           "%s was\nstored via PC.{PROMPT}", itemName(game, item.value)),
-          function() refreshRow(list, inv, item.value) end) -- engine/menus/players_pc.asm:137
+          function()
+            refreshRows(list, buildItems(game, Bag.rows(game.save, game.data)))
+          end) -- engine/menus/players_pc.asm:137
       end)
     end,
   }))
@@ -255,7 +206,7 @@ local function toss(game)
       "There is nothing\nstored."), nil, { noSound = true }))
     return
   end
-  game.stack:push(pcList(game, buildItems(game, pc, pcOrder(game)), {
+  game.stack:push(pcList(game, buildItems(game, Bag.pcRows(game.save, game.data)), {
     kind = "pc_item_toss",
     messageBox = true,
     -- players_pc.asm:205-206 WhatToTossText, printed before the list
@@ -272,20 +223,16 @@ local function toss(game)
       end
       local QuantityBox = require("src.ui.QuantityBox")
       game.stack:push(QuantityBox.new(game, {
-        max = pc[item.value] or 1,
+        max = item.stack or pc[item.value] or 1,
         onDone = function(qty)
           if not qty then return end
           list.footer = Strings("Toss %s?", itemName(game, item.value))
           game.stack:push(ChoiceBox.new(game, function(yes)
             if yes then
-              pc[item.value] = pc[item.value] - qty
-              if pc[item.value] <= 0 then
-                pc[item.value] = nil
-                pcOrder(game)
-              end
+              Bag.pcRemove(game.save, item.value, qty, game.data, item.slot)
               list:showCompletion(romText(game.data, "_ThrewAwayItemText",
                 "Threw away\n%s.{PROMPT}", itemName(game, item.value)),
-                function() refreshRow(list, pc, item.value) end) -- engine/menus/players_pc.asm:240
+                function() refreshRows(list, buildItems(game, Bag.pcRows(game.save, game.data))) end) -- engine/menus/players_pc.asm:240
             else
               list.footer = nil
             end

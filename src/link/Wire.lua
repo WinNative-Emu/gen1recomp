@@ -414,6 +414,13 @@ function Wire.mon3(v)
     otGender = Wire.num(v.otGender, 0, 0, 1),
     nature = Wire.num(v.nature, 0, 0, 255),
     ability = Wire.num(v.ability, 0, 0, 255),
+    abilityNum = Wire.num(v.abilityNum, nil, 0, 1),
+    language = Wire.num(v.language, nil, 0, 255),
+    contest = type(v.contest) == "table" and {
+      cool = Wire.num(v.contest.cool, 0, 0, 255), beauty = Wire.num(v.contest.beauty, 0, 0, 255),
+      cute = Wire.num(v.contest.cute, 0, 0, 255), smart = Wire.num(v.contest.smart, 0, 0, 255),
+      tough = Wire.num(v.contest.tough, 0, 0, 255), sheen = Wire.num(v.contest.sheen, 0, 0, 255),
+    } or nil,
     gender = gender,
     ivs = stat6(v.ivs, 255),
     evs = stat6(v.evs, 65535),
@@ -429,6 +436,7 @@ function Wire.mon3(v)
     markings = Wire.num(v.markings, 0, 0, 255),
     isEgg = Wire.bool(v.isEgg, false),
     fatefulEncounter = Wire.bool(v.fatefulEncounter, false),
+    modernFatefulEncounter = Wire.bool(v.modernFatefulEncounter, nil),
     eggCycles = Wire.num(v.eggCycles, 0, 0, 255),
   }
 end
@@ -1029,12 +1037,14 @@ local function groupPerson(v)
   if type(v) ~= "table" then return nil end
   local id = Wire.playerId(v.id)
   if not id then return nil end
-  return {
+  local out = {
     id = id,
     name = displayName(v.name),
     avatar = Wire.avatar(v.avatar),
     seat = Wire.num(v.seat, nil, 0, MAX_SEAT),
   }
+  if type(v.online) == "boolean" then out.online = v.online end
+  return out
 end
 
 local function groupEntry(v)
@@ -1346,7 +1356,8 @@ local function g3extra(v)
     version = Wire.str(v.version, nil, MAX_NAME),
     family = Wire.str(v.family, nil, MAX_NAME),
     gameVersion = Wire.num(v.gameVersion, nil, 0, 65535),
-    progressFlags = Wire.num(v.progressFlags, nil, 0, 255),
+    language = Wire.num(v.language, nil, 0, 65535),
+    progressFlags = Wire.num(v.progressFlags, nil, 0, 65535),
     rules = Wire.str(v.rules, nil, 128),
     core = Wire.digest(v.core),
     moves = Wire.digest(v.moves),
@@ -1382,12 +1393,26 @@ end)
 
 SCHEMAS.game3_exit_link_room = inner3(function() return {} end)
 
+-- pokeruby/src/overworld.c:2282
+SCHEMAS.game3_link_player = inner3(function(m)
+  return {
+    map = Wire.str(m.map, nil, MAX_NAME),
+    x = Wire.num(m.x, nil, 0, 65535),
+    y = Wire.num(m.y, nil, 0, 65535),
+    tx = Wire.num(m.tx, nil, 0, 65535),
+    ty = Wire.num(m.ty, nil, 0, 65535),
+    facing = Wire.str(m.facing, nil, 8),
+    frames = Wire.num(m.frames, nil, 1, 64),
+    busy = Wire.bool(m.busy, nil),
+  }
+end)
+
 SCHEMAS.game3_battle_linkup = inner3(function(m)
   return {
     linkType = Wire.num(m.linkType, nil, 0, 65535),
     players = Wire.num(m.players, nil, 0, MAX_SEATS),
     version = Wire.num(m.version, nil, 0, 65535),
-    progressFlags = Wire.num(m.progressFlags, nil, 0, 255),
+    progressFlags = Wire.num(m.progressFlags, nil, 0, 65535),
   }
 end)
 
@@ -1580,6 +1605,7 @@ SCHEMAS.game3_trade_party = inner3(function(m)
     gender = Wire.num(m.gender, 0, 0, 1),
     version = Wire.num(m.version, nil, 0, 255) or Wire.str(m.version, nil, MAX_NAME),
     progressFlags = Wire.num(m.progressFlags, nil, 0, MAX_INT),
+    giftRibbons = m.giftRibbons ~= nil and Wire.list(m.giftRibbons, 11, function(v) return Wire.num(v, 0, 0, 255) end) or nil,
   }
 end)
 

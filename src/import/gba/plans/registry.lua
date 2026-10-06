@@ -3,6 +3,9 @@ local GameVersion = require("src.core.GameVersion")
 local Plans = {}
 
 function Plans.of(version)
+  if version == "ruby" or version == "sapphire" then
+    return require("src.import.gba.plans.rs")
+  end
   local layout = GameVersion.layout(version)
   if type(layout) ~= "string" then
     error("import plan: '" .. tostring(version) .. "' has no gba layout", 2)
@@ -38,7 +41,9 @@ function Plans.required(plan, cacheRoot)
   local out, seen = {}, {}
   for _, module in ipairs(Plans.modules(plan)) do
     local mod = require(module)
-    for _, rel in ipairs(type(mod) == "table" and mod.REQUIRED or {}) do
+    local required = type(mod) == "table" and
+      (mod.requiredForPlan and mod.requiredForPlan(plan.id) or mod.REQUIRED) or {}
+    for _, rel in ipairs(required or {}) do
       local path = rel
       if not (rel:match("^data/") or rel:match("^assets/")) then
         path = cacheRoot .. "/" .. rel

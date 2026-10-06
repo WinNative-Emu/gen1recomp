@@ -444,6 +444,22 @@ function TextBox:arrowPos()
     gold and (self.boxTy + self.boxTh - 1) * 8 or self.line2Y
 end
 
+-- home/text.asm:270
+function TextBox:blankArrowCell()
+  if not self.fixedGen1Rows then return end
+  local line = self.shown[#self.shown]
+  if not line or #self.shown < 2 then return end
+  local ax = self:arrowPos()
+  local pen = self.textX
+  for i, code in ipairs(line) do
+    if pen == ax then
+      line[i] = 0x7F
+      return
+    end
+    pen = pen + Font.advanceOf(code)
+  end
+end
+
 -- scripts/MtMoonPokecenter.asm:30
 function TextBox:moneyVisible()
   if not self.money then return false end
@@ -640,6 +656,7 @@ function step(self, dt)
       if self.contAdvance then
         -- ContText / ManualTextScroll: keep the box, scroll one line
         self.contAdvance = false
+        self:blankArrowCell()
         self.lineIndex = self.lineIndex + 1
         self:beginLine()
         -- ScrollTextUpOneLine is 5 blocking frames and, as its own comment
@@ -760,13 +777,20 @@ function TextBox:draw()
   -- nothing in the original is ever drawn between two rows.
   local off = self.scrollPx or 0
   local ys = { self.line1Y, self.line2Y }
+  -- home/text.asm:264
+  local coverX, coverY
+  if self.fixedGen1Rows and self:arrowVisible() then
+    coverX, coverY = arrowX, arrowY
+  end
   for i, line in ipairs(self.shown) do
     local y = (ys[i] or self.line2Y) + (i == 1 and off or 0)
     -- the pen advances per glyph, matching the pixel budget paginate
     -- measured with; every fixed-width page still lands on the 8px grid
     local pen = self.textX
     for _, code in ipairs(line) do
-      drawGlyph(code, pen, y)
+      if not (pen == coverX and y == coverY) then
+        drawGlyph(code, pen, y)
+      end
       pen = pen + Font.advanceOf(code)
     end
   end

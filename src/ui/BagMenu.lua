@@ -19,7 +19,8 @@ local BAG_RETURN_WHITE = 19
 -- acquisition order like wBagItems (Bag.order), not alphabetical
 local function buildItems(game)
   local items = {}
-  for _, id in ipairs(Bag.order(game.save)) do
+  for _, row in ipairs(Bag.rows(game.save, game.data)) do
+    local id = row.id
     local def = game.data.items[id]
     -- PrintListMenuEntries skips the quantity for anything IsKeyItem_ owns:
     -- the KeyItemFlags bitfield plus the HMs (item_effects.asm:2616-2641)
@@ -27,7 +28,9 @@ local function buildItems(game)
     table.insert(items, {
       value = id,
       label = def and def.name or id,
-      count = (not unsellable) and game.save.inventory[id] or nil,
+      count = (not unsellable) and row.count or nil,
+      slot = row.slot,
+      stack = row.count,
     })
   end
   -- the $ff terminator's row: CANCEL is selectable and exits like B
@@ -37,9 +40,12 @@ local function buildItems(game)
 end
 
 local function consume(game, id, list)
-  Bag.remove(game.save, id, 1)
+  local before = #Bag.rows(game.save, game.data)
+  local row = list and list.items and list.items[list.index]
+  local slot = row and row.value == id and row.slot or nil
+  Bag.remove(game.save, id, 1, game.data, slot)
   -- engine/items/inventory.asm:131-136
-  if not game.save.inventory[id] then
+  if #Bag.rows(game.save, game.data) < before then
     game.bagSavedMenuItem, game.bagListScrollOffset = 0, 0
     if list then list.index, list.scroll = 1, 0 end
   end
@@ -362,13 +368,7 @@ local function vanillaUseOn(game, battle, id, target, list, moveIndex, picker)
     local function removeUsed()
       consume(game, id, list)
       -- refresh counts in the list
-      for i, it in ipairs(list.items) do
-        if it.value == id then
-          local left = game.save.inventory[id]
-          if left then it.count = left else table.remove(list.items, i) end
-          break
-        end
-      end
+      list.items = buildItems(game)
       list.index = math.min(list.index, math.max(1, #list.items))
     end
     if not battle and not target and not picker then
@@ -516,6 +516,8 @@ local function useOn(game, battle, id, target, list, moveIndex, picker)
 end
 
 local function pickTargetAndUse(game, battle, id, list)
+  -- engine/menus/start_sub_menus.asm:416
+  if list then list.optionBox = nil end
   -- pick a target from the party
   -- the ETHERs and PP UP open the move menu after picking a mon
   -- (ItemUsePPRestore / ItemUsePPUp); the ELIXERs hit every move
@@ -616,11 +618,13 @@ function BagMenu.new(game, opts)
         l.swapIndex = l.index
         return
       end
-      local order = Bag.order(game.save)
-      order[l.swapIndex], order[l.index] = order[l.index], order[l.swapIndex]
+      -- engine/menus/swap_items.asm:45
+      if l.swapIndex == l.index then return end
+      Bag.swap(game.save, l.swapIndex, l.index, game.data)
       l.swapIndex = nil
       require("src.core.Sound").play(game.data, "Swap")
       l.items = buildItems(game)
+      l.index = math.max(1, math.min(l.index, #l.items))
     end,
     onChoose = function(item)
       -- A on CANCEL leaves the list exactly like B (home/list_menu.asm:105-110)
@@ -632,11 +636,13 @@ function BagMenu.new(game, opts)
       local id = item.value
       local def = game.data.items[id]
       if list.swapIndex then -- A also completes a pending swap
-        local order = Bag.order(game.save)
-        order[list.swapIndex], order[list.index] = order[list.index], order[list.swapIndex]
+        -- engine/menus/swap_items.asm:45
+        if list.swapIndex == list.index then return end
+        Bag.swap(game.save, list.swapIndex, list.index, game.data)
         list.swapIndex = nil
         require("src.core.Sound").play(game.data, "Swap")
         list.items = buildItems(game)
+        list.index = math.max(1, math.min(list.index, #list.items))
         return
       end
       if battle then -- no tossing mid-battle
@@ -659,8 +665,12 @@ function BagMenu.new(game, opts)
       -- (engine/menus/start_sub_menus.asm:330-337; home/window.asm:193-206)
       list.hollowIndex = list.index
       local Menu = require("src.ui.Menu")
-      game.stack:push(Menu.new(game, {
+      local optionBox
+      optionBox = Menu.new(game, {
         { label = Strings("USE"), onSelect = function()
+            -- engine/menus/start_sub_menus.asm:362
+            optionBox.hollowIndex = optionBox.index
+            list.optionBox = optionBox
             useItem(game, battle, id, list)
           end },
         { label = Strings("TOSS"), keepOpen = true, onSelect = function()
@@ -670,12 +680,13 @@ function BagMenu.new(game, opts)
             -- engine/menus/start_sub_menus.asm:298-300, 438-439
             local function itemMenuLoop(pops)
               for _ = 1, pops do game.stack:pop() end
-              if not game.save.inventory[id] then
+              local fresh = buildItems(game)
+              if #fresh < #list.items then
                 -- engine/items/inventory.asm:131
                 game.bagSavedMenuItem, game.bagListScrollOffset = 0, 0
                 list.index, list.scroll = 1, 0
               end
-              list.items = buildItems(game)
+              list.items = fresh
               list.index = math.min(list.index, math.max(1, #list.items))
             end
             -- KeyItemFlags + HMs decide tossability (not price:
@@ -689,7 +700,7 @@ function BagMenu.new(game, opts)
             end
             local QuantityBox = require("src.ui.QuantityBox")
             game.stack:push(QuantityBox.new(game, {
-              max = game.save.inventory[id] or 1,
+              max = item.stack or game.save.inventory[id] or 1,
               keepOpen = true,
               onDone = function(qty)
                 if not qty then itemMenuLoop(2) return end
@@ -703,7 +714,7 @@ function BagMenu.new(game, opts)
                     game.stack:push(ChoiceBox.new(game, function(yes)
                       game.stack:pop()
                       if not yes then itemMenuLoop(2) return end
-                      Bag.remove(game.save, id, qty)
+                      Bag.remove(game.save, id, qty, game.data, item.slot)
                       showMessages(game, {
                         ((t._ThrewAwayItemText or Strings("Threw away\n%s.", name))
                           :gsub("{RAM:wNameBuffer}", name)) },
@@ -713,7 +724,8 @@ function BagMenu.new(game, opts)
               end,
             }))
           end },
-      }, { tx = 13, ty = 10, tw = 7, th = 5 }))
+      }, { tx = 13, ty = 10, tw = 7, th = 5 })
+      game.stack:push(optionBox)
     end,
   })
   -- reopen on the saved cursor: engine/battle/core.asm:2230-2234 and
@@ -727,9 +739,21 @@ function BagMenu.new(game, opts)
   end
   local baseUpdate = list.update
   list.update = function(self, dt)
+    self.optionBox = nil
     baseUpdate(self, dt)
     game.bagListScrollOffset = self.scroll
     game.bagSavedMenuItem = self.index - self.scroll - 1
+  end
+  local baseDraw = list.draw
+  list.draw = function(self)
+    -- engine/menus/start_sub_menus.asm:299
+    if game.stack:top() == self then
+      self.optionBox = nil
+      self.hollowIndex = nil
+    end
+    baseDraw(self)
+    -- engine/menus/start_sub_menus.asm:298
+    if self.optionBox then self.optionBox:draw() end
   end
   list.closeStartMenu = opts.onClose
   -- the item box overlaps the kept-open START menu box, so neither docks to

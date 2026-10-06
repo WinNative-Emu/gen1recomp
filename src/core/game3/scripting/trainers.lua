@@ -176,7 +176,10 @@ function Trainers.foeFromId(trainerId)
   end
 
   local foeParty = {}
-  local pers = t.doubleBattle and double_personalities(t) or {}
+  local bp = require("src.core.game3.battle.profile").get()
+  local nativeParty = bp.trainerParty
+  local pers = nativeParty and nativeParty.personalities(t, bp.gameId)
+    or (t.doubleBattle and double_personalities(t) or {})
   for pi, m in ipairs(t.party) do
     local rawIv = tonumber(m.rawIv) or tonumber(m.iv) or 0
     local iv = tonumber(m.iv) or math.floor((rawIv * 31) / 255)
@@ -192,6 +195,7 @@ function Trainers.foeFromId(trainerId)
       moves = m.moves,
       trainerId = trainerId,
       personality = pers[pi],
+      nativeNpcTrainer = nativeParty and true or nil,
     }
     foeParty[#foeParty + 1] = mon
   end
@@ -219,6 +223,7 @@ function Trainers.foeFromId(trainerId)
     gender = t.gender,
     encounterMusic = t.encounterMusic,
     doubleBattle = t.doubleBattle,
+    nativeNpcTrainer = nativeParty and true or nil,
   }
 end
 

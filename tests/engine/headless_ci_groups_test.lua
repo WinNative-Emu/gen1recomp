@@ -52,7 +52,7 @@ local prefix = "POKEPORT_TEST_CACHES=/tmp/no-headless-group-cache POKEPORT_IDENT
   .. "RED_CACHE= BLUE_CACHE= YELLOW_CACHE= GOLD_CACHE= SILVER_CACHE= CRYSTAL_CACHE= "
 local function plan(group)
   local result = {}
-  local output = capture(prefix .. "bash scripts/test.sh --quick --list --group " .. group)
+  local output = capture(prefix .. "bash scripts/test.sh --standard --list --group " .. group)
   T.check(output:find("tests were not run", 1, true), "listing does not execute tests: " .. group)
   for label in output:gmatch("%[tier%] ([^\r\n]+)") do
     T.check(not result[label], "tier occurs once in " .. group .. ": " .. label)

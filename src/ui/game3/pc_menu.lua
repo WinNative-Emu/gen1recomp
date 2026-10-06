@@ -188,6 +188,8 @@ local function draw_status_lines()
 end
 
 function PcMenu._storageOptions()
+  local RsStorage = require("src.ui.game3.rs.storage_policy")
+  if RsStorage.matches(PcMenu._session) then return RsStorage.options() end
   return {
     { id = "withdraw", label = RomText.plain("gText_WithdrawPokemon"), desc = RomText.plain("gText_WithdrawMonDescription") },
     { id = "deposit", label = RomText.plain("gText_DepositPokemon"), desc = RomText.plain("gText_DepositMonDescription") },
@@ -246,9 +248,13 @@ function PcMenu.handleInput(input)
       elseif choice.id == "player" then
         se(5)
         se(2) -- data/scripts/pc.inc:39
-        PcMenu.mode = "player_pc"
-        PcMenu.cursor = 1
-        PcMenu._status = RomText.plain("gText_WhatWouldYouLikeToDo")
+        if Rse then
+          Rse.enter(PcMenu, {bedroom = false})
+        else
+          PcMenu.mode = "player_pc"
+          PcMenu.cursor = 1
+          PcMenu._status = RomText.plain("gText_WhatWouldYouLikeToDo")
+        end
       end
     elseif input:wasPressed("b") then
       se(5) -- pokefirered/src/script_menu.c:831
@@ -286,7 +292,8 @@ function PcMenu.handleInput(input)
       elseif choice.id == "withdraw" then
         local party = (PcMenu._session and PcMenu._session.party) or {}
         if #party >= 6 then
-          PcMenu._status = RomText.plain("gText_PartyFull")
+          local RsStorage = require("src.ui.game3.rs.storage_policy")
+          PcMenu._status = RomText.plain(RsStorage.matches(PcMenu._session) and "gPCText_PartyFull2" or "gText_PartyFull")
           PcMenu._prevMode = "storage_menu"
           PcMenu.mode = "msg"
           se(5) -- pokefirered/src/pokemon_storage_system_tasks.c:992
@@ -307,7 +314,8 @@ function PcMenu.handleInput(input)
       elseif choice.id == "deposit" then
         local party = (PcMenu._session and PcMenu._session.party) or {}
         if #party <= 1 then
-          PcMenu._status = RomText.plain("gText_JustOnePkmn")
+          local RsStorage = require("src.ui.game3.rs.storage_policy")
+          PcMenu._status = RomText.plain(RsStorage.matches(PcMenu._session) and "gPCText_OnlyOne" or "gText_JustOnePkmn")
           PcMenu._prevMode = "storage_menu"
           PcMenu.mode = "msg"
           se(require("src.core.game3.se_ids").SE_FAILURE) -- pokefirered/src/pokemon_storage_system_tasks.c:1052

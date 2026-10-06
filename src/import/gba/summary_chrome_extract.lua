@@ -3,6 +3,7 @@
 
 local Versions = require("src.import.gba.versions")
 local Lz77 = require("src.import.gba.lz77")
+local CacheBlob = require("src.import.CacheBlob")
 
 local SummaryChromeExtract = {}
 
@@ -82,12 +83,12 @@ local function read_bin(candidates)
       if d and #d > 0 then return d end
     end
     if love and love.filesystem and love.filesystem.read then
-      local ok, d = pcall(love.filesystem.read, p)
+      local ok, d = pcall(CacheBlob.readFs, p)
       if ok and d and #d > 0 then return d end
     end
     local f = io.open(p, "rb")
     if f then
-      local d = f:read("*a")
+      local d = CacheBlob.decode(p, f:read("*a"))
       f:close()
       if d and #d > 0 then return d end
     end
@@ -709,12 +710,12 @@ function SummaryChromeExtract.ready(cache, cacheRoot)
     if d and #d >= 240 * 160 * 4 then return true end
   end
   if love and love.filesystem and love.filesystem.read then
-    local d = love.filesystem.read(need)
+    local d = CacheBlob.readFs(need)
     if d and #d >= 240 * 160 * 4 then return true end
   end
   local f = io.open(need, "rb") or io.open("data/generated/gba/" .. SummaryChromeExtract.CACHE_SUB .. "/page_info.rgba", "rb")
   if f then
-    local d = f:read("*a")
+    local d = CacheBlob.decode(need, f:read("*a"))
     f:close()
     if d and #d >= 240 * 160 * 4 then return true end
   end

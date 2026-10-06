@@ -81,6 +81,10 @@ function RegionMap.mapSecType(s, id)
     local visited = constants(s.session):flag("FLAG_VISITED_LITTLEROOT_TOWN") + (id - first)
     return flagSet(s, visited) and TYPE.CITY_CANFLY or TYPE.CITY_CANTFLY
   end
+  -- pokeruby/src/region_map.c:731
+  if RegionMap.manifest().assetLayout == "rs" and id == sec("BATTLE_TOWER") then
+    return flagSet(s, "FLAG_LANDMARK_BATTLE_TOWER") and TYPE.BATTLE_FRONTIER or TYPE.NONE
+  end
   if id == sec("BATTLE_FRONTIER") then
     return flagSet(s, "FLAG_LANDMARK_BATTLE_FRONTIER") and TYPE.BATTLE_FRONTIER or TYPE.NONE
   end
@@ -101,8 +105,11 @@ end
 -- pokeemerald/src/region_map.c:1227
 function RegionMap.correctSpecialMapSecId(s, id)
   local man = RegionMap.manifest()
-  for _, m in ipairs(man.marineCaveMapSecIds) do
-    if m == id then return terraOrMarineCaveMapSecId(s) end
+  -- pokeruby/src/region_map.c:745
+  if man.assetLayout ~= "rs" then
+    for _, m in ipairs(man.marineCaveMapSecIds) do
+      if m == id then return terraOrMarineCaveMapSecId(s) end
+    end
   end
   for _, pair in ipairs(man.specialPlaces) do
     if pair[1] == sec("NONE") then break end
@@ -204,13 +211,20 @@ function RegionMap.initFromPlayer(s)
     local wDef = mapDefOf(warp.map) or def
     if s.mapSecId == sec("DYNAMIC") then s.mapSecId = tonumber(wDef.regionMapSectionId) or 0 end
     s.playerIsInCave = false
-    for _, id in ipairs(RegionMap.manifest().aquaHideoutOld) do
-      if id == s.mapSecId then s.playerIsInCave = true end
+    if RegionMap.manifest().assetLayout ~= "rs" then
+      for _, id in ipairs(RegionMap.manifest().aquaHideoutOld) do
+        if id == s.mapSecId then s.playerIsInCave = true end
+      end
     end
     width, height, x, y = wDef.width, wDef.height, tonumber(warp.x) or 0, tonumber(warp.y) or 0
   else
     s.mapSecId = tonumber(def.regionMapSectionId) or 0
-    s.playerIsInCave = s.mapSecId == sec("UNDERWATER_SEAFLOOR_CAVERN") or s.mapSecId == sec("UNDERWATER_MARINE_CAVE")
+    if RegionMap.manifest().assetLayout == "rs" then
+      -- pokeruby/src/region_map.c:545
+      s.playerIsInCave = s.mapSecId == sec("UNDERWATER_128")
+    else
+      s.playerIsInCave = s.mapSecId == sec("UNDERWATER_SEAFLOOR_CAVERN") or s.mapSecId == sec("UNDERWATER_MARINE_CAVE")
+    end
     width, height, x, y = def.width, def.height, px, py
   end
   local e = Mapsec.entry(s.mapSecId) or { x = 0, y = 0, width = 1, height = 1 }
@@ -254,6 +268,7 @@ function RegionMap.initFromPlayer(s)
 end
 
 local function isEventIsland(id)
+  if RegionMap.manifest().assetLayout == "rs" then return false end
   for _, v in ipairs(RegionMap.manifest().offMap) do
     if v == id then return true end
   end
@@ -338,14 +353,20 @@ local function newState(opts)
 end
 RegionMap.newState = newState
 
+-- pokeemerald/src/region_map.c:349
+local MULTI_NAME_TABLES = { "sEverGrandeCityNames" }
+
 -- pokeemerald/src/region_map.c:1760
 function RegionMap.updateFlyText(s)
   s.flyText = nil
   if s.mapSecType > TYPE.NONE then
-    for _, m in ipairs(RegionMap.manifest().multiNameFlyDestinations) do
+    for i, m in ipairs(RegionMap.manifest().multiNameFlyDestinations) do
       if s.mapSecId == m.mapSecId then
         if flagSet(s, m.flag) then
-          s.flyText = { tall = true, name = s.mapSecName, sub = m.names[s.posWithinMapSec + 1] or "" }
+          local sub = m.names[s.posWithinMapSec + 1] or ""
+          local key = MULTI_NAME_TABLES[i] and RomText.key(MULTI_NAME_TABLES[i], s.posWithinMapSec)
+          if key and RomText.has(key) then sub = RomText.plain(key) end
+          s.flyText = { tall = true, name = s.mapSecName, sub = sub }
         end
         break
       end
@@ -663,12 +684,16 @@ function RegionMap.flyWarpDestination(session, secId, posWithinMapSec)
   local heal
   if secId == SEC.MAPSEC_SOUTHERN_ISLAND then
     heal = H.HEAL_LOCATION_SOUTHERN_ISLAND_EXTERIOR
+  elseif RegionMap.manifest().assetLayout == "rs" and secId == SEC.MAPSEC_BATTLE_TOWER then
+    -- pokeruby/src/region_map.c:1624
+    heal = H.HEAL_LOCATION_BATTLE_TOWER_OUTSIDE
   elseif secId == SEC.MAPSEC_BATTLE_FRONTIER then
     heal = H.HEAL_LOCATION_BATTLE_FRONTIER_OUTSIDE_EAST
   elseif secId == SEC.MAPSEC_LITTLEROOT_TOWN then
     heal = female and H.HEAL_LOCATION_LITTLEROOT_TOWN_MAYS_HOUSE or H.HEAL_LOCATION_LITTLEROOT_TOWN_BRENDANS_HOUSE
   elseif secId == SEC.MAPSEC_EVER_GRANDE_CITY then
-    heal = (flagSet({ session = session }, "FLAG_LANDMARK_POKEMON_LEAGUE") and (tonumber(posWithinMapSec) or 0) == 0)
+    local leagueFlag = RegionMap.manifest().assetLayout == "rs" and "FLAG_SYS_POKEMON_LEAGUE_FLY" or "FLAG_LANDMARK_POKEMON_LEAGUE"
+    heal = (flagSet({ session = session }, leagueFlag) and (tonumber(posWithinMapSec) or 0) == 0)
       and H.HEAL_LOCATION_EVER_GRANDE_CITY_POKEMON_LEAGUE or H.HEAL_LOCATION_EVER_GRANDE_CITY
   end
   if not heal then return nil end

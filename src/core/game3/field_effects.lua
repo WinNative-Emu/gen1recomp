@@ -146,7 +146,7 @@ local function drawFrlgReflections(camX, camY)
           for j = 1, #live do
             local obj = live[j]
             if not obj.hideReflection and obj.graphicsId and not obj.virtualId then
-              local spr = Ow.getDraw(obj.graphicsId)
+              local spr = (Ow.peekDraw or Ow.getDraw)(obj.graphicsId)
               if spr then
                 objectPoseOpts.frame = obj.customFrame
                 local frame, flip = Ow.pose(spr, obj.facing, Objects.walkPhase(obj), obj.stepFlip,

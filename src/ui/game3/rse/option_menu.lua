@@ -6,6 +6,7 @@ local FrlgFont = require("src.ui.game3.frlg_font")
 local Chrome = require("src.ui.game3.chrome")
 local Kit = require("src.ui.game3.rse.scene_kit")
 local Screens = require("src.ui.game3.screens")
+local ShaderFXMenu = require("src.ui.game3.shaderfx_menu")
 
 local OptionMenu = { isMenu = true }
 
@@ -63,15 +64,7 @@ end
 local function portRows()
   local cartRows = {}
   for _, r in ipairs(OptionMenu.CART) do cartRows[r.id] = { id = r.id, cart = r } end
-  local rows = {}
-  for _, r in ipairs(Rows.build(st.ctx)) do
-    rows[#rows + 1] = cartRows[r.id] or r
-    cartRows[r.id] = nil
-  end
-  for _, r in ipairs(OptionMenu.CART) do
-    if cartRows[r.id] then rows[#rows + 1] = cartRows[r.id] end
-  end
-  return Rows.group(rows, function(title, members)
+  return Rows.withCart(st.ctx, cartRows, function(title, members)
     st.pages[#st.pages + 1] = { title = title, rows = members, index = 1, scroll = 0 }
   end)
 end
@@ -98,6 +91,7 @@ function OptionMenu.show(opts)
 end
 
 function OptionMenu.close()
+  ShaderFXMenu.close()
   st.pages = nil
   Stack.pop(OptionMenu.ID)
   local cb = st.onClose
@@ -147,6 +141,7 @@ end
 
 function OptionMenu.handleInput(input)
   if not input then return end
+  if ShaderFXMenu.isOpen() then return ShaderFXMenu.handleInput(input) end
   local p = page()
   if not p then return end
   local total = rowCount(p)
@@ -199,6 +194,7 @@ function OptionMenu.back()
 end
 
 function OptionMenu.update()
+  ShaderFXMenu.update()
   st.k = (st.k or 0) + 1
 end
 
@@ -242,6 +238,7 @@ end
 function OptionMenu.draw()
   local p = page()
   if not p then return end
+  if ShaderFXMenu.isOpen() then return ShaderFXMenu.draw() end
   local m = manifest()
   local o = m and m.option
   local pal = o and o.textPalette or {}
@@ -300,6 +297,7 @@ function OptionMenu.draw()
 end
 
 function OptionMenu.reset()
+  ShaderFXMenu.close()
   if st.pages then Stack.pop(OptionMenu.ID) end
   st.pages, st.onClose = nil, nil
 end

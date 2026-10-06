@@ -547,7 +547,8 @@ end
 -- pokeemerald/src/pokeblock.c:1256
 function Pokeblock.chooseForBattle(session, done)
   session = session_of(session)
-  local Case = require("src.ui.game3.rse.pokeblock_case")
+  local Case = require("src.ui.game3.screens").get("pokeblock_case", session)
+    or require("src.ui.game3.rse.pokeblock_case")
   Case.show({
     session = session,
     caseId = Pokeblock.CASE.BATTLE,
@@ -563,9 +564,11 @@ end
 -- pokeemerald/src/pokeblock.c:446
 function Pokeblock.openCase(session, opts)
   opts = opts or {}
-  local Case = require("src.ui.game3.rse.pokeblock_case")
+  local sess = session_of(session)
+  local Case = require("src.ui.game3.screens").get("pokeblock_case", sess)
+    or require("src.ui.game3.rse.pokeblock_case")
   return Case.show({
-    session = session_of(session),
+    session = sess,
     caseId = opts.caseId or Pokeblock.CASE.FIELD,
     onUse = opts.onUse,
     onClose = opts.onClose,

@@ -6,6 +6,8 @@ Constants.GAMES = {
   firered = "firered",
   leafgreen = "firered",
   emerald = "emerald",
+  ruby = "ruby",
+  sapphire = "ruby",
 }
 
 Constants.KINDS = {

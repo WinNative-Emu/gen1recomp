@@ -1356,7 +1356,7 @@ local function pic_writer(rom, cache, root)
               out(kind, sp, "_" .. form, decode_pic_sheet(tiles, pal, form, form),
                 decode_pic_sheet(tiles, shiny, form, form))
             end
-          elseif kind == "front" and frames == 2 then
+          elseif kind == "front" and frames == 2 and Versions.MON_FRONT_PIC_ANIM ~= false then
             out("front_anim", sp, "", stack_frames(tiles, pal, { 0, 1 }, 0),
               stack_frames(tiles, shiny, { 0, 1 }, 0))
             state.written.anim = state.written.anim + 1
@@ -1525,7 +1525,7 @@ function PokemonExtract.runPart(rom, cache, opts)
     local castTiles = lz_string(rom, gba_off(rom:u32(pic_table("MON_FRONT_PIC_TABLE", "mon_front_pic_table")
       + castform * 8)))
     put(cache, root .. "/pics.lua", write_pics_manifest({
-      animFrames = 2,
+      animFrames = Versions.MON_FRONT_PIC_ANIM == false and 1 or 2,
       still = Versions.MON_STILL_FRONT_PIC_TABLE ~= nil,
       castform = castform,
       castformForms = castTiles and math.floor(#castTiles / PIC_BYTES) or 1,
@@ -1560,6 +1560,17 @@ PokemonExtract.REQUIRED = {
   "pokemon/icons/1.rgba", "pokemon/icons/411.rgba", "pokemon/icons/439.rgba",
   "pokemon/footprints/1.rgba",
 }
+
+function PokemonExtract.requiredForPlan(planId)
+  if planId ~= "rs" then return PokemonExtract.REQUIRED end
+  local required = {}
+  for _, path in ipairs(PokemonExtract.REQUIRED) do
+    if not path:match("^pokemon/front_anim/") and not path:match("^pokemon/front_still/") then
+      required[#required + 1] = path
+    end
+  end
+  return required
+end
 
 function PokemonExtract.ready(cache, cacheRoot)
   local baseRoot = cacheRoot or default_cache_root()
@@ -1626,7 +1637,7 @@ function PokemonExtract.ready(cache, cacheRoot)
     if count and count < (Versions.NUM_SPECIES or 412) then return false end
   end
 
-  if Versions.MON_FRONT_PIC_ANIM then
+  if Versions.MON_FRONT_PIC_ANIM ~= nil then
     for _, row in ipairs(RSE_READY) do
       if not valid_file(root .. "/" .. row[1], row[2]) then return false end
     end
@@ -1634,7 +1645,8 @@ function PokemonExtract.ready(cache, cacheRoot)
     local unown = Versions.SPECIES_UNOWN_QMARK
     for _, sp in ipairs({ 1, last, unown }) do
       if not (valid_file(root .. "/front/" .. sp .. ".rgba", pic)
-          and valid_file(root .. "/front_anim/" .. sp .. ".rgba", pic * 2)
+          and (Versions.MON_FRONT_PIC_ANIM == false
+            or valid_file(root .. "/front_anim/" .. sp .. ".rgba", pic * 2))
           and valid_file(root .. "/back/" .. sp .. ".rgba", pic)
           and valid_file(root .. "/icons/" .. sp .. ".rgba", iconBytes)) then
         return false

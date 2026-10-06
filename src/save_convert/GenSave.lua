@@ -845,43 +845,91 @@ local function decodeItemRows(bytes, off, capacity)
   return rows
 end
 
+local function stackCounts(stacks, id, qty)
+  local list = type(stacks) == "table" and stacks[id]
+  if type(list) ~= "table" or #list < 2 then return nil end
+  local sum = 0
+  for i = 1, #list do
+    local c = list[i]
+    if type(c) ~= "number" or c < 1 or c > 99 or c % 1 ~= 0 then return nil end
+    sum = sum + c
+  end
+  if sum ~= qty then return nil end
+  return list
+end
+
 local function foldRows(rows, cw)
-  local inventory, order = {}, {}
+  local inventory, order, counts = {}, {}, {}
   for _, r in ipairs(rows) do
     local id = cw.itemsByIndex[r[1]]
     if id and not BADGE_BY_BIT_SET[id] and r[2] > 0 then
-      if not inventory[id] then order[#order + 1] = id end
+      order[#order + 1] = id
       inventory[id] = (inventory[id] or 0) + r[2]
+      local list = counts[id] or {}
+      list[#list + 1] = r[2]
+      counts[id] = list
     end
   end
-  return inventory, order
+  local stacks = {}
+  for id, list in pairs(counts) do
+    local derived = true
+    for k = 1, #list - 1 do
+      if list[k] ~= 99 then derived = false end
+    end
+    if not derived and stackCounts({ [id] = list }, id, inventory[id]) then stacks[id] = list end
+  end
+  return inventory, order, next(stacks) ~= nil and stacks or nil
 end
 
-local function modelRows(inventory, order, capacity, cw)
-  local rows, seen, ids, rest = {}, {}, {}, {}
-  for _, id in ipairs(type(order) == "table" and order or {}) do
-    if not seen[id] then seen[id] = true; ids[#ids + 1] = id end
+-- engine/items/inventory.asm:64
+local function modelRows(inventory, order, capacity, cw, stacks)
+  inventory = inventory or {}
+  local need, lists = {}, {}
+  local function slots(id)
+    if need[id] == nil then
+      local qty = tonumber(inventory[id])
+      qty = qty and math.floor(qty) or 0
+      lists[id] = stackCounts(stacks, id, qty)
+      need[id] = (qty > 0 and cw.itemsIndex[id] and not BADGE_BY_BIT_SET[id])
+        and (lists[id] and #lists[id] or math.ceil(qty / 99)) or 0
+    end
+    return need[id]
   end
-  for id in pairs(inventory or {}) do
-    if not seen[id] then rest[#rest + 1] = id end
+  local kept, have = {}, {}
+  for _, id in ipairs(type(order) == "table" and order or {}) do
+    if (have[id] or 0) < slots(id) then
+      have[id] = (have[id] or 0) + 1
+      kept[#kept + 1] = id
+    end
+  end
+  local ids, at = {}, {}
+  for _, id in ipairs(kept) do
+    at[id] = (at[id] or 0) + 1
+    ids[#ids + 1] = id
+    if at[id] == have[id] then
+      for _ = have[id] + 1, slots(id) do ids[#ids + 1] = id end
+    end
+  end
+  local rest = {}
+  for id in pairs(inventory) do
+    if not have[id] and slots(id) > 0 then rest[#rest + 1] = id end
   end
   table.sort(rest, function(a, b)
     local ia, ib = cw.itemsIndex[a] or 1e9, cw.itemsIndex[b] or 1e9
     if ia ~= ib then return ia < ib end
     return tostring(a) < tostring(b)
   end)
-  for _, id in ipairs(rest) do ids[#ids + 1] = id end
+  for _, id in ipairs(rest) do
+    for _ = 1, slots(id) do ids[#ids + 1] = id end
+  end
+  local rows, k = {}, {}
   for _, id in ipairs(ids) do
-    local qty = tonumber((inventory or {})[id])
-    local idx = cw.itemsIndex[id]
-    if qty and qty > 0 and idx and not BADGE_BY_BIT_SET[id] then
-      qty = math.floor(qty)
-      while qty > 0 and #rows < capacity do
-        local q = math.min(qty, 99)
-        rows[#rows + 1] = { idx, q }
-        qty = qty - q
-      end
-    end
+    if #rows >= capacity then break end
+    k[id] = (k[id] or 0) + 1
+    local n = slots(id)
+    local q = lists[id] and lists[id][k[id]]
+      or (k[id] < n and 99 or math.floor(tonumber(inventory[id])) - 99 * (n - 1))
+    rows[#rows + 1] = { cw.itemsIndex[id], q }
   end
   return rows
 end
@@ -904,14 +952,14 @@ end
 
 local function decodeItems(bytes, off, capacity, cw)
   local rows = decodeItemRows(bytes, off, capacity)
-  local inventory, order = foldRows(rows, cw)
+  local inventory, order, stacks = foldRows(rows, cw)
   local carrier = nil
-  if not sameRows(modelRows(inventory, order, capacity, cw), rows) then carrier = rows end
-  return inventory, order, carrier
+  if not sameRows(modelRows(inventory, order, capacity, cw, stacks), rows) then carrier, stacks = rows, nil end
+  return inventory, order, carrier, stacks
 end
 
-local function encodeItems(buf, countOff, off, capacity, inventory, order, carrier, cw)
-  local rows = modelRows(inventory, order, capacity, cw)
+local function encodeItems(buf, countOff, off, capacity, inventory, order, carrier, cw, stacks)
+  local rows = modelRows(inventory, order, capacity, cw, stacks)
   carrier = validRows(carrier)
   if carrier then
     local inv, ord = foldRows(carrier, cw)
@@ -1023,8 +1071,8 @@ function GenSave.decode(bytes, data, opts)
     if bitGet(bytes, O.pokedexSeen, bitIdx) then save.pokedex.seen[species] = true end
   end
 
-  save.inventory, save.bagOrder, save.cartBag = decodeItems(bytes, O.bagItems, 20, cw)
-  save.pcItems, save.pcOrder, save.cartPc = decodeItems(bytes, O.pcItems, 50, cw)
+  save.inventory, save.bagOrder, save.cartBag, save.bagStacks = decodeItems(bytes, O.bagItems, 20, cw)
+  save.pcItems, save.pcOrder, save.cartPc, save.pcStacks = decodeItems(bytes, O.pcItems, 50, cw)
 
   -- badges: truthy save.inventory[id] entries (src/inventory/Badges.lua),
   -- set AFTER the bag decode since that call replaces save.inventory
@@ -1424,8 +1472,8 @@ function GenSave.encode(save, data, template)
   -- wBagItems (they only ever live in wObtainedBadges, already encoded
   -- above), so they must be filtered out here or they'd corrupt the bag
   -- with bogus "badge items".
-  encodeItems(buf, O.numBagItems, O.bagItems, 20, save.inventory or {}, save.bagOrder, save.cartBag, cw)
-  encodeItems(buf, O.numPcItems, O.pcItems, 50, save.pcItems or {}, save.pcOrder, save.cartPc, cw)
+  encodeItems(buf, O.numBagItems, O.bagItems, 20, save.inventory or {}, save.bagOrder, save.cartBag, cw, save.bagStacks)
+  encodeItems(buf, O.numPcItems, O.pcItems, 50, save.pcItems or {}, save.pcOrder, save.cartPc, cw, save.pcStacks)
 
   local flags = type(save.flags) == "table" and save.flags or {}
   local events = data.eventFlags

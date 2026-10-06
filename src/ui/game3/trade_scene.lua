@@ -4,6 +4,9 @@ local Chrome = require("src.ui.game3.chrome")
 local FrlgFont = require("src.ui.game3.frlg_font")
 local Pokemon = require("src.core.game3.pokemon")
 local Extract = require("src.import.gba.extract_island1")
+local Profile = require("src.core.game3.profile")
+local RsTrade = require("src.ui.game3.rs.trade_policy")
+local CacheBlob = require("src.import.CacheBlob")
 
 local TradeSceneUi = {}
 
@@ -43,16 +46,16 @@ local function read_bytes(rel)
     if type(d) == "string" and #d > 0 then return d end
   end
   if love and love.filesystem and love.filesystem.read then
-    local d = love.filesystem.read(rel)
+    local d = CacheBlob.readFs(rel)
     if type(d) == "string" and #d > 0 then return d end
     local alt = "data/generated/gba/" .. (rel:gsub("^data/generated/gba/", ""))
-    d = love.filesystem.read(alt)
+    d = CacheBlob.readFs(alt)
     if type(d) == "string" and #d > 0 then return d end
   end
   for _, p in ipairs({ rel, "data/generated/gba/" .. (rel:gsub("^data/generated/gba/", "")) }) do
     local f = io.open(p, "rb")
     if f then
-      local d = f:read("*a")
+      local d = CacheBlob.decode(p, f:read("*a"))
       f:close()
       if d and #d > 0 then return d end
     end
@@ -96,6 +99,14 @@ local SHEETS = {
 
 -- pokefirered/src/trade_scene.c:1220 LoadTradeGbaSpriteGfx
 function TradeSceneUi.loadArt()
+  local version = Profile.forSession().id
+  if TradeSceneUi._artVersion ~= version then TradeSceneUi.invalidate(); TradeSceneUi._artVersion = version end
+  if RsTrade.matches(version) then
+    if TradeSceneUi._artTried then return TradeSceneUi._art end
+    TradeSceneUi._artTried = true
+    TradeSceneUi._art = require("src.ui.game3.rs.trade_scene_chrome").load(read_bytes, load_lua, cache_root())
+    return TradeSceneUi._art
+  end
   if TradeSceneUi._artTried then return TradeSceneUi._art end
   TradeSceneUi._artTried = true
   local man = load_lua(trade_root() .. "/manifest.lua")
@@ -134,6 +145,7 @@ end
 function TradeSceneUi.invalidate()
   TradeSceneUi._art = nil
   TradeSceneUi._artTried = false
+  TradeSceneUi._artVersion = nil
 end
 
 function TradeSceneUi.isOpen()
@@ -213,6 +225,10 @@ function TradeSceneUi.draw()
   local s = core.state()
   if not s then return end
   local art = s.art
+  if s.nativeRS and art and art.native then
+    require("src.ui.game3.rs.trade_scene_chrome").draw(s, art)
+    return
+  end
 
   love.graphics.setColor(0, 0, 0, 1)
   love.graphics.rectangle("fill", 0, 0, Display.W, Display.H)

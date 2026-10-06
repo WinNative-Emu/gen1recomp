@@ -3,6 +3,9 @@ local Window = require("src.ui.game3.window")
 local Chrome = require("src.ui.game3.chrome")
 local FrlgFont = require("src.ui.game3.frlg_font")
 local RomText = require("src.core.game3.rom_text")
+local RsTrade = require("src.ui.game3.rs.trade_policy")
+local Profile = require("src.core.game3.profile")
+local Kit = require("src.ui.game3.rse.scene_kit")
 
 local LinkTradeMenu = {}
 
@@ -45,6 +48,7 @@ local EMERALD_TEXT = {
 }
 
 local function textKey(key)
+  if RsTrade.matches(Profile.forSession().id) then return RsTrade.textKey(key) end
   local ok, profile = pcall(require, "src.core.game3.profile")
   if ok and profile.family() == "rse" then return EMERALD_TEXT[key] or key end
   return key
@@ -188,12 +192,15 @@ local SHEETS = { "menu_bg1", "stripes_bg2", "stripes_bg3", "party_box", "moves_b
 
 -- pokefirered/src/trade.c:1368
 function LinkTradeMenu.loadArt()
+  local id = Profile.forSession().id
+  if LinkTradeMenu._artVersion ~= id then LinkTradeMenu.invalidate(); LinkTradeMenu._artVersion = id end
   if LinkTradeMenu._artTried then
     if LinkTradeMenu._artError then error(LinkTradeMenu._artError, 0) end
     return LinkTradeMenu._art
   end
   LinkTradeMenu._artTried = true
-  local root = cache_root() .. "/" .. LinkTradeMenu.CACHE_SUB
+  local native = RsTrade.matches(id)
+  local root = cache_root() .. "/" .. (native and RsTrade.SUB or LinkTradeMenu.CACHE_SUB)
   local src = read_bytes(root .. "/manifest.lua")
   local chunk = src and load(src, "@trade/manifest.lua", "t", {})
   local okM, man = false, nil
@@ -204,7 +211,13 @@ function LinkTradeMenu.loadArt()
   end
   local art = { manifest = man }
   for _, name in ipairs(SHEETS) do
-    local entry = man[name]
+    local entry = native and (man.layers[name] or man.sprites[name]) or man[name]
+    if native then
+      assert(man.assetLayout == "rs", "native RS trade pack required")
+      local bytes = assert(read_bytes(assert(entry and entry.png, name)), "native RS trade PNG missing: " .. name)
+      local image = love.graphics.newImage(love.image.newImageData(love.filesystem.newFileData(bytes, name .. ".png")))
+      image:setFilter("nearest", "nearest"); art[name] = image
+    else
     local w = tonumber(entry and entry.width)
     local h = tonumber(entry and entry.height)
     local rgba = w and h and read_bytes(root .. "/" .. name .. ".rgba")
@@ -215,15 +228,18 @@ function LinkTradeMenu.loadArt()
     local image = love.graphics.newImage(love.image.newImageData(w, h, "rgba8", rgba))
     image:setFilter("nearest", "nearest")
     art[name] = image
+    end
   end
-  local cols = tonumber(man.menu_tiles.columns) or 16
+  art.native = native
+  local tiles = native and man.layers.menu_tiles or man.menu_tiles
+  local cols = tonumber(tiles.columns) or 16
   local sw, sh = art.menu_tiles:getDimensions()
   art.tileQuads = {}
-  for t = 0, (tonumber(man.menu_tiles.tiles) or 148) - 1 do
+  for t = 0, (tonumber(tiles.count or tiles.tiles) or 148) - 1 do
     art.tileQuads[t] = love.graphics.newQuad((t % cols) * T, math.floor(t / cols) * T, T, T, sw, sh)
   end
   local cw, ch = art.cursor:getDimensions()
-  local fh = tonumber(man.cursor.frame_h) or 32
+  local fh = native and man.sprites.cursor.h or tonumber(man.cursor.frame_h) or 32
   art.cursorQuads = {
     [0] = love.graphics.newQuad(0, 0, cw, fh, cw, ch),
     [1] = love.graphics.newQuad(0, fh, cw, fh, cw, ch),
@@ -238,6 +254,7 @@ function LinkTradeMenu.invalidate()
   LinkTradeMenu._art = nil
   LinkTradeMenu._artTried = false
   LinkTradeMenu._artError = nil
+  LinkTradeMenu._artVersion = nil
 end
 
 -- pokefirered/src/trade.c:1401
@@ -255,6 +272,9 @@ end
 -- pokefirered/src/trade.c:1770
 function LinkTradeMenu.newCursorPosition(pos, dir, active)
   active = active or LinkTradeMenu.optionsActive()
+  if RsTrade.matches(Profile.forSession().id) and LinkTradeMenu._art then
+    return RsTrade.nextSlot(LinkTradeMenu._art.manifest, pos, dir - 1, active)
+  end
   for _, nextPos in ipairs(LinkTradeMenu.CURSOR_DEST[pos][dir]) do
     if active[nextPos] then return nextPos end
   end
@@ -394,6 +414,7 @@ function LinkTradeMenu.show()
   if LinkTradeMenu.open then return true end
   LinkTradeMenu.open = true
   resetState()
+  if RsTrade.matches(Profile.forSession().id) and hasGraphics() then LinkTradeMenu.loadArt() end
   -- pokefirered/src/trade.c:853
   LinkTradeMenu.message = plain(MSG.STANDBY)
   Stack.push("link_trade", LinkTradeMenu, { hideBelow = true, fullscreen = true })
@@ -438,7 +459,8 @@ local function enterMenu()
   if hasGraphics() then
     local Audio = audio()
     -- pokefirered/src/trade.c:1049
-    if Audio and Audio.playSong and pcall(Audio.playSong, Song.MUS_GAME_CORNER) then
+    local song = RsTrade.matches(Profile.forSession().id) and Song.forVersion(Profile.forSession().id).MUS_SCHOOL or Song.MUS_GAME_CORNER
+    if Audio and Audio.playSong and pcall(Audio.playSong, song) then
       LinkTradeMenu._song = true
     end
   end
@@ -474,9 +496,8 @@ local function showSummary(side, idx)
         playerName = trade().peer.name,
         trainerId = tonumber(trade().peer.trainerId) or 0,
       } or nil,
-      onClose = function()
-        -- pokefirered/src/trade.c:1236
-        local last = math.floor(tonumber(SummaryMenu._cursor) or (idx + 1))
+      onClose = function(nativeIndex)
+        local last = math.floor(tonumber(RsTrade.matches(Profile.forSession().id) and nativeIndex or SummaryMenu._cursor) or (idx + 1))
         setPos(side * PARTY_SIZE + math.max(0, math.min(partyCount(side), last) - 1))
         redrawChooseAPokemonWindow()
         startFade(-1)
@@ -497,7 +518,8 @@ local function tradeSelectedMon()
     return true
   end
   local Trade = require("src.core.game3.scripting.natives_trade")
-  queueMessage(Trade.refusalText(code) or plain(MSG.MON_CANT_BE_TRADED))
+  queueMessage(RsTrade.matches(Profile.forSession().id) and plain(code == 1 and MSG.ONLY_MON2 or MSG.FRIENDS_MON_CANT_BE_TRADED)
+    or Trade.refusalText(code) or plain(MSG.MON_CANT_BE_TRADED))
   LinkTradeMenu.cb = "trade_canceled"
   return false
 end
@@ -814,6 +836,38 @@ end
 -- pokefirered/src/trade.c:2397
 local function drawLevelAndGender(art, mon, boxX, boxY)
   local g = love.graphics
+  if art.native then
+    local man = art.manifest
+    art.rawGfx = art.rawGfx or assert(read_bytes(man.gfx), "native RS trade tiles missing")
+    art.wordTiles = art.wordTiles or {}
+    local dst = {}; for i = 1, 1024 do dst[i] = 0 end
+    local slot
+    for i, p in ipairs(man.coords.box) do if p[1] == boxX and p[2] == boxY then slot = i - 1; break end end
+    local side
+    if not slot then for i = 0, 1 do local p = man.coords.selectedBox[i + 1]; if p[1] == boxX and p[2] == boxY then side = i; break end end end
+    local P, gender = pokemon(), "U"
+    local ok, value = pcall(P.gender, P.speciesOf(mon), mon.personality); if ok then gender = value end
+    RsTrade.monBoxWords(man, dst, slot or 0, tonumber(mon.level) or 0, gender == "M" and 0 or gender == "F" and 254 or 255,
+      P.isEgg(mon), nameHasGenderSymbol(P.displayName(mon), gender), side)
+    for y = boxY, boxY + 2 do for x = boxX, boxX + 5 do
+      local word = dst[y * 32 + x + 1]
+      local image = art.wordTiles[word]
+      if not image then
+        local tile, bank, data = word % 1024, math.floor(word / 4096), love.image.newImageData(8, 8)
+        for py = 0, 7 do for px = 0, 7 do
+          local sx = math.floor(word / 1024) % 2 == 1 and 7 - px or px
+          local sy = math.floor(word / 2048) % 2 == 1 and 7 - py or py
+          local byte = art.rawGfx:byte(tile * 32 + sy * 4 + math.floor(sx / 2) + 1) or 0
+          local index = math.floor(byte / 16 ^ (sx % 2)) % 16
+          local r, gg, b = Kit.rgb555(man.palettes.menu[bank * 16 + index + 1])
+          data:setPixel(px, py, r, gg, b, index == 0 and 0 or 1)
+        end end
+        image = g.newImage(data); image:setFilter("nearest", "nearest"); art.wordTiles[word] = image
+      end
+      g.setColor(1, 1, 1, 1); g.draw(image, x * T, y * T)
+    end end
+    return
+  end
   g.draw(art.mon_box, boxX * T, boxY * T)
   local tiles = LinkTradeMenu.levelGenderTiles(mon)
   local x, y = boxX + 4, boxY + 1
@@ -842,6 +896,19 @@ local function drawNickname(mon, winLeft, winTop, width)
   drawText(name, winLeft * T + math.floor((width - w) / 2), winTop * T + 4, FrlgFont.COLOR.WHITE, true)
 end
 
+local function nativeTextOptions(art, kind, font)
+  local man, win = art.manifest, art.manifest.windows[kind]
+  local pal = kind == "spriteText" and man.palettes.text or man.palettes.font
+  local function color(i, transparent) local r, g, b = Kit.rgb555(pal[i + 1]); return {r, g, b, transparent and 0 or 1} end
+  return {font = "native_" .. (font or win.fontNum), colors = {fg = color(win.foregroundColor), shadow = color(win.shadowColor),
+    bg = color(win.backgroundColor, kind == "spriteText" or win.backgroundColor == 0)}}
+end
+local function nativeNickname(art, mon, x, y, selected)
+  local name, opts = pokemon().displayName(mon), nativeTextOptions(art, "menu", 4)
+  local width = FrlgFont.measure(name, opts)
+  FrlgFont.draw(name, x + RsTrade.nicknamePadding(width, selected), y, opts)
+end
+
 -- pokefirered/src/trade.c:997
 local function drawNameSprite(name, centerX)
   local w = FrlgFont.measure(name)
@@ -850,12 +917,31 @@ end
 
 local function drawMessage()
   if not LinkTradeMenu.message then return end
+  local art = LinkTradeMenu._art
+  if art and art.native then
+    local man, row = art.manifest, art.manifest.messages[1]
+    for _, candidate in ipairs(man.messages) do if plain(candidate.key) == LinkTradeMenu.message then row = candidate; break end end
+    local r = row.rect
+    Chrome.fixedStdFrame(r[1] + 1, r[2] + 1, r[3] - r[1] - 1, r[4] - r[2] - 1)
+    local opts = nativeTextOptions(art, "menu"); opts.maxWidth = (r[3] - r[1] - 1) * T
+    FrlgFont.draw(LinkTradeMenu.message, (r[1] + 1) * T, (r[2] + 1) * T, opts)
+    return
+  end
   -- pokefirered/src/trade.c:2581
   Chrome.fixedStdFrame(4, 7, 22, 4)
   FrlgFont.draw(LinkTradeMenu.message, 4 * T, 7 * T + 2, { maxWidth = 22 * T })
 end
 
 local function drawYesNo()
+  local art = LinkTradeMenu._art
+  if art and art.native then
+    local m = art.manifest
+    local r, p = m.geometry.yesNoFrame, m.geometry.yesNoOrigin
+    Chrome.fixedStdFrame(r[1] + 1, r[2] + 1, r[3] - r[1] - 1, r[4] - r[2] - 1)
+    for i, key in ipairs({"gText_Yes", "gText_No"}) do FrlgFont.draw(plain(key), p[1] * T, (p[2] + (i - 1) * 2) * T, nativeTextOptions(art, "actions")) end
+    require("src.ui.game3.rs.menu_cursor").draw(p[1] * T, (p[2] + (LinkTradeMenu.yesNoCursor - 1) * 2) * T, m.geometry.yesNoCursorWidth * T)
+    return
+  end
   -- pokefirered/src/trade.c:744
   Chrome.stdFrame(21, 13, 6, 4)
   local labels = { plain("gText_Yes"), plain("gText_No") }
@@ -867,6 +953,15 @@ local function drawYesNo()
 end
 
 local function drawSubmenu()
+  local art = LinkTradeMenu._art
+  if art and art.native then
+    local m = art.manifest
+    local r, p = m.geometry.actionFrame, m.geometry.actionOrigin
+    Chrome.fixedStdFrame(r[1] + 1, r[2] + 1, r[3] - r[1] - 1, r[4] - r[2] - 1)
+    for i, row in ipairs(m.actions) do FrlgFont.draw(plain(row.key), p[1] * T, (p[2] + (i - 1) * 2) * T, nativeTextOptions(art, "actions")) end
+    require("src.ui.game3.rs.menu_cursor").draw(p[1] * T, (p[2] + (LinkTradeMenu.subCursor - 1) * 2) * T, m.geometry.actionCursorWidth * T)
+    return
+  end
   -- pokefirered/src/trade.c:1850
   Chrome.stdFrame(17, 15, 12, 4)
   local labels = { plain("gText_TradeAction_Summary"), plain("gText_TradeAction_Trade") }
@@ -954,7 +1049,16 @@ function LinkTradeMenu.draw()
       end
       -- pokefirered/src/party_menu.c:2816
       local holdFrame = x and LinkTradeMenu.heldItemFrame(party[i + 1])
-      if holdFrame then
+      if holdFrame and art.native then
+        art.party = art.party or assert(Kit.manifest("rse/party"), "native RS held-item pack missing")
+        local held = art.party.sprites.heldItems
+        art.heldImage = art.heldImage or assert(Kit.image(held.png), "native RS held-item image missing")
+        art.heldQuads = art.heldQuads or {}
+        local frame = held.anims[holdFrame + 1][1].frame
+        local q = art.heldQuads[frame]
+        if not q then q = g.newQuad(0, frame * held.h, held.w, held.h, art.heldImage:getDimensions()); art.heldQuads[frame] = q end
+        g.draw(art.heldImage, q, x + 4 - held.w / 2, y + 10 - held.h / 2)
+      elseif holdFrame then
         local PartyMenu = require("src.ui.game3.party_menu")
         local hold = PartyMenu.heldItemSheet()
         g.draw(hold.image, hold.quads[holdFrame], x + 4 - hold.w / 2, y + 10 - hold.h / 2)
@@ -963,12 +1067,24 @@ function LinkTradeMenu.draw()
   end
 
   local s = link().session()
+  if art.native then
+    local opts = nativeTextOptions(art, "spriteText")
+    local centers = art.manifest.coords.owner
+    FrlgFont.draw((s and s.name) or "", centers[1][1] - 16, centers[1][2] - 8, opts)
+    FrlgFont.draw((LT.peer and LT.peer.name) or "", centers[2][1] - 16, centers[2][2] - 8, opts)
+    local cp, bp = art.manifest.geometry.cancelTextCenters[1], art.manifest.geometry.chooseTextCenters[1]
+    FrlgFont.draw(plain("TradeText_Cancel"), cp[1] - 16, cp[2] - 8, opts)
+    local key = LinkTradeMenu.bottom == "okay" and "gTradeText_TradeOkayPrompt" or LinkTradeMenu.bottom == "cancel" and "TradeText_CancelTradePrompt"
+      or LinkTradeMenu.selected[0].state >= 4 and "TradeText_PressBToExit" or "TradeText_ChoosePoke"
+    FrlgFont.draw(plain(key), bp[1] - 16, bp[2] - 8, opts)
+  else
   drawNameSprite((s and s.name) or "", 48)
   drawNameSprite((LT.peer and LT.peer.name) or "", 168)
   -- pokefirered/src/trade.c:1024
   drawText(RomText.at("sActionTexts", 0), 215 - 16, 151 - 8 + 2, MENU_TEXT_COLORS)
   -- pokefirered/src/trade.c:1034
   drawText(BOTTOM_TEXT[LinkTradeMenu.bottom](), 24 - 16, 150 - 8 + 2, MENU_TEXT_COLORS)
+  end
 
   for side = 0, 1 do
     local sel = LinkTradeMenu.selected[side]
@@ -976,15 +1092,22 @@ function LinkTradeMenu.draw()
     if sel.state == 0 then
       for i = 0, partyCount(side) - 1 do
         local c = LinkTradeMenu.SPRITE_COORDS[side * PARTY_SIZE + i]
-        drawNickname(party[i + 1], c[1] - 1, c[2], 64)
+        if art.native then nativeNickname(art, party[i + 1], c[1] * T, c[2] * T, false)
+        else drawNickname(party[i + 1], c[1] - 1, c[2], 64) end
       end
     elseif sel.state >= 4 and party[sel.idx + 1] then
       local mon = party[sel.idx + 1]
       -- pokefirered/src/trade.c:2307
+      if art.native then
+        local geo = RsTrade.selectedGeometry(art.manifest, side)
+        nativeNickname(art, mon, geo.name[1], geo.name[2], true)
+        for li, line in ipairs(LinkTradeMenu.movesLines(mon)) do FrlgFont.draw(line, geo.moves[1], geo.moves[2] + (li - 1) * 16, nativeTextOptions(art, "menu")) end
+      else
       drawNickname(mon, side == 0 and 2 or 17, 5, 80)
       local mx = side == 0 and 3 or 18
       for li, line in ipairs(LinkTradeMenu.movesLines(mon)) do
         drawText(line, mx * T, 8 * T + (li - 1) * 14, FrlgFont.COLOR.WHITE)
+      end
       end
     end
   end

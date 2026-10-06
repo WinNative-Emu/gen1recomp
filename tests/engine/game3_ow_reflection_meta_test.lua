@@ -86,10 +86,14 @@ local blob = OwExtract.encodeMeta({
   palette = source,
   reflectionPalette = rawReflection,
   mappedReflectionPalette = mappedReflection,
+  drawOffX = 32,
+  drawOffY = -4,
 })
 local meta = OwExtract.decodeMeta(blob)
 check(meta ~= nil, "reflection metadata decodes")
-eq(meta.formatVersion, 3, "new metadata format is explicit")
+eq(meta.formatVersion, OwExtract.FORMAT_VERSION, "new metadata format is explicit")
+eq(meta.drawOffX, 32, "subsprite draw x offset is retained")
+eq(meta.drawOffY, -4, "negative subsprite draw y offset is retained")
 eq(meta.paletteTag, 0x1100, "base palette tag is retained")
 eq(meta.reflectionPaletteTag, 0x1102, "ROM reflection palette tag is retained")
 eq(meta.paletteSlot, 0, "ROM palette slot is retained")
@@ -109,4 +113,5 @@ check(unavailable ~= nil, "metadata without a mapped reflection palette decodes"
 eq(unavailable.reflectionPaletteMappedTag, nil, "missing mapped palette stays unavailable")
 eq(unavailable.reflectionPalette, nil, "missing palette colors are not synthesized")
 eq(unavailable.mappedReflectionPalette, nil, "missing mapped colors are not synthesized")
+eq(unavailable.drawOffX, 0, "missing draw offset is centered")
 T.finish("game3_ow_reflection_meta_test")

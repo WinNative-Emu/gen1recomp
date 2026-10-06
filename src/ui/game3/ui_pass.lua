@@ -123,6 +123,11 @@ function UiPass.drawUi()
     tryDraw(MuseumPic)
   end
 
+  local towerRecords = package.loaded["src.ui.game3.rs.battle_tower_records"]
+  if towerRecords and towerRecords.isVisible() and not suppressOverworldDialog then tryDraw(towerRecords) end
+  local linkRecords = package.loaded["src.ui.game3.rs.link_records"]
+  if linkRecords and linkRecords.isVisible() and not suppressOverworldDialog then tryDraw(linkRecords) end
+
   if Message.isOpen() and not suppressOverworldDialog and not Stack.has("box_storage") and not Stack.has("pc_menu") then
     Message.draw()
   end

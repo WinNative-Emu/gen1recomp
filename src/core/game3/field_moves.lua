@@ -540,6 +540,17 @@ function FieldMoves.strengthFromMenu(ctx)
   end
 
   local mon = ctx.mon or FieldMoves.partyMoveUser(ctx.party, "STRENGTH")
+  local RsBraille = lazyReq("src.core.game3.braille_field_rs")
+  if RsBraille.isRs(ctx.session) then
+    -- pokeruby/src/fldeff_strength.c:47
+    if RsBraille.shouldDoStrength(ctx.session) then
+      return { ok = true, action = "braille_rs_strength", mon = mon }
+    end
+    if not ctx.facingObject or (ctx.facingObject.gfx ~= FieldMoves.GFX_IDS.PUSHABLE_BOULDER
+        and ctx.facingObject.graphicsId ~= FieldMoves.GFX_IDS.PUSHABLE_BOULDER) then
+      return { ok = false, text = FieldMoves.TEXT.CANT_USE_HERE }
+    end
+  end
   local monName = FieldMoves.getMonName(mon)
 
   return {
@@ -605,6 +616,12 @@ function FieldMoves.flyFromMenu(ctx)
     return { ok = false, text = FieldMoves.TEXT.BADGE_REQUIRED, badge = "FLY" }
   end
 
+  -- pokeruby/src/pokemon_menu.c:833
+  local RsBraille = lazyReq("src.core.game3.braille_field_rs")
+  if RsBraille.isRs(ctx.session) and RsBraille.shouldDoFly(ctx.session) then
+    return { ok = true, action = "braille_rs_fly", mon = ctx.mon or FieldMoves.partyMoveUser(ctx.party, "FLY") }
+  end
+
   if not FieldMoves.isOutdoors(ctx.mapType) then
     return { ok = false, text = FieldMoves.TEXT.CANT_USE_HERE }
   end
@@ -625,6 +642,10 @@ function FieldMoves.digFromMenu(ctx)
   end
 
   local mon = ctx.mon or FieldMoves.partyMoveUser(ctx.party, "DIG")
+  local RsBraille = lazyReq("src.core.game3.braille_field_rs")
+  if RsBraille.isRs(ctx.session) and RsBraille.shouldDoDig(ctx.session) then
+    return { ok = true, action = "braille_rs_dig", mon = mon, warp = ctx.escapeWarp }
+  end
 
   return {
     ok = true,

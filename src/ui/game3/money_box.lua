@@ -49,6 +49,16 @@ local RomText = require("src.core.game3.rom_text")
 function MoneyBox.draw()
   if not MoneyBox.visible then return end
   local x, y = MoneyBox.x, MoneyBox.y
+  local Runtime = package.loaded["src.core.game3.runtime"]
+  local session = Runtime and Runtime.getSession and Runtime.getSession()
+  local id = require("src.core.game3.profile").forSession(session).id
+  if id == "ruby" or id == "sapphire" then
+    love.graphics.push()
+    love.graphics.translate(x * 8, y * 8)
+    require("src.ui.game3.rs.shop_menu").drawMoneyBox(MoneyBox._amount)
+    love.graphics.pop()
+    return
+  end
   -- pret DrawMoneyBox: template = (x + 1, y + 1, 8, 3)
   local left = x + 1
   local top = y + 1

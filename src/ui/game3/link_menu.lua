@@ -2,6 +2,7 @@ local Stack = require("src.ui.game3.stack")
 local Window = require("src.ui.game3.window")
 local FrlgFont = require("src.ui.game3.frlg_font")
 local Status = require("src.core.game3.link.status")
+local CacheBlob = require("src.import.CacheBlob")
 
 local LinkMenu = {}
 
@@ -53,12 +54,12 @@ local function read_bytes(rel)
     if okR and type(d) == "string" and #d > 0 then return d end
   end
   if love and love.filesystem and love.filesystem.read then
-    local okR, d = pcall(love.filesystem.read, "data/generated/gba/" .. rel)
+    local okR, d = pcall(CacheBlob.readFs, "data/generated/gba/" .. rel)
     if okR and type(d) == "string" and #d > 0 then return d end
   end
   local f = io.open("data/generated/gba/" .. rel, "rb")
   if f then
-    local d = f:read("*a")
+    local d = CacheBlob.decode("data/generated/gba/" .. rel, f:read("*a"))
     f:close()
     if d and #d > 0 then return d end
   end
@@ -631,6 +632,20 @@ end
 
 -- pokefirered/src/cable_club.c:87
 local function drawPlayerCount()
+  local Profile = require("src.core.game3.profile")
+  local Policy = require("src.ui.game3.rs.trade_policy")
+  if Policy.matches(Profile.forSession().id) then
+    local man = assert(require("src.ui.game3.rse.scene_kit").manifest(Policy.SUB), "native RS cable UI missing")
+    local row = Policy.cableCount(man, Direct.count)
+    if not row then return end
+    local r, p = row.rect, row.origin
+    Window.stdFrame(Window.template(r[1] + 1, r[2] + 1, r[3] - r[1] - 1, r[4] - r[2] - 1))
+    local text = Policy.text(row.key, {stringVars = row.stringVars})
+    local opts = {font = "native_3"}
+    local width = FrlgFont.measure(text, opts)
+    FrlgFont.draw(text, p[1] * 8 + math.floor((row.width - width) / 2), p[2] * 8, opts)
+    return
+  end
   local tpl = Direct.COUNT_TEMPLATE
   Window.stdFrame(tpl)
   FrlgFont.draw(RomText().plain("gText_NumPlayerLink", { stringVars = { tostring(Direct.count) } }),

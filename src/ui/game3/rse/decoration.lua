@@ -43,6 +43,7 @@ local function se(name)
 end
 
 local function text(key, vars)
+  if D._opts and D._opts.text then return D._opts.text(key, vars) end
   return RomText.plain(key, vars and { stringVars = vars } or nil)
 end
 
@@ -149,6 +150,7 @@ end
 -- pokeemerald/src/decoration.c:581
 function D.open(opts)
   opts = opts or {}
+  D._opts = opts
   D.open_ = true
   D._session = opts.session or Rse.session()
   D.isPlayerRoom = opts.isPlayerRoom == true
@@ -187,6 +189,7 @@ local function cancelActions()
 end
 
 function D.reset()
+  D._opts = nil
   D._trade = nil
   D.open_ = false
   D._onClose = nil
@@ -335,7 +338,7 @@ local function inSecretBaseSection()
   local Map = package.loaded["src.core.game3.map"]
   local def = Map and Map.currentDef and Map.currentDef()
   local ok, sec = pcall(function()
-    return require("src.core.game3.constants").of("emerald"):require("region_map_sections", "MAPSEC_SECRET_BASE")
+    return require("src.core.game3.constants").active(session()):require("region_map_sections", "MAPSEC_SECRET_BASE")
   end)
   return def and ok and def.regionMapSectionId == sec
 end
@@ -351,7 +354,7 @@ local function placeDecoration()
     D.pendingSprite = { decor = m.decor, x = m.x, y = m.y }
     SB().setDecoration(m.decor, m.x, m.y, sess)
   end
-  if inSecretBaseSection() then
+  if not (D._opts and D._opts.recordSecretBaseVisit == false) and inSecretBaseSection() then
     Rse.call("tv", "tryPutSecretBaseVisitOnAir", "TryPutSecretBaseVisitOnAir", nil,
       SB().base(sess, Rse.var("VAR_CURRENT_SECRET_BASE", sess)).decorations)
   end
@@ -520,12 +523,15 @@ local function putAwayDecoration()
       local r = D.putAwayIteration(i)
       if r.done then break end
       if r.localId then O.removeObject(r.localId) end
+      if r.flagId and r.flagId ~= 0 then
+        require("src.core.game3.scripting.flags").setFlag(Rse.store(), nil, r.flagId, true)
+      end
     end
     D._marked = nil
     fade("FROM_BLACK", function()
       message(text("gText_DecorationReturnedToPC"), function() waitPress(continueMode) end)
       D.state = "printing"
-      if inSecretBaseSection() then
+      if not (D._opts and D._opts.recordSecretBaseVisit == false) and inSecretBaseSection() then
         Rse.call("tv", "tryPutSecretBaseVisitOnAir", "TryPutSecretBaseVisitOnAir", nil,
           SB().base(session(), Rse.var("VAR_CURRENT_SECRET_BASE", session())).decorations)
       end
@@ -610,7 +616,8 @@ function D.trade()
 end
 
 -- pokeemerald/src/decoration.c:844
-function D.openTrade(ctx, done)
+function D.openTrade(ctx, done, opts)
+  D._opts = opts or {}
   D.open_ = true
   D._session = Rse.session()
   D.isPlayerRoom = false
@@ -641,6 +648,7 @@ end
 -- pokeemerald/src/secret_base.c:916
 function D.openRegistry(opts)
   opts = opts or {}
+  D._opts = opts
   D.open_ = true
   D._session = opts.session or Rse.session()
   D._onClose = opts.onClose
@@ -984,6 +992,7 @@ local function isFemale()
 end
 
 local function avatarGfx()
+  if D._opts and D._opts.avatarGfx then return D._opts.avatarGfx(session(), isFemale()) end
   local C = require("src.core.game3.constants").of("emerald")
   return C:require("event_objects", isFemale() and "OBJ_EVENT_GFX_MAY_DECORATING" or "OBJ_EVENT_GFX_BRENDAN_DECORATING")
 end
@@ -1066,6 +1075,9 @@ end
 
 function D.draw()
   if not D.open_ then return end
+  if D._opts and D._opts.draw then
+    return D._opts.draw(D, {drawPlacing = drawPlacing, drawPutAway = drawPutAway})
+  end
   local mode = D.mode
   if mode then
     if mode.kind == "place" then drawPlacing() else drawPutAway() end
@@ -1085,7 +1097,8 @@ end
 -- pokeemerald/src/decoration.c:591
 function D.openPlayerRoom(opts)
   opts = opts or {}
-  return D.open({ isPlayerRoom = true, session = opts.session, onClose = opts.onClose })
+  opts.isPlayerRoom = true
+  return D.open(opts)
 end
 
 return D

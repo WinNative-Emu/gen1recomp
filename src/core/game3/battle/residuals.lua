@@ -2,6 +2,7 @@
 
 local Rules = require("src.core.game3.battle.rules")
 local EffectCtx = require("src.core.game3.battle.effect_ctx")
+local BattleProfile = require("src.core.game3.battle.profile")
 
 local Residuals = {}
 
@@ -75,7 +76,11 @@ local function runStepAndRecord(adapter, battler, phase, fn, events)
   if battler and adapter:isFainted(battler) then return false end
   if adapter:isBattleDecided() then return false end
 
+  if adapter.prepareFaintStep then adapter:prepareFaintStep(battler, phase) end
+
   local active = adapter:activeBattlers() or {}
+  local sequencing = BattleProfile.rule(adapter._st, "sequencingPolicy")
+  if sequencing then active = sequencing.residualOrder(adapter, battler, phase, active) end
   local hpBefore = {}
   for _, b in ipairs(active) do
     if b and b.side then

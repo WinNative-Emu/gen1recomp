@@ -120,7 +120,7 @@ PcRse.BY_NAME = {
   GameClear = function(ctx)
     local sess = Rse.session()
     local Storage = require("src.core.game3.storage")
-    for _, mon in ipairs(sess and sess.party or {}) do Storage.fullHealMon(mon) end
+    for _, mon in ipairs(sess and sess.party or {}) do Storage.fullHealMon(mon, sess) end
     local hasRecords = Rse.flag("FLAG_SYS_GAME_CLEAR", sess)
     if not hasRecords then Rse.setFlag("FLAG_SYS_GAME_CLEAR", true, sess) end
     if sess then PcRse.gameClearState(sess) end

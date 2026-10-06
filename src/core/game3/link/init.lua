@@ -166,6 +166,20 @@ function Link.setCableClubWarp(ctx)
   return nil
 end
 
+local function liveSeat()
+  local live = Link.link
+  if not (live and live.isOpen and live:isOpen()) then return nil end
+  return live.getSeat and tonumber(live:getSeat()) or (live.role == "guest" and 1 or 0)
+end
+
+-- pokeruby/src/overworld.c:1883
+function Link.cableClubArrivalX(x)
+  local seat = Link._warpMap and Link._warpMap == Link.currentMap() and liveSeat()
+  local n = tonumber(x)
+  if not (n and seat and n >= 0 and n < 0x8000) then return x end
+  return n + seat
+end
+
 local function resolveDest(dest)
   local mapId = dest.map or dest.mapId
   if type(mapId) ~= "string" then return nil end
@@ -227,8 +241,19 @@ function Link.doCableClubWarp(ctx, adapters)
   Link._warpMap = nil
   local mapId = Link.currentMap()
   local s = Link.session()
+  local dest = s and s.warpDestination
+  local seat = liveSeat()
+  if type(dest) == "table" and seat and seat > 0 then
+    local destMap, x, y = resolveDest(dest)
+    if destMap then
+      local shifted = {}
+      for k, v in pairs(dest) do shifted[k] = v end
+      shifted.warpId, shifted.x, shifted.y = -1, x + seat, y
+      dest = shifted
+    end
+  end
   local warped = not (armedOn and mapId ~= armedOn)
-    and Link.warpToDest(ctx, adapters, s and s.warpDestination, "warpsilent")
+    and Link.warpToDest(ctx, adapters, dest, "warpsilent")
   if not warped then
     local Player = package.loaded["src.core.game3.player"]
     if Player and Player.setVisible then Player.setVisible(true) end
@@ -322,6 +347,11 @@ function Link.doLinkRoomExit(ctx, adapters)
   if ctx == nil and adapters == nil then
     ctx, adapters = Link.vmCtx()
   end
+  local PartyMenu = package.loaded["src.ui.game3.party_menu"]
+  if PartyMenu and PartyMenu._linkRoomChoose then
+    PartyMenu._linkRoomChoose = nil
+    if PartyMenu.isOpen and PartyMenu.isOpen() then PartyMenu._onSelect = nil; PartyMenu.close() end
+  end
   Link.cleanupLinkRoomState(ctx, adapters)
   return Link.returnFromLinkRoom(ctx, adapters)
 end
@@ -331,7 +361,7 @@ function Link.exitLinkRoom(ctx, adapters)
   Link.exitQueued = true
   local link = Link.link
   if link and link:isOpen() then
-    link:send({ type = "game3_exit_link_room" })
+    link:send({ type = Game3Link.EXIT, seat = link.seat })
     return true
   end
   Link.exitQueued = false
@@ -339,9 +369,9 @@ function Link.exitLinkRoom(ctx, adapters)
   return false
 end
 
-local function leaveLink(link)
+local function leaveLink(link, keepRoom)
   if type(link) == "table" and type(link.leave) == "function" then
-    pcall(link.leave, link)
+    pcall(link.leave, link, keepRoom)
   end
 end
 
@@ -354,6 +384,8 @@ function Link.attach(link)
   link.onClosed = function(reason)
     Link.link = nil
     Link._pump = nil
+    local Players = package.loaded["src.core.game3.link.link_players"]
+    if Players then Players.clear() end
     Link._cardSent = false
     Link.lastCloseReason = reason
     if Link._localClose then return end
@@ -450,10 +482,12 @@ function Link.closeLink(reason)
   Link.link = nil
   Link._pump = nil
   Link._cardSent = false
+  local Players = package.loaded["src.core.game3.link.link_players"]
+  if Players then Players.clear() end
   if not link then return false end
   Link._localClose = true
   local ok = pcall(function() link:close(reason or "close_link") end)
-  leaveLink(link)
+  leaveLink(link, reason == "exit_link_room")
   Link._localClose = false
   return ok
 end
@@ -490,34 +524,11 @@ function Link.update(dt)
       end
     end
   end
+  lazyReq("src.core.game3.link.link_players").update()
   if Link.exitQueued then
-    local live = Link.link
-    if not (live and live:isOpen()) then
-      Link.exitQueued = false
-      Link._exits = nil
-      Link.doLinkRoomExit()
-    else
-      local ex = Link._exits or { seats = {}, n = 0 }
-      Link._exits = ex
-      local exit = live:take("game3_exit_link_room")
-      while exit do
-        local seat = tonumber(exit.seat)
-        if seat == nil then
-          ex.n = ex.n + 1
-        elseif not ex.seats[seat] then
-          ex.seats[seat] = true
-          ex.n = ex.n + 1
-        end
-        exit = live:take("game3_exit_link_room")
-      end
-      local need = math.max(1, (tonumber(live.nseats) or 2) - 1)
-      if ex.n >= need then
-        Link.exitQueued = false
-        Link._exits = nil
-        Link.closeLink("exit_link_room")
-        Link.doLinkRoomExit()
-      end
-    end
+    Link.exitQueued = false
+    Link.closeLink("exit_link_room")
+    Link.doLinkRoomExit()
   end
   local Union = package.loaded["src.core.game3.link.union_room"]
   local union = Union and Union.update(dt) or false
@@ -702,6 +713,7 @@ Link.inputPressed = inputPressed
 
 -- pokefirered/src/link.c:243 IsWirelessAdapterConnected
 function Link.isWirelessAdapterConnected(ctx, adapters)
+  if not Family.hasWireless(Link.version()) then Link.setResult(ctx, 0); return false, 0 end
   if Link.adapterConnected() then
     Link.setResult(ctx, 1)
     return false, 1
@@ -800,6 +812,9 @@ end
 
 -- pokefirered/src/trainer_card.c:858
 function Link.cardStars(s)
+  if Family.isRubySapphire(Family.activeVersion()) then
+    return lazyReq("src.core.game3.link.rs").trainerCard(s, Family.activeVersion()).stars
+  end
   if Family.of() == "rse" then
     -- pokeemerald/src/trainer_card.c:776 TrainerCard_GenerateCardForLinkPlayer
     local FieldRse = lazyReq("src.core.game3.scripting.natives_field_rse")
@@ -862,6 +877,9 @@ end
 function Link.localTrainerCard()
   local s = Link.session()
   if type(s) ~= "table" then return nil end
+  if Family.isRubySapphire(Family.activeVersion()) then
+    return lazyReq("src.core.game3.link.rs").trainerCard(s, Family.activeVersion())
+  end
   local stats = type(s.gameStats) == "table" and s.gameStats or {}
   local card = type(s.trainerCard) == "table" and s.trainerCard or {}
   return {
@@ -973,7 +991,6 @@ function Link.reset()
   Link._cardSent = false
   Link.peerCard = nil
   Link.peerCards = {}
-  Link._exits = nil
   Link._live = nil
   Link.connectPrompt = nil
   Link._towerReconnectPending = false

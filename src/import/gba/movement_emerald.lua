@@ -63,7 +63,13 @@ function MovementEmerald.forGame(game)
   local toCanon, names = {}, {}
   local count = 0
   for raw, name in pairs(actions(key)) do
-    local v = c.byName[name]
+    local canonicalName = name
+    if key == "ruby" then
+      canonicalName = name:gsub("^MOVEMENT_ACTION_WALK_IN_PLACE_FASTEST_", "MOVEMENT_ACTION_WALK_IN_PLACE_FASTER_")
+        :gsub("^MOVEMENT_ACTION_WALK_FASTEST_", "MOVEMENT_ACTION_WALK_FASTER_")
+        :gsub("^MOVEMENT_ACTION_WALK_DOWN_AFFINE_1$", "MOVEMENT_ACTION_WALK_DOWN_AFFINE")
+    end
+    local v = c.byName[canonicalName]
     if v ~= nil then
       toCanon[raw] = v
       names[raw] = name

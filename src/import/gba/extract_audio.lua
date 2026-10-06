@@ -752,7 +752,7 @@ function ExtractAudio.run(rom, cache, opts)
 
   if A.cry_id_table then
     cryIds = ExtractAudio.cryIdsFromTable(data, A.cry_id_table, A.cry_id_count, C.species.byName,
-      Versions.NUM_SPECIES)
+      A.cry_id_species_count or Versions.NUM_SPECIES)
   else
     for species = 1, 411 do
       cryIds[species] = species_to_cry_index_frlg(species, cryCount)

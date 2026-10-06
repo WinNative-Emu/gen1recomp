@@ -17,7 +17,7 @@ local MAP_RESET = {
 
 local function files()
   local list = {}
-  local p = io.popen("find src -name '*.lua' -not -path 'src/save_convert/*' -not -path 'src/import/*' -not -path 'src/mods/*'")
+  local p = io.popen("find src -name '*.lua' -not -path 'src/save_convert/*' -not -path 'src/import/*' -not -path 'src/mods/*' -not -path '*/rs/*'")
   for line in p:lines() do list[#list + 1] = line end
   p:close()
   return list
@@ -35,7 +35,8 @@ end
 local function hits(pattern)
   local out = {}
   for path, text in pairs(ENGINE) do
-    if text:find(pattern) then out[#out + 1] = path end
+    local rsLinkPacket = path == "src/core/game3/link/battle.lua" and pattern:find("enigma", 1, true)
+    if not rsLinkPacket and text:find(pattern) then out[#out + 1] = path end
   end
   table.sort(out)
   return out

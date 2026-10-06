@@ -2,6 +2,7 @@ local RelayTransport = {}
 RelayTransport.__index = RelayTransport
 
 local SIDE_SEAT = { host = 0, guest = 1 }
+local EXIT = "game3_exit_link_room"
 
 local function defaultClient()
   local loaded = package.loaded["src.online.Client"]
@@ -48,6 +49,7 @@ function RelayTransport.new(roomSession, opts)
     _rs = roomSession,
     _client = opts.client or defaultClient(),
     _closedByUs = false,
+    _departed = {},
   }, RelayTransport)
   self._startPlayers = copyPlayers(self:players())
   self._mySeat = self:seat()
@@ -122,7 +124,8 @@ function RelayTransport:_seatGone()
     if type(p) == "table" and p.id ~= nil then present[p.id] = true end
   end
   for _, p in ipairs(self._startPlayers) do
-    if p.id ~= nil and p.seat ~= self._mySeat and not present[p.id] then return true end
+    if p.id ~= nil and p.seat ~= self._mySeat and not present[p.id]
+        and not self._departed[p.seat] then return true end
   end
   return false
 end
@@ -152,7 +155,17 @@ function RelayTransport:update()
     self.closed = true
     return
   end
+  call(rs, "take", EXIT, function(m)
+    local seat = type(m) == "table" and tonumber(m.seat)
+    if seat then self._departed[seat] = true end
+    return false
+  end)
   if self:_seatGone() then self.closed = true end
+end
+
+function RelayTransport:forgetSeat(seat)
+  seat = tonumber(seat)
+  if seat then self._departed[seat] = true end
 end
 
 local function tag(msg)
@@ -179,7 +192,11 @@ end
 function RelayTransport:poll()
   local list = self._rs:poll() or {}
   local out = {}
-  for i = 1, #list do out[#out + 1] = tag(list[i]) end
+  for i = 1, #list do
+    local m = tag(list[i])
+    if type(m) == "table" and m.type == EXIT and tonumber(m.seat) then self._departed[tonumber(m.seat)] = true end
+    out[#out + 1] = m
+  end
   return out
 end
 
@@ -192,12 +209,13 @@ function RelayTransport:close()
   self.closed = true
 end
 
-function RelayTransport:leave()
+function RelayTransport:leave(keepRoom)
   self.closed = true
   if self.left then return false end
   self.left = true
   local rs = self._rs
   if rs.left then return false end
+  if keepRoom then rs.keepRoom = true end
   pcall(rs.close, rs)
   return true
 end

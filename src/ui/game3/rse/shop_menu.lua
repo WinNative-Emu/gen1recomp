@@ -16,6 +16,8 @@ local POKENEWS_SLATEPORT = 1
 local MAX_BAG_ITEM_CAPACITY = 99
 -- pokeemerald/include/constants/characters.h:74
 local CHAR_SPACER = 0x77
+-- include/constants/game_stat.h:42
+local GAME_STAT_SHOPPED = 38
 
 -- pokeemerald/src/shop.c:343
 local WIN = {
@@ -102,8 +104,13 @@ local function selected(shop)
   return shop._items[shop.scroll + shop.row + 1]
 end
 
+local function plain(shop, key, ctx)
+  if shop._nativeShopPolicy then return shop._nativeShopPolicy.plain(key, ctx) end
+  return RomText.plain(key, ctx)
+end
+
 local function say(shop, key, vars, after)
-  shop._status = RomText.plain(key, { stringVars = vars })
+  shop._status = plain(shop, key, { stringVars = vars })
   shop._after = after
   shop.state = "msg"
 end
@@ -132,13 +139,13 @@ local function back_to_menu(shop)
   shop.mode = "root"
   shop.state = "root"
   shop.cursor = 1
-  shop._status = RomText.plain(shop._martType == RseShop.MART_DECOR2 and "gText_CanIHelpWithAnythingElse"
+  shop._status = plain(shop, shop._martType == RseShop.MART_DECOR2 and "gText_CanIHelpWithAnythingElse"
     or "gText_AnythingElseICanHelp")
 end
 
-local function last_page(key)
+local function last_page(shop, key)
   local TextIR = require("src.core.game3.scripting.text_ir")
-  local ir = RomText.ir(key)
+  local ir = shop._nativeShopPolicy and shop._nativeShopPolicy.ir(key) or RomText.ir(key)
   local start = 1
   for i, seg in ipairs(ir) do
     if seg.t == "para" then start = i + 1 end
@@ -149,6 +156,7 @@ local function last_page(key)
 end
 
 function RseShop.show(shop, opts)
+  shop._nativeShopPolicy = opts.nativePolicy
   local mart = opts.mart
   shop._martType = (mart and mart.martType) or opts.martType or RseShop.MART_NORMAL
   shop.mode = "root"
@@ -157,7 +165,7 @@ function RseShop.show(shop, opts)
   shop.scroll, shop.row = 0, 0
   shop._fading = false
   -- pokeemerald/data/scripts/pokemart.inc:1
-  shop._status = last_page("gText_HowMayIServeYou")
+  shop._status = last_page(shop, "gText_HowMayIServeYou")
   -- pokeemerald/src/shop.c:1211
   shop._history = {}
 end
@@ -196,6 +204,10 @@ end
 
 -- pokeemerald/src/shop.c:1110
 local function subtract_money(shop, id, qty)
+  local session = shop._session
+  if type(session.gameStats) ~= "table" then session.gameStats = {} end
+  local count = math.floor(tonumber(session.gameStats[GAME_STAT_SHOPPED]) or 0)
+  session.gameStats[GAME_STAT_SHOPPED] = count < 0xFFFFFF and count + 1 or 0xFFFFFF
   shop._session.money = money(shop) - shop._totalCost
   se("SE_SHOP")
   shop._afterAnyKey = function() after_purchase(shop, id, qty) end
@@ -204,6 +216,11 @@ end
 -- pokeemerald/src/shop.c:1080
 local function try_purchase(shop)
   local id, qty = shop._itemId, shop.qty
+  local policy = shop._nativeShopPolicy
+  if policy and policy.canPurchase and not policy.canPurchase(shop) then
+    say(shop, "gText_YouDontHaveMoney", nil, function() shop.state = "list" end)
+    return
+  end
   if not is_decor(shop) then
     local bag = shop._session.bag
     if Bag.canAdd(bag, id, qty) and Bag.add(bag, id, qty) then
@@ -280,6 +297,7 @@ end
 
 -- pokeemerald/src/list_menu.c:438
 local function step(shop, down)
+  if shop._nativeShopPolicy then return shop._nativeShopPolicy.step(shop, down) end
   local n, s = total(shop), shown(shop)
   local row, scroll = shop.row, shop.scroll
   if not down then
@@ -512,6 +530,8 @@ end
 
 local function draw_icon(shop, id)
   if is_decor(shop) and id ~= nil then
+    -- pokeruby/shop.c:550
+    if decor().data().nativeIcons == false then return end
     if blankIcons[id] then return draw_object_icon(id, 20, 84) end
     if iconsImage == nil then
       local rel = "data/generated/gba/decorations/icons.rgba"
@@ -545,6 +565,7 @@ local function draw_icon(shop, id)
 end
 
 function RseShop.draw(shop)
+  if shop._nativeShopPolicy then return shop._nativeShopPolicy.draw(shop) end
   if shop.state == "root" then
     local rows = menu_rows(shop)
     local labels, w = {}, 0

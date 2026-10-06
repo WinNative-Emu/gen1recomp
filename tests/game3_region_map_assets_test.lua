@@ -50,6 +50,7 @@ check(MultichoiceExtract.ready({
 
 print("[test] 2. baked assets in an imported cache")
 local Cache = require("tests.game3_cache")
+local CacheBlob = require("src.import.CacheBlob")
 local root = Cache.root("region_map/extract_status.json")
 if not root then
   print("[skip] region map assets: " .. tostring(Cache.reason))
@@ -65,7 +66,7 @@ print("[info] FireRed cache at " .. root)
 local function readFile(rel)
   local f = io.open(root .. "/" .. rel, "rb")
   if not f then return nil end
-  local data = f:read("*a")
+  local data = CacheBlob.decode(root .. "/" .. rel, f:read("*a"))
   f:close()
   return data
 end

@@ -3,6 +3,7 @@
 local Stack = require("src.ui.game3.stack")
 local FrlgFont = require("src.ui.game3.frlg_font")
 local RomText = require("src.core.game3.rom_text")
+local CacheBlob = require("src.import.CacheBlob")
 
 local TrainerCard = { isMenu = true }
 
@@ -47,15 +48,15 @@ local function read_cache_file(path)
     end
   end
   if love and love.filesystem and love.filesystem.read then
-    local d = love.filesystem.read(path)
+    local d = CacheBlob.readFs(path)
     if d and #d > 0 then return d end
     local alt = "data/generated/gba/" .. (path:gsub("^data/generated/gba/", ""))
-    d = love.filesystem.read(alt)
+    d = CacheBlob.readFs(alt)
     if d and #d > 0 then return d end
   end
   local f = io.open(path, "rb")
   if f then
-    local d = f:read("*a")
+    local d = CacheBlob.decode(path, f:read("*a"))
     f:close()
     if d and #d > 0 then return d end
   end
@@ -625,6 +626,8 @@ end
 
 function TrainerCard.show(opts)
   opts = opts or {}
+  local redirected = require("src.ui.game3.screens").redirect("trainer_card", TrainerCard, opts.session)
+  if redirected then return redirected.show(opts) end
   TrainerCard.open = true
   TrainerCard.side = "front"
   TrainerCard._flip = nil

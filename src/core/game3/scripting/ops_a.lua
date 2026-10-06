@@ -61,6 +61,10 @@ local function resolve_text(vm, ptr)
   if type(ptr) == "string" then
     return vm:getText(ptr)
   end
+  -- pokeruby/src/text.c:196
+  if ptr == 0x020234CC and type(vm.ctx.stringVars[4]) == "string" then
+    return TextIR.fromAscii(vm.ctx.stringVars[4])
+  end
   local key = Opcodes.key(ptr)
   return vm:getText(key) or vm:getText(ptr)
 end
@@ -686,7 +690,8 @@ local function dispatch(vm, row)
     -- pokefirered/src/script_pokemon_util.c:48
     local code
     if a.giveMonToPlayer then
-      code = tonumber((a.giveMonToPlayer(species, level, row[3], nickname)))
+      local item = ctx.rsRamSession and var_get(store, ctx, row[3] or 0) or row[3]
+      code = tonumber((a.giveMonToPlayer(species, level, item, nickname)))
     elseif a.giveMon then
       local ok, c = a.giveMon(species, level, row[3], row[4], row[5], nickname)
       code = tonumber(c) or (ok and 0 or 2)
@@ -968,10 +973,15 @@ local function dispatch(vm, row)
     return false
   elseif op == "endram" then
     -- pret ScrCmd_endram (src/scrcmd.c:262) clears the RAM script and stops.
+    local E = require("src.core.game3.rs.enigma")
+    local session = ctx.rsRamSession or E.session()
+    if session and E.matches(session) then require("src.core.game3.rs.ram_script").clear(session) end
+    ctx.rsRamReturnKey = nil
     vm:halt()
     return true
   elseif op == "returnram" then
     -- pret ScrCmd_returnram (src/scrcmd.c:256) resumes the RAM script's caller.
+    if ctx.rsRamReturnKey then vm:setPc(ctx.rsRamReturnKey, 1); return false end
     local frame = table.remove(ctx.stack)
     if not frame then
       vm:halt()
@@ -985,7 +995,7 @@ local function dispatch(vm, row)
     local item = tostring(var_get(store, ctx, row[1]))
     local qty = math.max(1, tonumber(var_get(store, ctx, row[2])) or 1)
     local Runtime = package.loaded["src.core.game3.runtime"]
-    local session = Runtime and Runtime.getSession and Runtime.getSession()
+    local session = ctx.rsRamSession or (Runtime and Runtime.getSession and Runtime.getSession())
     local Storage = require("src.core.game3.storage")
     local storage = session and Storage.ensure(session) or nil
     local ok = false
@@ -1213,6 +1223,8 @@ local function dispatch(vm, row)
     -- pokefirered/src/scrcmd.c:719-731
     local x = var_get(store, ctx, row[4])
     local y = var_get(store, ctx, row[5])
+    local LinkMod = package.loaded["src.core.game3.link.init"]
+    if LinkMod and LinkMod.cableClubArrivalX then x = LinkMod.cableClubArrivalX(x) end
     if a.warp then
       -- waitstate typically follows; mark pending and let waitstate poll.
       ctx.warpPending = true
@@ -1372,7 +1384,11 @@ local function dispatch(vm, row)
     local body = TextIR.toPlain(ir, text_ctx_view(vm)) or ""
     local okB, Braille = pcall(require, "src.ui.game3.braille")
     if okB and type(Braille) == "table" and type(Braille.show) == "function" then
-      local okShow = pcall(Braille.show, body, { width = braille_width(ir) })
+      local window
+      for _, seg in ipairs(ir) do
+        if seg.t == "ext" and seg.cmd == "brailleformat" then window = seg.args end
+      end
+      local okShow = pcall(Braille.show, body, { width = braille_width(ir), window = window })
       if okShow then
         ctx.messageOpen = true
         return false
@@ -1391,7 +1407,14 @@ local function dispatch(vm, row)
     Flags.setVar(store, ctx, 0x8004, width or braille_width(ir))
     return false
   elseif op == "messageautoscroll" then
-    return show_message(vm, row.ptr or row[1], false)
+    show_message(vm, row.ptr or row[1], false)
+    -- pokeemerald/src/scrcmd.c:1292
+    local okP, profile = pcall(function() return require("src.core.game3.profile").forSession() end)
+    local Message = package.loaded["src.ui.game3.message"]
+    if okP and profile and profile.id == "emerald" and Message and Message.setAutoScroll then
+      Message.setAutoScroll()
+    end
+    return false
   elseif op == "setmetatile" or op == "dofieldeffect" or op == "waitfieldeffect"
       or op == "setfieldeffectargument" then
     -- Field pack: no-op / instant unless host implements.
@@ -1541,7 +1564,9 @@ local function dispatch(vm, row)
       local Runtime = package.loaded["src.core.game3.runtime"]
       rseSession = Runtime and Runtime.getSession and Runtime.getSession()
       if rseSession and require("src.core.game3.profile").family(rseSession) == "rse" then
-        RseRematch = require("src.core.game3.rse.init").system("rematch")
+        local RsRematch = require("src.core.game3.rs.rematch")
+        if RsRematch.enabled(rseSession) then RseRematch = RsRematch
+        else RseRematch = require("src.core.game3.rse.init").system("rematch") end
       end
     end
     if op == "trainerbattle" then
@@ -1657,6 +1682,7 @@ local function dispatch(vm, row)
       local function beginBattle()
         a.startTrainerBattle(foe, function(result)
           local lost = (result == "lose" or result == "whiteout" or result == "blackout")
+          if RseRematch and RseRematch.isPlayerDefeated then lost = RseRematch.isPlayerDefeated(result) end
           -- pret: gSpecialVar_Result = TRUE if player defeated (early rival).
           if earlyRival then
             Flags.setVar(store, ctx, Ctx.VAR_RESULT, lost and 1 or 0)
@@ -1808,7 +1834,7 @@ local function dispatch(vm, row)
       ok = a.checkItem(item, qty) and true or false
     else
       local Runtime = package.loaded["src.core.game3.runtime"]
-      local session = Runtime and Runtime.getSession and Runtime.getSession()
+      local session = ctx.rsRamSession or (Runtime and Runtime.getSession and Runtime.getSession())
       if session and session.bag then
         local Bag = require("src.core.game3.bag")
         ok = Bag.has(session.bag, item, qty)
@@ -1848,7 +1874,7 @@ local function dispatch(vm, row)
       ok = a.checkItemSpace(item, qty) and true or false
     else
       local Runtime = package.loaded["src.core.game3.runtime"]
-      local session = Runtime and Runtime.getSession and Runtime.getSession()
+      local session = ctx.rsRamSession or (Runtime and Runtime.getSession and Runtime.getSession())
       if session and session.bag then
         local Bag = require("src.core.game3.bag")
         ok = Bag.canAdd(session.bag, item, qty) and true or false
@@ -2083,7 +2109,7 @@ local function dispatch(vm, row)
     -- pokefirered/src/scrcmd.c:877
     local Party = require("src.core.game3.party")
     local Runtime = package.loaded["src.core.game3.runtime"]
-    local session = Runtime and Runtime.getSession and Runtime.getSession()
+    local session = ctx.rsRamSession or (Runtime and Runtime.getSession and Runtime.getSession())
     Flags.setVar(store, ctx, Ctx.VAR_RESULT, Party.size(session and session.party))
     return false
   elseif op == "checkplayergender" then
@@ -2218,6 +2244,31 @@ local function dispatch(vm, row)
     end
     return false
   elseif op == "erasebox" then
+    local braille = package.loaded["src.ui.game3.braille"]
+    local win = braille and braille.isOpen() and braille.window()
+    if win and (tonumber(row[1]) or 0) <= win.left and (tonumber(row[2]) or 0) <= win.top
+        and (tonumber(row[3]) or 0) >= win.right and (tonumber(row[4]) or 0) >= win.bottom then
+      -- pokeruby/src/scrcmd.c:1367
+      braille.hide()
+      ctx.messageOpen = false
+    end
+    local fieldRecords = package.loaded["src.ui.game3.rse.frontier_records"]
+    if fieldRecords and fieldRecords.eraseBox then fieldRecords.eraseBox(row[1], row[2], row[3], row[4]) end
+    local records = package.loaded["src.ui.game3.rs.link_records"]
+    if records and records.eraseBox then records.eraseBox(row[1], row[2], row[3], row[4]) end
+    local board = package.loaded["src.ui.game3.rs.battle_tower_records"]
+    if board and board.eraseBox then board.eraseBox(row[1], row[2], row[3], row[4]) end
+    local elevator = package.loaded["src.ui.game3.elevator_window"]
+    if elevator and elevator.hide then
+      local Runtime = package.loaded["src.core.game3.runtime"]
+      local session = Runtime and Runtime.getSession and Runtime.getSession()
+      local game = require("src.core.game3.profile").forSession(session).id
+      if (game == "ruby" or game == "sapphire")
+          and (tonumber(row[1]) or 0) <= 29 and (tonumber(row[3]) or 0) >= 20
+          and (tonumber(row[2]) or 0) <= 5 and (tonumber(row[4]) or 0) >= 0 then
+        elevator.hide()
+      end
+    end
     return false
   else
     local Runtime = package.loaded["src.core.game3.runtime"]

@@ -61,12 +61,17 @@ do
   local session = { party = { mon(1), mon(4) } }
   Storage.ensure(session)
   BoxStorageUI.show({ session = session })
+  for _ = 1, 600 do
+    if not BoxStorageUI.isPresentationBusy() then break end
+    BoxStorageUI.update(1 / 60)
+  end
   local storage = Storage.ensure(session)
   storage.boxes[1].mons[1] = mon(25)
   BoxStorageUI.mode = "party_drawer"
   BoxStorageUI.drawerOpen = true
-  BoxStorageUI.holdingMon = storage.boxes[1].mons[1]
+  BoxStorageUI.holdingMon = Storage.pickUpMon(session, "box", 1, 1)
   BoxStorageUI.holdingSource = { loc = "box", boxId = 1, slot = 1 }
+  BoxStorageUI._holdingOrigin = BoxStorageUI.holdingSource
   BoxStorageUI.partyCursor = 6
   BoxStorageUI.handleInput({
     wasPressed = function(_, k) return k == "a" end,

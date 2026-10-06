@@ -39,6 +39,8 @@ local function C()
 end
 
 local function metatile(name)
+  local policy = require("src.core.game3.profile").forSession(session()).secretBase
+  if policy and policy.metatiles and policy.metatiles[name] then return policy.metatiles[name] end
   return C():require("metatile_labels", name)
 end
 FldeffMisc.metatile = metatile
@@ -168,8 +170,8 @@ function FldeffMisc.npcFlyOut()
 end
 
 -- pokeemerald/src/fldeff_misc.c:788
-function FldeffMisc.pcTurnOn()
-  local name = "FLDEFF_PCTURN_ON"
+function FldeffMisc.pcTurnOn(effectName)
+  local name = effectName or "FLDEFF_PCTURN_ON"
   local token = begin(name)
   local x, y = facingCell()
   local Task = require("src.core.game3.task")
@@ -433,6 +435,7 @@ FldeffMisc.HANDLERS = {
     "SE_M_POISON_POWDER", 20),
   FLDEFF_NPCFLY_OUT = function() return FldeffMisc.npcFlyOut() end,
   FLDEFF_PCTURN_ON = function() return FldeffMisc.pcTurnOn() end,
+  FLDEFF_SECRET_BASE_PC_TURN_ON = function() return FldeffMisc.pcTurnOn("FLDEFF_SECRET_BASE_PC_TURN_ON") end,
   FLDEFF_SAND_PILLAR = function() return FldeffMisc.sandPillar() end,
   FLDEFF_HALL_OF_FAME_RECORD = function() return FldeffMisc.hallOfFameRecord() end,
   FLDEFF_SPARKLE = sparkle,

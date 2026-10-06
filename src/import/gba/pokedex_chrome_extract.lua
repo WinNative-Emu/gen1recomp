@@ -8,6 +8,7 @@
 local Versions = require("src.import.gba.versions")
 local TextIR = require("src.core.game3.scripting.text_ir")
 local Lz77 = require("src.import.gba.lz77")
+local CacheBlob = require("src.import.CacheBlob")
 
 local PokedexChromeExtract = {}
 
@@ -873,7 +874,7 @@ function PokedexChromeExtract.ready(cache, cacheRoot)
       if data and #data >= minSize then return true end
     end
     if love and love.filesystem and love.filesystem.read then
-      local ok, data = pcall(love.filesystem.read, rel)
+      local ok, data = pcall(CacheBlob.readFs, rel)
       if ok and data and #data >= minSize then return true end
     end
     local f = io.open(rel, "rb")

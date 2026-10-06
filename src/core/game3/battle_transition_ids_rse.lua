@@ -1,9 +1,10 @@
 local Constants = require("src.core.game3.constants")
 
+local function build(game)
 local Ids = {}
 
 Ids.family = "rse"
-Ids.GAME = "emerald"
+Ids.GAME = game
 
 local function C() return Constants.of(Ids.GAME) end
 
@@ -14,6 +15,11 @@ for name, v in pairs(C().battle.byName) do
   if short and not short:match("^GROUP_") and short ~= "COUNT" then ID[short] = v end
 end
 Ids.ID = ID
+local rs = game == "ruby" or game == "sapphire"
+if rs then
+  ID.CLOCKWISE_WIPE, ID.WHITE_BARS_FADE, ID.ANGLED_WIPES = ID.CLOCKWISE_BLACKFADE, ID.WHITEFADE, ID.SHARDS
+  ID.SIDNEY, ID.CHAMPION = ID.SYDNEY, ID.STEVEN
+end
 
 -- pokeemerald/src/battle_setup.c:696
 local TERRAIN = {
@@ -156,10 +162,10 @@ function Ids.pickTrainer(opts)
     return ID.CHAMPION
   end
   if classIn(cls, { "TRAINER_CLASS_CHAMPION" }) then return ID.CHAMPION end
-  if classIn(cls, { "TRAINER_CLASS_TEAM_MAGMA", "TRAINER_CLASS_MAGMA_LEADER", "TRAINER_CLASS_MAGMA_ADMIN" }) then
+  if not rs and classIn(cls, { "TRAINER_CLASS_TEAM_MAGMA", "TRAINER_CLASS_MAGMA_LEADER", "TRAINER_CLASS_MAGMA_ADMIN" }) then
     return ID.MAGMA
   end
-  if classIn(cls, { "TRAINER_CLASS_TEAM_AQUA", "TRAINER_CLASS_AQUA_LEADER", "TRAINER_CLASS_AQUA_ADMIN" }) then
+  if not rs and classIn(cls, { "TRAINER_CLASS_TEAM_AQUA", "TRAINER_CLASS_AQUA_LEADER", "TRAINER_CLASS_AQUA_ADMIN" }) then
     return ID.AQUA
   end
   local terrain = opts.terrain or Ids.getTerrainByMap(opts)
@@ -177,9 +183,10 @@ function Ids.pickSpecial(group, opts)
   local function pickFrom(t) return t[(rand(#t * 65536) % #t) + 1] end
   local playerLv = tonumber(opts.playerLevel) or 5
   local enemyLv = tonumber(opts.enemyLevel) or 3
-  if group == "trainer_hill" or group == "secret_base" or group == "e_reader" then
+  if group == "trainer_hill" or group == "secret_base" or group == "e_reader" or group == "battle_tower" then
     return enemyLv < playerLv and ID.POKEBALLS_TRAIL or ID.BIG_POKEBALL
   end
+  if rs then error("RS has no transition group " .. tostring(group)) end
   if group == "pyramid" then return pickFrom(Ids.TABLE_PYRAMID) end
   if group == "dome" then return pickFrom(Ids.TABLE_DOME) end
   return pickFrom(Ids.TABLE_FRONTIER)
@@ -195,4 +202,17 @@ Ids.TUNE = {
   rippleFadeDelay = -2,
 }
 
+return Ids
+end
+
+local cache = {}
+local function forVersion(version)
+  local game = require("src.core.game3.profile").resolveId(version)
+  if game ~= "ruby" and game ~= "sapphire" then game = "emerald" end
+  if not cache[game] then cache[game] = build(game) end
+  return cache[game]
+end
+local Ids = build("emerald")
+cache.emerald = Ids
+Ids.forVersion = forVersion
 return Ids

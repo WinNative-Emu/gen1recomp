@@ -57,7 +57,9 @@ local function finishPorthole(scene)
   scene.returning = true
   local R = Rse()
   local exitState = scene.direction == "right" and SSTIDAL.EXIT_RIGHT or SSTIDAL.EXIT_LEFT
-  R.setVar("VAR_SS_TIDAL_STATE", exitState, scene.session)
+  if not scene.exitStateOnCruiseEndOnly or scene.cruiseEnded then
+    R.setVar(scene.stateVar or "VAR_SS_TIDAL_STATE", exitState, scene.session)
+  end
   R.setFlag("FLAG_DONT_TRANSITION_MUSIC", false, scene.session)
   R.setFlag("FLAG_HIDE_MAP_NAME_POPUP", false, scene.session)
   local VirtualObjects = require("src.core.game3.virtual_objects")
@@ -71,7 +73,8 @@ local function finishPorthole(scene)
 end
 
 -- pokeemerald/src/field_special_scene.c:367 FieldCB_ShowPortholeView
-function SpecialScene.enterPorthole(session, direction, onDone)
+function SpecialScene.enterPorthole(session, direction, onDone, opts)
+  opts = opts or {}
   local Player = require("src.core.game3.player")
   local Constants = require("src.core.game3.constants").active(session)
   local gfx = Constants:require("event_objects", "OBJ_EVENT_GFX_SS_TIDAL")
@@ -85,6 +88,8 @@ function SpecialScene.enterPorthole(session, direction, onDone)
     direction == "right" and 2 or 1)
   SpecialScene._porthole = {
     session = session, direction = direction, objectId = objectId, graphicsId = gfx,
+    stateVar = opts.stateVar,
+    exitStateOnCruiseEndOnly = opts.exitStateOnCruiseEndOnly,
     onDone = onDone, tick = 0, returning = false,
     lastX = Player.cellX, lastY = Player.cellY,
     returnMap = session.dynamicWarp.map,
@@ -112,6 +117,7 @@ local function stepPorthole(scene)
   if Player.cellX ~= scene.lastX or Player.cellY ~= scene.lastY then
     scene.lastX, scene.lastY = Player.cellX, Player.cellY
     if SpecialScene.countSSTidalStep(1) then
+      scene.cruiseEnded = true
       finishPorthole(scene)
       return
     end

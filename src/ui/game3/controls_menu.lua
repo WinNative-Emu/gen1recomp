@@ -117,7 +117,8 @@ local function drawHelpBar(bm)
 end
 
 local function valueColors()
-  return { fg = FrlgFont.STDPAL[5], shadow = FrlgFont.STDPAL[4], bg = FrlgFont.STDPAL[0] }
+  FrlgFont.sync()
+  return FrlgFont.COLOR.OPTION_VALUE
 end
 
 local function bob(k, freq)

@@ -51,6 +51,9 @@ end
 local function helpText()
   local m = mgr()
   if not m then return "" end
+  if ModManager._prompt then
+    return "{DPAD_UPDOWN}PICK {A_BUTTON}OK {B_BUTTON}CANCEL"
+  end
   if m.overlay then
     return m.overlay.kind == "confirm"
         and "{DPAD_UPDOWN}PICK {A_BUTTON}OK {B_BUTTON}BACK"
@@ -108,7 +111,8 @@ local function bob(k, freq)
 end
 
 local function valueColors()
-  return { fg = FrlgFont.STDPAL[5], shadow = FrlgFont.STDPAL[4], bg = FrlgFont.STDPAL[0] }
+  FrlgFont.sync()
+  return FrlgFont.COLOR.OPTION_VALUE
 end
 
 -- Windowed slice of rows. List/detail own a sticky 7/4-row view here:
@@ -200,16 +204,13 @@ function ModManager.show(opts)
         ModManager._mgr:notify("UNSUPPORTED SCREEN")
       end,
     },
-    -- APPLY & RESTART: soft-return to the Gen 3 launcher rather than quitting
-    -- the process (ManagerState:restartGame falls through to love.event.quit).
-    -- Close first: Game3:returnToTitle Stack.clear()s without resetting this
-    -- module's open flag, and show() no-ops while open stays true.
+    save = type(realGame.options) == "table" and { options = realGame.options } or nil,
     restartWithMods = function()
       ModManager.close()
-      if realGame.returnToTitle then
-        realGame:returnToTitle()
-      elseif love.event and love.event.quit then
-        love.event.quit("restart")
+      if realGame.restartWithMods then
+        realGame:restartWithMods()
+      else
+        require("src.core.HostShell").restart()
       end
     end,
   }, { __index = game })
@@ -330,38 +331,91 @@ local function drawDetailBody(m)
   drawRows(m, rows, y + 2, ROW_STEP, LABEL_X, nil)
 end
 
+local YESNO_LEFT, YESNO_TOP, YESNO_H = 21, 9, 4
+local MSG_MIN_TOP = 7
+local MSG_SIDE_W = YESNO_LEFT - 4
+
+local function wrapLines(lines, maxW)
+  local out = {}
+  for _, line in ipairs(lines) do
+    local wrapped = FrlgFont.wrap(tostring(line or ""), maxW)
+    for part in (wrapped .. "\n"):gmatch("(.-)\n") do
+      out[#out + 1] = part
+    end
+  end
+  return out
+end
+
+local function tilesFor(n, lp)
+  return math.ceil((1 + (n - 1) * lp + FrlgFont.GLYPH_HEIGHT) / 8)
+end
+
+local function layoutMessage(lines, W)
+  local L, Top, DW, H = Chrome.dialogueWindow()
+  W = W or DW
+  local lp = FrlgFont.linePitch()
+  local text = wrapLines(lines, W * 8)
+  local bottom = Top + H
+  while #text > 1 and bottom - tilesFor(#text, lp) < MSG_MIN_TOP do
+    text[#text] = nil
+  end
+  local box = { text = text, L = L, W = W, lp = lp, top = Top, bottom = bottom,
+    printOpts = { maxWidth = W * 8, colors = FrlgFont.COLOR.NORMAL } }
+  if W ~= DW or #text > 2 then
+    box.hT = tilesFor(#text, lp)
+    box.top = bottom - box.hT
+  end
+  return box
+end
+
+local function messageLayout(owner, lines, confirm)
+  local box = owner._box
+  if box then return box end
+  box = layoutMessage(lines)
+  if confirm then
+    if box.top - YESNO_H - 2 >= MSG_MIN_TOP then
+      box.ynTop = math.min(YESNO_TOP, box.top - YESNO_H - 2)
+    else
+      box = layoutMessage(lines, MSG_SIDE_W)
+      box.ynTop = box.bottom - YESNO_H
+    end
+    box.ynLabels = { Strings("YES"), Strings("NO") }
+  end
+  owner._box = box
+  return box
+end
+
+local function drawMessage(box)
+  if box.hT then
+    Window.stdFrame(Window.template(box.L, box.top, box.W, box.hT))
+  else
+    Window.dialogueFrame()
+  end
+  local x, y0, lp = box.L * 8, box.top * 8 + 1, box.lp
+  for i, line in ipairs(box.text) do
+    Window.printPx(line, x, y0 + (i - 1) * lp, box.printOpts)
+  end
+end
+
 local function drawOverlay(m)
   local overlay = m.overlay
   if not overlay then return end
-  local lines = overlay.lines or {}
-  local h = 4 + #lines + (overlay.kind == "confirm" and 2 or 1)
-  if h < 5 then h = 5 end
-  local y = math.floor((160 - h * 8) / 2 / 8)
-  Window.dialogueFrame()
-  local ty = 2
-  for i, line in ipairs(lines) do
-    Window.printPx(truncate(line, 26), 2 * 8 + 4, (ty + i) * 8 - 6,
-      { colors = FrlgFont.COLOR.NORMAL })
-  end
-  if overlay.kind == "confirm" then
-    local yesY = (ty + #lines + 1) * 8 - 6
-    Window.cursorPx(5 * 8, (overlay.index == 1 and yesY or yesY + 12))
-    Window.printPx(Strings("YES"), 5 * 8 + 8, yesY, { colors = FrlgFont.COLOR.NORMAL })
-    Window.printPx(Strings("NO"), 5 * 8 + 8, yesY + 12, { colors = FrlgFont.COLOR.NORMAL })
-  else
-    Window.printPx(Strings("A:OK"), 5 * 8, (ty + #lines + 1) * 8 - 6,
-      { colors = FrlgFont.COLOR.NORMAL })
+  local confirm = overlay.kind == "confirm"
+  local box = messageLayout(overlay, overlay.lines or {}, confirm)
+  drawMessage(box)
+  if confirm then
+    local Choice = require("src.ui.game3.choice")
+    Choice.drawYesNo(YESNO_LEFT, box.ynTop, overlay.index, box.ynLabels)
   end
 end
 
 local function drawQtyPrompt(p)
-  Window.dialogueFrame()
-  Window.printPx(truncate(p.title or "HOW MANY?", 24), 2 * 8 + 4, 16 * 8,
-    { colors = FrlgFont.COLOR.NORMAL })
-  Window.printPx(tostring(p.value), 12 * 8, 18 * 8, { colors = valueColors() })
-  Window.cursorPx(10 * 8, 18 * 8)
-  Window.printPx(Strings("{A_BUTTON}OK {B_BUTTON}CANCEL"), 2 * 8 + 4, 20 * 8,
-    { colors = FrlgFont.COLOR.NORMAL })
+  local box = p._box or messageLayout(p, { p.title or "HOW MANY?" }, false)
+  drawMessage(box)
+  local L, Tp = YESNO_LEFT, box.top - 4
+  Window.stdFrame(Window.template(L, Tp, 6, 2))
+  Window.cursorPx(L * 8, Tp * 8 + 1)
+  Window.printPx(tostring(p.value), L * 8 + 8, Tp * 8 + 1, { colors = valueColors() })
 end
 
 function ModManager.draw()

@@ -31,6 +31,7 @@ local Versions = require("src.import.gba.versions")
 local Slot = require("src.import.gba.slot_machine_extract")
 local Trade = require("src.import.gba.trade_extract")
 local LinkArt = require("src.import.gba.link_art_extract")
+local CacheBlob = require("src.import.CacheBlob")
 
 local SHEETS = {
   { "slot_machine/reel_icons.rgba", 32, 224 },
@@ -139,7 +140,7 @@ print("[info] FireRed cache at " .. root)
 local function readFile(rel)
   local f = io.open(root .. "/" .. rel, "rb")
   if not f then return nil end
-  local d = f:read("*a")
+  local d = CacheBlob.decode(root .. "/" .. rel, f:read("*a"))
   f:close()
   return d
 end

@@ -1454,7 +1454,7 @@ AnimCallbacks.SlideMonToOriginalPos = nil
 AnimCallbacks.SlideMonToOffset = nil
 
 AnimCallbacks._destroy = destroy
-for _, group in ipairs({ "g1", "g2", "g3", "g4" }) do
+for _, group in ipairs({ "g1", "g2", "g3", "g4", "rs", "rs_early" }) do
   local ok, mod = pcall(require, "src.core.game3.battle.anim_port." .. group .. "_callbacks")
   if ok and type(mod) == "function" then mod = mod(AnimCallbacks) end
   if ok and type(mod) == "table" then

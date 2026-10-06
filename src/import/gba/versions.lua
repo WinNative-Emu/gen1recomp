@@ -53,6 +53,22 @@ function Versions.forGame(id)
   return VersionsGame.game(id)
 end
 
+function Versions.selectCache(id, cache)
+  if id ~= "ruby" and id ~= "sapphire" then return Versions.select(id) end
+  local raw = cache and cache:read("data/generated/gba/meta.json")
+  assert(type(raw) == "string", "versions: missing native " .. id .. " cache identity")
+  local sha1 = raw:match('"romSha1"%s*:%s*"([%x]+)"')
+  local legacy = raw:match('"md5"%s*:%s*"([%x]+)"')
+  local stampedId = raw:match('"version"%s*:%s*"([%w_]+)"')
+  if sha1 then sha1 = sha1:lower() end
+  if legacy then legacy = legacy:lower() end
+  assert(not (sha1 and legacy) or sha1 == legacy, "versions: conflicting native cache identities")
+  assert(not stampedId or stampedId == id, "versions: native cache edition mismatch")
+  sha1 = sha1 or legacy
+  assert(sha1 and GameVersion.acceptsSha1(id, sha1), "versions: unsupported native " .. id .. " cache identity")
+  return Versions.select(sha1)
+end
+
 Versions["for"] = Versions.forGame
 
 function Versions.active()

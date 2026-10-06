@@ -441,6 +441,20 @@ local function stepTriggers(game, dir, wasFacing, tx, ty)
     end
   end
 
+  if dir == "down" and wasFacing == "down" and Collision.arrowWarpDir(Collision.behavior(Player.cellX, Player.cellY)) == "down" then
+    -- pokeruby/src/overworld.c:1984
+    local Link = package.loaded["src.core.game3.link"] or package.loaded["src.core.game3.link.init"]
+    local Space = package.loaded["src.core.game3.scripting.space"]
+    local key = Space and Space.vm and (Space.scriptKey("TradeRoom_PromptToCancelLink")
+      or Space.scriptKey("EventScript_ConfirmLeaveCableClubRoom")
+      or Space.scriptKey("TradeCenter_ConfirmLeaveRoom"))
+    if key and Link and Link.link and Link.link:isOpen() and Link.inLinkRoom(Space.vm.ctx) then
+      local Audio = lazyReq("src.core.game3.audio")
+      if Audio.playSe then Audio.playSe(lazyReq("src.core.game3.se_ids").SE_WIN_OPEN) end
+      if Space.startScript(key) then return "link_room_exit" end
+    end
+  end
+
   if dir == "down" then
     local exitWarp = Collision.isExitWarp and Collision.isExitWarp(game, Player.cellX, Player.cellY)
     if exitWarp then
@@ -780,6 +794,11 @@ function Player.scriptStep(dir, run, slow, fast)
   end
   beginStep(tx, ty, run and true or false, false)
   Player._scriptedStep = true
+  -- pokeemerald/src/event_object_movement.c:5101
+  if Player.biking and not (Player.surfHopping or Player.dismounting) then
+    Player.stepFrames = run and RUN_FRAMES or WALK_FRAMES
+    Player.running = run and true or false
+  end
   -- pokefirered/src/event_object_movement.c:9029 UpdateRunSlowAnim
   if run and slow then Player.stepFrames = RUN_SLOW_FRAMES end
   if fast then Player.stepFrames = RUN_FRAMES end
@@ -1196,6 +1215,8 @@ function Player.update(game, input)
   if Space and Space.vm and Space.vm.isRunning and Space.vm:isRunning() then
     return
   end
+  -- pokeemerald/src/field_control_avatar.c:150
+  if Space and Space._pendingOnFrame then return end
 
   -- Menu Dismissal Frame Trap & Idle Sight Check: check sight before D-pad input polling
   local okTs, TrainerSight = pcall(lazyReq, "src.core.game3.trainer_sight")

@@ -259,7 +259,9 @@ function Hud.update(game, _dt, inputTop)
     local top = Stack.top()
     local evoTop = top and top.id == "evolution_scene" and (inputTop == nil or top == inputTop)
     local pyramidBagTop = top and top.id == "rse_pyramid_bag"
-    if (not inBattle) or evoTop or pyramidBagTop or (top and top.id == "naming") then
+    local safariCaseTop = top and top.id == "rse_pokeblock_case"
+      and Battle._phase == "safari_pokeblock" and (inputTop == nil or top == inputTop)
+    if (not inBattle) or evoTop or pyramidBagTop or safariCaseTop or (top and top.id == "naming") then
       if update_top_menu(input) then
         return
       end

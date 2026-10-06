@@ -30,7 +30,11 @@ function BattleTransition.ids(family)
   family = family or BattleTransition.family()
   local module = IDS_MODULES[family]
   if not module then error("battle transition: no id table for family '" .. tostring(family) .. "'") end
-  return require(module)
+  local ids = require(module)
+  if ids.forVersion then
+    return ids.forVersion(require("src.core.game3.profile").forSession().id)
+  end
+  return ids
 end
 
 setmetatable(BattleTransition, {
@@ -1398,19 +1402,22 @@ BattleTransition.H = {
 
 function BattleTransition.defs(family)
   family = family or BattleTransition.family()
-  local hit = DEFS[family]
-  if hit then return hit end
   local Ids = BattleTransition.ids(family)
+  local key = Ids.GAME or family
+  local hit = DEFS[key]
+  if hit then return hit end
   local t = {}
   for name, id in pairs(Ids.ID) do
     local frId = ID[name]
     if frId ~= nil and not MUGSHOT_BY_ID[frId] and DEF[frId] then t[id] = DEF[frId] end
   end
   for id in pairs(Ids.MUGSHOT_BY_ID) do t[id] = MUGSHOT_DEF end
-  for _, module in ipairs(BattleTransition.RSE_MODULES) do
-    require(module).register(t, Ids.ID, BattleTransition.H)
+  if Ids.GAME == "emerald" then
+    for _, module in ipairs(BattleTransition.RSE_MODULES) do
+      require(module).register(t, Ids.ID, BattleTransition.H)
+    end
   end
-  DEFS[family] = t
+  DEFS[key] = t
   return t
 end
 

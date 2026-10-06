@@ -45,8 +45,10 @@ local TASK_SCOPE = {
   "DrillPeckHitSplats", "DragonDanceWaver",
 }
 
+local RS_DISPATCH = require("src.core.game3.battle.anim_port.rs_callbacks")
 for _, n in ipairs(CB_SCOPE) do
-  check(G2.cb[n] ~= nil and AnimCallbacks[n] == G2.cb[n], "callback ported and hooked: " .. n)
+  local hooked = AnimCallbacks[n] == G2.cb[n] or (RS_DISPATCH[n] ~= nil and AnimCallbacks[n] == RS_DISPATCH[n])
+  check(G2.cb[n] ~= nil and hooked, "callback ported and hooked: " .. n)
 end
 for _, n in ipairs(TASK_SCOPE) do
   check(G2.tasks[n] ~= nil and AnimTasks.REGISTRY[n] == G2.tasks[n], "task ported and hooked: " .. n)

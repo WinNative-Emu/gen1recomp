@@ -15,22 +15,55 @@ local function alias(key)
   return aliases and aliases[key] or nil
 end
 
+local function cachedText(b, key)
+  local text = b and b.text
+  if not text then return nil end
+  if text[key] ~= nil then return text[key] end
+  local to = alias(key)
+  if type(to) == "string" then return text[to] end
+  if type(to) == "table" and to.key and to.line then
+    local source = text[to.key]
+    if not source then return nil end
+    local out, header, line, leading, found = {}, {}, 1, true, false
+    for _, seg in ipairs(source) do
+      if leading and seg.t == "ext" then header[#header + 1] = seg
+      else leading = false end
+      if seg.t == "nl" then
+        line = line + 1
+        if line == to.line then
+          for _, control in ipairs(header) do out[#out + 1] = control end
+        end
+      elseif line == to.line then
+        out[#out + 1] = seg
+        found = true
+      end
+    end
+    return found and out or nil
+  end
+end
+
 function RomText.ir(key)
   local over = RomText.overrides[key]
   if over ~= nil then return over end
   local b = bundle()
-  local ir = b and b.text and b.text[key]
-  if ir == nil then
-    local to = alias(key)
-    ir = to and b and b.text and b.text[to]
-  end
+  local ir = cachedText(b, key)
   return assert(ir, "ROM text " .. tostring(key) .. " is not in the script cache")
 end
 
 function RomText.has(key)
   if RomText.overrides[key] ~= nil then return true end
   local b = bundle()
-  return (b and b.text and b.text[key]) ~= nil
+  return cachedText(b, key) ~= nil
+end
+
+function RomText.irOr(key, fallback)
+  if key ~= nil and RomText.has(key) then return RomText.ir(key) end
+  return fallback
+end
+
+function RomText.refIr(ref)
+  if type(ref) ~= "table" then return nil end
+  return RomText.irOr(ref.name, RomText.irOr(ref.key, ref.ir))
 end
 
 local SOURCE_FORMS = {}

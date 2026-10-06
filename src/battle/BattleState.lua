@@ -1268,8 +1268,9 @@ end
 -- Returns true while animating.
 function BattleState:stepHPDrain()
   local busy = false
+  local only = self.drainOnly
   for _, b in ipairs({ self.player, self.enemy }) do
-    if b and b.shownHP then
+    if b and b.shownHP and (not only or b == only) then
       -- drainFloor is the stop the running row carries (see drainNext)
       local goal = b.mon.hp
       if b.drainFloor and b.drainFloor > goal
@@ -1393,6 +1394,19 @@ function BattleState:beginMsgLine()
   self.shown[#self.shown + 1] = {}
 end
 
+-- home/text.asm:264
+function BattleState:arrowOwnsCell()
+  local save = self.game and self.game.save
+  if save and (save.generation == 2 or save.version == "gold") then return false end
+  return not self:wideLayout()
+end
+
+-- home/text.asm:270
+function BattleState:blankArrowCell()
+  local line = self.shown and self.shown[2]
+  if line and line[18] and self:arrowOwnsCell() then line[18] = 0x7F end
+end
+
 function BattleState:visibleText()
   if self.phase ~= "messages" or not (self.current or self.animPlaying) then
     return nil
@@ -1436,7 +1450,7 @@ function BattleState:updateQueue()
   -- an HP-bar drain holds the queue until the bar catches up
   if self.draining then
     if self:stepHPDrain() then return true end
-    self.draining = nil
+    self.draining, self.drainOnly = nil, nil
     if self.player then self.player.drainFloor = nil end
     if self.enemy then self.enemy.drainFloor = nil end
   end
@@ -1478,7 +1492,7 @@ function BattleState:updateQueue()
       return true
     end
     if item.drain then
-      self.draining = true
+      self.draining, self.drainOnly = true, item.battler
       if item.battler then item.battler.drainFloor = item.stopAt end
       return true
     end
@@ -1618,6 +1632,7 @@ function BattleState:updateQueue()
     end
     if input:wasPressed("a") or input:wasPressed("b") then
       self.msgWaiting = nil
+      self:blankArrowCell()
       self:beginMsgLine()
       -- then the two ScrollTextUpOneLine calls block for 5 frames each
       -- (home/text.asm:280-305) before the next line starts typing
@@ -1714,6 +1729,7 @@ function BattleState:updateQueue()
       elseif input:wasPressed("a") or input:wasPressed("b") then
         -- home/text.asm:218
         self.msgPrompt = nil
+        self:blankArrowCell()
         self.msgHold = true
         self.current = nil
       end
@@ -1941,7 +1957,7 @@ function BattleState:enter()
   -- battle's DrawEnemyHUDAndHPBar only runs after the text (#317).  The
   -- draw is still gated on the slide having landed, so nothing shows while
   -- the silhouettes are still coming in.
-  self.introBalls = true
+  self.introBalls = "pending"
   -- SGB: the player-side battle palette while the back pic is up is
   -- MonsterPalettes[0] = PAL_MEWMON (wBattleMonSpecies is still 0 when
   -- the intro's SET_PAL_BATTLE runs -- SetPal_Battle,
@@ -1997,7 +2013,17 @@ function BattleState:enter()
     table.insert(self.queue, { waitSound = function() return self.introSfx end })
     table.insert(self.queue, { wait = Timing.TRAINER_INTRO_SFX_GAP })
   end
+  -- engine/battle/common_text.asm:25
+  if not self.ghost and not self.scopeReveal
+     and not (require("src.core.GameVersion").isYellow()
+              and (self.safari or self.demo)) then
+    self:act(function() self.introBalls = true end)
+  end
   self:say(self.introText)
+  -- engine/battle/common_text.asm:46
+  if self.ghost then
+    self:say(self:romText("_GhostCantBeIDdText", "Darn! The GHOST\ncan't be ID'd!"))
+  end
   -- the unveil rides on that same box, before _InitBattleCommon clears the
   -- intro chrome below (#492)
   if self.scopeReveal then self:queueScopeReveal() end
@@ -4553,6 +4579,7 @@ function BattleState:continueTrapping(user, target)
   -- through the attacker's final hit (endOfTurn nils it)
   user.trappingTurns = user.trappingTurns - 1
   self:applyDamage(target, user.trapDamage or 1)
+  self:handleBuildingRage(target)
   if target.mon.hp <= 0 then self:onFaint(target) end
 end
 
@@ -4573,6 +4600,7 @@ function BattleState:continueBide(user, target)
   -- here, after UnleashedEnergyText and before the damage (#375)
   self:animNext("BIDE", user.isPlayer)
   self:applyDamage(target, dmg)
+  self:handleBuildingRage(target)
   if target.mon.hp <= 0 then self:onFaint(target) end
 end
 
@@ -4581,7 +4609,7 @@ function BattleState:selfDestruct(user)
   self:onFaint(user)
 end
 
--- Applies damage honoring Substitute, Bide storage and Rage; returns the
+-- Applies damage honoring Substitute and Bide storage; returns the
 -- amount that counts as dealt (for recoil/drain).
 function BattleState:applyDamage(target, dmg)
   if target.substituteHP then
@@ -4601,11 +4629,26 @@ function BattleState:applyDamage(target, dmg)
   if target.bideTurns then
     target.bideDamage = (target.bideDamage or 0) + dealt
   end
-  if target.rageMove and dealt > 0 then
-    target.stages.attack = math.min(6, (target.stages.attack or 0) + 1)
-    self:sayNext(self:romText("_BuildingRageText", "%s's\nRAGE is building!", displayName(target)))
-  end
   return dealt
+end
+
+-- engine/battle/move_effects/recoil.asm:28
+function BattleState:applyRecoil(user, recoil)
+  local mon = user.mon
+  local before = mon.hp
+  mon.hp = math.max(0, mon.hp - recoil)
+  if mon.hp ~= before then self:drainNext(user, mon.hp) end
+  self:sayNext(self:romText("_HitWithRecoilText", "%s's\nhit with recoil!", displayName(user)))
+end
+
+-- engine/battle/core.asm:4913
+function BattleState:handleBuildingRage(target)
+  if not target.rageMove or target.mon.hp <= 0 then return end
+  if (target.stages.attack or 0) >= 6 then return end
+  self:sayNext(self:romText("_BuildingRageText", "%s's\nRAGE is building!", displayName(target)))
+  for _, m in ipairs(MoveEffects.changeStage(self, target, "attack", 1, false)) do
+    self:sayNext(m)
+  end
 end
 
 -- ---------------------------------------------------------------------
@@ -5809,14 +5852,20 @@ end
 -- PlayBattleVictoryMusic (core.asm:959-967) + EndLowHealthAlarm
 -- (core.asm:864-872): winning stops the low-health alarm and disables
 -- it for the rest of the battle (wLowHealthAlarmDisabled), then starts
--- the victory theme once; gym leaders, Lance and the final rival share
+-- the victory theme once; gym leaders and the final rival share
 -- MUSIC_DEFEATED_GYM_LEADER (core.asm:917-926).
 function BattleState:playVictoryMusic()
   require("src.core.Sound").stopLoop("Low_Health_Alarm")
   self.lowHealthAlarmDisabled = true
   if self.victoryMusicPlayed then return end
   self.victoryMusicPlayed = true
-  local kind = self.musicKind == "final" and "gym" or (self.musicKind or "wild")
+  local kind = self.musicKind or "wild"
+  -- engine/battle/core.asm:917
+  if kind == "final" or self.isGymLeader then
+    kind = "gym"
+  elseif kind == "gym" then
+    kind = "trainer"
+  end
   require("src.core.Music").playVictory(self.data, kind)
 end
 
@@ -6885,7 +6934,7 @@ function BattleState:drawHUDs(slide)
   -- rows coming back when the beaten trainer scrolls in (#282):
   -- _ScrollTrainerPicAfterBattle redraws tilemap columns and never touches
   -- OAM, which ClearSprites emptied when the intro text was dismissed.
-  local showIntroBalls = self.introBalls and slide == 0
+  local showIntroBalls = self.introBalls == true and slide == 0
   if showIntroBalls then
     if self.enemyParty and (self.kind == "trainer" or self.kind == "link") then
       -- PlaceEnemyHUDTiles (hlcoord 1,2): $73, then $74 + 8x $76 + $78
@@ -6975,10 +7024,15 @@ function BattleState:drawTextArea()
     -- view instead of drawing off-screen at y=144 (#216).
     local off = self.scrollPx or 0
     local ys = { 112, 128 }
+    -- home/text.asm:264
+    local arrowCell = (self.msgWaiting or self.msgPrompt) and off == 0
+      and self:arrowOwnsCell()
     for li, line in ipairs(self.shown or {}) do
       local y = (ys[li] or 128) + off
       for i = 1, #line do
-        drawGlyph(line[i], 8 + (i - 1) * 8, y)
+        if not (arrowCell and li == 2 and i == 18) then
+          drawGlyph(line[i], 8 + (i - 1) * 8, y)
+        end
       end
     end
     -- the blinking down arrow ('▼', glyph $EE) while a \v CONT wait

@@ -22,6 +22,12 @@ GAMES = {
         "out": "src/import/gba/versions_text_emerald.lua",
         "mode": "names",
     },
+    "ruby": {
+        "repo": "pokeruby",
+        "elfs": ["pokeruby.elf", "pokesapphire.elf"],
+        "out": "src/import/gba/versions_text_rs.lua",
+        "mode": "names",
+    },
 }
 
 
@@ -120,6 +126,8 @@ for root, _dirs, files in os.walk(pret):
         elif f.endswith((".inc", ".s")) and rel.startswith("data"):
             label = None
             for line in open(path, encoding="utf-8", errors="replace"):
+                if OPTS["game"] == "ruby":
+                    line = line.split("@", 1)[0]
                 lm = re.match(r"^\s*(\w+)::?\s*$", line)
                 if lm:
                     label = lm.group(1)
@@ -133,11 +141,12 @@ for root, _dirs, files in os.walk(pret):
                     label = None
 
 battle_names = set()
-for rel in ("src/battle_message.c",):
+battle_sources = ("src/data/battle_strings_en.h",) if OPTS["game"] == "ruby" else ("src/battle_message.c",)
+for rel in battle_sources:
     body = (pret / rel).read_text(encoding="utf-8", errors="replace")
     for m in C_TEXT.finditer(body):
         text = re.match(r"((?:\s*" + STRLIT + r")+)", body[m.end():])
-        if text and "{B_" in text.group(1):
+        if text and (OPTS["game"] == "ruby" or "{B_" in text.group(1)):
             battle_names.add(m.group(1))
 
 
@@ -231,7 +240,7 @@ for path in sorted(TABLE_SOURCES):
             if not inner_txt.isdigit():
                 continue
             inner = int(inner_txt)
-        add_table(m.group(1), inner=inner, battle_table=rel == "src/battle_message.c")
+        add_table(m.group(1), inner=inner, battle_table=rel in battle_sources)
 
 STRUCT_TABLES = [
     "sStartMenuActionTable", "sCursorOptions", "sMenuActions_TopMenu", "sMenuActions_ItemPc",
@@ -259,8 +268,9 @@ add_table("gTrainerClassNames", stride=13, inline=True)
 add_table("gTypeNames", stride=7, inline=True)
 
 defines = {}
-for line in (pret / "include/constants/battle_string_ids.h").read_text().splitlines():
-    m = re.match(r"#define\s+(\w+)\s+(\w+)\s*$", line)
+battle_ids_path = pret / ("include/battle_string_ids.h" if OPTS["game"] == "ruby" else "include/constants/battle_string_ids.h")
+for line in battle_ids_path.read_text().splitlines():
+    m = re.match(r"#define\s+(\w+)\s+(\w+)\s*$", line.split("//", 1)[0])
     if m:
         defines.setdefault(m.group(1), m.group(2))
 
@@ -271,9 +281,11 @@ def define_value(name):
 
 
 string_count = define_value("BATTLESTRINGS_COUNT")
-table_start = define_value("BATTLESTRINGS_TABLE_START")
+table_start = define_value("BATTLESTRINGS_ID_ADDER" if OPTS["game"] == "ruby" else "BATTLESTRINGS_TABLE_START")
+if OPTS["game"] == "ruby":
+    string_count += table_start
 ids = {}
-for line in (pret / "include/constants/battle_string_ids.h").read_text().splitlines():
+for line in battle_ids_path.read_text().splitlines():
     m = re.match(r"#define\s+(STRINGID_\w+)\s+(\d+)\s*$", line)
     if m and int(m.group(2)) < string_count:
         ids.setdefault(int(m.group(2)), m.group(1))

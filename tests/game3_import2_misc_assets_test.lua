@@ -35,6 +35,7 @@ local TrainerTowerExtract = require("src.import.gba.trainer_tower_extract")
 local TrainerCardExtract = require("src.import.gba.trainer_card_extract")
 local RegionMapExtract = require("src.import.gba.region_map_extract")
 local EggExtract = require("src.import.gba.egg_extract")
+local CacheBlob = require("src.import.CacheBlob")
 
 print("[test] 1. the ROM offsets follow pret's declaration order")
 -- src/script_menu.c:647 aerodactyl tiles, palette, then kabutops tiles, palette
@@ -188,7 +189,7 @@ print("[info] FireRed cache at " .. root)
 local function readFile(rel)
   local f = io.open(root .. "/" .. rel, "rb")
   if not f then return nil end
-  local d = f:read("*a")
+  local d = CacheBlob.decode(root .. "/" .. rel, f:read("*a"))
   f:close()
   return d
 end

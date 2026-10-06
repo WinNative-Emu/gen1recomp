@@ -6,6 +6,7 @@ local AnimSprites = require("src.core.game3.battle.anim_sprites")
 local AnimTasks = require("src.core.game3.battle.anim_tasks")
 local AnimPal = require("src.core.game3.battle.anim_pal")
 local AnimCoords = require("src.core.game3.battle.anim_coords")
+local AnimContext = require("src.core.game3.battle.anim_context")
 
 local _blendOpts = {}
 
@@ -1464,7 +1465,7 @@ OPS.nop = function() return true end
 OPS.nop2 = OPS.nop
 -- pokeemerald/src/battle_anim.c:1678
 OPS.jumpifcontest = function(vm, op)
-  if vm.ctx and vm.ctx.isContest and jump_label(vm, op.label) then return "jump" end
+  if AnimContext.isContest(vm) and jump_label(vm, op.label) then return "jump" end
   return true
 end
 OPS.stopsound = function()

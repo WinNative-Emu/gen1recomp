@@ -2,6 +2,7 @@
 local Pack = require("src.import.gba.native_pack")
 local Palette = require("src.core.game3.palette")
 local OwExtract = require("src.import.gba.ow_extract")
+local CacheBlob = require("src.import.CacheBlob")
 local D = {}
 
 function D.imageData(rgba, w, h)
@@ -111,12 +112,13 @@ function D.cache(spec, cancelSignal)
     if spec.directory then
       local f = io.open(spec.directory .. "/" .. path(rel), "rb")
       if not f then return nil end
-      local bytes = f:read("*a"); f:close(); return bytes
+      local bytes = f:read("*a"); f:close(); return CacheBlob.decode(rel, bytes)
     end
-    return love.filesystem.read(path(rel))
+    return CacheBlob.readFs(path(rel))
   end
   function cache:write(rel, bytes)
     checkCancel()
+    bytes = CacheBlob.encode(rel, bytes)
     -- No directory creation or mounting in a worker; derived caches are optional.
     if spec.directory then
       local f = io.open(spec.directory .. "/" .. path(rel), "wb")

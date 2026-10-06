@@ -534,7 +534,7 @@ local CART_COLOR = {
   red = PAL.railRed, blue = PAL.railBlue, yellow = PAL.railGold,
   gold = PAL.railAmber, silver = PAL.railSilver,
   crystal = PAL.railCrystal, firered = PAL.railFireRed, leafgreen = PAL.railLeafGreen,
-  emerald = PAL.railEmerald,
+  emerald = PAL.railEmerald, ruby = PAL.railRuby, sapphire = PAL.railSapphire,
 }
 local function cartColor(version)
   return CART_COLOR[version] or PAL.green
@@ -1493,6 +1493,10 @@ local GAME_TABS = {
     color = PAL.railFireRed, label = "Fire Red" },
   { id = "leafgreen", key = "tab-leafgreen", letter = "L",
     color = PAL.railLeafGreen, label = "Leaf Green" },
+  { id = "ruby", key = "tab-ruby", letter = "R",
+    color = PAL.railRuby, label = "Ruby" },
+  { id = "sapphire", key = "tab-sapphire", letter = "S",
+    color = PAL.railSapphire, label = "Sapphire" },
   { id = "emerald", key = "tab-emerald", letter = "E",
     color = PAL.railEmerald, label = "Emerald" },
 }
@@ -2324,13 +2328,19 @@ local function buildGamePanel(imp, x, y, w, availH, m, version, budgetH)
       action = function() imp._gameManage = version end,
     })
     ly = ly + cartH + gap
-    btn(imp, lx, ly, lw, m.btnH, "carts-" .. version,
+    local halfW = math.floor((lw - bgap) / 2)
+    btn(imp, lx, ly, halfW, m.btnH, "carts-" .. version,
       Strings("Custom Carts"), {
         kind = "accent", font = "small",
         action = function()
           imp._cartPopup = version
           imp._cartNotice = nil
         end,
+      })
+    btn(imp, lx + halfW + bgap, ly, lw - halfW - bgap, m.btnH, "idsync-" .. version,
+      Strings("ID Sync"), {
+        kind = "accent", fill = PAL.buttonPurple, font = "small",
+        action = function() imp:askIdSync(version) end,
       })
     ly = ly + m.btnH + gap
     local sealH = buildCartCard(imp, lx, ly, lw, m, version)
@@ -4598,20 +4608,23 @@ end
 local function buildModScopeModal(imp, m)
   local options = modScopeOptions(imp)
   local pad = math.floor(18 * m.s)
-  local w = math.floor(360 * m.s)
   local gap = math.floor(8 * m.s)
+  local cols = #options > 6 and 2 or 1
+  local w = math.floor((cols == 2 and 440 or 360) * m.s)
   local headH = Kit.textHeight("button") + math.floor(12 * m.s)
   local rowH = m.btnH + gap
-  local listH = #options * rowH - gap
+  local listH = math.ceil(#options / cols) * rowH - gap
   local px, py, pw, ph = modalPanel(m, w, 2 * pad + headH + listH + gap + m.btnH)
   Kit.text("button", Strings("Show for"), px + pad, py + pad, PAL.heading)
   local x, iw, bodyY = px + pad, pw - 2 * pad, py + pad + headH
   local footY = py + ph - pad - m.btnH
   local _, rw, place, done = modalBody(imp, "_modScopePopup", x, bodyY, iw,
     footY - gap - bodyY, listH)
+  local colW = math.floor((rw - (cols - 1) * gap) / cols)
   for i, opt in ipairs(options) do
     local id = "scopepop-" .. tostring(opt.id or "all")
-    btn(imp, x, place(id, (i - 1) * rowH, m.btnH), rw, m.btnH, id, opt.label, {
+    local bx = x + ((i - 1) % cols) * (colW + gap)
+    btn(imp, bx, place(id, math.floor((i - 1) / cols) * rowH, m.btnH), colW, m.btnH, id, opt.label, {
       kind = (imp.modScope == opt.id) and "primary" or "ghost", font = "small",
       action = function()
         imp:_setModScope(opt.id)
@@ -6474,7 +6487,7 @@ local MODAL_KEYS = {
   "_cartPopup", "_modScopePopup", "_filterPopup", "_indexManage",
   "_syncModal", "_pcPicker", "_tradeModal", "_skinActions", "_modActions",
   "_findEntry", "_gameManage", "_saveExport", "_savePicker", "_modGames",
-  "_pinModal", "_invitePicker", "_secretPopup",
+  "_pinModal", "_invitePicker", "_secretPopup", "_idSyncResult",
 }
 
 LauncherView.MODAL_KEYS = MODAL_KEYS
@@ -6493,7 +6506,8 @@ local function modalUp(imp)
     or imp._profileRenamePrompt or imp._findEntry or imp._gameManage
     or imp._saveExport or imp._savePicker or imp._modGames
     or imp._tradeModal or imp._bugModal or imp._pcPicker
-    or imp._pinModal or imp._invitePicker or imp._secretPopup) ~= nil
+    or imp._pinModal or imp._invitePicker or imp._secretPopup
+    or imp._idSyncResult) ~= nil
 end
 
 local function modalKey(imp)
@@ -6611,6 +6625,11 @@ local function buildModals(imp, m)
     return true
   end
   if imp._modConfirm then buildConfirmModal(imp, m) return true end
+  if imp._idSyncResult then
+    buildTextModal(imp, m, "idsync-result", imp._idSyncResult.title,
+      imp._idSyncResult.body, function() imp._idSyncResult = nil end)
+    return true
+  end
   if imp._appPatchNotes then
     local PatchNotes = require("src.update.PatchNotes")
     local ModUpdate = require("src.mods.ModUpdate")

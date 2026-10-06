@@ -17,6 +17,20 @@ local RomText = require("src.core.game3.rom_text")
 
 local EvolutionScene = {}
 
+-- pokeruby/src/evolution_scene.c:551
+local RS_EVO_TEXT = {
+  gText_PkmnIsEvolving = "BattleText_StartEvo",
+  gText_CongratsPkmnEvolved = "BattleText_FinishEvo",
+  gText_PkmnStoppedEvolving = "BattleText_StopEvo",
+  gText_EllipsisQuestionMark = "BattleText_StopEvo",
+}
+local function evoBox(key, vars)
+  if RS_EVO_TEXT[key] and not RomText.has(key) then
+    return RomText.box(RS_EVO_TEXT[key], { stringVars = vars, battle = { [2] = vars[1], [3] = vars[2] } })
+  end
+  return RomText.box(key, { stringVars = vars })
+end
+
 EvolutionScene.open = false
 EvolutionScene._mon = nil
 EvolutionScene._preSpecies = nil
@@ -376,7 +390,7 @@ function EvolutionScene.handleInput(input)
       pcall(function() Audio.playSe(SE.SE_NOT_EFFECTIVE or 2) end)
       local fromName = Pokemon.displayMonName(EvolutionScene._mon)
       -- pokefirered/src/evolution_scene.c:857
-      Message.show(RomText.box("gText_PkmnStoppedEvolving", { stringVars = { fromName } }), { frame = "battle" })
+      Message.show(evoBox("gText_PkmnStoppedEvolving", { fromName }), { frame = "battle" })
       return
     end
   end
@@ -462,7 +476,7 @@ function EvolutionScene.update(dt)
     EvolutionScene._timer = 0
     Audio.playSong(0)
     -- pokefirered/src/battle_message.c:1277 gText_EllipsisQuestionMark
-    Message.show(RomText.box("gText_EllipsisQuestionMark"), { frame = "battle" })
+    Message.show(evoBox("gText_EllipsisQuestionMark", { Pokemon.displayMonName(EvolutionScene._mon) }), { frame = "battle" })
     return
   end
 
@@ -475,7 +489,7 @@ function EvolutionScene.update(dt)
       EvolutionScene._timer = 0
       local fromName = Pokemon.displayMonName(EvolutionScene._mon)
       -- pokefirered/src/evolution_scene.c:678
-      Message.show(RomText.box("gText_PkmnIsEvolving", { stringVars = { fromName } }), { frame = "battle" })
+      Message.show(evoBox("gText_PkmnIsEvolving", { fromName }), { frame = "battle" })
     end
 
   elseif st == "intro_msg" then
@@ -580,7 +594,7 @@ function EvolutionScene.update(dt)
       local fromName = EvolutionScene._nick or clean_string(Pokemon.name(EvolutionScene._preSpecies))
       local intoName = Pokemon.name(EvolutionScene._postSpecies) or "POKéMON"
       -- pokefirered/src/evolution_scene.c:775
-      Message.show(RomText.box("gText_CongratsPkmnEvolved", { stringVars = { fromName, intoName } }),
+      Message.show(evoBox("gText_CongratsPkmnEvolved", { fromName, intoName }),
         { frame = "battle" })
     end
 

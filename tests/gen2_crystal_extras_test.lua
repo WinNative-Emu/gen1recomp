@@ -3,6 +3,7 @@
 -- ROM-free:
 --   luajit tests/gen2_crystal_extras_test.lua
 package.path = "./?.lua;./?/init.lua;" .. package.path
+require("src.core.GameVersion").set("crystal")
 
 -- The same love stub tests/gen2_menus_test.lua installs; nothing here draws.
 love = love or {}
@@ -569,4 +570,5 @@ do
   check(ids.Gen2BuenaPassword, "Gen2BuenaPassword is one too")
 end
 
+require("src.core.GameVersion").set("red")
 S.finish()

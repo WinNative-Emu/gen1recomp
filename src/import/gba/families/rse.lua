@@ -29,7 +29,8 @@ F.encounterSource = "behaviorTable"
 
 F.aliases = false
 
-F.games = {}
+local Rs = {}
+F.games = { ruby = Rs, sapphire = Rs }
 
 -- pokeemerald/include/constants/global.h:149
 F.connDirs = { [1] = "south", [2] = "north", [3] = "west", [4] = "east", [5] = "dive", [6] = "emerge" }
@@ -64,6 +65,34 @@ function F:decodeHeaderFlags(rom, headerOff, out)
   return out
 end
 
+local cyclingHeaders = setmetatable({}, { __mode = "k" })
+function Rs:decodeHeaderFlags(rom, headerOff, out)
+  local mapType = out.mapType or rom:get(headerOff + 23)
+  -- pokeruby/src/overworld.c:752
+  local cycling = mapType ~= 8 and mapType ~= 9 and mapType ~= 5
+  local S = self:syms()
+  local exceptions = cyclingHeaders[S]
+  if not exceptions then
+    exceptions = {
+      [S.off("Route110_SeasideCyclingRoadSouthEntrance")] = true,
+      [S.off("Route110_SeasideCyclingRoadNorthEntrance")] = true,
+      [S.off("SeafloorCavern_Room9")] = false,
+      [S.off("CaveOfOrigin_B4F")] = false,
+    }
+    cyclingHeaders[S] = exceptions
+  end
+  if exceptions[headerOff] ~= nil then cycling = exceptions[headerOff] end
+  out.allowCycling = cycling and 1 or 0
+  out.bikingAllowed = out.allowCycling
+  -- pokeruby/src/item_use.c:849
+  out.allowEscaping = mapType == 4 and 1 or 0
+  -- pokeruby/src/bike.c:916
+  out.allowRunning = mapType == 8 and 0 or 1
+  out.showMapName = rom:get(headerOff + 26) or 0
+  out.battleType = rom:get(headerOff + 27)
+  return out
+end
+
 -- pokeemerald/include/global.fieldmap.h:130
 function F:hiddenItem(rom, base)
   return {
@@ -77,7 +106,7 @@ function F:constants()
 end
 
 function F:syms()
-  return require("src.import.gba.syms").of(self.game)
+  return require("src.import.gba.versions").forGame(self.game).SYMS
 end
 
 local groupCache = {}
@@ -127,6 +156,12 @@ function F:uncompressedTileBytes(_, tilesOff, _, secondary)
   end
   local tiles = secondary and (self.numTilesTotal - self.numPrimaryTiles) or self.numPrimaryTiles
   return tiles * 32
+end
+
+-- pokeruby/src/fieldmap.c:768
+function Rs:uncompressedTileBytes(_, tilesOff)
+  if not tilesOff then return nil end
+  return 512 * 32
 end
 
 return F

@@ -261,6 +261,7 @@ local function repelWalk(leadLevel, steps)
   Runtime.session = {
     map = MT_MOON,
     repelSteps = 250,
+    vars = { [0x4020] = 250 },
     party = { { species = 41, level = leadLevel, hp = 20 } },
   }
   Rng.SeedRng(0x1234)

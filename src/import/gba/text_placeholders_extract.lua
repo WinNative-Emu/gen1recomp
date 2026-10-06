@@ -47,6 +47,9 @@ function TextPlaceholders.extract(rom, offsets)
   for name in pairs(TextPlaceholders.SYMBOLS) do
     out[name] = read_plain(rom, assert(offsets[name], "no offset for placeholder " .. name))
   end
+  for name, off in pairs(offsets) do
+    if out[name] == nil then out[name] = read_plain(rom, off) end
+  end
   for name, pair in pairs(TextPlaceholders.BY_GENDER) do
     out.byGender[name] = { male = out[pair.male], female = out[pair.female] }
   end

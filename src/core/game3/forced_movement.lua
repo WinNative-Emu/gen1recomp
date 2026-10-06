@@ -93,6 +93,9 @@ local function forcedMovementNone()
     M.forced = false
     P.spinning = false
     P.animDisabled = false
+    -- pokeruby/src/field_player_avatar.c:362
+    M.facingLocked = false
+    P.moveDir = P.facing
   end
   return false
 end
@@ -132,7 +135,8 @@ end
 local function slip(game)
   local P = player()
   P.animDisabled = true
-  return doForcedMovement(game, P.facing, FRAMES_FAST_1)
+  -- pokeruby/src/field_player_avatar.c:405
+  return doForcedMovement(game, P.moveDir or P.facing, FRAMES_FAST_1, M.facingLocked and { keepFacing = true } or nil)
 end
 
 -- pokefirered/src/field_player_avatar.c:335 ForcedMovement_WalkSouth
@@ -167,6 +171,8 @@ local function slide(dir)
   return function(game)
     local P = player()
     P.animDisabled = true
+    -- pokeruby/src/field_player_avatar.c:458
+    M.facingLocked = true
     return doForcedMovement(game, dir, FRAMES_FAST_1, { keepFacing = true })
   end
 end
@@ -422,6 +428,7 @@ end)
 
 function M.reset()
   M.forced = false
+  M.facingLocked = false
   M.lastSpinTile = nil
   local P = package.loaded["src.core.game3.player"]
   if P then

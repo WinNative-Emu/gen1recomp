@@ -100,11 +100,18 @@ local function itemName(id)
 end
 
 -- pokeemerald/src/battle_pyramid_bag.c:379
+-- pokeemerald/src/battle_pyramid_bag.c:687
+function PBag.returnTo(location)
+  local ret = Py().manifest().bagReturnTo[(PBag.LOCATION[location] or 0) + 1]
+  return ret and require("src.core.game3.scripting.text_ir").toPlain(RomText.refIr(ret), {}) or ""
+end
+
 function PBag.show(opts)
   opts = opts or {}
   for k in pairs(st) do st[k] = nil end
   st.session = opts.session
   st.location = opts.location or "field"
+  st.returnTo = PBag.returnTo(st.location)
   st.onClose = opts.onClose
   st.onUse = opts.onUse
   st.onGive = opts.onGive
@@ -465,9 +472,7 @@ local function description()
     return RomText.plain("gText_MoveVar1Where", { stringVars = { itemName(items[st.swapFrom + 1]) } })
   end
   if item then return ItemsData.description(item) or "" end
-  local ret = Py().manifest().bagReturnTo[(PBag.LOCATION[st.location] or 0) + 1]
-  local TextIR = require("src.core.game3.scripting.text_ir")
-  return RomText.plain("gText_ReturnToVar1", { stringVars = { ret and TextIR.toPlain(ret.ir, {}) or "" } })
+  return RomText.plain("gText_ReturnToVar1", { stringVars = { st.returnTo or "" } })
 end
 PBag.description = description
 

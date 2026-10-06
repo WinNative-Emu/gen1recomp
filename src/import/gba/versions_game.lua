@@ -6,6 +6,8 @@ VersionsGame.GAMES = {
   firered = "src.import.gba.versions_frlg",
   leafgreen = "src.import.gba.versions_frlg",
   emerald = "src.import.gba.games.emerald",
+  ruby = "src.import.gba.games.ruby",
+  sapphire = "src.import.gba.games.sapphire",
 }
 
 VersionsGame.FALLBACK = "firered"

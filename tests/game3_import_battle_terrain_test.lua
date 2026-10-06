@@ -14,6 +14,7 @@ end
 
 local BattleChromeExtract = require("src.import.gba.battle_chrome_extract")
 local Versions = require("src.import.gba.versions")
+local CacheBlob = require("src.import.CacheBlob")
 
 -- include/constants/battle.h:287
 local PRET_KEYS = {
@@ -108,7 +109,7 @@ print("[info] FireRed cache at " .. root)
 local function readFile(rel)
   local f = io.open(root .. "/pokemon/battle/" .. rel, "rb")
   if not f then return nil end
-  local data = f:read("*a")
+  local data = CacheBlob.decode(root .. "/pokemon/battle/" .. rel, f:read("*a"))
   f:close()
   return data
 end

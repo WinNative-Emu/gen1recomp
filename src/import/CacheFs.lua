@@ -29,6 +29,7 @@
 
 local CacheFs = {}
 local Platform = require("src.core.Platform")
+local CacheBlob = require("src.import.CacheBlob")
 local SaveData = setmetatable({}, {
   __index = function(_, k) return require("src.core.SaveData")[k] end,
 })
@@ -324,6 +325,7 @@ end
 function CacheFs.write(rel, data)
   rel = withPrefix(rel)
   if unsafe_rel(rel) then return false, "unsafe cache path" end
+  data = CacheBlob.encode(rel, data)
   local root, rootErr = resolveWriteRoot()
   if not root and rootErr then return false, rootErr end
   if root then
@@ -389,12 +391,12 @@ function CacheFs.readAt(rel)
     if not f then return nil end
     local data = f:read("*a")
     f:close()
-    return data
+    return CacheBlob.decode(rel, data)
   end
   -- headless (plain luajit, e.g. the modkit validate/pack driver): there is
   -- no save directory to read from, so a cache miss is nil, not a crash
   if not (love and love.filesystem and love.filesystem.read) then return nil end
-  return love.filesystem.read(rel)
+  return (CacheBlob.readFs(rel))
 end
 
 -- read cache-relative `rel`; returns the bytes or nil

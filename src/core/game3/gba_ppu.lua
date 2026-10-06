@@ -14,6 +14,7 @@ Ppu.W, Ppu.H = 240, 160
 Ppu.DISPCNT_MODE_0 = 0
 Ppu.DISPCNT_MODE_1 = 1
 Ppu.DISPCNT_MODE_2 = 2
+Ppu.DISPCNT_HBLANK_FREE = 0x20
 Ppu.DISPCNT_OBJ_1D_MAP = 0x40
 Ppu.DISPCNT_FORCED_BLANK = 0x80
 Ppu.DISPCNT_BG0_ON = 0x100
@@ -63,6 +64,7 @@ end
 
 local REG_DEFAULTS = {
   DISPCNT = 0, BLDCNT = 0, BLDALPHA = 0, BLDY = 0,
+  BG0CNT = 0, BG1CNT = 0, BG2CNT = 0, BG3CNT = 0,
   WIN0H = 0, WIN0V = 0, WIN1H = 0, WIN1V = 0, WININ = 0, WINOUT = 0,
   BG0HOFS = 0, BG0VOFS = 0, BG1HOFS = 0, BG1VOFS = 0,
   BG2HOFS = 0, BG2VOFS = 0, BG3HOFS = 0, BG3VOFS = 0,
@@ -89,6 +91,8 @@ end
 function Ppu:set(name, value)
   assert(REG_DEFAULTS[name] ~= nil, "gba_ppu: unknown register " .. tostring(name))
   self.regs[name] = value
+  local bg = name:match("^BG([0-3])CNT$")
+  if bg then self.bg[tonumber(bg)].priority = band(value, 3) end
 end
 
 function Ppu:get(name)
@@ -440,7 +444,36 @@ local function objBox(e)
   return x, y, bw, bh
 end
 
-function Ppu:_renderObjs(g, list, target, windowPass)
+function Ppu.objScanlineRanges(list, dispcnt)
+  local remaining, ranges = {}, {}
+  local budget = band(dispcnt, Ppu.DISPCNT_HBLANK_FREE) ~= 0 and 954 or 1210
+  for row = 0, Ppu.H - 1 do remaining[row] = budget end
+  for _, e in ipairs(list) do
+    local visible = {}
+    ranges[e] = visible
+    if e.affineMode ~= 2 then
+      local x, y, bw, bh = objBox(e)
+      if x < Ppu.W and x + bw >= 0 then
+        local cycles = band(e.affineMode, 1) ~= 0 and (10 + bw * 2) or bw
+        local first
+        local stop = math.min(Ppu.H, y + bh)
+        for row = math.max(0, y), stop - 1 do
+          if remaining[row] > 0 then
+            remaining[row] = remaining[row] - cycles
+            if not first then first = row end
+          elseif first then
+            visible[#visible + 1] = { first, row }
+            first = nil
+          end
+        end
+        if first then visible[#visible + 1] = { first, stop } end
+      end
+    end
+  end
+  return ranges
+end
+
+function Ppu:_renderObjs(g, list, target, windowPass, ranges)
   local sh = g.objShader
   love.graphics.setCanvas(target)
   love.graphics.clear(0, 0, 0, 0)
@@ -450,7 +483,8 @@ function Ppu:_renderObjs(g, list, target, windowPass)
   for k = #list, 1, -1 do
     local e = list[k]
     local sheet = e.sheet
-    if sheet and e.affineMode ~= 2 then
+    local visible = ranges[e]
+    if sheet and visible and #visible > 0 then
       local x, y, bw, bh = objBox(e)
       sh:send("sheet", sheet.image)
       sh:send("sheetSize", { sheet.w, sheet.h })
@@ -471,9 +505,13 @@ function Ppu:_renderObjs(g, list, target, windowPass)
       sh:send("bpp8", e.bpp == 8 and 1 or 0)
       local tag = windowPass and 1 or (16 + (e.priority or 0) * 4 + (e.objMode == 1 and 2 or 0)) / 255
       sh:send("tag", tag)
-      love.graphics.draw(g.pixel, x, y, 0, bw, bh)
+      for _, rows in ipairs(visible) do
+        love.graphics.setScissor(0, rows[1], Ppu.W, rows[2] - rows[1])
+        love.graphics.draw(g.pixel, x, y, 0, bw, bh)
+      end
     end
   end
+  love.graphics.setScissor()
   love.graphics.setBlendMode("alpha", "alphamultiply")
 end
 
@@ -502,14 +540,15 @@ function Ppu:render()
   local r = self.regs
   local objOn = band(r.DISPCNT, Ppu.DISPCNT_OBJ_ON) ~= 0 and band(r.DISPCNT, Ppu.DISPCNT_FORCED_BLANK) == 0
   local shown, winList = {}, {}
+  local ranges = Ppu.objScanlineRanges(objOn and (self.sprites.oamShown or {}) or {}, r.DISPCNT)
   if objOn then
     for _, e in ipairs(self.sprites.oamShown or {}) do
       if e.objMode == 2 then winList[#winList + 1] = e else shown[#shown + 1] = e end
     end
   end
-  self:_renderObjs(g, shown, g.obj, false)
+  self:_renderObjs(g, shown, g.obj, false, ranges)
   local objWinOn = band(r.DISPCNT, Ppu.DISPCNT_OBJWIN_ON) ~= 0 and objOn
-  self:_renderObjs(g, objWinOn and winList or {}, g.objWin, true)
+  self:_renderObjs(g, objWinOn and winList or {}, g.objWin, true, ranges)
   local sh = g.composeShader
   love.graphics.setCanvas(g.out)
   love.graphics.clear(0, 0, 0, 1)

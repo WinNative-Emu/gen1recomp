@@ -3,6 +3,7 @@ local FrlgFont = require("src.ui.game3.frlg_font")
 local RomText = require("src.core.game3.rom_text")
 local Storage = require("src.core.game3.storage")
 
+local RsPolicy = require("src.ui.game3.rs.player_pc_policy")
 local PlayerPc = {}
 
 -- pokeemerald/src/player_pc.c:195
@@ -91,15 +92,16 @@ local function reshow(pc)
 end
 PlayerPc.reshow = reshow
 
-local function storage_desc(i)
-  return RomText.plain(RomText.key("sItemStorage_OptionDescriptions", i - 1))
+local function storage_desc(pc, i)
+  local name = RsPolicy.matches(session(pc)) and RsPolicy.storageDescriptions or "sItemStorage_OptionDescriptions"
+  return RomText.plain(RomText.key(name, i - 1))
 end
 
 -- pokeemerald/src/player_pc.c:494
 local function open_item_storage(pc, cursor)
   pc.mode = "item_storage"
   pc.cursor = cursor
-  pc._status = storage_desc(cursor)
+  pc._status = storage_desc(pc, cursor)
 end
 PlayerPc.openItemStorage = open_item_storage
 
@@ -244,7 +246,7 @@ function PlayerPc.handleInput(pc, input)
     -- pokeemerald/src/player_pc.c:520
     local r = menu_input(pc, input, #STORAGE_ROWS, true)
     if r == "move" then
-      pc._status = storage_desc(pc.cursor)
+      pc._status = storage_desc(pc, pc.cursor)
     elseif r == "a" then
       choose_storage(pc, STORAGE_ROWS[pc.cursor].id)
     elseif r == "b" then
@@ -301,7 +303,7 @@ function PlayerPc.draw(pc)
     draw_menu(labels, pc.cursor, #labels * 2)
   elseif pc.mode == "item_storage" then
     local labels = {}
-    for i, row in ipairs(STORAGE_ROWS) do labels[i] = RomText.plain(row.label) end
+    for i, row in ipairs(STORAGE_ROWS) do labels[i] = RomText.plain(row.id == "exit" and RsPolicy.matches(session(pc)) and "gOtherText_Exit" or row.label) end
     draw_menu(labels, pc.cursor, 8)
   end
   draw_status(pc)

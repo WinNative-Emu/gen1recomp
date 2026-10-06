@@ -319,10 +319,10 @@ function SpriteRenderer:resolveImage()
     local colors, group = PaletteFX.spriteObp(self.def, self.seed)
     if colors then return getObpImage(self.def.image, colors, group) end
   elseif PaletteFX.usesSpriteObp() then
-    -- OG boot-ROM OBJ palette: green on Red, pink on Blue (PaletteFX.ogObj
+    -- OG boot-ROM OBJ palette: green on Red, pink on Blue (PaletteFX.ogObjWorld
     -- returns colors + a version-distinct cache group so the two never
     -- collide in obpCache) -- see issue #155
-    return getObpImage(self.def.image, PaletteFX.ogObj())
+    return getObpImage(self.def.image, PaletteFX.ogObjWorld())
   end
   -- Every other mode (SGB and the mono/inverted novelties) leaves the sprite
   -- in DMG shades so the zone shader colors it out of the map's own palette,
@@ -435,11 +435,11 @@ function SpriteRenderer:draw(px, py, camX, camY, facing, walkPhase, stepFlip,
   elseif PaletteFX.usesSpriteObp() and PaletteFX.spriteRedrawPassActive() then
     -- OG RED (GBC boot-ROM look): every OBJ wears the one global object
     -- palette -- green over Red's red background, pink over Blue's blue
-    -- background (PaletteFX.ogObj, #155).  The BG zone shader still runs over
+    -- background (PaletteFX.ogObjWorld, #155).  The BG zone shader still runs over
     -- the world canvas, so the baked sprite is queued for a post-zone redraw
     -- (PaletteFX.markSpriteRedraw) that restores its object-colored pixels on
     -- top.
-    image = getObpImage(self.def.image, PaletteFX.ogObj())
+    image = getObpImage(self.def.image, PaletteFX.ogObjWorld())
     redraw = true
   else
     -- SGB and the mono/inverted modes (and OG RED's tilt upright pass, which
@@ -529,7 +529,7 @@ function SpriteRenderer:drawTile(path, x, y, flip, quad)
     local colors, group = PaletteFX.spriteObp(self.def, self.seed)
     if colors then image = getObpImage(path, colors, group) end
   elseif PaletteFX.usesSpriteObp() and PaletteFX.spriteRedrawPassActive() then
-    image, redraw = getObpImage(path, PaletteFX.ogObj()), true
+    image, redraw = getObpImage(path, PaletteFX.ogObjWorld()), true
   else
     image = getObpImage(path, PaletteFX.dmgObj())
   end

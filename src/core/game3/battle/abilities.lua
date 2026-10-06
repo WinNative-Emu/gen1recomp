@@ -3,6 +3,7 @@ local Types = require("src.core.game3.battle.types")
 local Secondary = require("src.core.game3.battle.effects.secondary")
 local RomText = require("src.core.game3.rom_text")
 local State = require("src.core.game3.battle.state")
+local BattleProfile = require("src.core.game3.battle.profile")
 
 local Abilities = {}
 
@@ -278,7 +279,10 @@ function Abilities.endTurn(ad, b)
     if s and ad:roll(0, 2) % 3 == 0 then
       local word = STATUS_WORD[s]
       ad:clearStatus(b)
-      b.expNightmare = nil
+      -- pokeruby/src/battle_util.c:1934
+      if BattleProfile.rule(ad._st, "shedSkinClearsNightmare") ~= false then
+        b.expNightmare = nil
+      end
       say_id(ad, "STRINGID_PKMNSXCUREDYPROBLEM", {
         scrActive = b, scrActiveAbility = Abilities.id(ab), buff1 = RomText.plain(word),
       })
@@ -370,6 +374,7 @@ function Abilities.applyStatus(ad, holder, victim, status, primary, M)
   if (victim.substituteHP or 0) > 0 and victim ~= (M and M.user) then return false end
   local vab = ad:abilityOf(victim)
   local function prevents()
+    if M and M._nativeMoveEffect then M._nativeMoveEffect(nil, false) end
     if M then
       say_id(ad, "STRINGID_PKMNSXPREVENTSYSZ", {
         atk = M.user, atkAbility = ab_id(ad, M.user), def = M.target, defAbility = ab_id(ad, M.target),
@@ -404,6 +409,7 @@ function Abilities.applyStatus(ad, holder, victim, status, primary, M)
     return false
   end
   ad:applyStatus(victim, status, holder, { force = true, ignoreSafeguard = true })
+  if M and M._nativeMoveEffect then M._nativeMoveEffect(nil, false) end
   ad:statusAnim(victim, status)
   if status ~= "SLP" then ad._syncEffect = { status = status } end
   if status == "TOX" then
@@ -446,12 +452,14 @@ function Abilities.onDamage(M)
       local r
       repeat r = ad:roll(0, 3) % 4 until r ~= 0
       local status = ({ "SLP", "PSN", "PAR" })[r]
+      if M._nativeMoveEffect then M._nativeMoveEffect(({1, 2, 5})[r], true) end
       Abilities.applyStatus(ad, target, user, status, false, M)
       return true
     end
   elseif ab == "POISON_POINT" or ab == "STATIC" or ab == "FLAME_BODY" then
     if ad:roll(0, 2) % 3 == 0 then
       local status = (ab == "POISON_POINT" and "PSN") or (ab == "STATIC" and "PAR") or "BRN"
+      if M._nativeMoveEffect then M._nativeMoveEffect(ab == "POISON_POINT" and 2 or ab == "STATIC" and 5 or 3, true) end
       Abilities.applyStatus(ad, target, user, status, false, M)
       return true
     end
@@ -508,6 +516,7 @@ function Abilities.synchronize(M, holder, victim)
   ad._syncEffect = nil
   local status = pend.status
   if status == "TOX" then status = "PSN" end
+  if M._nativeMoveEffect then M._nativeMoveEffect(({PSN=2, BRN=3, PAR=5})[status], true) end
   Abilities.applyStatus(ad, holder, victim, status, true, M)
   return true
 end

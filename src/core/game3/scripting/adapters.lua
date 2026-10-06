@@ -146,6 +146,17 @@ function Adapters.stub(opts)
     local def = { 2601, 4128, 526, 2611 }
     if done then done(true, (o and o.words) or def) end
   end
+  a.openTrendyPhrase = opts.openTrendyPhrase or function(o, done)
+    if done then done(false, o and o.words) end
+  end
+  a.openRsEasyChat = opts.openRsEasyChat or function(o, done)
+    if done then done(false, o and o.words) end
+  end
+  a.rsFieldMessageBoxMode = opts.rsFieldMessageBoxMode or function() return 0 end
+  a.openRsFieldAutoScrollMessage = opts.openRsFieldAutoScrollMessage or function()
+    a.log("[game3] native RS field auto-scroll host unavailable")
+    return false
+  end
   a.hallOfFame = opts.hallOfFame or function(done)
     local HallOfFame = require("src.ui.game3.hall_of_fame")
     HallOfFame.start({
@@ -426,6 +437,18 @@ function Adapters.host(mod, game, world)
     openMessage = function(text)
       boxOpen = true
     end,
+    rsFieldMessageBoxMode = function()
+      return require("src.ui.game3.message").rsFieldMessageBoxMode()
+    end,
+    openRsFieldAutoScrollMessage = function(presentation, onPrinted)
+      local Runtime = package.loaded["src.core.game3.runtime"]
+      if not (Runtime and Runtime.isActive and Runtime.isActive()) then return false end
+      local Message = require("src.ui.game3.message")
+      if Message.rsFieldMessageBoxMode() ~= 0 then return false end
+      if not Message.showRsFieldAutoScroll(presentation, onPrinted) then return false end
+      boxOpen = true
+      return true
+    end,
     openMessageAsync = function(text, done)
       boxOpen = true
       local Runtime = package.loaded["src.core.game3.runtime"]
@@ -526,7 +549,8 @@ function Adapters.host(mod, game, world)
           -- explicitly dismissed; without this they persist after the script ends.
           local Message = package.loaded["src.ui.game3.message"]
           if Message and Message.isOpen and Message.isOpen() then
-            Message.close()
+            -- pokeruby/src/scrcmd.c:1263
+            if not (Message.isRsFieldAutoScroll and Message.isRsFieldAutoScroll()) then Message.close() end
           end
           if cb then cb() end
           tick_vm()
@@ -1100,7 +1124,9 @@ function Adapters.host(mod, game, world)
       if op == "opendoor" then
         Doors.open(mapId, x, y)
       elseif op == "closedoor" then
-        Doors.close(mapId, x, y)
+        -- pokefirered/src/scrcmd.c:2131
+        -- pokeemerald/src/scrcmd.c:2063
+        Doors.close(mapId, x, y, { playSound = false })
       end
     end,
     fadeScreen = function(mode, speed, done)
@@ -1142,6 +1168,19 @@ function Adapters.host(mod, game, world)
       end
       if Message.isOpen and Message.isOpen() and Message.close then
         Message.close()
+      end
+      if chooseOpts.nativeModule == "src.ui.game3.rs.daycare_party" then
+        assert(require("src.core.game3.constants").versionOf(session) == "ruby"
+          or require("src.core.game3.constants").versionOf(session) == "sapphire", "native RS daycare host used by another edition")
+        local Fade = require("src.ui.game3.fade")
+        local restore = Fade.mode == Fade.MODE.TO_BLACK and not Fade.isActive() and (tonumber(Fade.t) or 0) >= 16
+        if restore then Fade.clear() end
+        require(chooseOpts.nativeModule).show(session, function(index)
+          if restore then Fade.begin(Fade.MODE.FROM_BLACK, 1, function() end) end
+          local function resume() if done then done(index) end; tick_vm() end
+          if not Runtime.defer(resume) then resume() end
+        end)
+        return
       end
       local picked = nil
       local function resume()
@@ -1217,6 +1256,32 @@ function Adapters.host(mod, game, world)
       Fade.clear()
       EasyChat.open(opts)
     end,
+    openTrendyPhrase = function(opts, done)
+      local Trend = require("src.ui.game3.rs.trendy_phrase")
+      local Fade = require("src.ui.game3.fade")
+      local Message = require("src.ui.game3.message")
+      opts = opts or {}
+      opts.onDone = function(confirmed, words)
+        if done then done(confirmed, words) end
+        tick_vm()
+      end
+      if Message.isOpen and Message.isOpen() and Message.close then Message.close() end
+      Fade.clear()
+      Trend.show(opts)
+    end,
+    openRsEasyChat = function(opts, done)
+      local Editor = require("src.ui.game3.rs.easy_chat_editor")
+      local Fade = require("src.ui.game3.fade")
+      local Message = require("src.ui.game3.message")
+      opts = opts or {}
+      opts.onDone = function(confirmed, words)
+        if done then done(confirmed, words) end
+        tick_vm()
+      end
+      if Message.isOpen and Message.isOpen() and Message.close then Message.close() end
+      Fade.clear()
+      Editor.show(opts)
+    end,
     warp = function(group, num, warpId, x, y, done, kind)
       local Versions = require("src.import.gba.versions")
       -- Prefer FR standalone ids; fall back to Sevii ferry maps.
@@ -1250,7 +1315,7 @@ function Adapters.host(mod, game, world)
       end
       local cx, cy = as_coord(x), as_coord(y)
       local Plaza = require("src.core.game3.link.union_plaza_map")
-      if mapId == Plaza.SOURCE_ID then
+      if require("src.core.game3.capabilities").has(nil, "unionRoom") and mapId == Plaza.SOURCE_ID then
         Plaza.ensure(resolveGame())
         mapId = Plaza.MAP_ID
         cx, cy = Plaza.entry()

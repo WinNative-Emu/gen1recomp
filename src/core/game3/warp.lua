@@ -161,6 +161,33 @@ local function releaseField(Field)
 end
 Warp.releaseField = releaseField
 
+local function isRse()
+  local ok, row = pcall(function() return require("src.core.game3.profile").forSession(nil) end)
+  return ok and type(row) == "table" and row.family == "rse"
+end
+
+-- pokeruby/src/field_fadetransition.c:376
+-- pokeemerald/src/field_screen_effect.c:483
+local function ordinaryFadeOut(Fade, game, destMap, destX, destY, toMode, playDeparture, done)
+  if not isRse() then
+    if playDeparture then playDeparture() end
+    Fade.begin(toMode, 1, done)
+    return
+  end
+  local Audio = require("src.core.game3.audio")
+  if Audio.tryFadeOutOldMapMusic then Audio.tryFadeOutOldMapMusic(destMap, destX, destY) end
+  local faded = false
+  Fade.begin(toMode, 1, function() faded = true end)
+  local E = require("src.core.game3.weather").rseEngine()
+  if E then E.playRainStoppingSoundEffect() end
+  if playDeparture then playDeparture() end
+  require("src.core.game3.task").spawn(function()
+    if not faded or Audio._fadeOut then return false end
+    done()
+    return true
+  end)
+end
+
 --- Complete door entrance sequence (walking UP into a building)
 function Warp.startDoorEntrance(mod, game, destMap, destX, destY, doorX, doorY)
   if Warp._busy then return false end
@@ -187,7 +214,7 @@ function Warp.startDoorEntrance(mod, game, destMap, destX, destY, doorX, doorY)
       -- Step 4: Short beat, then door animates closed (Frame 2 -> 1 -> 0)
       Doors.closeAfterDelay(curMap, doorX, doorY, 8, { sound = sound, playSound = false }, function()
         -- Step 5: Screen fades to black
-        Fade.begin(toMode, 1, function() Warp.mapTransition(game, destMap, function()
+        ordinaryFadeOut(Fade, game, destMap, destX, destY, toMode, nil, function() Warp.mapTransition(game, destMap, function()
           -- Step 6: Inside black, load the indoor map
           local Map = require("src.core.game3.map")
           Map.load(mod, game, destMap, {
@@ -228,13 +255,9 @@ function Warp.startDoorExit(mod, game, destMap, destX, destY, exitX, exitY)
   local Audio = package.loaded["src.core.game3.audio"] or require("src.core.game3.audio")
   local toMode, fromMode = warpFadeModes(Fade, game, destMap)
 
-  -- Step 1: Play exit sound (SE_EXIT)
-  if Audio and Audio.playSe then
-    pcall(function() Audio.playSe(Doors.SOUND_EXIT) end)
-  end
-
-  -- Step 2: Screen fades to black
-  Fade.begin(toMode, 1, function() Warp.mapTransition(game, destMap, function()
+  ordinaryFadeOut(Fade, game, destMap, destX, destY, toMode, function()
+    if Audio and Audio.playSe then pcall(function() Audio.playSe(Doors.SOUND_EXIT) end) end
+  end, function() Warp.mapTransition(game, destMap, function()
     local Map = require("src.core.game3.map")
     Map.load(mod, game, destMap, {
       x = destX,
@@ -886,7 +909,7 @@ function warpExitArrival(game, destMap, x, y, fromMode, finish)
     Task.spawn(function()
       t = t + 1
       if t == 25 then
-        Doors.open(destMap, x, y, {}, function()
+        Doors.open(destMap, x, y, { playSound = not isRse() }, function()
           Player.setVisible(true)
           stepT = 0
           if not Player.forceStep("down", function() stepDone = true end) then stepDone = true end
@@ -1027,10 +1050,18 @@ function Warp.scripted(mod, game, kind, destMap, destX, destY, facing, onDone)
     if not faded then
       Fade.begin(toMode, 1, function() faded = true end)
     end
+    if isRse() and (kind == nil or kind == "warp" or kind == "warpsilent" or kind == "warpdoor") then
+      local E = require("src.core.game3.weather").rseEngine()
+      if E then E.playRainStoppingSoundEffect() end
+    end
     if spec.se then playSe(SE[spec.se]) end
     Task.spawn(function(t)
       if not faded then return false end
-      if t.frames < musicFrames and Audio._fadeOut then return false end
+      if isRse() then
+        if Audio._fadeOut then return false end
+      elseif t.frames < musicFrames and Audio._fadeOut then
+        return false
+      end
       arrive()
       return true
     end)
@@ -1058,11 +1089,6 @@ function Warp.scripted(mod, game, kind, destMap, destX, destY, facing, onDone)
     arrive()
   end
   return true
-end
-
-local function isRse()
-  local ok, row = pcall(function() return require("src.core.game3.profile").forSession(nil) end)
-  return ok and type(row) == "table" and row.family == "rse"
 end
 
 local function mbIs(beh, name)
@@ -1398,12 +1424,12 @@ function Warp.request(mod, game, mapId, x, y, facing, opts)
   if Field and Field.lock then Field.lock() end
   local toMode, fromMode = warpFadeModes(Fade, game, mapId)
 
-  if opts.se ~= false then
-    local Audio = package.loaded["src.core.game3.audio"] or require("src.core.game3.audio")
-    if Audio and Audio.playSe then pcall(function() Audio.playSe(sound) end) end
-  end
-
-  Fade.begin(toMode, 1, function() Warp.mapTransition(game, mapId, function()
+  ordinaryFadeOut(Fade, game, mapId, x, y, toMode, function()
+    if opts.se ~= false then
+      local Audio = package.loaded["src.core.game3.audio"] or require("src.core.game3.audio")
+      if Audio and Audio.playSe then pcall(function() Audio.playSe(sound) end) end
+    end
+  end, function() Warp.mapTransition(game, mapId, function()
     doLoad()
     if Player and Player.setVisible then
       Player.setVisible(true)

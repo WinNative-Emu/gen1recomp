@@ -149,7 +149,7 @@ T.check(tostring(ratingBox.text):find("least 50 species", 1, true) ~= nil,
 T.eq(#plays, 0, "no jingle while the evaluation is printing")
 ratingBox.opts.auto.sound()
 T.eq(#plays, 1, "jingle fires once the rating text is printed")
-T.eq(plays[1], "Pokedex_Rating", "jingle is the Pokedex_Rating fanfare")
+T.eq(plays[1], "Get_Item1", "55 owned plays the Get_Item1 tier jingle")
 T.check(tostring(pushed[6].text):find("Closed link", 1, true) ~= nil,
   "the closing link prints at the end of the session")
 
@@ -165,6 +165,29 @@ pushed[2].opts.choice(false)
 T.check(tostring(lastPush().text):find("Closed link", 1, true) ~= nil,
   "NO skips the rating and closes the PC")
 T.eq(#plays, 0, "declining plays no jingle")
+
+-- audio/pokedex_rating_sfx.asm:26
+local tiers = {
+  { 0, "Denied" }, { 9, "Denied" },
+  { 10, "Pokedex_Rating" }, { 39, "Pokedex_Rating" },
+  { 40, "Get_Item1" }, { 59, "Get_Item1" },
+  { 60, "Caught_Mon" }, { 89, "Caught_Mon" },
+  { 90, "Level_Up" }, { 119, "Level_Up" },
+  { 120, "Get_Key_Item" }, { 149, "Get_Key_Item" },
+  { 150, "Get_Item2" }, { 151, "Get_Item2" },
+}
+for _, row in ipairs(tiers) do
+  T.eq(OW.dexRatingSfx and OW.dexRatingSfx(row[1]), row[2],
+    ("%d owned rates with %s"):format(row[1], row[2]))
+end
+
+reset()
+local full = {}
+for i = 1, 151 do full[i] = true end
+fakeGame.save.pokedex = { seen = full, owned = full }
+fakeSelf:dexRating(function() end)
+lastPush().opts.auto.sound()
+T.eq(plays[1], "Get_Item2", "a complete dex plays Get_Item2")
 
 package.loaded["src.ui.Menu"] = realMenu
 if realSound ~= nil then package.loaded["src.core.Sound"] = realSound end

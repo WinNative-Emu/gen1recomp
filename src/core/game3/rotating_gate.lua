@@ -68,6 +68,11 @@ RotatingGate.ARM_LAYOUT = {
 RotatingGate.PUZZLE_MAPS = {
   EM_FORTREE_CITY_GYM = "fortree",
   EM_ROUTE110_TRICK_HOUSE_PUZZLE6 = "trick_house",
+  -- pokeruby/src/rotating_gate.c:623
+  RU_FORTREE_CITY_GYM = "fortree",
+  RU_ROUTE110_TRICK_HOUSE_PUZZLE6 = "trick_house",
+  SA_FORTREE_CITY_GYM = "fortree",
+  SA_ROUTE110_TRICK_HOUSE_PUZZLE6 = "trick_house",
 }
 
 RotatingGate._p = nil
@@ -235,8 +240,8 @@ function RotatingGate.rotate(i, direction)
 end
 
 local function playerFast()
-  local P = package.loaded["src.core.game3.player"]
-  return P ~= nil and (P.running == true or P.biking == true)
+  -- pokeruby/src/rotating_gate.c:789
+  return require("src.core.game3.bike.rse").playerSpeed() ~= 1
 end
 
 -- pokeemerald/src/rotating_gate.c:762

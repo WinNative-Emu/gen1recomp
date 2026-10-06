@@ -54,7 +54,7 @@ local function man(self)
 end
 
 local function scenery(self)
-  return Scenery.manifest(self.m)
+  return (self.scenery or Scenery).manifest(self.m)
 end
 
 local function rgbaImage(self, key)
@@ -233,7 +233,7 @@ local function taskCycleSceneryPalette(self, id, d)
   local main = tasks:get(d[2]).data
   local st = d[0]
   if st == Scenery.SCENE_OCEAN_SUNSET then
-    Scenery.cycleSceneryPalette(self.m, 0)
+    self.scenery.cycleSceneryPalette(self.m, 0)
   elseif st == Scenery.SCENE_FOREST_RIVAL_ARRIVE then
     if d[1] ~= TIMER_STOP then
       local bike = tasks:get(main[1]).data
@@ -242,7 +242,7 @@ local function taskCycleSceneryPalette(self, id, d)
         d[1] = TIMER_STOP
       end
     end
-    Scenery.cycleSceneryPalette(self.m, 1)
+    self.scenery.cycleSceneryPalette(self.m, 1)
   elseif st == Scenery.SCENE_FOREST_CATCH_RIVAL then
     if d[1] ~= TIMER_STOP then
       if d[1] == 584 then
@@ -252,9 +252,9 @@ local function taskCycleSceneryPalette(self, id, d)
         d[1] = d[1] + 1
       end
     end
-    Scenery.cycleSceneryPalette(self.m, 1)
+    self.scenery.cycleSceneryPalette(self.m, 1)
   elseif st == Scenery.SCENE_CITY_NIGHT then
-    Scenery.cycleSceneryPalette(self.m, 2)
+    self.scenery.cycleSceneryPalette(self.m, 2)
   else
     if d[1] ~= TIMER_STOP then
       if tasks:get(main[15]).data[2] == 2 then
@@ -262,7 +262,7 @@ local function taskCycleSceneryPalette(self, id, d)
         d[1] = TIMER_STOP
       end
     end
-    Scenery.cycleSceneryPalette(self.m, 0)
+    self.scenery.cycleSceneryPalette(self.m, 0)
   end
 end
 
@@ -277,19 +277,19 @@ local function setBikeScene(self, scene, taskId)
   player.data[0], rival.data[0] = 0, 0
   if scene == Scenery.SCENE_OCEAN_MORNING then
     player.x, rival.x = 240 + 32, 240 + 32
-    d[0] = Scenery.createBicycleBgAnimationTask(m, 0, 0x2000, 0x20, 8)
+    d[0] = (self.scenery or Scenery).createBicycleBgAnimationTask(m, 0, 0x2000, 0x20, 8)
   elseif scene == Scenery.SCENE_OCEAN_SUNSET then
     player.x, rival.x = 120, 240 + 32
-    d[0] = Scenery.createBicycleBgAnimationTask(m, 0, 0x2000, 0x20, 8)
+    d[0] = (self.scenery or Scenery).createBicycleBgAnimationTask(m, 0, 0x2000, 0x20, 8)
   elseif scene == Scenery.SCENE_FOREST_RIVAL_ARRIVE then
     player.x, rival.x = 120, 240 + 32
-    d[0] = Scenery.createBicycleBgAnimationTask(m, 1, 0x2000, 0x200, 8)
+    d[0] = (self.scenery or Scenery).createBicycleBgAnimationTask(m, 1, 0x2000, 0x200, 8)
   elseif scene == Scenery.SCENE_FOREST_CATCH_RIVAL then
     player.x, rival.x = 120, -32
-    d[0] = Scenery.createBicycleBgAnimationTask(m, 1, 0x2000, 0x200, 8)
+    d[0] = (self.scenery or Scenery).createBicycleBgAnimationTask(m, 1, 0x2000, 0x200, 8)
   else
     player.x, rival.x = 88, 152
-    d[0] = Scenery.createBicycleBgAnimationTask(m, 2, 0x2000, 0x200, 8)
+    d[0] = (self.scenery or Scenery).createBicycleBgAnimationTask(m, 2, 0x2000, 0x200, 8)
   end
   d[2] = m.tasks:create(function(i, dd) taskCycleSceneryPalette(self, i, dd) end, 0)
   local pd = m.tasks:get(d[2]).data
@@ -315,7 +315,7 @@ local function loadBikeScene(self, scene, taskId)
   elseif st == 1 then
     m.globals.movingSceneryVBase = 34
     m.globals.movingSceneryVOffset = 0
-    Scenery.loadCreditsSceneGraphics(m, scene)
+    self.scenery.loadCreditsSceneGraphics(m, scene)
     self.loadState = 2
   elseif st == 2 then
     local sm = scenery(self)
@@ -335,7 +335,7 @@ local function loadBikeScene(self, scene, taskId)
     self.loadState = 3
   else
     setBikeScene(self, scene, taskId)
-    Scenery.setCreditsSceneBgCnt(m)
+    self.scenery.setCreditsSceneBgCnt(m)
     self.loadState = 0
     return true
   end
@@ -359,6 +359,12 @@ end
 -- pokeemerald/src/credits.c:831
 local function checkChangeScene(self, page, taskId)
   local d = self.m.tasks:get(taskId).data
+  local transitions = man(self).pageTransitions
+  if transitions then
+    local entry = transitions[page]
+    if entry then d[11] = entry.mode; if entry.scene then d[7] = entry.scene end end
+    return d[11] ~= MODE_NONE
+  end
   local interval = math.floor(man(self).pageCount / 9)
   if page == interval * 1 or page == interval * 3 or page == interval * 5 or page == interval * 7 then
     d[11] = MODE_SHOW_MONS
@@ -437,6 +443,7 @@ end
 
 -- pokeemerald/src/credits.c:1570
 local function determinePokemonToShow(self)
+  local NUM_MON_SLIDES = self.numMonSlides or NUM_MON_SLIDES
   local Pokemon = require("src.core.game3.pokemon")
   local Dex = require("src.core.game3.dex")
   local Rng = require("src.core.game3.rng")
@@ -541,12 +548,12 @@ local function taskShowMons(self, id, d)
     if self.nextImgPos == POS_LEFT and main[14] == 0 then return end
     d[0] = d[0] + 1
   elseif st == 2 then
-    if self.imgCounter == NUM_MON_SLIDES or self.mainFunc ~= "main" then return end
+    if self.imgCounter == (self.numMonSlides or NUM_MON_SLIDES) or self.mainFunc ~= "main" then return end
     local pos = man(self).monSpritePos[self.nextImgPos + 1]
     local nat = self.monToShow[self.currShownMon] or 0
     local s = { nat = nat, x = pos[1], y = pos[2], pos = self.nextImgPos, state = 0, t = 0, scale = 16,
       invisible = true, hold = 50 }
-    if self.currShownMon < NUM_MON_SLIDES - 1 then
+    if self.currShownMon < (self.numMonSlides or NUM_MON_SLIDES) - 1 then
       self.currShownMon = self.currShownMon + 1
     else
       self.currShownMon = 0
@@ -698,6 +705,8 @@ end
 function Credits.new(opts)
   local self = setmetatable({}, { __index = Credits })
   opts = opts or {}
+  self.scenery = opts.scenery or Scenery
+  self.assetLayout = opts.assetLayout
   self.session = opts.session
   self.gender = (opts.session and (opts.session.gender == 1 or opts.session.gender == "female")) and 1 or 0
   self.hasRecords = opts.hasRecords == true
@@ -709,6 +718,7 @@ function Credits.new(opts)
   m.ppu.palette:resetFade()
   m.tasks:reset()
   initCreditsBgsAndWindows(self)
+  self.numMonSlides = man(self).numMonSlides or NUM_MON_SLIDES
   self.mainId = m.tasks:create(function(i, d) mainStep(self, i, d) end, 0)
   local d = m.tasks:get(self.mainId).data
   d[4], d[7], d[11], d[13] = 0, Scenery.SCENE_OCEAN_MORNING, MODE_NONE, MODE_BIKE_SCENE
@@ -827,9 +837,14 @@ local function drawText(st)
     if e.text ~= "" then
       local colors = e.isTitle and { fg = col(3), shadow = col(4), bg = { 0, 0, 0, 0 } }
         or { fg = col(1), shadow = col(2), bg = { 0, 0, 0, 0 } }
-      local w = FrlgFont.measure(e.text, { letterSpacing = 1 })
+      local textOpts = { colors = colors, letterSpacing = 1 }
+      if st.assetLayout == "rs" then
+        local bank = (e.palette or 8) - 8
+        textOpts = { colors = { fg=col(bank*16+1),shadow=col(bank*16+2),bg={0,0,0,0} },font="native_3",textMode=2,letterSpacing=0 }
+      end
+      local w = FrlgFont.measure(e.text, textOpts)
       local x = math.floor((240 - w) / 2)
-      FrlgFont.draw(e.text, x, top + 5 + (i - 1) * 16, { colors = colors, letterSpacing = 1 })
+      FrlgFont.draw(e.text, x, top + (st.assetLayout == "rs" and 0 or 5) + (i - 1) * 16, textOpts)
     end
   end
 end

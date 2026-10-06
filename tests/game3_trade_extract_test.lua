@@ -28,6 +28,7 @@ end
 
 local Versions = require("src.import.gba.versions")
 local Trade = require("src.import.gba.trade_extract")
+local CacheBlob = require("src.import.CacheBlob")
 
 local MENU_SHEETS = {
   { "menu_bg1", 240, 160 },
@@ -136,7 +137,7 @@ print("[test] 3. the offsets hit pret's graphics/trade bins in a matching build"
 local function slurp(path)
   local f = io.open(path, "rb")
   if not f then return nil end
-  local d = f:read("*a")
+  local d = CacheBlob.decode(path, f:read("*a"))
   f:close()
   return d
 end

@@ -6,6 +6,7 @@ local Chrome = require("src.ui.game3.chrome")
 local FrlgFont = require("src.ui.game3.frlg_font")
 local TeachyTv = require("src.core.game3.teachy_tv")
 local SeIds = require("src.core.game3.se_ids")
+local CacheBlob = require("src.import.CacheBlob")
 
 local Ui = {}
 
@@ -129,12 +130,12 @@ local function read_bytes(rel)
     if ok and type(d) == "string" and #d > 0 then return d end
   end
   if love and love.filesystem and love.filesystem.read then
-    local ok, d = pcall(love.filesystem.read, rel)
+    local ok, d = pcall(CacheBlob.readFs, rel)
     if ok and type(d) == "string" and #d > 0 then return d end
   end
   local f = io.open(rel, "rb")
   if f then
-    local d = f:read("*a")
+    local d = CacheBlob.decode(rel, f:read("*a"))
     f:close()
     if d and #d > 0 then return d end
   end

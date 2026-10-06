@@ -37,6 +37,7 @@ local WIN_PROMPT = Window.template(2, 15, 26, 4)
 -- pokefirered/src/learn_move.c:329 sMoveRelearnerYesNoMenuTemplate
 local WIN_YESNO = Window.template(21, 8, 6, 4)
 local SE = require("src.core.game3.se_ids")
+local CacheBlob = require("src.import.CacheBlob")
 
 local function se(id)
   pcall(function()
@@ -57,12 +58,12 @@ local function read_bytes(rel)
     if ok and type(d) == "string" and #d > 0 then return d end
   end
   if love and love.filesystem and love.filesystem.read then
-    local ok, d = pcall(love.filesystem.read, rel)
+    local ok, d = pcall(CacheBlob.readFs, rel)
     if ok and type(d) == "string" and #d > 0 then return d end
   end
   local f = io.open(rel, "rb")
   if f then
-    local d = f:read("*a")
+    local d = CacheBlob.decode(rel, f:read("*a"))
     f:close()
     if d and #d > 0 then return d end
   end

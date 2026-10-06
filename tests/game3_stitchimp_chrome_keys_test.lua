@@ -3,6 +3,7 @@
 -- pokefirered/src/region_map.c:425
 
 package.path = "./?.lua;./?/init.lua;" .. package.path
+local CacheBlob = require("src.import.CacheBlob")
 
 local failed = 0
 local function check(cond, msg)
@@ -21,7 +22,7 @@ end
 local function slurp(path)
   local f = io.open(path, "rb")
   if not f then return nil end
-  local s = f:read("*a")
+  local s = CacheBlob.decode(path, f:read("*a"))
   f:close()
   return s
 end

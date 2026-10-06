@@ -152,13 +152,16 @@ end
 -- home/list_menu.asm:472-477
 local function sellItems(game)
   local items = {}
-  for _, id in ipairs(Bag.order(game.save)) do
+  for _, row in ipairs(Bag.rows(game.save, game.data)) do
+    local id = row.id
     local def = game.data.items[id]
     local keyed = (def and def.keyItem) or id:find("^HM_") ~= nil
     table.insert(items, {
       value = id,
       label = def and def.name or id,
-      count = (not keyed) and game.save.inventory[id] or nil,
+      count = (not keyed) and row.count or nil,
+      slot = row.slot,
+      stack = row.count,
     })
   end
   items[#items + 1] = { cancel = true, label = Strings("CANCEL") }
@@ -196,11 +199,13 @@ local function sell(game, menu)
         l.swapIndex = l.index
         return
       end
-      local order = Bag.order(game.save)
-      order[l.swapIndex], order[l.index] = order[l.index], order[l.swapIndex]
+      -- engine/menus/swap_items.asm:45
+      if l.swapIndex == l.index then return end
+      Bag.swap(game.save, l.swapIndex, l.index, game.data)
       l.swapIndex = nil
       require("src.core.Sound").play(game.data, "Swap")
       l.items = sellItems(game)
+      l.index = math.max(1, math.min(l.index, #l.items))
     end,
     onChoose = function(item)
       -- home/list_menu.asm:105-110, 523-528
@@ -227,7 +232,7 @@ local function sell(game, menu)
         if game.stack:top() == qtyBox then game.stack:pop() end
       end
       qtyBox = QuantityBox.new(game, {
-        max = game.save.inventory[item.value] or 1,
+        max = item.stack or game.save.inventory[item.value] or 1,
         unitPrice = unit,
         keepOpen = true,
         onDone = function(qty)
@@ -250,13 +255,14 @@ local function sell(game, menu)
                 game.save.money = game.save.money + unit * qty
                 -- home/inventory.asm:15
                 require("src.core.Sound").play(game.data, "Purchase")
-                Bag.remove(game.save, item.value, qty)
-                local left = game.save.inventory[item.value]
-                if left then
-                  item.count = left
-                else
-                  list:removeCurrent()
+                Bag.remove(game.save, item.value, qty, game.data, item.slot)
+                local fresh = sellItems(game)
+                if #fresh < #list.items then
+                  -- engine/items/inventory.asm:131
+                  list.index, list.scroll = 1, 0
                 end
+                list.items = fresh
+                list.index = math.max(1, math.min(list.index, #list.items))
                 -- a sale prints nothing -- engine/events/pokemart.asm:112
                 list.footer = greet
               end }))

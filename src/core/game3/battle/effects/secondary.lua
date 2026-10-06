@@ -32,12 +32,26 @@ function Secondary.statName(stat)
   return RomText.at("gStatNamesTable", Secondary.STAT_ID[stat])
 end
 
+-- A two-stage stat change: the US and Japanese "sharply"/"harshly" rows end
+-- with a space before the plain change ("sharply rose!", "ぐーんと　あがった！");
+-- the French, Italian and Spanish ones carry the whole change ("monte
+-- beaucoup!"), and their code skips the plain string that follows (pret
+-- pokeemerald multi-language, src/battle_message.c:4617). The German rows have
+-- the same shape ("steigt stark!").
+function Secondary.sharpChange(sharpId, plainId)
+  local sharp = RomText.plain(sharpId)
+  if sharp:sub(-1) == " " or sharp:sub(-3) == "\227\128\128" then
+    return sharp .. RomText.plain(plainId)
+  end
+  return sharp
+end
+
 -- src/battle_script_commands.c:6758
 local function stat_text(ad, battler, stat, delta, isUser)
   local change
-  if delta >= 2 then change = RomText.plain("STRINGID_STATSHARPLY") .. RomText.plain("STRINGID_STATROSE")
+  if delta >= 2 then change = Secondary.sharpChange("STRINGID_STATSHARPLY", "STRINGID_STATROSE")
   elseif delta >= 1 then change = RomText.plain("STRINGID_STATROSE")
-  elseif delta <= -2 then change = RomText.plain("STRINGID_STATHARSHLY") .. RomText.plain("STRINGID_STATFELL")
+  elseif delta <= -2 then change = Secondary.sharpChange("STRINGID_STATHARSHLY", "STRINGID_STATFELL")
   else change = RomText.plain("STRINGID_STATFELL") end
   local id
   if delta > 0 then
@@ -191,16 +205,19 @@ local function apply_status_effect(M, eff, primary, certain, effBattler)
   local strict = primary or certain
   if status == "PSN" or status == "TOX" then
     if ab == "IMMUNITY" and strict then
+      if M._rsStatusAbilityEffect then M._rsStatusAbilityEffect = false end
       ability_prevention_msg(ad, effBattler, ab, "STRINGID_PKMNPREVENTSPOISONINGWITH")
       return false
     end
   elseif status == "BRN" then
     if ab == "WATER_VEIL" and strict then
+      if M._rsStatusAbilityEffect then M._rsStatusAbilityEffect = false end
       ability_prevention_msg(ad, effBattler, ab, "STRINGID_PKMNSXPREVENTSBURNS")
       return false
     end
   elseif status == "PAR" then
     if ab == "LIMBER" and strict then
+      if M._rsStatusAbilityEffect then M._rsStatusAbilityEffect = false end
       ability_prevention_msg(ad, effBattler, ab, "STRINGID_PKMNPREVENTSPARALYSISWITH")
       return false
     end
@@ -213,6 +230,7 @@ local function apply_status_effect(M, eff, primary, certain, effBattler)
     return false
   end
   ad:applyStatus(effBattler, status, M.user, { ignoreSafeguard = true, force = true })
+  if M._rsStatusAbilityEffect then M._rsStatusAbilityEffect = false end
   ad:statusAnim(effBattler, status)
   ad:sayText(STATUS_MSG[status], { eff = effBattler })
   -- pokefirered/src/battle_script_commands.c:2376
@@ -273,10 +291,11 @@ function Secondary.set(M, eff, primary, certain, affectsUser)
   if not effBattler then return false end
   -- pokefirered/src/battle_script_commands.c:2128
   if M.st and M.st.pokedude and eff ~= "SLEEP" and effBattler.side == "enemy" then return false end
-  if rank and rank <= 9 and not primary and ad:abilityOf(effBattler) == "SHIELD_DUST" and not affectsUser then
+  if rank and rank <= 9 and not primary and not M._rsStatusAbilityEffect
+      and ad:abilityOf(effBattler) == "SHIELD_DUST" and not affectsUser then
     return false
   end
-  if rank and rank <= 7 and not primary and not affectsUser then
+  if rank and rank <= 7 and not primary and not affectsUser and not M._rsStatusAbilityEffect then
     local side = ad:ownSide(effBattler)
     if side and (side.expSafeguardTurns or 0) > 0 then return false end
   end

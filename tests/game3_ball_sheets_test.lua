@@ -1,6 +1,7 @@
 #!/usr/bin/env luajit
 package.path = "./?.lua;./?/init.lua;" .. package.path
 local GameCache = require("tests.game3_cache")
+local CacheBlob = require("src.import.CacheBlob")
 local root = GameCache.mountOrSkip("game3_ball_sheets_test")
 require("tests.fixture_data.game3_items").install()
 
@@ -17,7 +18,7 @@ end
 local function slurp(path)
   local f = io.open(path, "rb")
   if not f then return nil end
-  local d = f:read("*a")
+  local d = CacheBlob.decode(path, f:read("*a"))
   f:close()
   return d
 end

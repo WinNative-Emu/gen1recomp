@@ -28,6 +28,7 @@ end
 local Versions = require("src.import.gba.versions")
 local MapCatalog = require("src.import.gba.map_catalog")
 local NativePack = require("src.import.gba.native_pack")
+local CacheBlob = require("src.import.CacheBlob")
 MapCatalog.rebuildIndex()
 
 -- pokefirered/include/constants/layouts.h:253,267,268,308
@@ -169,7 +170,7 @@ else
   local function readFile(rel)
     local f = io.open(root .. "/" .. rel, "rb")
     if not f then return nil end
-    local d = f:read("*a")
+    local d = CacheBlob.decode(root .. "/" .. rel, f:read("*a"))
     f:close()
     return d
   end

@@ -18,6 +18,12 @@ TilesetAnim._enabled = true
 
 local MID_RGBA = 16 * 16 * 4 -- 1024
 
+local nativeMod
+local function NativeTileset()
+  nativeMod = nativeMod or require("src.core.game3.tileset_native")
+  return nativeMod
+end
+
 local function log(msg)
   print("[game3/anim] " .. tostring(msg))
 end
@@ -167,6 +173,7 @@ local function rse_paste(entry, bank, blob, mids, quads, frame, imageData, lut, 
       if piece then
         local ax, ay = (slot % cols) * 16, math.floor(slot / cols) * 16
         local mask = quads and quads[k] or 15
+        NativeTileset().markDirty(ts, over, slot)
         if mask == 15 then
           imageData:paste(piece, ax, ay, 0, 0, 16, 16)
         else
@@ -234,12 +241,6 @@ end
 
 local rseDirty = {}
 
-local nativeMod
-local function NativeTileset()
-  nativeMod = nativeMod or require("src.core.game3.tileset_native")
-  return nativeMod
-end
-
 -- pokeemerald/src/tileset_anims.c:586
 function TilesetAnim.stepRse()
   local st = TilesetAnim._rse
@@ -295,6 +296,49 @@ local function load_bank(cache, pair, kind, info)
   }
 end
 
+local get_frame_piece
+
+local function prewarm(pair, entry)
+  local Warm = require("src.core.game3.warm")
+  Warm.add("anim:" .. pair, function()
+    if TilesetAnim._pairs[pair] ~= entry then return end
+    NativeTileset().ensureAlt(entry.atlas)
+    if entry.rse then
+      for _, bank in ipairs(entry.banks) do
+        local row = bank and bank.row
+        if row and row.kind == "palette" then
+          if row.paletteSlot then NativeTileset().prepareSlot(entry.atlas, tonumber(row.paletteSlot) or 0) end
+        elseif row then
+          local frames = tonumber(row.frames) or 0
+          for frame = 0, frames - 1 do
+            local n, on = #(row.mids or EMPTY), #(row.overMids or EMPTY)
+            for k = 1, n do
+              if bank.under then rse_piece(entry, bank, bank.under, entry.lut, frame, k, n, false) end
+              if k % 4 == 0 then Warm.yield() end
+            end
+            for k = 1, on do
+              if bank.over then rse_piece(entry, bank, bank.over, entry.lutOver, frame, k, on, true) end
+              if k % 4 == 0 then Warm.yield() end
+            end
+            Warm.yield()
+          end
+        end
+      end
+    else
+      for _, bank in pairs(entry.banks) do
+        local nMids = #bank.mids
+        for frame = 0, bank.frames - 1 do
+          for mi = 1, nMids do
+            get_frame_piece(bank, frame, mi, (frame * nMids + (mi - 1)) * MID_RGBA)
+            if mi % 8 == 0 then Warm.yield() end
+          end
+          Warm.yield()
+        end
+      end
+    end
+  end, 3)
+end
+
 -- pokefirered/src/tileset_anims.c:223
 function TilesetAnim.bindPair(pair, atlas, prepared)
   if not Versions.NATIVE_RENDER or Versions.TILESET_ANIM == false then
@@ -314,6 +358,7 @@ function TilesetAnim.bindPair(pair, atlas, prepared)
       entry = rse_entry(cache, pair, atlas, man)
       TilesetAnim._pairs[pair] = entry
       if not entry then return false end
+      prewarm(pair, entry)
       if not TilesetAnim._rse then TilesetAnim.enterMap(pair, false) end
       TilesetAnim._visible[pair] = true
       return true
@@ -324,6 +369,7 @@ function TilesetAnim.bindPair(pair, atlas, prepared)
       flower = load_bank(cache, pair, "flower", man.flower),
     } }
     TilesetAnim._pairs[pair] = entry
+    prewarm(pair, entry)
   end
   TilesetAnim._visible[pair] = true
   if entry.rse then return true end
@@ -356,7 +402,7 @@ function TilesetAnim.setVisiblePairs(visible)
   end
 end
 
-local function get_frame_piece(bank, frame, mi, srcOff)
+function get_frame_piece(bank, frame, mi, srcOff)
   if not (love and love.image and love.image.newImageData) then return nil end
   local pieces = bank.pieces
   if not pieces then
@@ -395,6 +441,7 @@ function TilesetAnim._applyKind(entry, kind, frame, deferUpload)
       local ax = (slot % cols) * 16
       local ay = math.floor(slot / cols) * 16
       local piece = get_frame_piece(bank, frame, mi, srcOff)
+      NativeTileset().markDirty(ts, false, slot)
       local pasted = false
       if piece and ts.imageData.paste then
         ts.imageData:paste(piece, ax, ay)

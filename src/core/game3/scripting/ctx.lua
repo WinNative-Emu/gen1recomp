@@ -187,6 +187,7 @@ function Ctx.haltCleanup(ctx)
   Ctx.clearLocks(ctx)
   Ctx.clearMoves(ctx)
   ctx.messageOpen = false
+  ctx.fieldControlsLocked = nil
   ctx.frozen = false
   ctx.mode = "stopped"
   ctx.status = "shutdown"

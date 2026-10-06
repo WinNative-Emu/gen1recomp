@@ -360,9 +360,9 @@ function RoomSession:peerOnline(seat)
   return false
 end
 
-local function sendLeave()
+local function sendLeave(keepRoom)
   if S.room then S.leftRoom = S.room.room end
-  if S.room and S.role == "host" and S.room.intent == "battle" then
+  if not keepRoom and S.room and S.role == "host" and S.room.intent == "battle" then
     sendRaw(Protocol2.roomClose())
   end
   sendRaw(Protocol2.roomLeave())
@@ -372,7 +372,7 @@ function RoomSession:close()
   if self.left then return end
   self.left = true
   self.closed = true
-  sendLeave()
+  sendLeave(self.keepRoom)
   clearRoom()
 end
 

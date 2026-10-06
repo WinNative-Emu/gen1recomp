@@ -90,7 +90,8 @@ local function nameLine(mon)
   end
   parts.name = name
   parts.gender = g
-  parts.level = RomText.plain("gText_LvVar1", { stringVars = { tostring(tonumber(mon.level) or 1) } })
+  parts.level = st.opts.levelText and st.opts.levelText(tonumber(mon.level) or 1)
+    or RomText.plain("gText_LvVar1", { stringVars = { tostring(tonumber(mon.level) or 1) } })
   return parts
 end
 
@@ -102,7 +103,8 @@ local function refreshText(sel)
   local mon = monAt(sel)
   st.nameInfo = nameLine(mon)
   -- pokeemerald/src/use_pokeblock.c:1395
-  st.natureText = RomText.plain("gText_NatureSlash") .. RomText.at("gNatureNamePointers", Pokeblock.natureOf(mon))
+  st.natureText = st.opts.natureText and st.opts.natureText(mon)
+    or RomText.plain("gText_NatureSlash") .. RomText.at("gNatureNamePointers", Pokeblock.natureOf(mon))
 end
 
 local function setMonPic(sel)
@@ -505,6 +507,9 @@ end
 
 function Use.draw()
   if not Use.open then return end
+  if st.opts.draw then
+    return st.opts.draw(st, {drawIcons = drawIcons, isCancel = isCancel, sprite = sprite})
+  end
   local m = man()
   local L = layerImages()
   love.graphics.setColor(0, 0, 0, 1)

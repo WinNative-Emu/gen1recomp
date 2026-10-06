@@ -49,6 +49,25 @@ function Sem.var(session, name)
   return resolve(session, "vars", name)
 end
 
+local function live_store(session)
+  local Runtime = package.loaded["src.core.game3.runtime"]
+  local Space = package.loaded["src.core.game3.scripting.space"]
+  if Runtime and Runtime.getSession and Runtime.getSession() == session and Space and Space.active then
+    return Space.store
+  end
+end
+
+function Sem.getVar(session, name)
+  return require("src.core.game3.scripting.flags").getVar(live_store(session) or session, nil, Sem.var(session, name))
+end
+
+function Sem.setVar(session, name, value)
+  local Flags, id = require("src.core.game3.scripting.flags"), Sem.var(session, name)
+  Flags.setVar(session, nil, id, value)
+  local store = live_store(session)
+  if store then Flags.setVar(store, nil, id, value) end
+end
+
 function Sem.flag(session, name)
   return resolve(session, "flags", name)
 end

@@ -8,7 +8,7 @@ local ExtractMapEvents = require("src.import.gba.extract_map_events")
 local OwExtract = {}
 
 OwExtract.MAGIC = "SVOW"
-OwExtract.FORMAT_VERSION = 3
+OwExtract.FORMAT_VERSION = 4
 
 OwExtract.REQUIRED = { "ow/manifest.lua", "ow/palette_manifest.lua" }
 
@@ -130,6 +130,7 @@ local function read_graphics_info(rom, infoOff)
   local tracks = rom:get(infoOff + 13)
   local imagesPtr = rom:u32(infoOff + 0x1C)
   local animsPtr = rom:u32(infoOff + 0x18)
+  local subspriteTablesPtr = rom:u32(infoOff + 0x14)
   return {
     tileTag = tileTag,
     paletteTag = paletteTag,
@@ -143,6 +144,59 @@ local function read_graphics_info(rom, infoOff)
     tracks = tracks,
     imagesPtr = imagesPtr,
     animsPtr = animsPtr,
+    subspriteTablesPtr = subspriteTablesPtr,
+  }
+end
+
+-- src/sprite.c:246
+local OAM_DIMS = {
+  [0] = { { 8, 8 }, { 16, 16 }, { 32, 32 }, { 64, 64 } },
+  [1] = { { 16, 8 }, { 32, 8 }, { 32, 16 }, { 64, 32 } },
+  [2] = { { 8, 16 }, { 8, 32 }, { 16, 32 }, { 32, 64 } },
+}
+
+local function signed(v, bits)
+  local half = 2 ^ (bits - 1)
+  if v >= half then return v - 2 * half end
+  return v
+end
+
+-- src/sprite.c:1669
+local function read_subsprite_layout(rom, tablesPtr, width, height)
+  local tableOff = tablesPtr ~= 0 and gba_off(tablesPtr)
+  if not tableOff then return nil end
+  local count = rom:get(tableOff)
+  local subsOff = gba_off(rom:u32(tableOff + 4))
+  if not subsOff or count < 1 or count > 64 then return nil end
+  local game = Versions.GAME
+  -- pokeruby/include/sprite.h:153
+  local wide = game == "ruby" or game == "sapphire"
+  local stride = wide and 8 or 4
+  local subs = {}
+  local minX, minY, maxX, maxY = math.huge, math.huge, -math.huge, -math.huge
+  for i = 0, count - 1 do
+    local off = subsOff + i * stride
+    local x, y, bits
+    if wide then
+      x, y, bits = signed(rom:u16(off), 16), signed(rom:u16(off + 2), 16), rom:u16(off + 4)
+    else
+      x, y, bits = signed(rom:get(off), 8), signed(rom:get(off + 1), 8), rom:u16(off + 2)
+    end
+    local dims = OAM_DIMS[bits % 4]
+    dims = dims and dims[math.floor(bits / 4) % 4 + 1]
+    if not dims then return nil end
+    subs[#subs + 1] = { x = x, y = y, w = dims[1], h = dims[2], tile = math.floor(bits / 16) % 1024 }
+    minX, minY = math.min(minX, x), math.min(minY, y)
+    maxX, maxY = math.max(maxX, x + dims[1]), math.max(maxY, y + dims[2])
+  end
+  if maxX - minX ~= width or maxY - minY ~= height then return nil end
+  for _, sub in ipairs(subs) do
+    sub.x, sub.y = sub.x - minX, sub.y - minY
+  end
+  return {
+    subs = subs,
+    offX = minX + math.floor(width / 2),
+    offY = minY + math.floor(height / 2),
   }
 end
 
@@ -205,7 +259,7 @@ local function sym_frame_count(imagesOff)
 end
 
 --- Decode one 4bpp sprite frame (tile order: L→R, T→B 8×8) → indexed [w*h].
-local function decode_frame_4bpp(raw, width, height)
+local function decode_frame_4bpp(raw, width, height, layout)
   local pixels = {}
   local tilesX = math.floor(width / 8)
   local tilesY = math.floor(height / 8)
@@ -221,18 +275,24 @@ local function decode_frame_4bpp(raw, width, height)
     if high then return math.floor(b / 16) % 16 end
     return b % 16
   end
+  local function tileAt(tx, ty)
+    if not layout then return ty * tilesX + tx end
+    local px, py = tx * 8, ty * 8
+    for _, sub in ipairs(layout.subs) do
+      if px >= sub.x and px < sub.x + sub.w and py >= sub.y and py < sub.y + sub.h then
+        return sub.tile + ((py - sub.y) / 8) * (sub.w / 8) + (px - sub.x) / 8
+      end
+    end
+    return nil
+  end
   for ty = 0, tilesY - 1 do
     for tx = 0, tilesX - 1 do
-      local tileIndex = ty * tilesX + tx
-      if width == 128 and height == 64 then
-        tileIndex = math.floor(ty / 4) * 64 + math.floor(tx / 8) * 32
-          + (ty % 4) * 8 + tx % 8
-      end
-      local tileOff = tileIndex * 32
+      local tileIndex = tileAt(tx, ty)
+      local tileOff = (tileIndex or 0) * 32
       for y = 0, 7 do
         for x = 0, 7 do
           local byteIndex = tileOff + y * 4 + math.floor(x / 2)
-          local idx = nybble(byteIndex, x % 2 == 1)
+          local idx = tileIndex and nybble(byteIndex, x % 2 == 1) or 0
           local px = tx * 8 + x
           local py = ty * 8 + y
           pixels[py * width + px + 1] = idx
@@ -305,6 +365,7 @@ function OwExtract.extractOne(rom, graphicsId, palsByTag, version, reflectionMap
 
   local imagesOff = gba_off(info.imagesPtr)
   if not imagesOff then return nil, "bad images ptr" end
+  local layout = read_subsprite_layout(rom, info.subspriteTablesPtr, w, h)
 
   local expected = math.floor(w * h / 2)
   local frames = {}
@@ -320,7 +381,7 @@ function OwExtract.extractOne(rom, graphicsId, palsByTag, version, reflectionMap
       frames[i + 1] = {}
       for p = 1, w * h do frames[i + 1][p] = 0 end
     else
-      frames[i + 1] = decode_frame_4bpp(bytes, w, h)
+      frames[i + 1] = decode_frame_4bpp(bytes, w, h, layout)
     end
   end
 
@@ -347,6 +408,8 @@ function OwExtract.extractOne(rom, graphicsId, palsByTag, version, reflectionMap
     reflectionPalette = rawReflectPal,
     mappedReflectionPalette = reflectPal,
     inanimate = info.inanimate,
+    drawOffX = layout and layout.offX or 0,
+    drawOffY = layout and layout.offY or 0,
   }
 end
 
@@ -398,6 +461,8 @@ function OwExtract.encodeMeta(sprite)
   for c = 0, 15 do out[#out + 1] = u16le(sprite.palette and sprite.palette[c] or 0) end
   for c = 0, 15 do out[#out + 1] = u16le(sprite.reflectionPalette and sprite.reflectionPalette[c] or 0) end
   for c = 0, 15 do out[#out + 1] = u16le(sprite.mappedReflectionPalette and sprite.mappedReflectionPalette[c] or 0) end
+  out[#out + 1] = u8(sprite.drawOffX or 0)
+  out[#out + 1] = u8(sprite.drawOffY or 0)
   return table.concat(out)
 end
 
@@ -430,6 +495,11 @@ function OwExtract.decodeMeta(blob)
     if math.floor(flags / 2) % 2 == 0 then meta.mappedReflectionPalette = nil end
     if meta.reflectionPaletteTag == PALETTE_TAG_NONE then meta.reflectionPaletteTag = nil end
     if meta.reflectionPaletteMappedTag == PALETTE_TAG_NONE then meta.reflectionPaletteMappedTag = nil end
+  end
+  meta.drawOffX, meta.drawOffY = 0, 0
+  if meta.formatVersion >= 4 and #blob >= 120 then
+    local function s8(v) return v >= 128 and v - 256 or v end
+    meta.drawOffX, meta.drawOffY = s8(blob:byte(119)), s8(blob:byte(120))
   end
   return meta
 end
@@ -478,6 +548,7 @@ function OwExtract.readAvatars(rom, spec)
   if not spec then return nil end
   local genders = spec.genders
   local function pair(off)
+    if not off then return nil end
     return { male = rom:get(off), female = rom:get(off + 1) }
   end
   local function states(off, n)
@@ -514,7 +585,9 @@ local function avatar_lines(av)
     out[#out + 1] = "    },\n"
   end
   for _, key in ipairs({ "linkFrlg", "linkRs" }) do
+    if av[key] then
     out[#out + 1] = ("    %s = { male = %d, female = %d },\n"):format(key, av[key].male, av[key].female)
+    end
   end
   out[#out + 1] = "    stateFlags = {\n"
   for _, g in ipairs({ "male", "female" }) do

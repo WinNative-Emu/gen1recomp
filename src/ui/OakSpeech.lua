@@ -253,6 +253,8 @@ function OakSpeech.defaultSteps(speech)
       pic = "player",
       -- oak_speech.asm:106-108
       reveal = "fade_white_in",
+      -- data/text/text_2.asm:1753
+      auto = true,
     },
     {
       id = "shrink",
@@ -331,6 +333,8 @@ function OakSpeech.new(game, onDone)
   local sprites = game.data.sprites or {}
   local red = sprites[playerSprites.walk or "SPRITE_RED"] or sprites.SPRITE_RED
   self.walkSheet = tryImage(red and red.image)
+  self.walkDef = red
+  self.walkPath = red and red.image
   return self
 end
 
@@ -453,7 +457,8 @@ function OakSpeech:runStep(step)
         self.holdBox = box
         self.game.stack:push(box)
       else
-        self:sayText(self:stepText(step), function() self:advance() end)
+        self:sayText(self:stepText(step), function() self:advance() end,
+          step.auto and { auto = { delay = 0 } } or nil)
       end
     end)
   elseif kind == "demo" then
@@ -687,14 +692,23 @@ function OakSpeech:finish()
   if self.onDone then self.onDone() end
 end
 
--- Shrink timeline (oak_speech.asm .next):
---   frames  1-4   RedPicFront still up      (ld c, 4 / DelayFrames)
---   frames  5-8   ShrinkPic1                (ld c, 4 / DelayFrames)
---   frames  9-28  ShrinkPic2, music fades   (wAudioFadeOutControl; ld c, 20)
---   frames 29-78  pic area cleared, walking sprite at the standard
---                 player screen spot        (ResetPlayerSpriteData /
---                 ClearScreenArea / wUpdateSpritesEnabled; ld c, 50)
---   frames 79-102 GBFadeOutToWhite          (3 palettes x 8 frames)
+-- engine/movie/oak_speech/oak_speech.asm:125
+local SHRINK_PIC1_AT = 36
+local SHRINK_PIC2_AT = 76
+-- engine/movie/oak_speech/oak_speech.asm:154
+local SHRINK_WALK_AT = 108
+local SHRINK_FADE_AT = 158
+local SHRINK_END = SHRINK_FADE_AT + 3 * WHITE_FADE_STEP
+-- home/fade.asm:71
+local SHRINK_FADE_BGP = { 0x90, 0x40, 0x00 }
+local SHRINK_FADE_OBP0 = { 0x80, 0x40, 0x00 }
+
+OakSpeech.SHRINK_PIC1_AT = SHRINK_PIC1_AT
+OakSpeech.SHRINK_PIC2_AT = SHRINK_PIC2_AT
+OakSpeech.SHRINK_WALK_AT = SHRINK_WALK_AT
+OakSpeech.SHRINK_FADE_AT = SHRINK_FADE_AT
+OakSpeech.SHRINK_END = SHRINK_END
+
 function OakSpeech:update(dt)
   local r = self.picReveal
   if r then
@@ -708,30 +722,57 @@ function OakSpeech:update(dt)
   if not self.shrink then return end
   local s = self.shrink
   s.frame = s.frame + 1
-  if s.frame == 5 then
+  if s.frame == SHRINK_PIC1_AT then
     self.pic = self.shrinkPic1 or self.pic
     self.picTrueColor = false
-  elseif s.frame == 9 then
+  elseif s.frame == SHRINK_PIC2_AT then
     self.pic = self.shrinkPic2 or self.pic
     self.picTrueColor = false
     -- wAudioFadeOutControl = 10: the music ramps to silence over ~70
-    -- frames (7 levels x 10), reaching 0 just as the fade-to-white
-    -- begins at frame 79, instead of a hard cut (oak_speech.asm:145-149,
+    -- frames (7 levels x 10), reaching 0 shortly before the fade-to-white
+    -- begins, instead of a hard cut (oak_speech.asm:145-149,
     -- home/fade_audio.asm)
     Music.fadeOut(10)
-  elseif s.frame == 29 then
+  elseif s.frame == SHRINK_WALK_AT then
     self.pic = nil
     self.picTrueColor = false
     self.walkVisible = true
-  elseif s.frame >= 79 and s.frame <= 102 then
-    self.fadeLevel = math.floor((s.frame - 79) / 8) + 1
-  elseif s.frame > 102 then
+  elseif s.frame >= SHRINK_FADE_AT and s.frame < SHRINK_END then
+    self.fadeLevel = math.floor((s.frame - SHRINK_FADE_AT) / WHITE_FADE_STEP) + 1
+  elseif s.frame >= SHRINK_END then
     -- clear before finish(): a finished-listener that pushes a state gets
     -- ITS state popped in the speech's place, and a live shrink would call
     -- finish() again next frame, re-firing the event every frame (#308)
     self.shrink = nil
     self:finish()
   end
+end
+
+-- engine/movie/oak_speech/oak_speech.asm:162
+function OakSpeech:walkImage()
+  if not self.walkPath then return self.walkSheet, false end
+  local PF = require("src.render.PaletteFX")
+  local colors, group
+  if PF.usesGbcPack() then
+    colors, group = PF.spriteObp(self.walkDef)
+    if colors then colors, group = PF.fadeObp(colors, group) end
+  end
+  if not colors then
+    if PF.usesSpriteObp() then
+      if self.fadeLevel then
+        colors, group = PF.ogObjLit()
+      else
+        -- home/fade.asm:68
+        colors, group = PF.ogObjNormal()
+      end
+    else
+      colors, group = PF.dmgObjLit()
+    end
+  end
+  local ok, img = pcall(require("src.render.SpriteRenderer").obpImage,
+                        self.walkPath, colors, group)
+  if not (ok and img) then return self.walkSheet, false end
+  return img, PF.usesSpriteObp() or PF.usesGbcPack()
 end
 
 function OakSpeech:draw()
@@ -742,6 +783,14 @@ function OakSpeech:draw()
   if revealBgp then
     require("src.render.PaletteFX").setShadeMap(
       require("src.render.Transition").shadeMapFor(revealBgp))
+  end
+  if self.fadeLevel then
+    -- home/fade.asm:26
+    local PF = require("src.render.PaletteFX")
+    local Transition = require("src.render.Transition")
+    local i = math.min(#SHRINK_FADE_BGP, self.fadeLevel)
+    PF.setShadeMap(Transition.shadeMapFor(SHRINK_FADE_BGP[i]))
+    PF.setFadeObp(Transition.shadeMapFor(SHRINK_FADE_OBP0[i]))
   end
   if self.pic then
     -- IntroDisplayPicCenteredOrUpperRight centered: the 7x7-tile pic
@@ -773,7 +822,11 @@ function OakSpeech:draw()
     -- ResetPlayerSpriteData: Y screen pos $3c, X screen pos $40
     self.walkQuad = self.walkQuad
       or love.graphics.newQuad(0, 0, 16, 16, self.walkSheet:getDimensions())
-    love.graphics.draw(self.walkSheet, self.walkQuad, 64, 60)
+    local img, redraw = self:walkImage()
+    love.graphics.draw(img, self.walkQuad, 64, 60)
+    if redraw then
+      require("src.render.PaletteFX").markUiSpriteRedraw(img, self.walkQuad, 64, 60)
+    end
   end
   if self.shrinkText then
     -- This is a REPLICA of the dialogue box that just closed, redrawn at
@@ -793,11 +846,6 @@ function OakSpeech:draw()
         Font.drawCode(code, 8 + (j - 1) * 8, y)
       end
     end
-    love.graphics.setColor(1, 1, 1, 1)
-  end
-  if self.fadeLevel then
-    love.graphics.setColor(1, 1, 1, self.fadeLevel / 3)
-    love.graphics.rectangle("fill", 0, 0, 160, 144)
     love.graphics.setColor(1, 1, 1, 1)
   end
 end

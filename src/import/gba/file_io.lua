@@ -1,6 +1,7 @@
 -- File-backed mod.imports / mod.cache shim for offline extract (dev CLI).
 
 local FileIO = {}
+local CacheBlob = require("src.import.CacheBlob")
 
 function FileIO.makeImports(path, md5, id)
   id = id or "firered"
@@ -45,7 +46,7 @@ function FileIO.makeCache(root)
     local parent = path:match("^(.*)/[^/]+$")
     if parent then mkdir_p(parent) end
     local f = assert(io.open(path, "wb"))
-    f:write(bytes)
+    f:write(CacheBlob.encode(rel, bytes))
     f:close()
     return true
   end
@@ -54,7 +55,7 @@ function FileIO.makeCache(root)
     if not f then return nil end
     local d = f:read("*a")
     f:close()
-    return d
+    return CacheBlob.decode(rel, d)
   end
   function cache:exists(rel)
     local f = io.open(root .. "/" .. rel, "rb")

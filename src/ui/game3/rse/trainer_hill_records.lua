@@ -32,7 +32,7 @@ function Records.lines(sess)
   local y = 18
   local modes = Hl.manifest().modeStrings
   for i = 1, Hl.NUM_MODES do
-    out[#out + 1] = { text = TextIR.toPlain(modes[i].ir, {}), x = 0, y = y }
+    out[#out + 1] = { text = TextIR.toPlain(RomText.refIr(modes[i]), {}), x = 0, y = y }
     y = y + 15
     local m, s, f = Hl.timeParts(sess.trainerHillTimes[i])
     local vars = { string.format("%2d", m), string.format("%2d", s), string.format("%02d", f) }

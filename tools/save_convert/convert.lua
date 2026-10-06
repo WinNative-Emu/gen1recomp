@@ -135,7 +135,7 @@ else
   io.stderr:write(
     "usage: luajit tools/save_convert/convert.lua import <in.json|in.sav> <out.lua> [game]\n" ..
     "       luajit tools/save_convert/convert.lua export <in.lua> <out.sav> [game]\n" ..
-    "       game: red (default) | blue | yellow | gold | silver | crystal | firered | leafgreen | emerald\n" ..
+    "       game: red (default) | blue | yellow | gold | silver | crystal | firered | leafgreen | ruby | sapphire | emerald\n" ..
     "       set <GAME>_CACHE to that game's imported ROM cache directory\n")
   os.exit(1)
 end

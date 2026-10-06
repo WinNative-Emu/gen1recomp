@@ -507,7 +507,7 @@ do
   local usable, why = OnlinePanel.inviteUsable(red, { id = "i3", activity = "trade",
     from = { id = "u3", name = "MAY", where = "direct" } })
   T.eq(usable, false, "a launcher with no Gen 3 game can't answer a Gen 3 invite")
-  T.eq(why, "MAY plays FireRed or LeafGreen. Import one to answer.", "and says so")
+  T.eq(why, "MAY plays a Game Boy Advance game. Import one to answer.", "and says so")
   restore()
 end
 

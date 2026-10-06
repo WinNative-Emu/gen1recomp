@@ -56,6 +56,16 @@ local PLAYER_WIN = { left = 2, top = 2, width = 17, height = 6 }
 local PLAYER_WIN_RSE = { left = 2, top = 2, width = 14, height = 6 }
 local WHITE_TEXT = { fg = FrlgFont.STDPAL[1], shadow = FrlgFont.STDPAL[2], bg = FrlgFont.STDPAL[0] }
 local GRAY_TEXT = { fg = FrlgFont.STDPAL[2], shadow = FrlgFont.STDPAL[3], bg = FrlgFont.STDPAL[0] }
+local function rs()
+  local id = require("src.core.game3.profile").forSession(HallOfFame._session).id
+  return id == "ruby" or id == "sapphire"
+end
+-- pokeruby/src/text.c:1525
+local function textColors(player)
+  if not rs() then return player and GRAY_TEXT or WHITE_TEXT end
+  return {fg=FrlgFont.STDPAL[player and 1 or 15],shadow=FrlgFont.STDPAL[8],bg=FrlgFont.STDPAL[0]}
+end
+
 
 -- pokefirered/src/hall_of_fame.c:382 Task_Hof_InitMonData
 local function extract_eligible_mons(party)
@@ -80,9 +90,10 @@ local function commit_clear_and_save(session, eligibleMons)
   session.hasHallOfFameRecords = true
 
   -- 2. Timestamp debut
-  local h = tonumber(session.playTimeHours or session.hours) or 0
-  local m = tonumber(session.playTimeMinutes or session.minutes) or 0
-  local s = tonumber(session.playTimeSeconds or session.seconds) or 0
+  local pt = session.playtime or session.playTime or {}
+  local h = tonumber(session.playTimeHours or session.hours or pt.hours) or 0
+  local m = tonumber(session.playTimeMinutes or session.minutes or pt.minutes) or 0
+  local s = tonumber(session.playTimeSeconds or session.seconds or pt.seconds) or 0
   session.hofDebutHours = h
   session.hofDebutMinutes = m
   session.hofDebutSeconds = s
@@ -260,7 +271,10 @@ function HallOfFame.close()
   HallOfFame._onDone = nil
   if HallOfFame._credits then
     -- pokeemerald/src/hall_of_fame.c:775
-    require("src.ui.game3.rse.credits").start({
+    local Profile = require("src.core.game3.profile")
+    local id = Profile.forSession(HallOfFame._session).id
+    local credits = (id == "ruby" or id == "sapphire") and "src.ui.game3.rs.credits" or "src.ui.game3.rse.credits"
+    require(credits).start({
       session = HallOfFame._session,
       hasRecords = HallOfFame._hasRecords,
       onDone = cb,
@@ -505,7 +519,8 @@ end
 
 -- pokefirered/src/hall_of_fame.c:993 HallOfFame_PrintMonInfo
 local function draw_mon_info(mon)
-  local x0, y0 = 16, 120
+  local native = rs()
+  local x0, y0 = 16, native and 119 or 120
   local sp = tonumber(mon.species) or 0
   local egg = Pokemon.isEgg(mon)
   if not egg then
@@ -515,45 +530,47 @@ local function draw_mon_info(mon)
       dex = require("src.core.game3.dex").regionalNumber(sp, require("src.core.game3.profile").forSession(HallOfFame._session).id)
     end
     local digits = dex and string.format("%03d", dex) or "???"
-    FrlgFont.draw(RomText.plain("gText_Number") .. digits, x0 + 16, y0 + 1, { colors = WHITE_TEXT })
+    FrlgFont.draw(RomText.plain("gText_Number") .. digits, x0 + 16, y0 + 1, { colors = textColors(false) })
   end
   local nick = egg and RomText.plain("gText_EggNickname") or Pokemon.displayName(mon)
   local w = FrlgFont.measure(nick)
-  local nx = egg and (0x80 - math.floor(w / 2)) or (0x80 - w)
-  FrlgFont.draw(nick, x0 + nx, y0 + 1, { colors = WHITE_TEXT })
+  local nx = native and 56 or (egg and (0x80 - math.floor(w / 2)) or (0x80 - w))
+  FrlgFont.draw(nick, x0 + nx, y0 + 1, { colors = textColors(false) })
   if egg then return end
   local gender = " "
   if sp ~= SPECIES_NIDORAN_M and sp ~= SPECIES_NIDORAN_F then
     local g = Pokemon.gender(sp, tonumber(mon.personality) or 0)
     if g == "M" then gender = "♂" elseif g == "F" then gender = "♀" end
   end
-  FrlgFont.draw("/" .. tostring(Pokemon.name(sp) or "") .. gender, x0 + 0x80, y0 + 1, { colors = WHITE_TEXT })
-  FrlgFont.draw(RomText.plain("gText_Level") .. tostring(tonumber(mon.level) or 0), x0 + 0x20, y0 + 0x11,
-    { colors = WHITE_TEXT })
+  FrlgFont.draw("/" .. tostring(Pokemon.name(sp) or "") .. gender, x0 + (native and 118 or 0x80), y0 + 1, { colors = textColors(false) })
+  FrlgFont.draw(RomText.plain("gText_Level") .. tostring(tonumber(mon.level) or 0), x0 + (native and 40 or 0x20), y0 + 0x11,
+    { colors = textColors(false) })
   local tid = tonumber(mon.otId or mon.tid or HallOfFame._session.trainerId) or 0
-  FrlgFont.draw(RomText.plain("gText_IDNumber") .. string.format("%05d", tid % 65536), x0 + 0x60, y0 + 0x11,
-    { colors = WHITE_TEXT })
+  FrlgFont.draw(RomText.plain("gText_IDNumber") .. string.format("%05d", tid % 65536), x0 + (native and 88 or 0x60), y0 + 0x11,
+    { colors = textColors(false) })
 end
 
 -- pokefirered/src/hall_of_fame.c:1080 HallOfFame_PrintPlayerInfo
 local function draw_player_info()
   local session = HallOfFame._session or {}
-  local win = rse(session) and PLAYER_WIN_RSE or PLAYER_WIN
+  local native = rs()
+  local win = native and {left=2,top=3,width=13,height=6} or (rse(session) and PLAYER_WIN_RSE or PLAYER_WIN)
   local ox, oy = win.left * 8, win.top * 8
-  local textWidth = win.width * 8 - 6
+  local textWidth = win.width * 8 - (native and 0 or 6)
   Window.fill(win, 1, 1, 1, 1)
   Window.stdFrame(win)
   local name = tostring(session.name or session.playerName or "")
-  FrlgFont.draw(RomText.plain("gText_Name"), ox + 4, oy + 3, { colors = GRAY_TEXT })
-  FrlgFont.draw(name, ox + textWidth - FrlgFont.measure(name), oy + 3, { colors = GRAY_TEXT })
+  FrlgFont.draw(RomText.plain("gText_Name"), ox + (native and 0 or 4), oy + (native and 0 or 3), { colors = textColors(true) })
+  FrlgFont.draw(name, ox + textWidth - FrlgFont.measure(name), oy + (native and 0 or 3), { colors = textColors(true) })
   local tid = (tonumber(session.trainerId or session.playerTrainerId) or 0) % 65536
-  FrlgFont.draw(RomText.plain("gText_IDNumber"), ox + 4, oy + 18, { colors = GRAY_TEXT })
-  FrlgFont.draw(string.format("%05d", tid), ox + textWidth - 30, oy + 18, { colors = GRAY_TEXT })
-  local h = tonumber(session.playTimeHours or session.hours) or 0
-  local m = tonumber(session.playTimeMinutes or session.minutes) or 0
-  FrlgFont.draw(RomText.plain(key(session, "gText_MainMenuTime")), ox + 4, oy + 32, { colors = GRAY_TEXT })
+  FrlgFont.draw(RomText.plain(native and "gOtherText_IDNumber2" or "gText_IDNumber"), ox + (native and 0 or 4), oy + (native and 16 or 18), { colors = textColors(true) })
+  FrlgFont.draw(string.format("%05d", tid), ox + textWidth - 30, oy + (native and 16 or 18), { colors = textColors(true) })
+  local pt = session.playtime or session.playTime or {}
+  local h = tonumber(session.playTimeHours or session.hours or pt.hours) or 0
+  local m = tonumber(session.playTimeMinutes or session.minutes or pt.minutes) or 0
+  FrlgFont.draw(RomText.plain(key(session, "gText_MainMenuTime")), ox + (native and 0 or 4), oy + 32, { colors = textColors(true) })
   FrlgFont.draw(string.format("%3d:%02d", h % 1000, m % 100), ox + textWidth - 36, oy + 32,
-    { colors = GRAY_TEXT })
+    { colors = textColors(true) })
 end
 
 function HallOfFame.draw()
@@ -575,21 +592,21 @@ function HallOfFame.draw()
   end
   if HallOfFame._saving then
     -- pokefirered/src/hall_of_fame.c:456
-    Window.dialogueFrame()
-    Window.printPx(RomText.plain(key(HallOfFame._session, "gText_SavingDontTurnOffThePower2")), 16, 121)
+    if rs() then require("src.ui.game3.chrome").stdFrame(3,15,24,4) else Window.dialogueFrame() end
+    if rs() then FrlgFont.draw(RomText.plain(key(HallOfFame._session,"gText_SavingDontTurnOffThePower2")),24,120,{colors=textColors(true)}) else Window.printPx(RomText.plain(key(HallOfFame._session,"gText_SavingDontTurnOffThePower2")),16,121) end
   end
   if HallOfFame._info then draw_mon_info(HallOfFame._info) end
   if HallOfFame._welcome then
     -- pokefirered/src/hall_of_fame.c:984
     local text = RomText.plain("gText_WelcomeToHOF")
     local x = math.floor((0xD0 - FrlgFont.measure(text)) / 2)
-    FrlgFont.draw(text, 16 + x, 121, { colors = WHITE_TEXT })
+    FrlgFont.draw(text,16+x,rs() and 120 or 121,{colors=textColors(false)})
   end
   if HallOfFame._playerInfo then
     draw_player_info()
     -- pokefirered/src/hall_of_fame.c:642
-    Window.dialogueFrame()
-    Window.printPx(RomText.plain("gText_LeagueChamp"), 16, 121)
+    if rs() then require("src.ui.game3.chrome").stdFrame(3,15,24,4) else Window.dialogueFrame() end
+    if rs() then FrlgFont.draw(RomText.plain("gText_LeagueChamp"),32,120,{colors=textColors(true)}) else Window.printPx(RomText.plain("gText_LeagueChamp"),16,121) end
   end
   draw_confetti()
   local f = HallOfFame._fade

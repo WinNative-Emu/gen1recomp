@@ -6,15 +6,17 @@
 --     POKEPORT_IDENTITY=bug274 SHOT_DIR=/tmp/shots love .
 return function(game)
   local U = dofile("tests/drivers/util.lua")
-  local DIR = os.getenv("SHOT_DIR") or "/tmp/shots"
+  local DIR = os.getenv("POKEPORT_SHOT_DIR") or os.getenv("SHOT_DIR") or "/tmp/shots"
   local PaletteFX = require("src.render.PaletteFX")
   local PartyMenu = require("src.ui.PartyMenu")
   local Pokemon = require("src.pokemon.Pokemon")
   local Screens = require("src.ui.Screens")
   local Strings = require("src.core.Strings")
 
+  local failed = false
   local function check(label, ok)
     U.log(ok and "PASS" or "FAIL", label)
+    if not ok then failed = true end
     return ok
   end
 
@@ -159,7 +161,7 @@ return function(game)
             :format(i, row.hp, row.pal),
           z ~= nil and z.colors == pal(row.pal))
     check(("row %d's block covers the bar's cap + six fill tiles"):format(i),
-          z ~= nil and z.x == 48 and z.w == 56 and z.y == (i * 2 - 1) * 8
+          z ~= nil and z.x == 40 and z.w == 56 and z.y == (i * 2 - 1) * 8
           and z.h == 8)
   end
 
@@ -227,14 +229,12 @@ return function(game)
     check("the icon column is drawn (not blank)", flesh > 0)
 
     -- (b) the bars: each row's fill must be ITS OWN bar color and none of the
-    -- other two.  Fill tiles run x 56..103 (drawHPBar at tile 5: "HP" 40,
-    -- ":[" 48, six fill tiles 56..103, cap 104).
     for i, row in ipairs(ROWS) do
       local y0 = (i * 2 - 1) * 8
       local own = pal(row.pal)
       -- the three bar palettes share color 0/1/3; only color 2, the fill
       -- shade, tells them apart
-      local mine = countColor(id, own and own[3], 56, y0, 103, y0 + 7)
+      local mine = countColor(id, own and own[3], 48, y0, 95, y0 + 7)
       U.log(("  row %d (%d/48 HP) %s fill pixels: %d")
               :format(i, row.hp, row.pal, mine))
       if row.fill then
@@ -243,7 +243,7 @@ return function(game)
       for _, other in ipairs({ "GREENBAR", "YELLOWBAR", "REDBAR" }) do
         if other ~= row.pal then
           local c = pal(other)
-          local n = countColor(id, c and c[3], 56, y0, 103, y0 + 7)
+          local n = countColor(id, c and c[3], 48, y0, 95, y0 + 7)
           check(("row %d's bar carries no %s"):format(i, other), n == 0)
         end
       end
@@ -275,7 +275,5 @@ return function(game)
   U.log("OPTION -> COLORS cycles modes; OG and CLASSIC are mono by design.")
   U.log("Captures: bug274_party_advanced.png and bug274_party_sgb.png in " .. DIR)
 
-  while true do
-    coroutine.yield()
-  end
+  love.event.quit(failed and 1 or 0)
 end

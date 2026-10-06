@@ -60,7 +60,7 @@ Compat.RULES = {
 local GEN = {
   red = 1, blue = 1, yellow = 1,
   gold = 2, silver = 2, crystal = 2,
-  firered = 3, leafgreen = 3, emerald = 3,
+  firered = 3, leafgreen = 3, emerald = 3, ruby = 3, sapphire = 3,
 }
 
 function Compat.generationOf(version)
@@ -338,10 +338,11 @@ local function checkGen2(s, r, version)
 end
 
 local G3_CHUNKS = {
+  rs = { [0] = 0x890, 0xF80, 0xF80, 0xF80, 0xC40, 0xF80, 0xF80, 0xF80, 0xF80, 0xF80, 0xF80, 0xF80, 0xF80, 0x7D0 },
   frlg = { [0] = 0xF24, 0xF80, 0xF80, 0xF80, 0xEE8, 0xF80, 0xF80, 0xF80, 0xF80, 0xF80, 0xF80, 0xF80, 0xF80, 0x7D0 },
   emerald = { [0] = 0xF2C, 0xF80, 0xF80, 0xF80, 0xF08, 0xF80, 0xF80, 0xF80, 0xF80, 0xF80, 0xF80, 0xF80, 0xF80, 0x7D0 },
 }
-local G3_PARTY = { frlg = { count = 0x34, mons = 0x38 }, emerald = { count = 0x234, mons = 0x238 } }
+local G3_PARTY = { rs = { count = 0x234, mons = 0x238 }, frlg = { count = 0x34, mons = 0x38 }, emerald = { count = 0x234, mons = 0x238 } }
 -- include/save.h:15
 local SIGNATURE = 0x08012025
 
@@ -454,7 +455,7 @@ local function checkGen3(s, r, version)
         ("%d trailing bytes are neither an RTC footer (7 or an even 12-48) nor a uniform pad; PKHeX refuses the file"):format(extra), 0x20000)
     end
   end
-  local family = version == "emerald" and "emerald" or "frlg"
+  local family = (version == "ruby" or version == "sapphire") and "rs" or (version == "emerald" and "emerald" or "frlg")
   r.family = family
   local chunks = G3_CHUNKS[family]
   local blocks, slots = Compat.gen3Blocks(s, family)
@@ -523,7 +524,7 @@ local function checkGen3(s, r, version)
     if u32le(sb2, 0xAF8) == 0 then
       r.add("gen3.securityKey", "SB2 0xAF8 (berry powder XOR key) is 0; OpenHome G3SAV rejects the file", 0xAF8)
     end
-  else
+  elseif family == "emerald" then
     if code == 0 or code == 1 then
       r.add("gen3.gameCode", ("Emerald key at SB2 0xAC is %d, readers type the file as %s"):format(code,
         code == 0 and "Ruby/Sapphire" or "FireRed/LeafGreen"), 0xAC)

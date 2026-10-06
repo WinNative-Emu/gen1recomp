@@ -12,6 +12,7 @@ OUT_ROOT = os.path.join(REPO, "src", "core", "game3", "constants")
 GAMES = {
     "emerald": "pokeemerald",
     "firered": "pokefirered",
+    "ruby": "pokeruby",
 }
 
 
@@ -513,6 +514,8 @@ def opcode_of(item, const_id):
 def gen_script_cmds(game, root):
     rel_t = "data/script_cmd_table.inc"
     rel_m = "asm/macros/event.inc"
+    if not os.path.exists(os.path.join(root, rel_m)):
+        rel_m = "include/macros/event.inc"
     ttext = read(os.path.join(root, rel_t))
     handlers = {}
     consts = {}
@@ -540,7 +543,7 @@ def gen_script_cmds(game, root):
     const_id = {c: i for i, c in consts.items()}
     mtext = read(os.path.join(root, rel_m))
     macros, morder = parse_macros(mtext)
-    mapinc = os.path.join(root, "asm/macros/map.inc")
+    mapinc = os.path.join(root, os.path.dirname(rel_m), "map.inc")
     if os.path.exists(mapinc):
         mm, _ = parse_macros(read(mapinc))
         for k, v in mm.items():
@@ -615,6 +618,12 @@ def gen_script_cmds(game, root):
             stub = True
         else:
             stub = False
+        if game == "ruby" and h == "ScrCmd_addelevmenuitem":
+            # pokeruby/src/scrcmd.c:1976-1985 reads these operands even though
+            # its unused event macro emits only the opcode (a stale FRLG nop).
+            seq = [("byte", "floor"), ("half", "mapGroup"),
+                   ("half", "mapNum"), ("half", "warpId")]
+            variable = False
         entry = {
             "name": name,
             "handler": h,
@@ -645,9 +654,15 @@ def headers(root):
     for f in sorted(os.listdir(os.path.join(root, "include", "constants"))):
         if f.endswith(".h"):
             h.parse(os.path.join("include", "constants", f))
-    for extra in ("include/battle_transition.h",):
+    for extra in ("include/battle_transition.h", "include/battle_string_ids.h"):
         if os.path.exists(os.path.join(root, extra)):
             h.parse(extra)
+    if not os.path.exists(os.path.join(root, "include/constants/pokedex.h")):
+        if os.path.exists(os.path.join(root, "include/pokedex.h")):
+            h.parse("include/pokedex.h")
+    if not os.path.exists(os.path.join(root, "include/constants/item.h")):
+        if os.path.exists(os.path.join(root, "include/item.h")):
+            h.parse("include/item.h")
     return h
 
 
@@ -704,6 +719,8 @@ def gen_field_effects(game, h, root):
 
 def gen_items(game, h, root):
     f = ["include/constants/items.h", "include/constants/item.h", "include/constants/global.h"]
+    if not os.path.exists(os.path.join(root, "include/constants/item.h")):
+        f.append("include/item.h")
     files = [x for x in f if os.path.exists(os.path.join(root, x))]
     t = h.collect(r"^(ITEM_|ITEMS_COUNT|FIRST_|LAST_|NUM_|MAX_BERRY|MAIL_|ITEM_TO_)", set(files[:1]))
     pockets = h.collect(r"^(POCKET_|\w+_POCKET$|POCKETS_COUNT|NUM_BAG_POCKETS)", set(files))
@@ -713,9 +730,12 @@ def gen_items(game, h, root):
 
 def gen_species(game, h, root):
     f = ["include/constants/species.h"]
-    t = h.collect(r"^(SPECIES_|NUM_SPECIES|NATIONAL_DEX_|HOENN_DEX_|KANTO_DEX_|NUM_)", set(f + ["include/constants/pokedex.h"]))
+    dex = "include/constants/pokedex.h"
+    if not os.path.exists(os.path.join(root, dex)):
+        dex = "include/pokedex.h"
+    t = h.collect(r"^(SPECIES_|NUM_SPECIES|NATIONAL_DEX_|HOENN_DEX_|KANTO_DEX_|NUM_)", set(f + [dex]))
     rev = reverse({k: v for k, v in t.items() if k.startswith("SPECIES_")}, h.ordered, r"(_START|_END|_COUNT)$")
-    return {"byName": t, "byId": {"SPECIES_": rev}}, hdr_src(root, f + ["include/constants/pokedex.h"])
+    return {"byName": t, "byId": {"SPECIES_": rev}}, hdr_src(root, f + [dex])
 
 
 def gen_trainer_classes(game, h, root):
@@ -729,7 +749,7 @@ def gen_trainers(game, h, root):
 
 
 def gen_battle_strings(game, h, root):
-    f = ["include/constants/battle_string_ids.h"]
+    f = ["include/constants/battle_string_ids.h", "include/battle_string_ids.h"]
     return simple(h, root, f, r"^(STRINGID_|BATTLESTRINGS_|B_MSG_)", rev=["STRINGID_"])
 
 

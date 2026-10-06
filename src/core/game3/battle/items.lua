@@ -27,9 +27,8 @@ local BALL_MULT = {
 
 local function band(a, m) return bit.band(tonumber(a) or 0, m) end
 
-local function effect_of(itemId)
-  local info = ItemsData.info(itemId)
-  local e = info and info.effect
+local function effect_of(itemId, session)
+  local e = ItemUse.effect(itemId, session)
   return type(e) == "table" and e or nil
 end
 
@@ -68,6 +67,9 @@ function BattleItems.isBall(id)
 end
 
 function BattleItems.isBattleUsable(id)
+  if (ItemsData.toNumericId(id) or tonumber(id)) == 175 and require("src.core.game3.rs.enigma").matches() then
+    return ItemUse.fieldUseKind(id, nil, true) ~= "none"
+  end
   local info = ItemsData.info(id)
   if not info then return false end
   local bu = tonumber(info.battleUsage) or 0
@@ -82,7 +84,7 @@ function BattleItems.needsPartySelect(id)
   local num = ItemsData.toNumericId(id) or tonumber(id)
   if num == 80 then return false end -- POKE_DOLL
   if BattleItems.isStatBooster(id) then return false end
-  local use = ItemsData.fieldUseKind(id)
+  local use = ItemUse.fieldUseKind(id, nil, true)
   local info = ItemsData.info(id)
   local bu = info and tonumber(info.battleUsage) or 0
   if bu == 1 or use == "heal" or use == "status" or use == "revive"
@@ -175,19 +177,64 @@ local function stat_booster_text(st, b, e)
   return text
 end
 
+local function enigma_options(st, active, user, preview)
+  local Enigma = require("src.core.game3.rs.enigma")
+  local State = require("src.core.game3.battle.state")
+  user = user or st.player
+  local raw = st.enigmaBerries and st.enigmaBerries[State.idOf(user)]
+  if raw and raw[1] ~= nil then raw = Enigma.decodeBattle(raw) end
+  local effect = raw and raw.itemEffect
+  if not effect and st.link then effect = {} end
+  local statUser = user
+  if preview and user then
+    statUser = {}
+    for key, value in pairs(user) do statUser[key] = value end
+  end
+  return {
+    preview = preview, state = st, battler = active, effect = effect,
+    volatile = function(e, kind)
+      local mask = {0,0,0,0,0,0}
+      if kind == "infatuation" then mask[1] = band(e[1], 0x80)
+      else mask[4] = band(e[4], 1) end
+      return status2_cure(active, mask, not preview)
+    end,
+    stats = function(e) return stat_booster(st, statUser, e, not preview) end,
+    hpApplied = function(hp, max, revive)
+      if revive and user and user.side == "player" and st.battleResults then
+        st.battleResults.reviveCount = math.min(255, (tonumber(st.battleResults.reviveCount) or 0) + 1)
+      end
+      if st.resultPolicy then
+        st.resultPolicy.hpItem(st.battleResults, {
+          hpEffect = true, revive = revive, inBattle = true, effectMode = 0,
+          committed = true, hpBefore = hp, maxHP = max,
+          battleId = active and State.idOf(active) or 4, usingSide = user and user.side == "enemy" and 1 or 0,
+        })
+      end
+    end,
+  }
+end
+
 function BattleItems.canUseOn(st, itemId, partySlot, mon, moveSlot)
+  local session = st and st.session
   if not mon or not itemId then return false, wont_have_effect() end
   if mon.isEgg then return false, Strings("An EGG can't be used on.") end
+  if (ItemsData.toNumericId(itemId) or tonumber(itemId)) == 175 and require("src.core.game3.rs.enigma").matches(session) then
+    if ItemUse.fieldUseKind(itemId, session, true) == "none" then return false, wont_have_effect() end
+    local ok, detail = ItemUse.applyEnigmaItem(session, mon, moveSlot or 1,
+      enigma_options(st, active_for_slot(st, partySlot), st and st.player, true))
+    if detail and detail.aborted then return true end
+    return ok, not ok and wont_have_effect() or nil
+  end
   local hp = tonumber(mon.hp) or 0
   local maxHp = tonumber(mon.maxHp or mon.maxhp) or 1
   local mk = ItemsData.medicineKind(itemId)
-  local use = ItemsData.fieldUseKind(itemId)
+  local use = ItemUse.fieldUseKind(itemId, session, true)
   -- pokefirered/src/party_menu.c:4675 TryUsePPItemInBattle
   if use == "pp" then
-    if ItemUse.ppItemHasEffect(mon, itemId, moveSlot or 1) then return true end
+    if ItemUse.ppItemHasEffect(mon, itemId, moveSlot or 1, session) then return true end
     return false, wont_have_effect()
   end
-  local e = effect_of(itemId)
+  local e = effect_of(itemId, session)
   if mk == "revive" or use == "revive" then
     if hp > 0 then return false, wont_have_effect() end
     return true
@@ -233,6 +280,13 @@ end
 
 -- pokefirered/src/item_use.c:757
 function BattleItems.statBoosterHasEffect(st, itemId, battlerId)
+  if (ItemsData.toNumericId(itemId) or tonumber(itemId)) == 175 and require("src.core.game3.rs.enigma").matches(st.session) then
+    local user = user_battler(st, battlerId)
+    local party = st.playerParty or (st.session and st.session.party)
+    local mon = user and party and party[user.partyIndex] or user and user.mon
+    local ok, detail = ItemUse.applyEnigmaItem(st.session, mon, 1, enigma_options(st, user, user, true))
+    return ok or (detail and detail.aborted) or false
+  end
   return stat_booster(st, user_battler(st, battlerId), effect_of(itemId), false)
 end
 
@@ -267,6 +321,38 @@ function BattleItems.use(st, adapter, bag, session, itemId, partySlot, battlerId
   end
 
   local num = ItemsData.toNumericId(itemId) or tonumber(itemId)
+  if num == 175 and require("src.core.game3.rs.enigma").matches(session)
+      and ItemUse.fieldUseKind(itemId, session, true) == "none" then
+    say(wont_have_effect()); return "error", msgs, false, false
+  end
+
+  if num == 175 and require("src.core.game3.rs.enigma").matches(session) then
+    local kind = ItemUse.fieldUseKind(itemId, session, true)
+    local user = user_battler(st, battlerId)
+    local party = st.playerParty or (session and session.party)
+    if kind == "battle" then partySlot = user and user.partyIndex end
+    if not partySlot then return "need_slot", msgs, false, false end
+    local mon, active = party and party[partySlot], active_for_slot(st, partySlot)
+    if not mon or mon.isEgg then say(wont_have_effect()); return "error", msgs, false, false end
+    if active then require("src.core.game3.battle.state").syncBattlerToParty(active, party) end
+    local before = tonumber(mon.hp) or 0
+    local opts = enigma_options(st, active, user, false)
+    local applied, detail = ItemUse.applyEnigmaItem(session, mon, moveSlot or 1, opts)
+    if active then
+      active.status, active.fainted = mon.status, (tonumber(mon.hp) or 0) <= 0
+      if active.mon and active.mon ~= mon then
+        active.mon.hp, active.mon.status, active.mon.sleep = mon.hp, mon.status, mon.sleep
+      end
+    end
+    if not applied then say(wont_have_effect()); return "error", msgs, false, false end
+    Bag.remove(bag, itemId, 1)
+    if kind == "battle" then
+      return "xitem", msgs, true, false, stat_booster_text(st, user, opts.effect or ItemUse.effect(itemId, session))
+    end
+    local text = kind == "pp" and ItemUse.ppItemText(mon, itemId, moveSlot or 1)
+      or ItemUse.medicineText(mon, before, ItemUse.cureKind(itemId, session))
+    return "heal", msgs, true, false, text
+  end
 
   -- Poké Doll → flee wild
   if num == 80 then
@@ -319,7 +405,7 @@ function BattleItems.use(st, adapter, bag, session, itemId, partySlot, battlerId
 
   -- pokefirered/src/item_use.c:755 BattleUseFunc_StatBooster
   if BattleItems.isStatBooster(itemId) then
-    local e = effect_of(itemId)
+    local e = effect_of(itemId, session)
     local battler = user_battler(st, battlerId)
     if not stat_booster(st, battler, e, true) then
       -- pokefirered/src/item_use.c:758
@@ -339,7 +425,7 @@ function BattleItems.use(st, adapter, bag, session, itemId, partySlot, battlerId
   end
 
   -- Medicine / berries on party mon
-  local use = ItemsData.fieldUseKind(itemId)
+  local use = ItemUse.fieldUseKind(itemId, session, true)
   local info = ItemsData.info(itemId)
   -- pokefirered/src/party_menu.c:4675 TryUsePPItemInBattle
   if use == "pp" then
@@ -379,10 +465,10 @@ function BattleItems.use(st, adapter, bag, session, itemId, partySlot, battlerId
       say(wont_have_effect())
       return "error", msgs, false, false
     end
-    local ok, cured = false, nil
+    local ok, cured, hpCommitted = false, nil, false
     local hpBefore = tonumber(mon.hp) or 0
     local mk = ItemsData.medicineKind(itemId)
-    local e = effect_of(itemId)
+    local e = effect_of(itemId, session)
     local active = active_for_slot(st, partySlot)
     local asleep = mon.status == "SLP" or mon.status == 5 or (tonumber(mon.sleep) or 0) > 0
     -- pokefirered/src/pokemon.c:4258
@@ -394,21 +480,32 @@ function BattleItems.use(st, adapter, bag, session, itemId, partySlot, battlerId
         ok = ItemUse.revive(mon, max)
       end
     elseif mk == "status" or use == "status" then
-      ok, cured = ItemUse.clearStatus(mon, itemId)
+      ok, cured = ItemUse.clearStatus(mon, itemId, session)
     else
       ok = ItemUse.healMon(session, mon, itemId)
+      hpCommitted = ok
     end
     if status2_cure(active, e, true) then ok = true end
     if not ok then
       say(wont_have_effect())
       return "error", msgs, false, false
     end
+    if st.resultPolicy then
+      st.resultPolicy.hpItem(st.battleResults, {
+        hpEffect = e ~= nil and band(tonumber(e[5]) or 0, 0x04) ~= 0,
+        revive = e ~= nil and band(tonumber(e[5]) or 0, 0x40) ~= 0,
+        inBattle = true, effectMode = 0, committed = hpCommitted == true,
+        hpBefore = hpBefore, maxHP = tonumber(mon.maxHp) or tonumber(mon.maxhp) or 0,
+        battleId = active and require("src.core.game3.battle.state").idOf(active) or 4,
+        usingSide = 0,
+      })
+    end
     -- pokefirered/src/pokemon.c:4178
     if active and asleep and e and band(e[4], 0x20) ~= 0 and not (mon.status or (tonumber(mon.sleep) or 0) > 0) then
       active.expNightmare = nil
     end
     -- pokefirered/src/party_menu.c:5345
-    if e then cured = ItemUse.cureKind(itemId) end
+    if e then cured = ItemUse.cureKind(itemId, session) end
     -- pokefirered/src/pokemon.c:4481
     if num and ItemUse.BITTER_MEDICINE_FRIENDSHIP[num] then
       local Pokemon = require("src.core.game3.pokemon")

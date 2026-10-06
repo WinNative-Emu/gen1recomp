@@ -96,7 +96,7 @@ function CameraObject.installViewSeam()
   return true
 end
 
-function CameraObject.spawn(game)
+function CameraObject.spawn(game, opts)
   local eo = live()
   if eo then return eo end
   local O = Objects()
@@ -104,12 +104,13 @@ function CameraObject.spawn(game)
   local lid = CameraObject.LOCALID
   local cx = tonumber(P.cellX) or 0
   local cy = tonumber(P.cellY) or 0
+  opts = opts or {}
   local pool = O.spawnFromDefs({ {
     localId = lid,
     x = cx,
     y = cy,
-    graphicsId = GFX_YOUNGSTER,
-    movementType = MOVEMENT_TYPE_FACE_DOWN,
+    graphicsId = opts.graphicsId or GFX_YOUNGSTER,
+    movementType = opts.movementType or MOVEMENT_TYPE_FACE_DOWN,
     elevation = ELEVATION,
   } }, nil)
   eo = pool and pool.byId and pool.byId[lid]
@@ -118,7 +119,7 @@ function CameraObject.spawn(game)
   eo.hidden = true
   eo.px = tonumber(P.px) or (cx * CELL)
   eo.py = tonumber(P.py) or (cy * CELL)
-  eo.facing = P.facing or "down"
+  eo.facing = opts.facing or P.facing or "down"
   O._byId[lid] = eo
   if not orderIndex(O._order, lid) then
     O._order[#O._order + 1] = lid

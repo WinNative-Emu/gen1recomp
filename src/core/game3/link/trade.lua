@@ -281,10 +281,11 @@ function LT.sendParty()
     type = LT.MSG.PARTY,
     party = LT.packParty(s),
     name = (s and s.name) or "PLAYER",
-    trainerId = tonumber(s and (s.trainerId or s.id)) or 0,
+    trainerId = require("src.core.game3.link.family").trainerId(s),
     gender = (s and (s.gender == "female" or s.gender == 1)) and 1 or 0,
     version = version,
     progressFlags = flags,
+    giftRibbons = require("src.core.game3.link.rs").giftRibbonBlock(s),
   })
   LT._partySent = ok
   return ok
@@ -310,6 +311,15 @@ function LT.checkValidityOfTradeMons(slot, partnerSlot)
   local s = session()
   local party = partyOf(s)
   slot = tonumber(slot) or 1
+  local Family = require("src.core.game3.link.family")
+  local version = s and s.version or Family.activeVersion()
+  if Family.isRubySapphire(version) then
+    -- pokeruby/src/trade.c:1996
+    local code = Family.canTradeSelectedMon(version, party, slot - 1, {
+      session = s, partyCount = #party,
+    })
+    return code == trade().CAN_TRADE_MON and LT.BOTH_MONS_VALID or LT.PLAYER_MON_INVALID
+  end
   local alive = 0
   for i = 1, LT.PARTY_SIZE do
     local mon = party[i]
@@ -597,7 +607,7 @@ function LT.beginTrade()
     -- pokefirered/src/union_room.c:1733 gLinkPartnerMail
     mail = mailRecordFor(s, mon),
     name = (s and s.name) or "PLAYER",
-    trainerId = tonumber(s and (s.trainerId or s.id)) or 0,
+    trainerId = require("src.core.game3.link.family").trainerId(s),
   }
   LT._sentPacked = sanitizedMon(block)
   LT._monSent = send(block)
@@ -660,6 +670,9 @@ function LT.tryConfirm()
       room = room, digest = digest, at = os.time(),
       sent = mine, mon = theirs, mail = block.mail,
       name = block.name or (LT.peer and LT.peer.name),
+      peerVersion = LT.peer and LT.peer.version,
+      giftRibbons = LT.peer and type(LT.peer.giftRibbons) == "table"
+        and require("src.core.game3.link.rs").giftRibbonBlock(LT.peer) or nil,
       unionRoom = LT.unionRoom and true or false,
     })
     if wrote == false then
@@ -789,6 +802,12 @@ function LT.tryPlayScene()
       local sent = LT._sent
       if Trade.tradeMons(s, slot, received) then
         LT._swapped = true
+        -- pokeruby/trade.c:4137
+        local Family = require("src.core.game3.link.family")
+        if Family.isRubySapphire(s.version)
+            and Family.nativeLinkField2(LT.peer and LT.peer.version) == 0x8000 then
+          require("src.core.game3.dex").enableNational(s)
+        end
         local key, args = Trade.noteLinkTrade(s, sent, received, peerName, LT.unionRoom)
         -- pokefirered/src/trade_scene.c:2599
         if key then require("src.core.game3.quest_log_recorder").event(s, key, args) end
@@ -881,7 +900,13 @@ local function takeParty(party)
     gender = tonumber(party.gender) or 0,
     version = tonumber(party.version) or 0,
     progressFlags = tonumber(party.progressFlags) or 0,
+    giftRibbons = type(party.giftRibbons) == "table"
+      and require("src.core.game3.link.rs").giftRibbonBlock(party) or nil,
   }
+  local Rs = require("src.core.game3.link.rs")
+  if Rs.is(require("src.core.game3.link.family").activeVersion()) then
+    Rs.mergeGiftRibbons(session(), party.giftRibbons)
+  end
   LT.peerParty = list
   LT._peerPacked = party.party
   return true
@@ -993,7 +1018,7 @@ function LT.enterTradeSeat(ctx, adapters)
   end
   ctx.nativePoll = function()
     local now = lk()
-    if not now then
+    if not now or (now.players and #now:players() < 2) then
       -- pokefirered/src/cable_club.c:856 CABLE_SEAT_FAILED
       LT.state = "off"
       return true
@@ -1152,6 +1177,14 @@ function LT.applyPending(s, entry)
   local swapped = Trade.tradeMons(s, slot - 1, received)
   Trade.clearPartnerMail()
   if not swapped then return false, "swap" end
+  local Family = require("src.core.game3.link.family")
+  -- pokeruby/src/trade.c:3354
+  if Family.isRubySapphire(s.version) then
+    require("src.core.game3.link.rs").mergeGiftRibbons(s, entry.giftRibbons)
+  end
+  if Family.isRubySapphire(s.version) and Family.nativeLinkField2(entry.peerVersion) == 0x8000 then
+    require("src.core.game3.dex").enableNational(s)
+  end
   local key, args = Trade.noteLinkTrade(s, sent, received, entry.name, entry.unionRoom)
   if key then require("src.core.game3.quest_log_recorder").event(s, key, args) end
   -- pokefirered/src/trade_scene.c:2311

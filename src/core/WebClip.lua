@@ -11,6 +11,11 @@ local WEB_CLIP_TITLES = {
   gold = "Pokémon Gold",
   silver = "Pokémon Silver",
   crystal = "Pokémon Crystal",
+  firered = "Pokémon FireRed",
+  leafgreen = "Pokémon LeafGreen",
+  emerald = "Pokémon Emerald",
+  ruby = "Pokémon Ruby",
+  sapphire = "Pokémon Sapphire",
 }
 
 local function cleanLabel(value)

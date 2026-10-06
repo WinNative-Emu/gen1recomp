@@ -145,8 +145,17 @@ function Gen.bindGoldData(data)
 end
 
 function Gen.game3CacheReady()
+  local version = GameVersion.get()
+  local selected = pcall(function()
+    require("src.import.gba.versions").selectCache(version, require("src.core.game3.dataset").cache())
+  end)
+  if not selected then
+    require("src.core.game3.scripting.space").bundle = nil
+    return false
+  end
   local RomText = require("src.core.game3.rom_text")
-  if RomText.has(RomText.key("gNatureNamePointers", 0)) then return true end
+  local natureTable = (version == "ruby" or version == "sapphire") and "gNatureNames" or "gNatureNamePointers"
+  if RomText.has(RomText.key(natureTable, 0)) then return true end
   require("src.core.game3.scripting.space").bundle = nil
   return false
 end
@@ -162,6 +171,7 @@ function Gen.bindGame3Data(data)
   if type(data) ~= "table" then return data end
   local okD, Dataset = pcall(require, "src.core.game3.dataset")
   if okD and Dataset then
+    require("src.import.gba.versions").selectCache(GameVersion.get(), Dataset.cache())
     if Dataset.mountExtractRoots then pcall(Dataset.mountExtractRoots) end
     local okM, g3Maps = pcall(Dataset.buildMaps)
     if okM and g3Maps then
@@ -221,12 +231,19 @@ function Gen.bindGame3Data(data)
   local okI, ItemsData = pcall(require, "src.core.game3.items_data")
   if okI and ItemsData then
     data.items = data.items or {}
+    local version = GameVersion.get()
+    local rs = version == "ruby" or version == "sapphire"
+    local C = rs and require("src.core.game3.constants").of(version)
     for k, v in pairs(ItemsData.BY_HOST or {}) do
-      local iDef = { id = k, name = v.name or k, pocket = v.pocket, itemId = v.frlg }
-      data.items[k] = iDef
+      local itemId = rs and C.items.byName["ITEM_" .. k] or not rs and v.frlg
+      if itemId then
+        local info = rs and ItemsData.info(itemId)
+        local iDef = { id = k, name = info and info.name or v.name or k,
+          pocket = info and info.pocket or v.pocket, itemId = itemId }
+        data.items[k] = iDef
+      end
     end
     local lastItem = 375
-    local version = GameVersion.get()
     if GameVersion.layout(version) == "rse" then
       -- pokeemerald/include/constants/items.h:412
       lastItem = require("src.core.game3.constants").of(version):require("items", "ITEMS_COUNT") - 1

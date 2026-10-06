@@ -3,6 +3,7 @@
 
 local Versions = require("src.import.gba.versions")
 local Lz77 = require("src.import.gba.lz77")
+local CacheBlob = require("src.import.CacheBlob")
 
 local PartyChromeExtract = {}
 
@@ -488,12 +489,12 @@ function PartyChromeExtract.ready(cache, cacheRoot)
     if d and #d >= 80 * 56 * 4 then return true end
   end
   if love and love.filesystem and love.filesystem.read then
-    local d = love.filesystem.read(need)
+    local d = CacheBlob.readFs(need)
     if d and #d >= 80 * 56 * 4 then return true end
   end
   local f = io.open(need, "rb") or io.open("data/generated/gba/" .. PartyChromeExtract.CACHE_SUB .. "/slot_main.rgba", "rb")
   if f then
-    local d = f:read("*a")
+    local d = CacheBlob.decode(need, f:read("*a"))
     f:close()
     if d and #d >= 80 * 56 * 4 then return true end
   end

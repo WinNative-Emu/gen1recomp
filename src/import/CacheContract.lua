@@ -22,9 +22,12 @@ CacheContract.VERSION_FORMAT = {
   -- data/pikachu/pikachu_pic_animation.asm:340
   yellow = "rom-cache-v12-yellow2:",
   -- v8: M4A tracks retain reachable patterns and explicit entry offsets.
-  firered = "rom-cache-v21-firered:",
-  leafgreen = "rom-cache-v6-leafgreen:",
-  emerald = "rom-cache-v3-emerald:",
+  firered = "rom-cache-v25-firered:",
+  leafgreen = "rom-cache-v10-leafgreen:",
+  emerald = "rom-cache-v5-emerald:",
+  -- pokeruby/src/string_util.c:408
+  ruby = "rom-cache-v7-ruby:",
+  sapphire = "rom-cache-v7-sapphire:",
 }
 CacheContract.MARKER_PATH = "rom-cache.complete"
 
@@ -689,6 +692,9 @@ CacheContract.VERSION_REQUIRED_FILES_OVERRIDE = {
 }
 do
   local frlg = CacheContract.VERSION_REQUIRED_FILES_OVERRIDE.firered
+  for _, path in ipairs(require("src.import.gba.battle_anim_extract").FRLG_REQUIRED) do
+    frlg[#frlg + 1] = "data/generated/gba/" .. path
+  end
   -- src/trainer_card.c:155, :293
   local hoenn = "data/generated/gba/rse/trainer_card/"
   frlg[#frlg + 1] = hoenn .. "manifest.lua"
@@ -858,7 +864,34 @@ local function withVersionPrefix(version, fs, action)
   return true, first, second
 end
 
-function CacheContract.allRequiredFilesExist(version, fs)
+local function nativeRs(version)
+  return version == "ruby" or version == "sapphire"
+end
+
+local function nativeMeta(fs)
+  local raw = fs.read and fs.read("data/generated/gba/meta.json")
+  if type(raw) ~= "string" then return nil end
+  local ok, meta = pcall(require("src.link.Json").decode, raw)
+  if ok and type(meta) == "table" then return meta end
+end
+
+local function nativeDataReady(version, fs, sha1)
+  if not nativeRs(version) then return true end
+  local path = "data/generated/gba/meta.json"
+  if sha1 ~= nil and type(sha1) ~= "string" then return false, path end
+  local meta = nativeMeta(fs)
+  local V = require("src.import.gba.versions").forGame(version)
+  if not meta or meta.version ~= version or meta.cache_version ~= V.CACHE_VERSION
+      or meta.native_version ~= V.NATIVE_VERSION
+      or type(meta.romSha1) ~= "string" then return false, path end
+  if meta.md5 ~= nil and (type(meta.md5) ~= "string"
+      or meta.md5:lower() ~= meta.romSha1:lower()) then return false, path end
+  local expected = type(sha1) == "string" and sha1:lower() or meta.romSha1:lower()
+  if meta.romSha1:lower() ~= expected then return false, path end
+  return require("src.import.gba.rs.cache_readiness").check(version, fs, expected)
+end
+
+function CacheContract.allRequiredFilesExist(version, fs, sha1)
   fs = fs or require("src.import.CacheFs")
   local ok, complete, missing = withVersionPrefix(version, fs, function()
     local required, isOverride = CacheContract.requiredFilesFor(version)
@@ -871,7 +904,8 @@ function CacheContract.allRequiredFilesExist(version, fs)
         if not fs.exists(path) then missingPath = path; break end
       end
     end
-    return missingPath == nil, missingPath
+    if missingPath then return false, missingPath end
+    return nativeDataReady(version, fs, sha1)
   end)
   if not ok then return false, complete end
   return complete, missing
@@ -911,12 +945,20 @@ function CacheContract.isReady(version, fs)
   local marker, readError = CacheContract.readMarker(version, fs)
   if readError or not CacheContract.markerMatches(version, marker) then return false end
   if not CacheContract.cacheVersionCurrent(version, fs) then return false end
-  return CacheContract.allRequiredFilesExist(version, fs)
+  local sha1 = nativeRs(version) and marker:match(":([%x]+)$") or nil
+  return CacheContract.allRequiredFilesExist(version, fs, sha1)
 end
 
 function CacheContract.publish(version, fs, sha1)
   fs = fs or require("src.import.CacheFs")
-  local complete, missing = CacheContract.allRequiredFilesExist(version, fs)
+  if nativeRs(version) then
+    if sha1 == nil then
+      local ok, meta = withVersionPrefix(version, fs, function() return nativeMeta(fs) end)
+      sha1 = ok and meta and meta.romSha1 or nil
+    end
+    if type(sha1) == "string" then sha1 = sha1:lower() end
+  end
+  local complete, missing = CacheContract.allRequiredFilesExist(version, fs, sha1)
   if not complete then
     -- A caller may be retrying over a partially replaced cache.  Do not
     -- leave its old marker advertising readiness after this failed check.
@@ -963,6 +1005,20 @@ function CacheContract.sourceTreeHasData(version)
       end
     end
   end
+  if nativeRs(version) then
+    local exact = {
+      read = function(path)
+        local full = prefix .. path
+        if love.filesystem.getRealDirectory(full) == source then return require("src.import.CacheBlob").readFs(full) end
+      end,
+      exists = function(path)
+        local full = prefix .. path
+        return love.filesystem.getInfo(full, "file") ~= nil
+          and love.filesystem.getRealDirectory(full) == source
+      end,
+    }
+    return nativeDataReady(version, exact)
+  end
   return true
 end
 
@@ -997,6 +1053,23 @@ local function sourceReady(version, fs, semantic)
   if not complete then return nil end
   local first = prefix .. CacheContract.requiredFiles(version, semantic)[1]
   if fs.getRealDirectory(first) ~= fs.getSource() then return nil end
+  if nativeRs(version) then
+    local source = fs.getSource()
+    for _, path in ipairs(CacheContract.requiredFiles(version, semantic)) do
+      if fs.getRealDirectory(prefix .. path) ~= source then return nil end
+    end
+    local relative = {
+      read = function(path)
+        local full = prefix .. path
+        if fs.getRealDirectory(full) == source then return readAt(fs, full) end
+      end,
+      exists = function(path)
+        local full = prefix .. path
+        return isFileAt(fs, full) and fs.getRealDirectory(full) == source
+      end,
+    }
+    if not nativeDataReady(version, relative) then return nil end
+  end
   return { kind = "source", prefix = prefix }
 end
 
@@ -1017,6 +1090,14 @@ function CacheContract.inspect(version, fs, opts)
   local complete, missing = hasExactFiles(version, fs, prefix, opts.semantic)
   if not complete then
     return nil, "not_imported", "required cache file is missing: " .. tostring(missing)
+  end
+  if nativeRs(version) then
+    local relative = {
+      read = function(path) return readAt(fs, prefix .. path) end,
+      exists = function(path) return isFileAt(fs, prefix .. path) end,
+    }
+    local ready, invalid = nativeDataReady(version, relative, marker:match(":([%x]+)$"))
+    if not ready then return nil, "not_imported", "native cache data is missing or stale: " .. tostring(invalid) end
   end
   return { kind = "cache", prefix = prefix, marker = marker }
 end

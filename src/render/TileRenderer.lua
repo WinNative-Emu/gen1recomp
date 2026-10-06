@@ -733,48 +733,92 @@ local function getKeyedTile(self, tile)
   return img or nil
 end
 
-function TileRenderer:drawCellBottomRaw(cx, cy, camX, camY)
-  local ty = cy * 2 + 1
-  for i = 0, 1 do
-    local tx = cx * 2 + i
-    local tile = self.map:tileAt(tx, ty)
-    local keyed = tile and self.gbcCtx and getKeyedTile(self, tile)
-    if keyed then
-      love.graphics.draw(keyed, tx * 8 - camX, ty * 8 - camY)
-    else
-      local quad = self.quads[tile]
-      if quad then
-        love.graphics.draw(self.image, quad, tx * 8 - camX, ty * 8 - camY)
-      end
+-- data/sprites/facings.asm:51
+-- engine/gfx/sprite_oam.asm:127
+function TileRenderer.feetStrip(px, py, sprite)
+  local fw = sprite and sprite.frameWidth or 16
+  local fh = sprite and sprite.frameHeight or 16
+  local ax = sprite and sprite.anchorX or fw / 2
+  local ay = sprite and sprite.anchorY or fh
+  local x0 = math.floor(px + 8 - ax)
+  local top = math.floor(py + 12 - ay)
+  local y0 = top + math.max(0, fh - 8)
+  return x0, y0, x0 + fw, y0 + math.min(8, fh)
+end
+
+function TileRenderer.eachStripSpan(x0, y0, x1, y1, fn, a, b, c, d)
+  for ty = math.floor(y0 / 8), math.floor((y1 - 1) / 8) do
+    local top, bottom = math.max(y0, ty * 8), math.min(y1, ty * 8 + 8)
+    for tx = math.floor(x0 / 8), math.floor((x1 - 1) / 8) do
+      local left, right = math.max(x0, tx * 8), math.min(x1, tx * 8 + 8)
+      fn(tx, ty, left, top, left - tx * 8, top - ty * 8,
+         right - left, bottom - top, a, b, c, d)
     end
   end
 end
 
--- redraw a cell's bottom tile row (tall grass hides the lower half of
--- sprites standing in it, like the GB sprite-priority trick)
-function TileRenderer:drawCellBottom(cx, cy, camX, camY)
+local function stripQuad(self, image, tile, ox, oy, w, h)
+  local cache = self.stripQuads
+  if not cache then
+    cache = {}
+    self.stripQuads = cache
+  end
+  local sub = ((ox * 9 + w) * 8 + oy) * 9 + h
+  local key = image == self.image and tile * 6000 + sub or -1 - sub
+  local q = cache[key]
+  if q then return q end
+  local iw, ih = image:getDimensions()
+  local sx, sy = 0, 0
+  if image == self.image then
+    local perRow = self.map.tileset.tilesPerRow
+    sx, sy = (tile % perRow) * 8, math.floor(tile / perRow) * 8
+  end
+  q = love.graphics.newQuad(sx + ox, sy + oy, w, h, iw, ih)
+  cache[key] = q
+  return q
+end
+
+local function drawStripTile(tx, ty, x, y, ox, oy, w, h, self, camX, camY)
+  local tile = self.map:tileAt(tx, ty)
+  if not (tile and self.quads[tile]) then return end
+  local img = self.gbcCtx and getKeyedTile(self, tile) or self.image
+  love.graphics.draw(img, stripQuad(self, img, tile, ox, oy, w, h),
+                     x - camX, y - camY)
+end
+
+local function markStripTile(tx, ty, x, y, ox, oy, w, h, self, camX, camY, colors)
+  local tile = self.map:tileAt(tx, ty)
+  if not (tile and self.quads[tile]) then return end
+  PaletteFX.markSpriteRedraw(self.image,
+                             stripQuad(self, self.image, tile, ox, oy, w, h),
+                             x - math.floor(camX), y - math.floor(camY),
+                             1, colors, true)
+end
+
+function TileRenderer:drawStripRaw(x0, y0, x1, y1, camX, camY)
+  TileRenderer.eachStripSpan(x0, y0, x1, y1, drawStripTile, self, camX, camY)
+end
+
+function TileRenderer:drawStrip(x0, y0, x1, y1, camX, camY)
   -- the RED++ path is pre-keyed; the white test would be a no-op there at
   -- best, and a false hit on some other group's near-white color 0 at worst
   local shader = not self.gbcCtx and getColor0KeyShader() or nil
   if shader then love.graphics.setShader(shader) end
-  self:drawCellBottomRaw(cx, cy, camX, camY)
+  self:drawStripRaw(x0, y0, x1, y1, camX, camY)
   if shader then love.graphics.setShader() end
 end
 
--- queue the same bottom tile row for the post-zone sprite-redraw pass
--- (GBC mode: OBP-baked sprites replay after the zone shader, so the
--- grass patch that hides their feet must replay over them, colorized
--- with the map's palette and color-0 keyed)
-function TileRenderer:markCellBottomRedraw(cx, cy, camX, camY, colors)
-  local ty = cy * 2 + 1
-  for i = 0, 1 do
-    local tx = cx * 2 + i
-    local quad = self.quads[self.map:tileAt(tx, ty)]
-    if quad then
-      PaletteFX.markSpriteRedraw(self.image, quad, tx * 8 - math.floor(camX),
-                                 ty * 8 - math.floor(camY), 1, colors, true)
-    end
-  end
+function TileRenderer:markStripRedraw(x0, y0, x1, y1, camX, camY, colors)
+  TileRenderer.eachStripSpan(x0, y0, x1, y1, markStripTile,
+                             self, camX, camY, colors)
+end
+
+function TileRenderer:drawCellBottomRaw(cx, cy, camX, camY)
+  self:drawStripRaw(cx * 16, cy * 16 + 8, cx * 16 + 16, cy * 16 + 16, camX, camY)
+end
+
+function TileRenderer:drawCellBottom(cx, cy, camX, camY)
+  self:drawStrip(cx * 16, cy * 16 + 8, cx * 16 + 16, cy * 16 + 16, camX, camY)
 end
 
 
@@ -1023,6 +1067,10 @@ function TileRenderer:releaseBatches()
   if self.quads then
     for _, q in pairs(self.quads) do safeRelease(q) end
     self.quads = nil
+  end
+  if self.stripQuads then
+    for _, q in pairs(self.stripQuads) do safeRelease(q) end
+    self.stripQuads = nil
   end
   if self.anims then
     for _, a in ipairs(self.anims) do

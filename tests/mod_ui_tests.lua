@@ -978,7 +978,7 @@ do
   local fgame = { data = {}, stack = newStack(), input = newInput(),
                   save = { player = {} } }
   local fspeech = OakSpeech.new(fgame, nil)
-  fspeech.shrink = { frame = 103 } -- past the shrink timeline's end
+  fspeech.shrink = { frame = OakSpeech.SHRINK_END } -- past the shrink timeline's end
   fgame.stack:push(fspeech)
   fspeech.picReveal = nil -- skip the intro fade so update reaches shrink
   local finishes = 0

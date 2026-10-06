@@ -67,9 +67,13 @@ function HeldItems.flavorRelation(personality, flavor)
   return row[flavor + 1] or 0
 end
 
-function HeldItems.effectOf(item)
+function HeldItems.effectOf(item, session)
   item = tonumber(item) or 0
   if item == 0 then return 0, 0 end
+  if item == 175 then
+    local b = require("src.core.game3.rs.enigma").localBattleInfo(session)
+    if b then return b.holdEffect, b.holdEffectParam end
+  end
   local row = ITEM_HOLD[item]
   if row then return row[1], row[2] end
   local ok, ItemsData = pcall(require, "src.core.game3.items_data")
@@ -88,9 +92,23 @@ end
 
 function HeldItems.of(b)
   local item = HeldItems.itemOf(b)
+  local battle = package.loaded["src.core.game3.battle.init"]
+  local st = battle and battle._st
+  local E = require("src.core.game3.rs.enigma")
+  if item == 175 and b and E.matches(st and st.session) then
+    local berry = b.enigmaBerry or (st and st.enigmaBerries and st.enigmaBerries[b.id])
+    if not berry and not (st and st.link) and not b.linkPeer then
+      berry = b.side == "enemy" and {holdEffect = 0, holdEffectParam = 0} or E.localBattleInfo(st and st.session)
+    end
+    if not berry then return 0, 0, item end
+    if berry.holdEffect == nil then berry = require("src.core.game3.rs.enigma").battleInfo(berry) end
+    if berry then return berry.holdEffect or 0, berry.holdEffectParam or 0, item end
+    return 0, 0, item
+  end
   local he, param = HeldItems.effectOf(item)
   return he, param, item
 end
+HeldItems.installEnigmaState = require("src.core.game3.rs.enigma").installBattle
 
 function HeldItems.has(b, he)
   return (HeldItems.of(b)) == he
@@ -125,7 +143,7 @@ local function stat_up(ad, b, item, stat, delta)
   b.stages[stat] = math.min(6, (b.stages[stat] or 0) + delta)
   ad:playAnim("general", "STATS_CHANGE", b, b, Secondary.statAnimArg(stat, delta))
   local change = RomText.plain("STRINGID_STATROSE")
-  if delta >= 2 then change = RomText.plain("STRINGID_STATSHARPLY") .. change end
+  if delta >= 2 then change = Secondary.sharpChange("STRINGID_STATSHARPLY", "STRINGID_STATROSE") end
   say_id(ad, "STRINGID_USINGITEMSTATOFPKMNROSE", {
     lastItem = item, buff1 = Secondary.statName(stat), scrActive = b, buff2 = change,
   })
@@ -334,12 +352,19 @@ function HeldItems.normal(ad, b, moveTurn)
 end
 
 -- pokefirered/src/battle_util.c:2851
-function HeldItems.moveEnd(ad)
+function HeldItems.moveEnd(ad, opts)
   local any = false
   local list = { ad._st.player, ad._st.enemy }
-  if ad._st.double then list = ad:activeBattlers() end
+  if opts and opts.includeFainted then
+    local State = require("src.core.game3.battle.state")
+    list = {}
+    for id = 0, (ad._st.double and 3 or 1) do
+      local b = State.battler(ad._st, id)
+      if b then list[#list + 1] = b end
+    end
+  elseif ad._st.double then list = ad:activeBattlers() end
   for _, b in ipairs(list) do
-    if b and not ad:isFainted(b) then
+    if b and ((opts and opts.includeFainted) or not ad:isFainted(b)) then
       local he, _, item = HeldItems.of(b)
       local did = false
       if he >= H.CURE_PAR and he <= H.CURE_FRZ then
@@ -369,6 +394,7 @@ function HeldItems.kingsRockShellBell(M)
     if not M.noEffect and M.targetDamaged and ad:roll(0, 99) < p0
         and M.move and M.move.flags and math.floor((tonumber(M.move.flags) or 0) / 32) % 2 == 1
         and ad:hp(target) > 0 then
+      if M._nativeMoveEffect then M._nativeMoveEffect(8) end
       Secondary.set(M, "FLINCH", false, false, false)
       return true
     end

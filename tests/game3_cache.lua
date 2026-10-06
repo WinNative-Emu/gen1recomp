@@ -1,3 +1,4 @@
+local CacheBlob = require("src.import.CacheBlob")
 local M = {}
 
 local function readable(path)
@@ -40,7 +41,7 @@ end
 local function metaVersions(root)
   local f = io.open(root .. "/meta.json", "rb")
   if not f then return nil end
-  local src = f:read("*a") or ""
+  local src = CacheBlob.decode(root .. "/meta.json", f:read("*a")) or ""
   f:close()
   return tonumber(src:match('"cache_version"%s*:%s*(%d+)')) or 0,
     tonumber(src:match('"native_version"%s*:%s*(%d+)')) or 0
@@ -104,7 +105,7 @@ function M.cache()
     read = function(_, rel)
       local f = io.open(rel, "rb")
       if not f then return nil end
-      local data = f:read("*a")
+      local data = CacheBlob.decode(rel, f:read("*a"))
       f:close()
       if type(data) == "string" and #data > 0 then return data end
       return nil

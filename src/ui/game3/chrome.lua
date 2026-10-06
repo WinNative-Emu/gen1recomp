@@ -152,12 +152,13 @@ function Chrome.arrowSpec()
   if Chrome._arrowSpec then return Chrome._arrowSpec end
   local m = manifest(spec)
   local info = m and m.fonts and m.fonts[a.manifestKey]
+  if spec.nativeLayout == "rs" then info = m and m.downArrow end
   if type(info) ~= "table" then
     error("Chrome: chrome/manifest.lua has no fonts." .. tostring(a.manifestKey), 0)
   end
   Chrome._arrowSpec = {
     path = a.path, w = info.width, h = info.height, frameH = info.frameH,
-    yOffsets = info.yOffsets, delay = a.delay, lastPage = a.lastPage,
+    yOffsets = info.yOffsets or { 0, 16, 32, 48 }, delay = a.delay, period = a.period, lastPage = a.lastPage,
   }
   return Chrome._arrowSpec
 end
@@ -182,12 +183,13 @@ local function ensureDlg()
   if d then
     local m = manifest(spec)
     local info = m and m.frames and m.frames[d.manifestKey]
+    if spec.nativeLayout == "rs" then info = m and m.dialogue end
     if type(info) ~= "table" then
       error("Chrome: chrome/manifest.lua has no frames." .. tostring(d.manifestKey), 0)
     end
     local img, path = loadImage({ { path = d.path, w = info.width, h = info.height } })
     if not img then error("Chrome: " .. tostring(d.path) .. " is not in the cache", 0) end
-    Chrome._dlg = { image = img, quads = makeQuads(img, info.tilesW, info.tilesH), path = path, layout = d.layout }
+    Chrome._dlg = { image = img, quads = makeQuads(img, info.tilesW or info.width / 8, info.tilesH or info.height / 8), path = path, layout = d.layout }
     return Chrome._dlg
   end
   local img, path = loadImage(PATHS.dlg)
@@ -260,7 +262,8 @@ end
 function Chrome.windowFillColor()
   local okF, FrlgFont = pcall(require, "src.ui.game3.frlg_font")
   if okF and FrlgFont.face then FrlgFont.face() end
-  local c = okF and FrlgFont.STDPAL and FrlgFont.STDPAL[1]
+  local spec = frames()
+  local c = okF and FrlgFont.STDPAL and FrlgFont.STDPAL[spec and spec.fillColor or 1]
   if type(c) == "table" then return c end
   return { 1, 1, 1, 1 }
 end
@@ -268,6 +271,22 @@ end
 function Chrome.dialogueFrame()
   local L, Top, W, H = Chrome.DLG_LEFT, Chrome.DLG_TOP, Chrome.DLG_W, Chrome.DLG_H
   local atlas = ensureDlg()
+  if atlas and atlas.layout == "rs_dialogue" then
+    -- pokeruby/src/text_window.c:92
+    local rows = {
+      {1,3,4,4,5,6,9}, {11,9,9,9,9,0x040B,9}, {7,9,9,9,9,10,9},
+      {0x080B,9,9,9,9,0x0C0B,9}, {0x0801,0x0803,0x0804,0x0804,0x0805,0x0806,9},
+    }
+    love.graphics.setColor(1,1,1,1)
+    for y = 0, 5 do for x = 0, 31 do
+      local row = y >= 4 and y - 4 + 3 or y > 1 and 2 or y
+      local col = x >= 28 and x - 28 + 4 or x > 2 and 3 or x
+      local entry = (rows[row + 1] or {})[col + 1] or 9
+      local tile, sx, sy = entry % 1024, math.floor(entry / 1024) % 2 == 1 and -1 or 1, math.floor(entry / 2048) % 2 == 1 and -1 or 1
+      love.graphics.draw(atlas.image, atlas.quads[tile], x * T + (sx < 0 and T or 0), (14+y) * T + (sy < 0 and T or 0), 0, sx, sy)
+    end end
+    return
+  end
   if atlas and atlas.layout == "message_box" then
     L, Top, W, H = Chrome.dialogueWindow()
     return drawMessageBox(atlas, L, Top, W, H)

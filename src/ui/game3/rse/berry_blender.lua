@@ -7,6 +7,7 @@ local Sprites = require("src.core.game3.gba_sprites")
 local Machine = require("src.ui.game3.rse.gba_machine")
 local Affine = require("src.core.game3.bg_affine")
 local B = require("src.core.game3.rse.berry_blender")
+local CacheBlob = require("src.import.CacheBlob")
 
 local UI = {}
 UI.__index = UI
@@ -102,7 +103,7 @@ function UI:readCache(path)
     if ok and Dataset and Dataset.cache then data = Dataset.cache():read(path) end
   end
   if not data and love and love.filesystem and love.filesystem.getInfo and love.filesystem.getInfo(path) then
-    data = love.filesystem.read(path)
+    data = CacheBlob.readFs(path)
   end
   return assert(data, "berry_blender: missing " .. tostring(path))
 end
@@ -931,7 +932,7 @@ function UI:cb_end()
     if self:printRanking() then g.gameEndState = 6 end
   elseif st == 6 then
     if self:printResults() then
-      B.incrementGameStat(self.session, B.GAME_STAT_POKEBLOCKS)
+      B.incrementGameStat(self.session, self.opts.nativeRS and self.linked and B.GAME_STAT_POKEBLOCKS_WITH_FRIENDS or B.GAME_STAT_POKEBLOCKS)
       g.gameEndState = 7
     end
   elseif st == 7 then

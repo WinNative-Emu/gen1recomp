@@ -55,7 +55,7 @@ TextIR.setContextProvider(function(kind, dialect)
 end)
 eq(TextIR.toPlain(rivalIr, { dialect = "rse" }), "BRENDAN EMERALD", "the provider supplies placeholders and gender")
 asked = {}
-eq(TextIR.toPlain(rivalIr, { dialect = "frlg", rivalName = "BLUE" }), "BLUE ", "frlg never asks the provider")
+eq(TextIR.toPlain(rivalIr, { dialect = "frlg", rivalName = "BLUE" }), "BLUE ", "frlg without the honorific strings never asks the provider")
 eq(#asked, 0, "no provider calls for frlg text")
 TextIR.setContextProvider(prevProvider)
 

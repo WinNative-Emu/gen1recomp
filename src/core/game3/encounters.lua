@@ -336,14 +336,10 @@ end
 
 --- pret VarGet(VAR_REPEL_STEP_COUNT) != 0.
 local function repel_active()
-  local VAR_REPEL_STEP_COUNT = game_constants():require("vars", "VAR_REPEL_STEP_COUNT")
   local ok, Runtime = pcall(require, "src.core.game3.runtime")
   local session = ok and Runtime and Runtime.getSession and Runtime.getSession()
   if type(session) ~= "table" then return false end
-  local vars = session.vars
-  local steps = tonumber(session.repelSteps)
-    or (type(vars) == "table" and tonumber(vars[VAR_REPEL_STEP_COUNT]))
-    or 0
+  local steps = tonumber(require("src.core.game3.field_semantics").getVar(session, "repelSteps")) or 0
   return steps > 0
 end
 
@@ -386,10 +382,12 @@ local bound = {}
 
 local function rules()
   local family = Profile.family()
-  local r = bound[family]
+  local profile = Profile.forSession(nil)
+  local key = profile.encounters and profile.encounters.rules or family
+  local r = bound[key]
   if not r then
-    r = require("src.core.game3.encounter_rules." .. family).bind(Encounters, H)
-    bound[family] = r
+    r = require("src.core.game3.encounter_rules." .. key).bind(Encounters, H)
+    bound[key] = r
   end
   return r
 end
@@ -424,6 +422,7 @@ local function mod_encounter(enc)
     roamer = enc.roamer,
     foe = enc.foe,
     personality = enc.personality,
+    ivs = enc.ivs,
     moves = enc.moves,
   }
 end
@@ -444,6 +443,7 @@ local function engine_encounter(enc)
     roamer = enc.roamer,
     foe = enc.foe,
     personality = enc.personality,
+    ivs = enc.ivs,
     moves = enc.moves,
   }
 end

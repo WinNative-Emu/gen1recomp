@@ -451,7 +451,12 @@ end
 -- pokefirered/src/sprite.c:494
 function S.applyTemplate(s, tplName, vm)
   local T = P.templates()
-  local tpl = T[tplName]
+  local tpl = s._nativeTemplate or T[tplName]
+  local pack = vm and vm._pack
+  if pack and pack.assetLayout == "rs" and pack.nativeTemplates and pack.nativeTemplates[tplName] then
+    local rs = package.loaded["src.core.game3.battle.anim_port.rs_callbacks"]
+    if rs and rs._template then tpl = rs._template(s, tplName, vm) end
+  end
   local info = tpl and tpl.tag and P.tagInfo(vm, tpl.tag)
   local opTag = s._op and s._op.tag
   local packTag = type(tpl and tpl.tag) == "string" and not info and opTag and P.tagInfo(vm, opTag) and true or false

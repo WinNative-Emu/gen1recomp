@@ -3,6 +3,7 @@
 
 local Versions = require("src.import.gba.versions")
 local Lz77 = require("src.import.gba.lz77")
+local CacheBlob = require("src.import.CacheBlob")
 
 local TrainerCardExtract = {}
 
@@ -406,12 +407,12 @@ function TrainerCardExtract.ready(cache, cacheRoot)
     if d and #d >= 240 * 160 * 4 then return true end
   end
   if love and love.filesystem and love.filesystem.read then
-    local d = love.filesystem.read(need)
+    local d = CacheBlob.readFs(need)
     if d and #d >= 240 * 160 * 4 then return true end
   end
   local f = io.open(need, "rb") or io.open("data/generated/gba/" .. TrainerCardExtract.CACHE_SUB .. "/bg.rgba", "rb")
   if f then
-    local d = f:read("*a")
+    local d = CacheBlob.decode(need, f:read("*a"))
     f:close()
     if d and #d >= 240 * 160 * 4 then return true end
   end

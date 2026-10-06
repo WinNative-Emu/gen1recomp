@@ -166,11 +166,16 @@ local function scan_slot(blob, cols, slot, skipZero)
   local base = 13 + midCount * 2
   local lo, hi = slot * 16, slot * 16 + 15
   local n = 0
+  local cells = {}
+  out.cells = cells
+  local warm = package.loaded["src.core.game3.warm"]
   for i = 0, midCount * 256 - 1 do
     local b = blob:byte(base + i)
+    if warm and i % 16384 == 16383 then warm.yield() end
     if b and b >= lo and b <= hi and not (skipZero and b == 0) then
       local mid = math.floor(i / 256)
       local within = i % 256
+      cells[mid] = true
       n = n + 1
       out[n] = {
         (mid % cols) * 16 + within % 16,
@@ -200,43 +205,98 @@ local function retarget(old, new)
   end
 end
 
-local function flip(ts, imgKey, dataKey, altKey)
+local scratch
+local function cellData(data, x, y)
+  if not scratch then scratch = love.image.newImageData(16, 16) end
+  scratch:paste(data, 0, 0, x, y, 16, 16)
+  return scratch
+end
+
+local function merge(pend, slots, full)
+  if full or not slots then
+    pend.full, pend.slots = true, nil
+  elseif not pend.full then
+    pend.slots = pend.slots or {}
+    for slot in pairs(slots) do pend.slots[slot] = true end
+  end
+end
+
+local function apply(ts, image, data, pend)
+  if pend.full then
+    image:replacePixels(data)
+  elseif pend.slots then
+    local cols = ts.cols or 16
+    for slot in pairs(pend.slots) do
+      local x, y = (slot % cols) * 16, math.floor(slot / cols) * 16
+      image:replacePixels(cellData(data, x, y), 1, 1, x, y)
+    end
+  end
+  pend.full, pend.slots = false, nil
+end
+
+local function flip(ts, imgKey, dataKey, altKey, slots)
   local img, data = ts[imgKey], ts[dataKey]
   if not (img and data and img.replacePixels) then return end
+  ts._pend = ts._pend or setmetatable({}, { __mode = "k" })
+  local pend = ts._pend
   local alt = ts[altKey]
+  local full = not slots or not next(slots)
   if alt and alt.replacePixels then
-    alt:replacePixels(data)
+    pend[alt] = pend[alt] or {}
+    merge(pend[alt], slots, full)
+    apply(ts, alt, data, pend[alt])
   elseif love and love.graphics and love.graphics.newImage then
     alt = love.graphics.newImage(data)
     if alt.setFilter then alt:setFilter("nearest", "nearest") end
+    pend[alt] = {}
   else
     img:replacePixels(data)
     return
   end
+  pend[img] = pend[img] or {}
+  merge(pend[img], slots, full)
   ts[imgKey], ts[altKey] = alt, img
   retarget(img, alt)
 end
 
-function NativeTileset.flush(ts, under, over)
-  if under then flip(ts, "image", "imageData", "imageAlt") end
-  if over then flip(ts, "overImage", "overImageData", "overImageAlt") end
+function NativeTileset.markDirty(ts, over, slot)
+  local key = over and "_dirtyOver" or "_dirtyUnder"
+  local set = ts[key]
+  if not set then set = {}; ts[key] = set end
+  set[slot] = true
 end
 
-local function paint(imageData, list, colors)
+function NativeTileset.flush(ts, under, over)
+  local du, dov = ts._dirtyUnder, ts._dirtyOver
+  ts._dirtyUnder, ts._dirtyOver = nil, nil
+  if under then flip(ts, "image", "imageData", "imageAlt", du) end
+  if over then flip(ts, "overImage", "overImageData", "overImageAlt", dov) end
+end
+
+function NativeTileset.ensureAlt(ts)
+  for _, k in ipairs({ { "image", "imageData", "imageAlt" }, { "overImage", "overImageData", "overImageAlt" } }) do
+    local img, data = ts[k[1]], ts[k[2]]
+    if img and data and not ts[k[3]] and love and love.graphics and love.graphics.newImage then
+      local alt = love.graphics.newImage(data)
+      if alt.setFilter then alt:setFilter("nearest", "nearest") end
+      ts[k[3]] = alt
+    end
+  end
+end
+
+local function paint(ts, over, imageData, list, colors)
   if not (imageData and #list > 0) then return false end
   for i = 1, #list do
     local p = list[i]
     local c = colors[p[3]]
     imageData:setPixel(p[1], p[2], c[1] / 255, c[2] / 255, c[3] / 255, 1)
   end
+  for slot in pairs(list.cells or {}) do NativeTileset.markDirty(ts, over, slot) end
   return true
 end
 
 -- pokefirered/src/palette.c:88
-function NativeTileset.setSlotPalette(pairOrTs, slot, bgr16)
-  local ts = type(pairOrTs) == "table" and pairOrTs or NativeTileset.get(pairOrTs)
-  if not (ts and ts.imageData and type(bgr16) == "table") then return false end
-  slot = tonumber(slot) or 0
+function NativeTileset.prepareSlot(ts, slot)
   local pix = ts.slotPix[slot]
   if not pix then
     pix = {
@@ -245,10 +305,19 @@ function NativeTileset.setSlotPalette(pairOrTs, slot, bgr16)
     }
     ts.slotPix[slot] = pix
   end
+  return pix
+end
+
+function NativeTileset.setSlotPalette(pairOrTs, slot, bgr16)
+  local ts = type(pairOrTs) == "table" and pairOrTs or NativeTileset.get(pairOrTs)
+  if not (ts and ts.imageData and type(bgr16) == "table") then return false end
+  slot = tonumber(slot) or 0
+  local pix = NativeTileset.prepareSlot(ts, slot)
   local src = {}
   for c = 0, 15 do src[c] = bgr16[c + 1] or 0 end
   local colors = NativePack.palsToRgb8({ [0] = src })[0]
-  NativeTileset.flush(ts, paint(ts.imageData, pix.under, colors), paint(ts.overImageData, pix.over, colors))
+  NativeTileset.flush(ts, paint(ts, false, ts.imageData, pix.under, colors),
+    paint(ts, true, ts.overImageData, pix.over, colors))
   ts.patchedSlots = ts.patchedSlots or {}
   ts.patchedSlots[slot] = true
   return true

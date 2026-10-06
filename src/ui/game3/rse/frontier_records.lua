@@ -338,12 +338,12 @@ function Records.buildRankingHall(sess, hallId, lvlMode)
   local win = newWindow(HALL_TPL)
   local man = D().manifest()
   local pair = man.recordsChallengeTexts[hallId + 1]
-  local facilityName = plainIr(pair[1].ir)
-  put(win, plainIr(pair[2].ir, { facilityName }), 0, 1)
-  local lvl = plainIr(man.levelModeText[lvlMode + 1].ir)
+  local facilityName = plainIr(RomText.refIr(pair[1]))
+  put(win, plainIr(RomText.refIr(pair[2]), { facilityName }), 0, 1)
+  local lvl = plainIr(RomText.refIr(man.levelModeText[lvlMode + 1]))
   put(win, lvl, (240 - 32) - width(lvl), 1)
   local rows = U().rankingHall(sess, hallId, lvlMode)
-  local recordText = man.hallFacilityToRecordsText[hallId + 1].ir
+  local recordText = RomText.refIr(man.hallFacilityToRecordsText[hallId + 1])
   local link = hallId == U().RANKING_HALL.TOWER_LINK
   for i, r in ipairs(rows) do
     local pos = i - 1
@@ -423,6 +423,14 @@ end
 function Records.remove()
   Records._window = nil
   pop(Records.STACK_ID)
+end
+
+function Records.eraseBox(left, top, right, bottom)
+  local win = Records._window
+  if win and left <= win.left - 1 and top <= win.top - 1
+      and right >= win.left + win.width and bottom >= win.top + win.height then
+    Records.remove()
+  end
 end
 
 function Records.isOpen()

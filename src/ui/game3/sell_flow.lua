@@ -21,6 +21,11 @@ local function is_rse(session)
   return require("src.core.game3.profile").family(session) == "rse"
 end
 
+local function box(self, key, ctx)
+  if self.nativeShop then return self.nativeShop.box(key, ctx) end
+  return RomText.box(key, ctx)
+end
+
 local function price_of(itemId)
   local info = ItemsData.info(itemId)
   return math.max(0, math.floor(tonumber(info and info.price) or 0))
@@ -44,6 +49,9 @@ function SellFlow.start(opts)
   self.itemId = opts.itemId
   self.name = ItemsData.displayName(opts.itemId)
   self.session = opts.session
+  local ui = require("src.core.game3.profile").forSession(self.session).ui
+  local shop = ui and ui.shopMenu
+  self.nativeShop = type(shop) == "string" and require(shop) or shop
   self.bag = opts.bag
   self.onDone = opts.onDone
   self.qty = 1
@@ -54,7 +62,7 @@ function SellFlow.start(opts)
   if price_of(opts.itemId) == 0 then
     self.state = "cant"
     if is_rse(self.session) then
-      self.text = RomText.box("gText_CantBuyKeyItem", { stringVars = { [2] = self.name } })
+      self.text = box(self, "gText_CantBuyKeyItem", { stringVars = { [2] = self.name } })
     else
       self.text = RomText.box("gText_OhNoICantBuyThat", { stringVars = { self.name } })
     end
@@ -63,12 +71,12 @@ function SellFlow.start(opts)
   end
   local owned = math.max(1, tonumber(opts.owned) or 1)
   self.owned = math.min(self:rseBerry() and 999 or 99, owned)
-  if owned == 1 then
+  if owned == 1 and not (self.nativeShop and self.nativeShop.alwaysQuantity) then
     self:ask()
   else
     self.state = "qty"
     if is_rse(self.session) then
-      self.text = RomText.box("gText_HowManyToSell", { stringVars = { [2] = self.name } })
+      self.text = box(self, "gText_HowManyToSell", { stringVars = { [2] = self.name } })
     else
       self.text = RomText.box("gText_HowManyWouldYouLikeToSell", { stringVars = { self.name } })
     end
@@ -92,7 +100,7 @@ function SellFlow:ask()
   self.state = "confirm"
   self.yesNo = 1
   if is_rse(self.session) then
-    self.text = RomText.box("gText_ICanPayVar1", { stringVars = { tostring(self:total()) } })
+    self.text = box(self, "gText_ICanPayVar1", { stringVars = { tostring(self:total()) } })
   else
     self.text = RomText.box("gText_ICanPayThisMuch_WouldThatBeOkay",
       { stringVars = { [3] = tostring(self:total()) } })
@@ -104,7 +112,7 @@ end
 function SellFlow:commit()
   local earn = self:total()
   if is_rse(self.session) then
-    self.text = RomText.box("gText_TurnedOverVar1ForVar2", { stringVars = { tostring(earn), self.name } })
+    self.text = box(self, "gText_TurnedOverVar1ForVar2", { stringVars = { tostring(earn), self.name } })
   else
     self.text = RomText.box("gText_TurnedOverItemsWorthYen",
       { stringVars = { self.name, [3] = tostring(earn) } })
@@ -114,10 +122,13 @@ function SellFlow:commit()
   se(SE.SE_SHOP)
   if self.bag and Bag.remove(self.bag, self.itemId, self.qty) and self.session then
     self.session.money = math.max(0, math.floor(tonumber(self.session.money) or 0)) + earn
-    local Q = require("src.core.game3.quest_log_recorder")
-    local rt = package.loaded["src.core.game3.runtime"]
-    Q.event(self.session, "SoldItemsIncludingItem",
-      { D0 = Q.location(rt and rt._game, self.session), D1 = self.name, D2 = earn })
+    if self.nativeShop and self.nativeShop.saleMoney then self.session.money = self.nativeShop.saleMoney(self.session.money) end
+    if not self.nativeShop or self.nativeShop.questLog ~= false then
+      local Q = require("src.core.game3.quest_log_recorder")
+      local rt = package.loaded["src.core.game3.runtime"]
+      Q.event(self.session, "SoldItemsIncludingItem",
+        { D0 = Q.location(rt and rt._game, self.session), D1 = self.name, D2 = earn })
+    end
   end
   self.sold = true
 end
@@ -154,7 +165,8 @@ function SellFlow:handleInput(input)
   self.k = self.k + 1
   local st = self.state
   if st == "cant" or st == "done" then
-    if input:wasPressed("a") or input:wasPressed("b") then
+    if input:wasPressed("a") or (input:wasPressed("b") and
+      not (st == "done" and self.nativeShop and self.nativeShop.doneCancel == false)) then
       se(SE.SE_SELECT)
       self:finish()
     end
@@ -212,6 +224,7 @@ end
 
 -- pokeemerald/src/item_menu.c:2120 InitSellHowManyInput, :1201 PrintItemSoldAmount
 function SellFlow:drawRse()
+  if self.nativeShop and self.nativeShop.drawSell then return self.nativeShop.drawSell(self) end
   local st = self.state
   local Shop = require("src.ui.game3.rse.shop_menu")
   local Chrome = require("src.ui.game3.chrome")

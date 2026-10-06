@@ -24,15 +24,18 @@ local function random()
 end
 
 local function housesOpts(session)
+  local profile = require("src.core.game3.profile").forSession(session)
+  local prefix = profile.map.enginePrefix
   local g, n = Rse.mapGroupNum(session and session.map, session)
-  local hg, bn = Rse.mapGroupNum("EM_LITTLEROOT_TOWN_BRENDANS_HOUSE_1F", session)
-  local _, mn = Rse.mapGroupNum("EM_LITTLEROOT_TOWN_MAYS_HOUSE_1F", session)
+  local hg, bn = Rse.mapGroupNum(prefix .. "LITTLEROOT_TOWN_BRENDANS_HOUSE_1F", session)
+  local _, mn = Rse.mapGroupNum(prefix .. "LITTLEROOT_TOWN_MAYS_HOUSE_1F", session)
   return {
     mapGroup = g,
     mapNum = n,
     housesGroup = hg,
     brendanNum = bn,
     mayNum = mn,
+    latiFlag = profile.tv and profile.tv.latiFlag,
     gender = tonumber(session and session.gender) or 0,
     flag = function(name) return Rse.flag(name, session) end,
   }
@@ -48,7 +51,7 @@ local function currentLayout()
 end
 
 local function tvMetatile(on)
-  local C = require("src.core.game3.constants").of("emerald")
+  local C = require("src.core.game3.constants").active(Rse.session())
   return C:require("metatile_labels", on and "METATILE_Building_TV_On" or "METATILE_Building_TV_Off")
 end
 
@@ -78,7 +81,7 @@ function NativesTv.updateScreensOnMap(session)
     setScreens(tvMetatile(true))
   elseif news == Tv.PLAYERS_HOUSE_TV_MOVIE then
     return
-  elseif session.map == "EM_LILYCOVE_CITY_COVE_LILY_MOTEL_1F" then
+  elseif session.map == require("src.core.game3.profile").forSession(session).map.enginePrefix .. "LILYCOVE_CITY_COVE_LILY_MOTEL_1F" then
     setScreens(tvMetatile(true))
   elseif Rse.flag("FLAG_SYS_TV_START", session) and (NativesTv.anyShowOnAir(session)
       or Tv.findPokeNewsOnAir(session) ~= 0xFF or Tv.isGabbyAndTyOnAir(session)) then

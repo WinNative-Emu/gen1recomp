@@ -1,13 +1,13 @@
 # Save conversion
 
 Cartridge `.sav` files go in and out of the launcher through `src/save_convert/`. One codec per generation:
-`GenSave` (Red/Blue/Yellow), `Gen2Save` (Gold/Silver/Crystal), `Gen3Save` (FireRed/LeafGreen/Emerald).
+`GenSave` (Red/Blue/Yellow), `Gen2Save` (Gold/Silver/Crystal), `Gen3Save` (FireRed/LeafGreen/Emerald/Ruby/Sapphire).
 `SaveConvert.importSav` / `exportSav` are the only entry points; both return `nil, message` instead of raising.
 
 ## Supported
 
 - Gen 1: 32768 bytes, English. Gen 2: 32768 bytes plus an optional RTC footer, English. Gen 3: 128 KB flash plus an optional footer.
-- Not converted: Japanese and Korean carts, Ruby/Sapphire. Detected ones are refused with a named reason.
+- Not converted: Japanese and Korean carts. Detected ones are refused with a named reason.
 - Gen 1 and Gen 2 need the selected game's imported ROM cache; missing data refuses conversion with a named reason.
 
 ## Round trips

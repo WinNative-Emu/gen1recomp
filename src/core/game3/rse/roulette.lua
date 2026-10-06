@@ -292,8 +292,8 @@ function Roulette.resetHits(st)
 end
 
 -- pokeemerald/src/roulette.c:1115
-function Roulette.partyFlags(party, speciesOf)
-  local C = require("src.core.game3.constants").of("emerald")
+function Roulette.partyFlags(party, speciesOf, constants)
+  local C = constants or require("src.core.game3.constants").of("emerald")
   local shroomish = C:require("species", "SPECIES_SHROOMISH")
   local taillow = C:require("species", "SPECIES_TAILLOW")
   local flags = 0

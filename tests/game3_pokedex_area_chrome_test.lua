@@ -30,6 +30,7 @@ local Versions = require("src.import.gba.versions")
 local Extract = require("src.import.gba.pokedex_chrome_extract")
 local PokedexChrome = require("src.ui.game3.pokedex_chrome")
 local Pokedex = require("src.ui.game3.pokedex")
+local CacheBlob = require("src.import.CacheBlob")
 
 print("[test] 1. versions.lua carries the area-page / size-page ROM offsets")
 check(Versions.CACHE_VERSION >= 103, "CACHE_VERSION at or past the dex chrome import ("
@@ -233,7 +234,7 @@ else
   local function slurp(rel)
     local f = io.open(dexRoot .. "/" .. rel, "rb")
     if not f then return nil end
-    local d = f:read("*a")
+    local d = CacheBlob.decode(dexRoot .. "/" .. rel, f:read("*a"))
     f:close()
     return d
   end

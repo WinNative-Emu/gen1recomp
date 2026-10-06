@@ -43,6 +43,10 @@ for i, row in ipairs(FieldMoves.FLYPOINTS) do
   }
   LANDMARKS.order[index] = row.landmark
 end
+LANDMARKS.landmarks.LANDMARK_ROUTE_27 = {
+  index = 0x5b, name = "ROUTE 27", x = 40, y = 64,
+}
+LANDMARKS.order[0x5b] = "LANDMARK_ROUTE_27"
 
 local function visited(...)
   local save = { engineFlags = {} }
@@ -61,13 +65,15 @@ check(Pokegear.FLY_MAP == true, "Pokegear now declares a fly mode")
 local function flyScreen(save, opts)
   opts = opts or {}
   local input = fakeInput()
-  local points = FieldMoves.flyPoints(save, LANDMARKS, opts.region or "johto")
+  local points, shown =
+    FieldMoves.flyPoints(save, LANDMARKS, opts.region or "johto")
   local chosen, closed
   local screen = Pokegear.new({ input = input, save = save }, {
     save = save,
     landmarks = LANDMARKS,
     currentLandmark = opts.currentLandmark,
     fly = points,
+    flyRegion = opts.passRegion and shown or nil,
     onFly = function(spawn) chosen = spawn end,
     onClose = function() closed = true end,
   })
@@ -146,6 +152,66 @@ do
   local points = FieldMoves.flyPoints(save, LANDMARKS, "kanto")
   eq(#points, 1, "with no Indigo the Kanto half is withheld")
   eq(points[1].spawn, "SPAWN_NEW_BARK", "and the Johto map is shown instead")
+end
+
+local JOHTO_ART, KANTO_ART = { "johto art" }, { "kanto art" }
+local function drawProbe(screen)
+  local probe = { icons = 0 }
+  screen.gfx = { maps = { johto = JOHTO_ART, kanto = KANTO_ART } }
+  screen.drawTilemap = function(_self, map) probe.tilemap = map end
+  screen.drawPlayerIcon = function()
+    probe.icons = probe.icons + 1
+    return true
+  end
+  local ok, err = pcall(function() screen:drawMap() end)
+  probe.ok, probe.err = ok, err
+  return probe
+end
+
+-- engine/pokegear/pokegear.asm:2237
+for _, passRegion in ipairs({ true, false }) do
+  local how = passRegion and " (World's region)" or " (screen's own gate)"
+  do
+    local save = visited("SPAWN_NEW_BARK", "SPAWN_VIOLET", "SPAWN_MAHOGANY")
+    local screen, _input, points = flyScreen(save, {
+      region = "kanto", currentLandmark = "LANDMARK_ROUTE_27",
+      passRegion = passRegion,
+    })
+    eq(#points, 3, "Route 27 before Indigo offers the Johto rows" .. how)
+    eq(screen:region(), "kanto", "the player still stands in Kanto" .. how)
+    eq(screen.flyRegion, "johto", ".NoKanto picks the Johto map" .. how)
+    eq(screen.flyIndex, 1, "and defaults to JOHTO_FLYPOINT" .. how)
+    eq(screen:flyRow().spawn, "SPAWN_NEW_BARK", "which is New Bark Town" .. how)
+    local probe = drawProbe(screen)
+    check(probe.ok, "the pre-Indigo picker draws" .. how
+      .. " (" .. tostring(probe.err) .. ")")
+    check(probe.tilemap == JOHTO_ART, "FillJohtoMap, not the Kanto art" .. how)
+    eq(probe.icons, 0, ".NoKanto skips TownMapPlayerIcon" .. how)
+  end
+  do
+    local save = visited("SPAWN_NEW_BARK", "SPAWN_PALLET", "SPAWN_INDIGO")
+    local screen = flyScreen(save, {
+      region = "kanto", currentLandmark = "LANDMARK_ROUTE_27",
+      passRegion = passRegion,
+    })
+    eq(screen.flyRegion, "kanto", "with Indigo the Kanto map is used" .. how)
+    eq(screen:flyRow().spawn, "SPAWN_INDIGO", "opening on Indigo Plateau" .. how)
+    local probe = drawProbe(screen)
+    check(probe.ok, "the Kanto picker draws" .. how
+      .. " (" .. tostring(probe.err) .. ")")
+    check(probe.tilemap == KANTO_ART, "FillKantoMap" .. how)
+    eq(probe.icons, 1, "and TownMapPlayerIcon" .. how)
+  end
+  do
+    local save = visited("SPAWN_NEW_BARK", "SPAWN_VIOLET")
+    local screen = flyScreen(save, {
+      currentLandmark = "LANDMARK_VIOLET_CITY", passRegion = passRegion,
+    })
+    eq(screen.flyRegion, "johto", "the Johto picker stays Johto" .. how)
+    local probe = drawProbe(screen)
+    check(probe.tilemap == JOHTO_ART, "on the Johto art" .. how)
+    eq(probe.icons, 1, "with the player icon drawn" .. how)
+  end
 end
 
 -- Drawing must not throw: the plain path (no town-map art in the cache) is
@@ -359,6 +425,24 @@ do
     eq(asked, false, "and does not ask from under the list")
     check(world:openFlyMap(mon) == true, "while the queued path still asks")
     eq(asked, true, "through the same yesorno box")
+  end
+
+  do
+    local save = visited("SPAWN_NEW_BARK", "SPAWN_VIOLET", "SPAWN_MAHOGANY")
+    local stack = fakeStack()
+    local game = { save = save, stack = stack, input = fakeInput() }
+    local world = setmetatable({
+      game = game,
+      landmarks = LANDMARKS,
+      map = { def = { landmark = "LANDMARK_ROUTE_27" } },
+    }, World)
+    game.world = world
+    check(world:openFlyMap({ species = 17 }) == true,
+      "FLY from Route 27 before Indigo opens the picker")
+    local gear = stack:top()
+    eq(gear and gear.screenId, "Gen2Pokegear", "straight onto the fly map")
+    eq(gear.flyRegion, "johto", "World hands over the .NoKanto Johto map")
+    eq(gear:flyRow().spawn, "SPAWN_NEW_BARK", "on New Bark Town")
   end
 end
 

@@ -138,6 +138,7 @@ local function default_present(id)
     displayMaxHp = nil,
     displayExp = nil,
     displayLevel = nil,
+    displayStatus = nil,
     flash = 0,
   }
 end
@@ -195,12 +196,39 @@ function Anim.setDouble(v)
   AnimCoords.setDouble(v)
 end
 
+-- pokeruby/src/contest.c:339
+function Anim.beginContestPresentation(opts)
+  opts = opts or {}
+  if not Anim._vm then
+    local headless = opts.headless
+    if headless == nil then headless = Anim._headless end
+    Anim.reset({ headless = headless })
+  end
+  assert(not Anim._contestPresentation, "contest presentation already active")
+  local token = { previous2 = rawget(Anim._present, 2), previous3 = rawget(Anim._present, 3) }
+  Anim._contestPresentation = token
+  for id = 2, 3 do
+    local p = default_present(id)
+    p.visible = false
+    rawset(Anim._present, id, p)
+  end
+  return token
+end
+
+function Anim.endContestPresentation(token)
+  if token == nil or Anim._contestPresentation ~= token then return false end
+  rawset(Anim._present, 2, token.previous2)
+  rawset(Anim._present, 3, token.previous3)
+  Anim._contestPresentation = nil
+  return true
+end
+
 function Anim.present(key)
   local id = Anim.idOf(key)
   if id == nil then return nil end
   local p = rawget(Anim._present, id)
   if not p then
-    if id >= 2 and not AnimCoords.isDouble() then return nil end
+    if id >= 2 and not AnimCoords.isDouble() and not Anim._contestPresentation then return nil end
     p = default_present(id)
     if id >= 2 and not Anim._headless then p.visible = false end
     rawset(Anim._present, id, p)
@@ -245,6 +273,7 @@ end
 
 function Anim.reset(opts)
   opts = opts or {}
+  Anim._contestPresentation = nil
   for id in pairs(Anim._stageTasks) do Task.cancel(id) end
   Anim._stageTasks = {}
   Anim._headless = opts.headless and true or false
@@ -298,10 +327,10 @@ function Anim.ballIdOf(key)
   return BallOpen.ballIdForItem(b and b.mon and b.mon.pokeball)
 end
 
-local function play_se(name, pan)
+local function play_se(name)
   pcall(function()
     local SE = require("src.core.game3.se_ids")
-    require("src.core.game3.audio").playSe(SE[name], { pan = pan })
+    require("src.core.game3.audio").playSe(SE[name])
   end)
 end
 
@@ -326,11 +355,11 @@ function Anim.sendOutMon(key, opts)
   local ball = { visible = true, frame = 0, rot = 0, side = side, battler = id, x = 0, y = 0,
     ballId = Anim.ballIdOf(id) }
   stage.balls[id] = ball
-  local pan = (side == "player") and -64 or 63
   local function reveal()
     ball.frame = 1
     ball.rot = 0
-    play_se("SE_BALL_OPEN", pan)
+    -- pokefirered/src/battle_anim_special.c:1427
+    play_se("SE_BALL_OPEN")
     Anim.ballOpen(id, ball.x, ball.y)
     p.visible = true
     p.ox = 0
@@ -355,7 +384,6 @@ function Anim.sendOutMon(key, opts)
     local sx, sy = require("src.core.game3.battle.pokedude").sendOutOrigin(Battle and Battle._st)
     local tx, ty = base.x, base.y + 24
     ball.x, ball.y = sx, sy
-    play_se("SE_BALL_THROW", pan)
     Anim.tweenStage(25, function(u, t)
       local f = t and t.frames or (u * 25)
       ball.x = sx + (tx - sx) * u
@@ -504,6 +532,7 @@ function Anim.syncDisplayFromState(st)
       p.displayHp = tonumber(b.mon.hp) or 0
       p.displayMaxHp = tonumber(b.mon.maxHp) or 1
       p.displayLevel = tonumber(b.mon.level) or 1
+      p.displayStatus = b.status or (b.mon and (b.mon.status or b.mon.status1))
       local prog = Experience.progress(b.mon)
       p.displayExp = prog.progressPercent or 0
     end

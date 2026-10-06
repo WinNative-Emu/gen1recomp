@@ -1,6 +1,7 @@
 local Rse = require("src.core.game3.rse.init")
 local D = require("src.core.game3.rse.frontier.trainers")
 local Util = require("src.core.game3.rse.frontier.util")
+local RomText = require("src.core.game3.rom_text")
 
 local NativesFrontier = {}
 
@@ -307,7 +308,7 @@ function NativesFrontier.ssTidalMultichoice(ctx, adapters)
   local FrlgFont = require("src.ui.game3.frlg_font")
   for i, id in ipairs(sel) do
     local ref = D.manifest().ssTidalDestinations[id + 1]
-    labels[i] = TextIR.toPlain(ref.ir, {})
+    labels[i] = TextIR.toPlain(RomText.refIr(ref), {})
     local w = FrlgFont.measure(labels[i])
     if w > widest then widest = w end
   end

@@ -52,6 +52,13 @@ return {
       -- pokeemerald/src/menu_specialized.c:1503
       levelUpStats = { "gText_MaxHP", "gText_Attack", "gText_Defense", "gText_SpAtk", "gText_SpDef", "gText_Speed" },
     },
+    -- pokeemerald/src/data/party_menu.h:658
+    cursorOptionTexts = {
+      "gText_Summary5", "gText_Switch2", "gText_Cancel2", "gText_Item", "gMenuText_Give", "gText_Take",
+      "gText_Mail", "gText_Take2", "gText_Read2", "gText_Cancel2", "gText_Shift", "gText_SendOut",
+      "gText_Enter", "gText_NoEntry", "gText_Store", "gText_Register", "gText_Trade4", "gText_Trade4",
+      "gMenuText_Toss",
+    },
     -- pokeemerald/src/party_menu.c:2101
     buttons = { cancel = "gText_Cancel", confirm = "gMenuText_Confirm" },
     -- pokeemerald/src/party_menu.c:2557

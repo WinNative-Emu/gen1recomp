@@ -51,6 +51,10 @@ end
 
 -- pokefirered/src/pokedex.c:123
 local function has_all_mons()
+  local Runtime = package.loaded["src.core.game3.runtime"]
+  local session = Runtime and Runtime.getSession and Runtime.getSession()
+  local id = require("src.core.game3.constants").versionOf(session)
+  if id == "ruby" or id == "sapphire" then return require("src.core.game3.profiles.rs.pokedex").completedNational(session) end
   local Queries = require("src.core.game3.scripting.natives_queries")
   local _, v = Queries.BY_NAME.HasAllMons(nil)
   return v == 1

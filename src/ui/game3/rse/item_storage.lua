@@ -19,6 +19,21 @@ local WIN = {
   yesno = Window.template(9, 7, 5, 4),
 }
 ItemStorage.WIN = WIN
+-- pokeruby/src/player_pc.c:973
+local WIN_RS = {
+  list = WIN.list,
+  message = WIN.message,
+  title = Window.template(1, 1, 10, 2),
+  -- pokeruby/src/player_pc.c:606
+  quantity = Window.template(7, 9, 6, 2),
+  -- pokeruby/src/player_pc.c:703
+  yesno = Window.template(8, 7, 5, 4),
+}
+ItemStorage.WIN_RS = WIN_RS
+
+local function is_rs()
+  return require("src.ui.game3.rs.player_pc_policy").matches(ItemStorage._session)
+end
 -- pokeemerald/src/player_pc.c:283
 local ITEM_X, UP_TEXT_Y = 8, 9
 -- pokeemerald/src/player_pc.c:699
@@ -53,10 +68,12 @@ local function pos()
 end
 
 local function narrow()
+  if is_rs() then return { font = "normal" } end
   return { font = "narrow" }
 end
 
 local function row_height()
+  if is_rs() then return 16 end
   local face = FrlgFont.face and FrlgFont.face(narrow())
   return face and face.height or 16
 end
@@ -384,7 +401,44 @@ local function frame(tpl)
   Window.fill(tpl, 1, 1, 1, 1)
 end
 
+-- pokeruby/src/player_pc.c:862
+local function draw_list_rs()
+  local tpl = WIN_RS.list
+  frame(tpl)
+  local ox = tpl.left * 8
+  local list = items()
+  local shown = page_items()
+  local font = narrow()
+  local ItemsData = require("src.core.game3.items_data")
+  for i = 0, shown - 1 do
+    local idx = ItemStorage.scroll + i
+    local y = (i * 2 + 2) * 8
+    local e = list[idx + 1]
+    if not e then
+      FrlgFont.draw(RomText.plain("gText_Cancel2"), ox, y,
+        { font = "normal", colors = { fg = FrlgFont.STDPAL[1], bg = { 0, 0, 0, 0 }, shadow = FrlgFont.STDPAL[8] } })
+      break
+    end
+    local colors = { fg = FrlgFont.STDPAL[ItemStorage.swapFrom == idx and 2 or 1], bg = { 0, 0, 0, 0 },
+      shadow = FrlgFont.STDPAL[8] }
+    FrlgFont.draw(item_name(e.id), ox, y, { font = "normal", colors = colors })
+    local pocket = ItemsData.pocketOf(e.id)
+    -- pokeruby/src/player_pc.c:815
+    if pocket ~= "KEY_ITEMS" and not ItemsData.isHm(e.id) then
+      local qx = 26 * 8
+      FrlgFont.draw("×", qx, y, { font = "normal", colors = colors })
+      local digits = tostring(tonumber(e.qty) or 0)
+      local dx = qx + FrlgFont.measure("×", font) + (3 - #digits) * 6
+      for c = 1, #digits do
+        FrlgFont.draw(digits:sub(c, c), dx + (c - 1) * 6, y, { font = "normal", colors = colors })
+      end
+    end
+  end
+  require("src.ui.game3.rs.menu_cursor").draw(ox, 16 + ItemStorage.row * 16, 13 * 8)
+end
+
 local function draw_list()
+  if is_rs() then return draw_list_rs() end
   local tpl = WIN.list
   frame(tpl)
   local ox, oy = tpl.left * 8, tpl.top * 8
@@ -427,14 +481,20 @@ end
 
 function ItemStorage.draw()
   if not ItemStorage.open then return end
-  local title = WIN.title
+  local rs = is_rs()
+  local W = rs and WIN_RS or WIN
+  local title = W.title
   frame(title)
   local t = RomText.plain(ItemStorage._toss and "gText_TossItem" or "gText_WithdrawItem")
-  -- pokeemerald/src/player_pc.c:960
-  Window.printPx(t, title.left * 8 + math.floor((104 - FrlgFont.measure(t)) / 2), title.top * 8 + 1)
+  if rs then
+    Window.printPx(t, title.left * 8, title.top * 8)
+  else
+    -- pokeemerald/src/player_pc.c:960
+    Window.printPx(t, title.left * 8 + math.floor((104 - FrlgFont.measure(t)) / 2), title.top * 8 + 1)
+  end
   draw_list()
-  draw_icon()
-  local m = WIN.message
+  if not rs then draw_icon() end
+  local m = W.message
   frame(m)
   local pitch = FrlgFont.linePitch()
   local y = m.top * 8 + 1
@@ -443,13 +503,13 @@ function ItemStorage.draw()
     y = y + pitch
   end
   if ItemStorage.state == "quantity" then
-    local q = WIN.quantity
+    local q = W.quantity
     frame(q)
     local s = RomText.plain("gText_xVar1", { stringVars = { string.format("%03d", ItemStorage.quantity) } })
     -- pokeemerald/src/player_pc.c:1361
     Window.printPx(s, q.left * 8 + math.floor((48 - FrlgFont.measure(s)) / 2), q.top * 8 + 1)
   elseif ItemStorage.state == "yesno" then
-    local yn = WIN.yesno
+    local yn = W.yesno
     frame(yn)
     local ph = Window.optionHeight()
     Window.printPx(RomText.plain("gText_Yes"), yn.left * 8 + 8, yn.top * 8 + 1)

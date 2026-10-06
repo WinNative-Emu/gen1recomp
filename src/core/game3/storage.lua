@@ -23,7 +23,7 @@ local function save_ids(session)
   local row = require("src.core.game3.profile").forSession(session)
   local names = row.save.storage
   local C = require("src.core.game3.constants").of(row.id)
-  return C:require("vars", names.sendVar), C:require("flags", names.boxFullFlag),
+  return names.sendVar and C:require("vars", names.sendVar), names.boxFullFlag and C:require("flags", names.boxFullFlag),
     C:require("flags", names.pcOwnerFlag)
 end
 
@@ -94,7 +94,7 @@ function Storage.ensure(session)
 end
 
 --- The "PC Heal" Exploit: Fully heals HP, restores all move PPs, and clears status ailments.
-function Storage.fullHealMon(mon)
+function Storage.fullHealMon(mon, session)
   if not mon or type(mon) ~= "table" then return mon end
   -- Restore HP
   if mon.maxHp and mon.maxHp > 0 then
@@ -103,7 +103,10 @@ function Storage.fullHealMon(mon)
     mon.hp = mon.maxHp or mon.hp
   end
   -- Restore move PPs
-  if type(mon.moves) == "table" then
+  local edition = require("src.core.game3.profile").forSession(session).id
+  if edition == "ruby" or edition == "sapphire" then
+    require("src.core.game3.rse.storage_rs").restorePP(mon)
+  elseif type(mon.moves) == "table" then
     for _, move in ipairs(mon.moves) do
       if type(move) == "table" then
         if move.maxPp and move.maxPp > 0 then
@@ -205,7 +208,7 @@ function Storage.deposit(session, partyIdx, targetBoxId, targetSlotIdx)
   end
 
   local mon = table.remove(session.party, partyIdx)
-  Storage.fullHealMon(mon)
+  Storage.fullHealMon(mon, session)
   box.mons[slot] = mon
   require("src.core.game3.quest_log_recorder").event(session,"DepositedMonInPC",
     {D0=require("src.core.game3.pokemon").displayMonName(mon),D1=box.name})
@@ -268,8 +271,8 @@ function Storage.moveMon(session, srcLoc, srcIdx, destLoc, destIdx, srcBox, dest
   end
 
   -- Apply PC heal to any mon landing in a box
-  if destLoc == "box" then Storage.fullHealMon(srcMon) end
-  if srcLoc == "box" and destMon then Storage.fullHealMon(destMon) end
+  if destLoc == "box" then Storage.fullHealMon(srcMon, session) end
+  if srcLoc == "box" and destMon then Storage.fullHealMon(destMon, session) end
 
   -- Assign to dest
   if destLoc == "party" then
@@ -311,6 +314,85 @@ function Storage.moveMon(session, srcLoc, srcIdx, destLoc, destIdx, srcBox, dest
   return true
 end
 
+function Storage.pickUpMon(session, loc, slot, boxId)
+  local storage = Storage.ensure(session)
+  if not storage then return nil, "no_session" end
+  local box = storage.boxes[boxId or storage.currentBox]
+  local slots = loc == "party" and session.party or box and box.mons
+  local mon = slots and slots[slot]
+  if not mon then return nil, "empty_slot" end
+  if loc == "party" then
+    local count = 0; for _, other in pairs(slots) do if other then count = count + 1 end end
+    if count <= 1 then return nil, "last_pokemon" end
+  end
+  slots[slot] = nil
+  if loc == "party" then Storage.compactParty(slots) end
+  return mon
+end
+
+function Storage.placeHeldMon(session, mon, loc, slot, boxId, origin)
+  local storage = Storage.ensure(session)
+  if not storage or not mon then return false, nil, "no_mon" end
+  session.party = session.party or {}
+  local box = storage.boxes[boxId or storage.currentBox]
+  local slots = loc == "party" and session.party or box and box.mons
+  local limit = loc == "party" and 6 or Storage.IN_BOX_COUNT
+  if not slots or slot < 1 or slot > limit then return false, nil, "invalid_slot" end
+  local target = slots[slot]
+  if loc == "box" then Storage.fullHealMon(mon, session) end
+  slots[slot] = mon
+  if loc == "party" then Storage.compactParty(slots) end
+  if origin then
+    local Q = require("src.core.game3.quest_log_recorder")
+    local Pokemon = require("src.core.game3.pokemon")
+    local srcName, targetName = Pokemon.displayMonName(mon), target and Pokemon.displayMonName(target)
+    local fromBox = storage.boxes[origin.boxId or storage.currentBox]
+    local fromName, toName = fromBox and fromBox.name, box and box.name
+    if origin.loc == "party" and loc == "party" then Q.event(session, "SwitchMon1WithMon2", {srcName, targetName})
+    elseif origin.loc == "box" and loc == "box" then
+      local same = origin.boxId == (boxId or storage.currentBox)
+      local key = target and (same and "SwitchedMonsWithinBox" or "SwitchedMonsBetweenBoxes")
+        or (same and "MovedMonWithinBox" or "MovedMonToNewBox")
+      Q.event(session, key, {D0 = fromName, D1 = srcName, D2 = target and same and targetName or toName, D3 = targetName})
+    elseif target then Q.event(session, "SwitchedPartyMonForPCMon", {D0 = origin.loc == "box" and fromName or toName,
+      D1 = origin.loc == "box" and srcName or targetName, D2 = origin.loc == "party" and srcName or targetName})
+    elseif loc == "box" then Q.event(session, "DepositedMonInPC", {D0 = srcName, D1 = toName})
+    else Q.event(session, "WithdrewMonFromPC", {D0 = fromName, D1 = srcName}) end
+  end
+  return true, target
+end
+
+function Storage.restoreHeldMon(session, mon, origin)
+  if not mon then return true end
+  local storage = Storage.ensure(session)
+  if not storage then return false end
+  session.party = session.party or {}
+  local mail = require("src.core.game3.mail").isMailItem(mon.heldItem or mon.item)
+  if origin and origin.loc == "party" and #session.party < 6 then
+    table.insert(session.party, math.min(origin.slot or 1, #session.party + 1), mon)
+    return true
+  end
+  if mail then
+    if #session.party >= 6 then return false end
+    session.party[#session.party + 1] = mon
+    return true
+  end
+  local box = origin and origin.loc == "box" and storage.boxes[origin.boxId]
+  if box and not box.mons[origin.slot] then
+    Storage.fullHealMon(mon, session)
+    box.mons[origin.slot] = mon
+    return true
+  end
+  if #session.party < 6 then session.party[#session.party + 1] = mon; return true end
+  local bi, si = Storage.findOpenSlot(storage)
+  if bi then
+    Storage.fullHealMon(mon, session)
+    storage.boxes[bi].mons[si] = mon
+    return true
+  end
+  return false
+end
+
 --- Release a Pokémon from a box slot.
 function Storage.releaseMon(session, boxId, slotIdx)
   local storage = Storage.ensure(session)
@@ -331,19 +413,19 @@ function Storage.sendMonToPC(session, mon)
   local Queries = require("src.core.game3.scripting.natives_queries")
   local store = script_store(session)
   local VAR_PC_BOX_TO_SEND_MON, FLAG_SHOWN_BOX_WAS_FULL_MESSAGE = save_ids(session)
-  Queries.setPCBoxToSendMon(Flags.getVar(store, nil, VAR_PC_BOX_TO_SEND_MON))
+  Queries.setPCBoxToSendMon(VAR_PC_BOX_TO_SEND_MON and Flags.getVar(store, nil, VAR_PC_BOX_TO_SEND_MON) or (storage.currentBox - 1))
   local intended = tonumber(Queries.pcBoxToSendMon) or 0
 
-  Storage.fullHealMon(mon)
+  Storage.fullHealMon(mon, session)
   local bId, slot = Storage.findOpenSlot(storage)
   if not bId or not slot then
     return false, nil, nil, intended
   end
   storage.boxes[bId].mons[slot] = mon
   if (bId - 1) ~= intended then
-    Flags.setFlag(store, nil, FLAG_SHOWN_BOX_WAS_FULL_MESSAGE, false)
+    if FLAG_SHOWN_BOX_WAS_FULL_MESSAGE then Flags.setFlag(store, nil, FLAG_SHOWN_BOX_WAS_FULL_MESSAGE, false) end
   end
-  Flags.setVar(store, nil, VAR_PC_BOX_TO_SEND_MON, bId - 1)
+  if VAR_PC_BOX_TO_SEND_MON then Flags.setVar(store, nil, VAR_PC_BOX_TO_SEND_MON, bId - 1) end
   session.monBoxId = bId - 1
   session.monBoxPos = slot - 1
   return true, bId, slot, intended
@@ -370,14 +452,14 @@ function Storage.isDestinationBoxFull(session)
   local Queries = require("src.core.game3.scripting.natives_queries")
   local store = script_store(session)
   local VAR_PC_BOX_TO_SEND_MON, FLAG_SHOWN_BOX_WAS_FULL_MESSAGE = save_ids(session)
-  Queries.setPCBoxToSendMon(Flags.getVar(store, nil, VAR_PC_BOX_TO_SEND_MON))
+  Queries.setPCBoxToSendMon(VAR_PC_BOX_TO_SEND_MON and Flags.getVar(store, nil, VAR_PC_BOX_TO_SEND_MON) or (storage.currentBox - 1))
   local bId = Storage.findOpenSlot(storage)
   if not bId then return false end
   if (bId - 1) ~= (tonumber(Queries.pcBoxToSendMon) or 0) then
-    Flags.setFlag(store, nil, FLAG_SHOWN_BOX_WAS_FULL_MESSAGE, false)
+    if FLAG_SHOWN_BOX_WAS_FULL_MESSAGE then Flags.setFlag(store, nil, FLAG_SHOWN_BOX_WAS_FULL_MESSAGE, false) end
   end
-  Flags.setVar(store, nil, VAR_PC_BOX_TO_SEND_MON, bId - 1)
-  return should_show_box_was_full()
+  if VAR_PC_BOX_TO_SEND_MON then Flags.setVar(store, nil, VAR_PC_BOX_TO_SEND_MON, bId - 1) end
+  return FLAG_SHOWN_BOX_WAS_FULL_MESSAGE and should_show_box_was_full() or false
 end
 
 -- pokefirered/src/battle_script_commands.c:9617
@@ -388,6 +470,11 @@ function Storage.pcTransferMessage(session, name, boxWasFull)
   local store = script_store(session)
   local VAR_PC_BOX_TO_SEND_MON, _, FLAG_SYS_NOT_SOMEONES_PC = save_ids(session)
   name = tostring(name or "")
+  local policy = require("src.core.game3.profile").forSession(session).save.storage
+  if policy.transferText then
+    -- pokeruby/src/naming_screen.c:1591
+    return require("src.core.game3.rom_text").box(policy.transferText, { stringVars = { name } })
+  end
   local sent = box_name(storage, Flags.getVar(store, nil, VAR_PC_BOX_TO_SEND_MON))
   local shown = boxWasFull
   if shown == nil then shown = should_show_box_was_full() end

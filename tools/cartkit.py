@@ -57,7 +57,8 @@ BUNDLE_FORMAT = "g1rcart"
 BUNDLE_VERSION = 1
 CART_SCHEMA = 1
 
-BASES = ("red", "blue", "yellow", "gold", "silver", "crystal")
+BASES = ("red", "blue", "yellow", "gold", "silver", "crystal",
+         "firered", "leafgreen", "ruby", "sapphire", "emerald")
 SEALS = ("sealed", "sealed+", "open")
 FINISHES = ("sparkle", "holo", "sparkle+holo")
 # GameSpeed.LEVELS (src/core/GameSpeed.lua)

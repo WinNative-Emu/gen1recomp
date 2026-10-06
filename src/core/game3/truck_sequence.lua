@@ -250,10 +250,12 @@ function Truck.execute(host, opts)
   state.seq = seq
   if opts.spawn ~= false then
     local Task = require("src.core.game3.task")
-    Task.spawn(function()
+    state.task = Task.spawn(function()
+      if state.seq ~= seq then return true end
       local fin = Truck.step(seq)
       if fin then
         state.running = false
+        state.task = nil
         if opts.onDone then opts.onDone(seq) end
       end
       return fin
@@ -278,6 +280,10 @@ function Truck.endSequence(host)
 end
 
 function Truck.reset()
+  if state.task then
+    require("src.core.game3.task").cancel(state.task.id)
+    state.task = nil
+  end
   state.running = false
   state.seq = nil
   local Field = package.loaded["src.core.game3.field"]

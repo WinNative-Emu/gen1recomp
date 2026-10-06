@@ -7,6 +7,36 @@ local FIELD_IDS = {
 }
 
 local EXTRA = {
+  rs = {
+    { "sb2", 0x98, 8, "T1", "localTimeOffset" },
+    { "sb2", 0xA0, 8, "T1", "lastBerryTreeUpdate" },
+    { "sb2", 0xA8, 0x4D1, "T1", "battleTower" },
+    { "sb1", 0x7F8, 0x140, "T1", "pokeblocks" },
+    { "sb1", 0x96C, 6, "T1", "berryBlenderRecords" },
+    { "sb1", 0x978, 0x66, "T1", "trainerRematches" },
+    { "sb1", 0x1608, 0x400, "T1", "berryTrees" },
+    { "sb1", 0x1A08, 0xC80, "T1", "secretBases" },
+    { "sb1", 0x2688, 12, "T1", "playerRoomDecorations" },
+    { "sb1", 0x2694, 12, "T1", "playerRoomDecorationPositions" },
+    { "sb1", 0x26A0, 150, "T1", "decorationInventory" },
+    { "sb1", 0x2738, 900, "T1", "tvShowsNativeBytes" },
+    { "sb1", 0x2ABC, 64, "T1", "pokeNews" },
+    { "sb1", 0x2AFC, 20, "T1", "outbreak" },
+    { "sb1", 0x2B10, 12, "T1", "gabbyAndTyData" },
+    { "sb1", 0x2B1C, 12, "T1", "easyChatProfile" },
+    { "sb1", 0x2B28, 36, "T1", "easyChatBattle" },
+    { "sb1", 0x2D8C, 4, "T1", "unlockedTrendySayings" },
+    { "sb1", 0x2D94, 64, "T1", "oldMan" },
+    { "sb1", 0x2DD4, 40, "T1", "dewfordTrends" },
+    { "sb1", 0x2DFC, 416, "T1", "contestWinners" },
+    { "sb1", 0x30B8, 80, "T1", "linkBattleRecords" },
+    { "sb1", 0x3110, 11, "T1", "giftRibbons" },
+    { "sb1", 0x311B, 20, "T1", "externalEventDataNativeBytes" },
+    { "sb1", 0x312F, 21, "T1", "externalEventFlagsNativeBytes" },
+    { "sb1", 0x3160, 1328, "T1", "enigmaBerryNativeBytes" },
+    { "sb1", 0x3690, 1004, "T1", "ramScriptNativeBytes" },
+    { "sb1", 0x3A7C, 16, "T1", "recordMixingGift" },
+  },
   frlg = {
     { "sb2", 0x16, 0x2, "T2", "optionsPadding", "G3-05", { kind = "padding" } },
     { "sb2", 0x24, 0x4, "T2", "pokedexUnknown", "G3-05", { kind = "absent", patterns = { "unknown2" } } },
@@ -112,6 +142,7 @@ local EXTRA = {
 }
 
 local CARRIED_FIELDS = {
+  rs = { savedMusic = { kind = "runtime", patterns = { "savedMusic" } } },
   frlg = {
     savedMusic = { kind = "runtime", patterns = { "savedMusic" } },
     weather = { kind = "runtime", patterns = { "savedWeather" } },
@@ -151,7 +182,7 @@ local function build(family)
   R("sb1", L.MAIL.off, L.MAIL.count * L.MAIL.size, "T1", "sb1.mail")
   R("sb1", L.DAYCARE.off, family == "emerald" and 0x120 or 0x11C, "T1", "sb1.daycare")
   R("sb1", L.ROAMER_OFFSET, 0x14, "T1", "sb1.roamer", { ids = "G3-09" })
-  R("sb1", L.REGISTERED_TEXTS.off, L.REGISTERED_TEXTS.count * L.REGISTERED_TEXTS.size, "T1", "sb1.registeredTexts")
+  if L.REGISTERED_TEXTS then R("sb1", L.REGISTERED_TEXTS.off, L.REGISTERED_TEXTS.count * L.REGISTERED_TEXTS.size, "T1", "sb1.registeredTexts") end
   if L.FAME_CHECKER then R("sb1", L.FAME_CHECKER.off, L.FAME_CHECKER.count * L.FAME_CHECKER.stride, "T1", "sb1.fameChecker") end
   if L.TRAINER_TOWER then
     R("sb1", L.TRAINER_TOWER.off, L.TRAINER_TOWER.count * L.TRAINER_TOWER.size, "T1", "sb1.trainerTower")
@@ -185,13 +216,14 @@ local function build(family)
   return regions
 end
 
-local frlg, emerald = build("frlg"), build("emerald")
+local frlg, emerald, rs = build("frlg"), build("emerald"), build("rs")
 
 return {
   generation = 3,
   size = 0x20000,
   blocks = { "sb2", "sb1", "storage" },
-  layouts = { firered = frlg, leafgreen = frlg, emerald = emerald, default = frlg },
+  layouts = { firered = frlg, leafgreen = frlg, emerald = emerald, ruby = rs, sapphire = rs, default = frlg },
   frlg = frlg,
   emerald = emerald,
+  rs = rs,
 }

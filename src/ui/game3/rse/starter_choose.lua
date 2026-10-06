@@ -1,5 +1,6 @@
 local Kit = require("src.ui.game3.rse.scene_kit")
 local RomText = require("src.core.game3.rom_text")
+local Strings = require("src.core.Strings")
 local FrlgFont = require("src.ui.game3.frlg_font")
 local Pal = require("src.core.game3.pal_fade")
 local Trig = require("src.core.game3.trig")
@@ -120,13 +121,15 @@ function StarterChoose.species(man, selection)
   return list[selection + 1]
 end
 
-local function categoryText(species)
+local function categoryText(species, policy)
   local Pokemon = require("src.core.game3.pokemon")
   local dex = Kit.loadLua("data/generated/gba/pokemon/dex.lua")
   local nat = Pokemon.national and Pokemon.national(species) or species
   local row = dex and dex[nat]
   -- pokeemerald/src/international_string_util.c:86
-  return ((row and row.category) or "") .. " " .. RomText.plain("gText_Pokemon")
+  local category = Strings((row and row.category) or "")
+  if policy then return policy.categoryText(category, RomText.plain(policy.categoryKey)) end
+  return category .. " " .. RomText.plain("gText_Pokemon")
 end
 
 local function speciesName(species)
@@ -139,8 +142,12 @@ function StarterChoose.new(opts)
   opts = opts or {}
   local man = StarterChoose.manifest()
   if not man then error("starter choose: data/generated/gba/starter_choose/manifest.lua missing from the cache", 2) end
+  local profile = require("src.core.game3.profile").forSession()
+  local policy = (profile.id == "ruby" or profile.id == "sapphire")
+    and require("src.ui.game3.rs.starter_choose_policy") or nil
   local self = setmetatable({
     man = man,
+    policy = policy,
     onDone = opts.onDone,
     frameType = opts.frameType or 0,
     pal = Pal.new(),
@@ -160,7 +167,7 @@ end
 
 function StarterChoose:_createLabel()
   local sp = StarterChoose.species(self.man, self.selection)
-  self.label = { selection = self.selection, category = categoryText(sp), name = speciesName(sp) }
+  self.label = { selection = self.selection, category = categoryText(sp, self.policy), name = speciesName(sp) }
 end
 
 function StarterChoose:_clearLabel()
@@ -170,8 +177,8 @@ end
 -- pokeemerald/src/starter_choose.c:474
 function StarterChoose:_taskStarterChoose()
   self:_createLabel()
-  self.message = "gText_BirchInTrouble"
-  self.messageFill = false
+  self.message = self.policy and self.policy.messageKey or "gText_BirchInTrouble"
+  self.messageFill = self.policy ~= nil
   self.state = "input"
 end
 
@@ -188,7 +195,7 @@ function StarterChoose:frame(inp)
   inp = inp or { new = {}, held = {} }
   inp.new, inp.held = inp.new or {}, inp.held or {}
   self.frames = self.frames + 1
-  self.pal:updateFade()
+  if not self.policy then self.pal:updateFade() end
   local st = self.state
   if st == "choose" then
     self:_taskStarterChoose()
@@ -205,11 +212,11 @@ function StarterChoose:frame(inp)
     elseif inp.new.left and sel > 0 then
       self.selection = sel - 1
       self:_clearLabel()
-      self.state = "create_label"
+      if self.policy then self:_createLabel() else self.state = "create_label" end
     elseif inp.new.right and sel < 2 then
       self.selection = sel + 1
       self:_clearLabel()
-      self.state = "create_label"
+      if self.policy then self:_createLabel() else self.state = "create_label" end
     end
   elseif st == "create_label" then
     -- pokeemerald/src/starter_choose.c:623
@@ -225,10 +232,14 @@ function StarterChoose:frame(inp)
     -- pokeemerald/src/starter_choose.c:528
     local okA, Audio = pcall(require, "src.core.game3.audio")
     if okA and Audio and Audio.playCry then Audio.playCry(self.mon.species) end
-    self.message = "gText_ConfirmStarterChoice"
+    self.message = self.policy and self.policy.confirmKey or "gText_ConfirmStarterChoice"
     self.messageFill = true
-    local w = self.man.windows.confirm
-    self.confirm = Kit.yesNo(w.tilemapLeft, w.tilemapTop, { frameType = self.frameType, initial = 0 })
+    if self.policy then
+      self.confirm = self.policy.confirm(self.frameType)
+    else
+      local w = self.man.windows.confirm
+      self.confirm = Kit.yesNo(w.tilemapLeft, w.tilemapTop, { frameType = self.frameType, initial = 0 })
+    end
     self.state = "confirm"
   elseif st == "confirm" then
     -- pokeemerald/src/starter_choose.c:538
@@ -262,6 +273,7 @@ function StarterChoose:frame(inp)
     spriteToward(self.mon)
     affineStep(self.mon.affine)
   end
+  if self.policy then self.pal:updateFade() end
   return self.done
 end
 
@@ -293,6 +305,7 @@ local function monImage(species)
 end
 
 function StarterChoose:labelRect()
+  if self.policy and self.label then return self.policy.labelRect(self.man, self.label.selection) end
   local lc = self.label and self.man.labelCoords[self.label.selection + 1]
   if not lc then return nil end
   -- pokeemerald/src/starter_choose.c:598
@@ -320,7 +333,13 @@ function StarterChoose:draw()
     drawSprite(sp.pokeball, self.balls[i].frame, c[1], c[2])
   end
   if self.circle then
-    drawSprite(sp.circle, 0, self.circle.x, self.circle.y, self.circle.affine.scale / 256)
+    if self.policy then
+      self.policy.drawAffine(self.circle.x, self.circle.y, self.circle.affine.scale, 64, function(scale)
+        drawSprite(sp.circle, 0, self.circle.x, self.circle.y, scale)
+      end)
+    else
+      drawSprite(sp.circle, 0, self.circle.x, self.circle.y, self.circle.affine.scale / 256)
+    end
   end
   local l, t, r, b = self:labelRect()
   if l then
@@ -332,7 +351,9 @@ function StarterChoose:draw()
   local tc = man.textColors or { 0, 1, 3 }
   local white = Kit.messageColors("message_box", tc[2], tc[1], tc[3])
   white.bg = { 0, 0, 0, 0 }
-  if self.label then
+  if self.label and self.policy then
+    self.policy.drawLabel(self.label, man)
+  elseif self.label then
     local lc = man.labelCoords[self.label.selection + 1]
     local wx, wy = lc[1] * 8, lc[2] * 8
     local width = 0x68
@@ -344,19 +365,22 @@ function StarterChoose:draw()
     FrlgFont.draw(self.label.name, wx + math.max(0, math.floor((width - nw) / 2)), wy + 17, { colors = white })
   end
   if self.message then
-    local w = man.windows.message
-    local colors = Kit.messageColors()
+    local w = self.policy and self.policy.windows.message or man.windows.message
+    local colors = self.policy and self.policy.messageColors or Kit.messageColors()
     local text = RomText.plain(self.message)
     local x0, y0 = w.tilemapLeft * 8, w.tilemapTop * 8
     Kit.userFrame(w.tilemapLeft, w.tilemapTop, w.width, w.height, self.frameType, self.messageFill and colors.bg or nil)
-    FrlgFont.draw(text, x0, y0 + 1, { colors = colors, maxWidth = w.width * 8 })
+    FrlgFont.draw(text, x0, y0 + (self.policy and 0 or 1), { colors = colors, maxWidth = w.width * 8 })
   end
   if self.confirm then self.confirm:draw() end
   if self.mon then
     local img = monImage(self.mon.species)
     if img then
-      local s = self.mon.affine.scale / 256
-      love.graphics.draw(img, frameQuad(img, { w = 64, h = 64 }, 0), self.mon.x, self.mon.y, 0, s, s, 32, 32)
+      local function draw(scale)
+        love.graphics.draw(img, frameQuad(img, { w = 64, h = 64 }, 0), self.mon.x, self.mon.y, 0, scale, scale, 32, 32)
+      end
+      if self.policy then self.policy.drawAffine(self.mon.x, self.mon.y, self.mon.affine.scale, 32, draw)
+      else draw(self.mon.affine.scale / 256) end
     end
   end
   Kit.drawFade(self.pal, 0)

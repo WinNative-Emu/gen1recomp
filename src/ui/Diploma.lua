@@ -6,6 +6,7 @@
 
 local Assets = require("src.render.Assets")
 local Font = require("src.render.Font")
+local GameVersion = require("src.core.GameVersion")
 local PaletteFX = require("src.render.PaletteFX")
 local Sprites = require("src.pokemon.Sprites")
 local SpriteRenderer = require("src.render.SpriteRenderer")
@@ -14,6 +15,7 @@ local Strings = require("src.core.Strings")
 -- engine/events/diploma.asm:65
 local OBP0_90 = { { 255, 255, 255 }, { 255, 255, 255 },
                   { 170, 170, 170 }, { 85, 85, 85 } }
+local PIC_X, PIC_Y = 115, 80
 
 local Diploma = {}
 Diploma.__index = Diploma
@@ -69,6 +71,57 @@ local function drawFrameBox(frame, tx, ty, tw, th)
   end
 end
 
+local function playerName(game)
+  return (game.save.player and game.save.player.name) or "RED"
+end
+
+local function drawLines(game)
+  -- engine/events/diploma.asm:95
+  Font.draw(Strings("Player"), 24, 32)
+  -- engine/events/diploma.asm:39
+  Font.draw(playerName(game), 80, 32)
+
+  -- engine/events/diploma.asm:97
+  local congrats = {
+    { text = Strings.source("Congrats! This"),    y = 48 },
+    { text = Strings.source("diploma certifies"), y = 64 },
+    { text = Strings.source("that you have"),     y = 80 },
+    { text = Strings.source("completed your"),    y = 96 },
+    { text = Strings.source("POKéDEX."),          y = 112 },
+  }
+  for _, line in ipairs(congrats) do
+    Font.draw(Strings(line.text), 16, line.y)
+  end
+
+  -- engine/events/diploma.asm:98
+  Font.draw(Strings("GAME FREAK"), 72, 128)
+end
+
+local overlayCanvas, overlayKey
+
+local function textOverlay(game)
+  local g = love.graphics
+  if not (g.newCanvas and g.setCanvas and g.push and g.pop) then return nil end
+  local key = playerName(game) .. "\0" .. tostring(Strings.active())
+  if overlayCanvas and overlayKey == key then return overlayCanvas end
+  if not overlayCanvas then
+    local ok, c = pcall(g.newCanvas, 160, 144)
+    if not ok or not c then return nil end
+    overlayCanvas = c
+  end
+  g.push("all")
+  g.setCanvas(overlayCanvas)
+  g.origin()
+  g.setScissor()
+  g.setShader()
+  g.clear(0, 0, 0, 0)
+  g.setColor(0, 0, 0, 1)
+  drawLines(game)
+  g.pop()
+  overlayKey = key
+  return overlayCanvas
+end
+
 function Diploma.new(game, onDone)
   local self = setmetatable({
     game = game,
@@ -102,25 +155,32 @@ function Diploma.render(game)
     titlePlayer or "assets/generated/title/player.png",
     { side = "front", kind = "diploma", data = game.data })
   local pic
+  local ogObp = false
   if picPath then
     if picTrueColor then
       pic = tryImage(picPath)
     else
-      local ok, faded = pcall(SpriteRenderer.obpImage, picPath, OBP0_90,
-                              "diploma")
+      ogObp = PaletteFX.usesSpriteObp() and PaletteFX.pass() == "ui"
+      local ramp, group = OBP0_90, "diploma"
+      if ogObp then
+        local c = PaletteFX.ogObjBase()
+        -- engine/events/diploma.asm:65
+        ramp = { c[1], c[1], c[2], c[3] }
+        group = GameVersion.isBlue() and "diploma_og_blue" or "diploma_og"
+      end
+      local ok, faded = pcall(SpriteRenderer.obpImage, picPath, ramp, group)
       pic = (ok and faded) or tryImage(picPath)
+      ogObp = ogObp and ok and faded ~= nil
     end
   end
   if pic then
     love.graphics.setColor(1, 1, 1, 1)
-    local sx, sy, sw, sh = love.graphics.getScissor()
     -- engine/events/diploma.asm:44
-    love.graphics.setScissor(8, 8, 144, 128)
-    love.graphics.draw(pic, 115, 80)
-    if sx then love.graphics.setScissor(sx, sy, sw, sh)
-    else love.graphics.setScissor() end
+    love.graphics.draw(pic, PIC_X, PIC_Y)
     if picTrueColor then
-      PaletteFX.markTrueColor(115, 80, pic:getDimensions())
+      PaletteFX.markTrueColor(PIC_X, PIC_Y, pic:getDimensions())
+    elseif ogObp then
+      PaletteFX.markUiSpriteRedraw(pic, nil, PIC_X, PIC_Y)
     end
   end
 
@@ -133,26 +193,17 @@ function Diploma.render(game)
   love.graphics.setColor(0, 0, 0, 1)
   Font.draw(Strings("Diploma"), 48, 16)  -- hlcoord 6, 2
 
-  -- 4. Player info: hlcoord 3, 4 ("PLAYER" / "Player") and hlcoord 10, 4 (name)
-  Font.draw(Strings("Player"), 24, 32)
-  local playerName = (game.save.player and game.save.player.name) or "RED"
-  Font.draw(playerName, 80, 32)
-
-  -- 5. Congratulations text: hlcoord 2, 6 double-spaced lines (rows 6, 8, 10, 12, 14)
-  local congrats = {
-    { text = Strings.source("Congrats! This"),    y = 48 },  -- hlcoord 2, 6
-    { text = Strings.source("diploma certifies"), y = 64 },  -- hlcoord 2, 8
-    { text = Strings.source("that you have"),     y = 80 },  -- hlcoord 2, 10
-    { text = Strings.source("completed your"),    y = 96 },  -- hlcoord 2, 12
-    { text = Strings.source("POKéDEX."),          y = 112 }, -- hlcoord 2, 14
-  }
-  for _, line in ipairs(congrats) do
-    Font.draw(Strings(line.text), 16, line.y)
-  end
-
-  -- 6. Developer signature: hlcoord 9, 16
-  Font.draw(Strings("GAME FREAK"), 72, 128)
+  drawLines(game)
   love.graphics.setColor(1, 1, 1, 1)
+
+  if ogObp then
+    local overlay = textOverlay(game)
+    if overlay then
+      -- engine/events/diploma.asm:44
+      PaletteFX.markUiSpriteRedraw(overlay, nil, 0, 0,
+        { clip = { PIC_X, PIC_Y, pic:getWidth(), pic:getHeight() } })
+    end
+  end
 end
 
 function Diploma:draw()

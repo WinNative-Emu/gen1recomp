@@ -256,9 +256,10 @@ for _, transparent in ipairs({false, true}) do
       render(s, case)
       if case.key == "cutTree" then s.cutAnim.frames = 5
       elseif s.dustAnim.boulder then s.dustAnim.faded = true
-      else s.dustAnim.frames = 28 end
+      else s.dustAnim.frames = 31 end
       draws = {}; case.fn(s, s.camera)
-      T.eq(draws[1].alpha, .55, version .. " " .. case.name .. " flicker tint preserved")
+      T.eq(draws[1].alpha, 1, version .. " " .. case.name .. " OBP1 flash frame drawn opaque")
+      T.check(draws[1].image ~= render(s, case)[1].image, version .. " " .. case.name .. " OBP1 flash frame uses its own bake")
     end
   end
 end

@@ -3,6 +3,8 @@ local band, rshift = bit.band, bit.rshift
 
 local Tasks = require("src.core.game3.gba_tasks")
 
+local RsPolicy = require("src.core.game3.rs.berry_blender_policy")
+local CacheBlob = require("src.import.CacheBlob")
 local Blender = {}
 Blender.__index = Blender
 
@@ -70,7 +72,7 @@ local function readCache(path)
     if okR and s then return s end
   end
   if love and love.filesystem and love.filesystem.getInfo and love.filesystem.getInfo(path) then
-    return love.filesystem.read(path)
+    return CacheBlob.readFs(path)
   end
   return nil
 end
@@ -132,8 +134,9 @@ function Blender.defaultRandom()
 end
 
 -- pokeemerald/src/berry_blender.c:1210
-function Blender.blenderBerry(itemId, berries, ids)
+function Blender.blenderBerry(itemId, berries, ids, session)
   local info = berries[itemId - ids.first] or {}
+  if itemId == ids.enigma then info = require("src.core.game3.rs.enigma").info(session) or info end
   return {
     itemId = itemId,
     name = info.name or "",
@@ -261,6 +264,7 @@ end
 function Blender.new(opts)
   opts = opts or {}
   local self = setmetatable({}, Blender)
+  self.session = opts.session or require("src.core.game3.rs.enigma").session()
   self.T = opts.tables or Blender.manifest().tables
   self.random = opts.random or Blender.defaultRandom
   self.ids = opts.itemIds or Blender.itemIds(opts.version)
@@ -268,7 +272,8 @@ function Blender.new(opts)
   self.var8004 = opts.opponents or 1
   self.linked = opts.linked == true
   self.localPlayerId = tonumber(opts.localPlayerId) or 0
-  self.blendMaster = opts.blendMaster and true or false
+  self.nativeRS = RsPolicy.matches(opts.version or require("src.core.game3.profile").forSession().id)
+  self.blendMaster = not self.nativeRS and opts.blendMaster and true or false
   self.names = opts.opponentNames or Blender.manifest().opponentNames
   self.playerName = opts.playerName or ""
   self.events = {}
@@ -327,6 +332,7 @@ end
 
 -- pokeemerald/src/berry_blender.c:1224
 function Blender:initLocalPlayers(n)
+  if self.nativeRS then return RsPolicy.initLocalPlayers(self,n) end
   local N = Blender.NAME
   local nm = function(i) return self.names[i + 1] end
   local p = self.playerNames
@@ -346,7 +352,7 @@ end
 -- pokeemerald/src/berry_blender.c:3214
 function Blender:setPlayerBerryData(playerId, itemId)
   self.chosenItemId[playerId] = itemId
-  self.blendedBerries[playerId] = Blender.blenderBerry(itemId, self.berries, self.ids)
+  self.blendedBerries[playerId] = Blender.blenderBerry(itemId, self.berries, self.ids, self.session)
 end
 
 -- pokeemerald/src/berry_blender.c:1542
@@ -940,7 +946,7 @@ function Blender:finishBlend(session)
   local block = self.pokeblock or self:calculate()
   if not session then return block end
   local okR, Rse = pcall(require, "src.core.game3.rse.init")
-  if okR and Rse then Rse.call("tv", "incrementDailyBerryBlender", nil, nil, session) end
+  if not self.nativeRS and okR and Rse then Rse.call("tv", "incrementDailyBerryBlender", nil, nil, session) end
   if session.bag then
     local localItem = self.chosenItemId[self.localPlayerId or 0]
     require("src.core.game3.bag").remove(session.bag, localItem, 1)

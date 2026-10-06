@@ -422,7 +422,7 @@ function Flags.getVar(store, ctx, id)
   -- src/event_data.c:235-241
   if id < 0x4000 then return id end
   if not (store and store.vars) then return 0 end
-  return (store.vars[id]) or 0
+  return store.vars[id] or store.vars[tostring(id)] or 0
 end
 
 function Flags.setVar(store, ctx, id, value)
@@ -434,10 +434,16 @@ function Flags.setVar(store, ctx, id, value)
   else
     if not (store and store.vars) then return end
     store.vars[id] = value % 65536
+    store.vars[tostring(id)] = nil
   end
 end
 
-function Flags.onMapLoad(store)
+function Flags.onMapLoad(store, keepTemps)
+  -- pokeruby/src/overworld.c:1479
+  if keepTemps then
+    repairForGame(store)
+    return
+  end
   if store and store.vars then
     Ctx.clearTemps(store.vars)
   end

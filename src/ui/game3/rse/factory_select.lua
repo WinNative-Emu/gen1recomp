@@ -1,6 +1,7 @@
 local Stack = require("src.ui.game3.stack")
 local FrlgFont = require("src.ui.game3.frlg_font")
 local RomText = require("src.core.game3.rom_text")
+local Strings = require("src.core.Strings")
 local Kit = require("src.ui.game3.rse.scene_kit")
 local Gfx = require("src.ui.game3.rse.pokeblock_gfx")
 local PalFade = require("src.core.game3.pal_fade")
@@ -162,7 +163,7 @@ function Common.categoryText(species)
     entriesPack = Gfx.loadLua("data/generated/gba/pokemon/pokedex/entries.lua") or {}
   end
   local e = entriesPack[tonumber(species) or 0] or {}
-  return (e.category or "") .. " " .. RomText.plain("gText_Pokemon")
+  return Strings(e.category or "") .. " " .. RomText.plain("gText_Pokemon")
 end
 
 function Common.speciesName(species)

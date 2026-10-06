@@ -162,6 +162,8 @@ function SB.curMapIsSecretBase(sess, mapId)
 end
 
 local function metatile(name, sess)
+  local policy = Rse.profile(session(sess)).secretBase
+  if policy and policy.metatiles and policy.metatiles[name] ~= nil then return policy.metatiles[name] end
   return consts(sess):require("metatile_labels", name)
 end
 SB.metatile = metatile
@@ -242,6 +244,9 @@ end
 
 function SB.decorationFlagRange(sess)
   local C = consts(sess)
+  if C.game == "ruby" then
+    return C:require("flags", "FLAG_DECORATION_2"), C:require("flags", "FLAG_DECORATION_15")
+  end
   return C:require("flags", "FLAG_DECORATION_1"), C:require("flags", "FLAG_DECORATION_14")
 end
 
@@ -448,6 +453,11 @@ function SB.onMapLoad(sess, def, enterVia)
   SB.setOccupiedEntrances(mapEvents(sess.map, def), grid, sess)
   if enterVia == "continue" then
     SB.initAppearance(false, grid, sess)
+    local id = Rse.profile(sess).id
+    if (id == "ruby" or id == "sapphire") and SB.curMapIsSecretBase(sess) then
+      SB.hideDecorationSprites(sess)
+      require("src.core.game3.rs.room_decorations").init({specialVars = {[0x8004] = 0}}, sess, grid)
+    end
   else
     SB.initAppearance(true, grid, sess)
   end
@@ -466,6 +476,8 @@ function SB.curIdFromPosition(x, y, events)
 end
 
 local function startScript(label)
+  local policy = Rse.profile(session()).secretBase
+  label = policy and policy.scriptAliases and policy.scriptAliases[label] or label
   local Space = package.loaded["src.core.game3.scripting.space"] or require("src.core.game3.scripting.space")
   local key = Space.scriptKey(label)
   if not key then return false end
@@ -477,7 +489,11 @@ SB.startScript = startScript
 function SB.bgEventScript(ev, facing)
   if not (ev and isBaseEvent(ev)) then return nil end
   if facing ~= "up" and facing ~= 2 then return nil end
-  if SB.trySetCur(ev.secretBaseId) then return "SecretBase_EventScript_CheckEntrance" end
+  if SB.trySetCur(ev.secretBaseId) then
+    local policy = Rse.profile(session()).secretBase
+    return policy and policy.scriptAliases and policy.scriptAliases.SecretBase_EventScript_CheckEntrance
+      or "SecretBase_EventScript_CheckEntrance"
+  end
   return nil
 end
 
@@ -580,11 +596,18 @@ function SB.ownedByAnotherPlayer(sess)
   return SB.base(sess, 0).secretBaseId ~= SB._curId
 end
 
--- pokeemerald/src/secret_base.c:728
+-- pokeemerald/src/secret_base.c:728; the European carts put the owner in the
+-- row's STR_VAR_1 ("BASE DE {STR_VAR_1}", pret pokeemerald multi-language,
+-- src/secret_base.c:732), the US and Japanese ones append the row to it.
 function SB.name(idx, sess)
   local b = SB.base(sess, idx)
-  local ok, suffix = pcall(Rse.text, "gText_ApostropheSBase")
-  return tostring(b.trainerName or "") .. (ok and suffix or "'s BASE")
+  local owner = tostring(b.trainerName or "")
+  local ok, base = pcall(function()
+    return require("src.core.game3.rom_text").plain("gText_ApostropheSBase", { stringVars = { "\1" } })
+  end)
+  if not ok then return owner .. "'s BASE" end
+  if base:find("\1", 1, true) then return (base:gsub("\1", function() return owner end)) end
+  return owner .. base
 end
 
 -- pokeemerald/src/secret_base.c:735
@@ -891,6 +914,7 @@ end
 
 -- pokeemerald/src/secret_base.c:1804
 function SB.initVars(sess)
+  if not Rse.varId("VAR_SECRET_BASE_IS_NOT_LOCAL", sess) then return end
   setVar("VAR_SECRET_BASE_STEP_COUNTER", 0, sess)
   setVar("VAR_SECRET_BASE_LAST_ITEM_USED", 0, sess)
   setVar("VAR_SECRET_BASE_LOW_TV_FLAGS", 0, sess)
@@ -901,6 +925,7 @@ end
 
 -- pokeemerald/src/secret_base.c:1818
 function SB.checkLeftFriendsBase(sess)
+  if not Rse.varId("VAR_SECRET_BASE_IS_NOT_LOCAL", sess) then return end
   if var("VAR_SECRET_BASE_IS_NOT_LOCAL", sess) ~= 0 and SB._inFriendBase and not SB.curMapIsSecretBase(sess) then
     setVar("VAR_SECRET_BASE_IS_NOT_LOCAL", 0, sess)
     SB._inFriendBase = false
@@ -915,6 +940,7 @@ function SB.checkLeftFriendsBase(sess)
 end
 
 local function friendBase(sess)
+  if not Rse.varId("VAR_SECRET_BASE_IS_NOT_LOCAL", sess) then return false end
   return var("VAR_CURRENT_SECRET_BASE", sess) ~= 0
 end
 
@@ -1072,7 +1098,7 @@ function SB.perStep(game, data)
     return P.cellX, P.cellY
   end
   if (data.state or 0) == 0 then
-    SB._inFriendBase = var("VAR_CURRENT_SECRET_BASE") ~= 0
+    SB._inFriendBase = friendBase()
     data.x, data.y = dest()
     data.state = 1
     return false
@@ -1080,7 +1106,9 @@ function SB.perStep(game, data)
   local x, y = dest()
   if x == data.x and y == data.y then return false end
   data.x, data.y = x, y
-  setVar("VAR_SECRET_BASE_STEP_COUNTER", (var("VAR_SECRET_BASE_STEP_COUNTER") + 1) % 0x10000)
+  if Rse.varId("VAR_SECRET_BASE_STEP_COUNTER") then
+    setVar("VAR_SECRET_BASE_STEP_COUNTER", (var("VAR_SECRET_BASE_STEP_COUNTER") + 1) % 0x10000)
+  end
   local grid = SB.fieldGrid()
   local beh = grid.behavior(x, y)
   local mid = grid.metatile(x, y)
@@ -1149,9 +1177,9 @@ local function gfxVarFor(def, sess)
   return consts(sess):require("vars", "VAR_OBJ_GFX_ID_0") + (g - consts(sess):require("event_objects", "OBJ_EVENT_GFX_VAR_0"))
 end
 
-local function spawnDecorationObject(def, decor, x, y, sess)
+local function spawnDecorationObject(def, decor, x, y, sess, nativeInfo)
   local Flags = require("src.core.game3.scripting.flags")
-  local d = Decor.info(decor)
+  local d = nativeInfo or Decor.info(decor)
   Flags.setVar(flagStore(), nil, gfxVarFor(def, sess), d.tiles[1] or 0)
   local lid = tonumber(def.localId or def.index) or 0
   local flagId = tonumber(def.flag or def.flagId) or 0
@@ -1166,10 +1194,11 @@ local function spawnDecorationObject(def, decor, x, y, sess)
 end
 
 -- pokeemerald/src/secret_base.c:552
-function SB.initDecorationSprites(counter, sess, grid)
+function SB.initDecorationSprites(counter, sess, grid, opts)
   sess = session(sess)
   grid = grid or SB.fieldGrid()
   counter = tonumber(counter) or 0
+  opts = opts or {}
   local items, pos
   local inBase = SB.curMapIsSecretBase(sess)
   if inBase then
@@ -1179,21 +1208,26 @@ function SB.initDecorationSprites(counter, sess, grid)
     local ctx = Decor.context(sess, true)
     items, pos = ctx.items, ctx.pos
   end
-  local first = SB.decorationFlagRange(sess)
+  local first = opts.flagFirst or SB.decorationFlagRange(sess)
   local spawned = {}
   for i = 1, #items do
     local decor = items[i]
-    if decor ~= 0 and Decor.isSprite(decor) then
+    local nativeInfo = opts.decorations and opts.decorations[decor]
+    local sprite = nativeInfo and nativeInfo.permission == Decor.PERM.SPRITE
+    if decor ~= 0 and (opts.decorations and sprite or not opts.decorations and Decor.isSprite(decor)) then
       local def
       for _, t in ipairs(templates()) do
         if tonumber(t.flag or t.flagId) == first + counter then def = t break end
       end
       if def then
         local x, y = Decor.decodePos(pos[i])
+        if opts.onPosition then opts.onPosition(x, y) end
         local beh = grid.behavior(x, y)
         if Decor.isBeh(beh, "HOLDS_SMALL_DECORATION") or Decor.isBeh(beh, "HOLDS_LARGE_DECORATION") then
-          local lid = spawnDecorationObject(def, decor, x, y, sess)
-          if inBase and var("VAR_CURRENT_SECRET_BASE", sess) ~= 0 then
+          local lid = spawnDecorationObject(def, decor, x, y, sess, nativeInfo)
+          local basePolicy = Rse.profile(sess).secretBase
+          if not opts.nativeRS and not (basePolicy and basePolicy.preserveDecorationScripts)
+              and inBase and var("VAR_CURRENT_SECRET_BASE", sess) ~= 0 then
             local cat = require("src.core.game3.rse.decoration_inventory").categoryOf(decor)
             local eo = objectsMod().find(lid)
             -- pokeemerald/src/event_object_movement.c:2515
@@ -1205,6 +1239,7 @@ function SB.initDecorationSprites(counter, sess, grid)
           end
           spawned[#spawned + 1] = lid
           counter = counter + 1
+          if opts.onSpawn then opts.onSpawn(lid, counter) end
         end
       end
     end
@@ -1531,8 +1566,16 @@ end
 Rse.register("secretBase", SB)
 Rse.register("secretBaseField", { setUpFieldMove = SB.setUpFieldMove })
 Rse.register("decorationMenu", {
-  open = function(opts) return require("src.ui.game3.rse.decoration").openPlayerRoom(opts) end,
-  chooseForTrade = function(ctx, done) return require("src.ui.game3.rse.decoration").openTrade(ctx, done) end,
+  open = function(opts)
+    local ui = require("src.ui.game3.screens").get("decoration", opts and opts.session)
+      or require("src.ui.game3.rse.decoration")
+    return ui.openPlayerRoom(opts)
+  end,
+  chooseForTrade = function(ctx, done)
+    local ui = require("src.ui.game3.screens").get("decoration", session())
+      or require("src.ui.game3.rse.decoration")
+    return ui.openTrade(ctx, done)
+  end,
 })
 
 do

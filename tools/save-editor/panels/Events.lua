@@ -54,6 +54,16 @@ local HINTS_RSE = {
   vars = HINTS_GEN3.vars,
 }
 
+-- pokeruby/include/constants/flags.h:773
+local HINTS_RS = {
+  story = HINTS_GEN3.story,
+  trainers = "Trainer defeat flags (0x501-0x7B5): checked means that trainer stays beaten.",
+  items = HINTS_RSE.items,
+  toggles = HINTS_GEN3.toggles,
+  system = "System flags (0x800-0x8BF), Gym Badges (0x807-0x80E), National Dex, and daily flags (0x8C0-0x8FF).",
+  vars = HINTS_GEN3.vars,
+}
+
 local function sortedKeys(t)
   local keys = {}
   for k in pairs(t) do
@@ -277,7 +287,8 @@ local function drawSection(S, Kit, x, y, w, h)
   local hints = HINTS_GEN1
   if gen == 3 then
     pills = SUB_TABS_GEN3
-    hints = require("Gen3Flags").rseGame() and HINTS_RSE or HINTS_GEN3
+    local game = require("Gen3Flags").rseGame()
+    hints = (game == "ruby" or game == "sapphire") and HINTS_RS or game and HINTS_RSE or HINTS_GEN3
   elseif gen == 2 then
     pills = { SUB_TABS_GEN1[1] }
     if S.eventsTab ~= "flags" then

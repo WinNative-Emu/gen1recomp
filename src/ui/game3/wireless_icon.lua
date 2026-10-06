@@ -168,6 +168,12 @@ end
 
 -- pokefirered/src/overworld.c:1829
 function WirelessIcon.drawField()
+  local Runtime = package.loaded["src.core.game3.runtime"]
+  local session = Runtime and Runtime.getSession and Runtime.getSession()
+  if not require("src.core.game3.profile").has(session, "unionRoom") then
+    WirelessIcon._lastTime = nil
+    return false
+  end
   if not WirelessIcon.onLinkMap(currentMap()) then
     WirelessIcon._lastTime = nil
     return false

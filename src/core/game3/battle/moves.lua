@@ -48,8 +48,13 @@ function Moves.loadRomPack(cache)
   Moves._romLoaded = true
   local root = (Extract.CACHE_ROOT or "data/generated/gba") .. "/pokemon/battle_moves.lua"
   cache = cache or require("src.core.game3.dataset").cache()
-  local src = assert(cache:read(root), "pokemon/battle_moves.lua is not in the cache")
-  local pack = assert(load(src, "@" .. root, "t", {}))()
+  local chunk = Moves._romChunk
+  if not (chunk and Moves._romChunkCache == cache) then
+    local src = assert(cache:read(root), "pokemon/battle_moves.lua is not in the cache")
+    chunk = assert(load(src, "@" .. root, "t", {}))
+    Moves._romChunk, Moves._romChunkCache = chunk, cache
+  end
+  local pack = chunk()
   Moves._rom = assert(pack and pack.moves, "pokemon/battle_moves.lua has no moves")
   Moves._numByName = nil
   build_names()

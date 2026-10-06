@@ -24,7 +24,11 @@ NativesContest.partyIndex = 0
 NativesContest.linkFlags = 0
 NativesContest.ui = {}
 
-local function Util() return require("src.core.game3.rse.contest_util") end
+local function Util(sess)
+  local Rs = require("src.core.game3.rs.contest_util")
+  if Rs.is(sess or Rse.session()) then return Rs end
+  return require("src.core.game3.rse.contest_util")
+end
 local function ContestLink() return require("src.core.game3.link.contest_link") end
 local function Link() return require("src.core.game3.link.init") end
 local function Natives() return require("src.core.game3.scripting.natives") end
@@ -47,7 +51,7 @@ local function current() return Util().current() end
 local function ensureWinners(sess, data)
   if sess and type(sess.contestWinners) ~= "table" then
     local c = current()
-    Util().clearAllWinners(sess, data or (c and c.data) or nil)
+    Util(sess).clearAllWinners(sess, data or (c and c.data) or nil)
   end
   return sess
 end
@@ -56,6 +60,9 @@ NativesContest.ensureWinners = ensureWinners
 local function uiModule(key, path)
   local m = NativesContest.ui[key]
   if m then return m end
+  local ui = require("src.core.game3.profile").forSession(session()).ui
+  local native = ui and ui.contest and ui.contest[key]
+  if native then return require(native) end
   return require(path)
 end
 
@@ -90,6 +97,19 @@ end
 -- pokeemerald/src/party_menu.c:6234
 function NativesContest.chooseContestMon(vm)
   local ctx, adapters = vm.ctx, vm.adapters
+  local sess = session()
+  if require("src.core.game3.rs.contest_util").is(sess) then
+    return Natives().yieldHost(ctx, adapters, function(done)
+      require("src.ui.game3.rse.contest_party").show(sess,
+        var(ctx, VAR_CONTEST_CATEGORY), var(ctx, VAR_CONTEST_RANK), function(slot)
+          slot = tonumber(slot) or PARTY_NOTHING_CHOSEN
+          if slot < 0 or slot >= PARTY_SIZE then slot = PARTY_NOTHING_CHOSEN end
+          setVar(ctx, VAR_0x8004, slot)
+          NativesContest.partyIndex = slot
+          done()
+        end)
+    end)
+  end
   local yield = Natives().choosePartyMon(ctx, adapters, "choose_contest")
   local function settle()
     local slot = var(ctx, VAR_0x8004)
@@ -192,7 +212,7 @@ end
 
 -- pokeemerald/src/contest_util.c:662
 function NativesContest.onResultsShown(c, sess)
-  local U = Util()
+  local U = Util(sess)
   sess = ensureWinners(sess or session(), c.data)
   U.saveContestWinner(sess, c.rank, c)
   U.saveContestWinner(sess, U.SAVE_FOR_ARTIST, c)

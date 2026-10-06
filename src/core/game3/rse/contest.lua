@@ -124,6 +124,14 @@ function Contest.data()
   if dataCache and dataRoot == cacheRoot() then return dataCache end
   local moves = assert(readLua(Contest.REL_MOVES), "contest moves are not in the cache")
   local manifest = assert(readLua(Contest.REL_MANIFEST), "contest manifest is not in the cache")
+  if manifest.assetLayout == "rs" then
+    local native = assert(readLua("rse/contest_data/manifest.lua"), "RS contest data is not in the cache")
+    assert(native.assetLayout == "rs", "RS contest data layout")
+    local merged = {}
+    for k, v in pairs(manifest) do merged[k] = v end
+    for k, v in pairs(native) do merged[k] = v end
+    manifest = merged
+  end
   dataCache, dataRoot = Contest.buildData(moves, manifest), cacheRoot()
   return dataCache
 end
@@ -175,6 +183,8 @@ function Contest.new(opts)
   c.linkFlags = opts.linkFlags or 0
   c.rng = opts.rng or function() return require("src.core.game3.rng").Random() end
   c.uninit = opts.uninit
+  c.nativeContestRam, c.nativeContestGfx, c.nativeContestMoveAnim =
+    opts.nativeContestRam, opts.nativeContestGfx, opts.nativeContestMoveAnim
   c.playerIndex = opts.playerIndex or (N - 1)
   c.mons = { [0] = false, false, false, false }
   c.round1, c.totals, c.appealTotals, c.round2 = zero4(), zero4(), zero4(), zero4()
@@ -244,6 +254,9 @@ Contest.HEAP = {
 
 function Contest:uninitVar(idx)
   if self.uninit then return s16(self.uninit(idx, self)) end
+  if self.data and self.data.manifest and self.data.manifest.assetLayout == "rs" then
+    return require("src.core.game3.rs.contest_memory").uninitVar(self, idx)
+  end
   local off = 0x1A + idx * 2
   local H = Contest.HEAP
   local w = H.words[off]

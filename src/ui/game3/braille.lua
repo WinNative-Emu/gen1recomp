@@ -2,6 +2,7 @@
 
 local FrlgFont = require("src.ui.game3.frlg_font")
 local TextIR = require("src.core.game3.scripting.text_ir")
+local CacheBlob = require("src.import.CacheBlob")
 
 local Braille = {}
 
@@ -85,6 +86,8 @@ Braille._quads = nil
 Braille._tried = false
 Braille._logged = false
 Braille._cursor = nil
+Braille._pitch = nil
+Braille._window = nil
 
 local function log(msg)
   if Braille._logged then return end
@@ -107,17 +110,17 @@ local function read_bytes(rel)
     if okR and type(d) == "string" and #d > 0 then return d end
   end
   if love and love.filesystem and love.filesystem.read then
-    local okR, d = pcall(love.filesystem.read, rel)
+    local okR, d = pcall(CacheBlob.readFs, rel)
     if okR and type(d) == "string" and #d > 0 then return d end
     local alt = "data/generated/gba/" .. (rel:gsub("^data/generated/gba/", ""))
-    okR, d = pcall(love.filesystem.read, alt)
+    okR, d = pcall(CacheBlob.readFs, alt)
     if okR and type(d) == "string" and #d > 0 then return d end
   end
   local candidates = { rel, "data/generated/gba/" .. (rel:gsub("^data/generated/gba/", "")) }
   for _, path in ipairs(candidates) do
     local f = io.open(path, "rb")
     if f then
-      local d = f:read("*a")
+      local d = CacheBlob.decode(path, f:read("*a"))
       f:close()
       if d and #d > 0 then return d end
     end
@@ -206,7 +209,10 @@ local function ensure()
     return false
   end
   Braille._fg = fg
-  Braille._sh = load_sheet(SHADOW_PATHS, manifest)
+  Braille._pitch = type(manifest) == "table" and tonumber(manifest.linePitch) or nil
+  if not (type(manifest) == "table" and manifest.shadow == false) then
+    Braille._sh = load_sheet(SHADOW_PATHS, manifest)
+  end
   local w, h = fg:getWidth(), fg:getHeight()
   local cols = Braille.sheetCols(manifest, w)
   local quads = {}
@@ -229,7 +235,13 @@ function Braille.invalidate()
   Braille._fg = nil
   Braille._sh = nil
   Braille._quads = nil
+  Braille._pitch = nil
   Braille._tried = false
+end
+
+function Braille.linePitch()
+  ensure()
+  return Braille._pitch or Braille.LINE_PITCH
 end
 
 local function chars(text)
@@ -337,10 +349,18 @@ function Braille.show(text, opts)
   local body = tostring(text or "")
   Braille._text = body
   Braille._width = tonumber(opts.width) or Braille.width(body)
+  Braille._window = type(opts.window) == "table" and #opts.window >= 6 and opts.window or nil
   Braille.clearCursor()
   local Message = require("src.ui.game3.message")
   Message.showStay(body, { frame = "braille", speed = opts.speed, session = opts.session })
   return true
+end
+
+-- pokeruby/src/scrcmd.c:1425
+function Braille.window()
+  local w = Braille._window
+  if not w then return nil end
+  return { left = w[1], top = w[2], right = w[3], bottom = w[4], textX = w[5], textY = w[6] }
 end
 
 function Braille.isOpen()
@@ -353,6 +373,7 @@ function Braille.hide()
   if Message and Message.isOpen() and Message.frameKind() == "braille" then
     Message.close()
   end
+  Braille._window = nil
   Braille.clearCursor()
 end
 
@@ -371,7 +392,7 @@ function Braille.drawText(text, x, y, opts)
   local colors = opts.colors or FrlgFont.COLOR.NORMAL
   local drawn = 0
   for row, line in ipairs(Braille.encode(text)) do
-    local penY = y + (row - 1) * Braille.LINE_PITCH
+    local penY = y + (row - 1) * (Braille._pitch or Braille.LINE_PITCH)
     for col, code in ipairs(line) do
       if limit and drawn >= limit then
         love.graphics.setColor(1, 1, 1, 1)

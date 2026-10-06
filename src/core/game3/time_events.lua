@@ -74,13 +74,28 @@ local function consts(session)
   return Constants.of(Constants.versionOf(session))
 end
 
-local function orderedCall(order, handlers, ...)
+local function clockPolicy(session)
+  return require("src.core.game3.profile").forSession(session).clock or {}
+end
+
+local function policyHandlers(session, kind, defaults)
+  local policy = clockPolicy(session)
+  if not policy.timeEventsModule then return defaults, policy end
+  local own = require(policy.timeEventsModule)[kind] or {}
+  local handlers = {}
+  for name, fn in pairs(defaults) do handlers[name] = fn end
+  for name, fn in pairs(own) do handlers[name] = fn end
+  return handlers, policy
+end
+
+local function orderedCall(order, handlers, allowExtra, ...)
   local seen = {}
   for _, name in ipairs(order) do
     seen[name] = true
     local fn = handlers[name]
     if fn then fn(...) end
   end
+  if allowExtra == false then return end
   local extra = {}
   for name in pairs(handlers) do
     if not seen[name] then extra[#extra + 1] = name end
@@ -137,7 +152,8 @@ local function updatePerDay(session, lt, store)
   local days = Rtc.u16(tonumber(F.getVar(store, nil, varDays)) or 0)
   if days ~= lt.days and days <= lt.days then
     local daysSince = Rtc.u16(lt.days - days)
-    orderedCall(TimeEvents.PER_DAY_ORDER, perDay, session, daysSince, lt, store)
+    local handlers, policy = policyHandlers(session, "perDay", perDay)
+    orderedCall(policy.perDayOrder or TimeEvents.PER_DAY_ORDER, handlers, policy.allowExtraTimeHandlers, session, daysSince, lt, store)
     F.setVar(store, nil, varDays, lt.days)
     return daysSince
   end
@@ -150,7 +166,8 @@ local function updatePerMinute(session, lt, store)
   local diff = Rtc.calcTimeDifference(last or Rtc.newTime(0, 0, 0, 0), lt)
   local minutes = Rtc.timeMinutes(diff)
   if minutes ~= 0 and minutes >= 0 then
-    orderedCall(TimeEvents.PER_MINUTE_ORDER, perMinute, session, minutes, lt, store)
+    local handlers, policy = policyHandlers(session, "perMinute", perMinute)
+    orderedCall(policy.perMinuteOrder or TimeEvents.PER_MINUTE_ORDER, handlers, policy.allowExtraTimeHandlers, session, minutes, lt, store)
     if type(session) == "table" then session.lastBerryTreeUpdate = Rtc.copyTime(lt) end
     return minutes
   end
@@ -189,9 +206,11 @@ function TimeEvents.run(session, opts)
   local store = storeOf(session, opts)
   local C = consts(session)
   if not flags().getFlag(store, nil, C:require("flags", "FLAG_SYS_CLOCK_SET")) then return false end
-  local inPc = opts.inPokemonCenter
-  if inPc == nil then inPc = TimeEvents.inPokemonCenter(session) end
-  if inPc then return false end
+  if not clockPolicy(session).updateInPokemonCenters then
+    local inPc = opts.inPokemonCenter
+    if inPc == nil then inPc = TimeEvents.inPokemonCenter(session) end
+    if inPc then return false end
+  end
   local lt = Rtc.calcLocalTime(session)
   local daysSince = updatePerDay(session, lt, store)
   local minutes = updatePerMinute(session, lt, store)

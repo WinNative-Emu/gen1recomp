@@ -51,6 +51,12 @@ local function rseEngine()
 end
 Weather.rseEngine = rseEngine
 
+local function weatherPolicy(sess)
+  local Profile = lazyReq("src.core.game3.profile")
+  local row = Profile.forSession(sess)
+  return type(row) == "table" and type(row.weather) == "table" and row.weather or nil
+end
+
 local function session()
   local Runtime = package.loaded["src.core.game3.runtime"]
   return Runtime and Runtime.getSession and Runtime.getSession() or nil
@@ -86,7 +92,11 @@ end
 -- pokeemerald/src/field_weather_effect.c:2596
 function Weather.translate(weather, sess)
   weather = tonumber(weather) or Weather.NONE
-  if weather >= Weather.NONE and weather <= Weather.ABNORMAL then return weather end
+  local policy = weatherPolicy(sess)
+  -- pokeruby/src/field_weather_effects.c:2354
+  if policy and policy.translateByte then weather = math.floor(weather) % 256 end
+  local directMax = policy and policy.directWeatherMax or Weather.ABNORMAL
+  if weather >= Weather.NONE and weather <= directMax then return weather end
   local stage = (tonumber((sess or session() or {}).weatherCycleStage) or 0) % Weather.CYCLE_LENGTH
   if weather == Weather.ROUTE119_CYCLE then return Weather.cycles().route119[stage + 1] end
   if weather == Weather.ROUTE123_CYCLE then return Weather.cycles().route123[stage + 1] end
@@ -137,7 +147,9 @@ end
 
 local function abnormalTarget(E, resume)
   local w = Weather.getSaved()
-  if w == Weather.ABNORMAL then
+  local policy = weatherPolicy()
+  -- pokeruby/src/field_weather_effects.c:2329
+  if w == Weather.ABNORMAL and not (policy and policy.abnormal == false) then
     w = E.startAbnormal()
   else
     E.stopAbnormal()
@@ -248,7 +260,8 @@ function Weather.apply(id, opts)
     if seamless == nil then seamless = not fieldLocked() and E.isStarted() end
     local pinned = Weather._scriptSaved
     -- pokeemerald/src/overworld.c:854
-    if not (pinned and pinned.seq == Weather._applySeq and pinned.map == currentMapId()) then
+    -- pokeruby/src/overworld.c:1479
+    if not opts.continue and not (pinned and pinned.seq == Weather._applySeq and pinned.map == currentMapId()) then
       Weather.setSavedFromHeader(id)
     end
     Weather._applySeq = Weather._applySeq + 1

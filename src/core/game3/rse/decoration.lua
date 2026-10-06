@@ -80,7 +80,11 @@ function Decor.layerType(tile)
 end
 
 function Decor.tileBehavior(tile)
-  return MB.fromRaw("emerald", Decor.attributes(tile) % (ATTR_BEHAVIOR_MASK + 1))
+  local game = "emerald"
+  if Decor.manifest().assetLayout == "rs" then
+    game = require("src.core.game3.constants").versionOf(require("src.core.game3.rse.init").session())
+  end
+  return MB.fromRaw(game, Decor.attributes(tile) % (ATTR_BEHAVIOR_MASK + 1))
 end
 
 local function isBeh(beh, name)

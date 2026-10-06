@@ -1,4 +1,5 @@
 package.path = "./?.lua;./?/init.lua;" .. package.path
+local CacheBlob = require("src.import.CacheBlob")
 
 local T = require("tests.harness")
 local check, eq = T.check, T.eq
@@ -62,7 +63,7 @@ local function readFile(path)
   if not IDROOT then return nil end
   local h = io.open(IDROOT .. path, "rb")
   if not h then return nil end
-  local s = h:read("*a")
+  local s = CacheBlob.decode(IDROOT .. path, h:read("*a"))
   h:close()
   return s
 end

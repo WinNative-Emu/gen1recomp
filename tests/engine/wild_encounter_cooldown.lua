@@ -224,7 +224,7 @@ eq(Encounters._encounterRateBuff, 0, "a landed encounter clears the buff")
 -- A Repel zeroes the bank instead of growing it.
 reset()
 Rng.SeedWildEncounterRng(1)
-Runtime.session = { repelSteps = 100 }
+Runtime.session = { repelSteps = 100, vars = { [0x4020] = 100 } }
 eq(rollLand(), nil, "the roll still fails under a Repel")
 eq(Encounters._encounterRateBuff, 0, "an active Repel clears the bank")
 Runtime.session = prevSession

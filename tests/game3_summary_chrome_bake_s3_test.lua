@@ -4,6 +4,7 @@
 package.path = "./?.lua;./?/init.lua;" .. package.path
 
 local T = require("tests.harness")
+local CacheBlob = require("src.import.CacheBlob")
 local check, eq = T.check, T.eq
 
 local PRET = "../pokefirered"
@@ -13,7 +14,7 @@ local ROM_SHA1 = "41cb23d8dccc8ebd7c649cd8fbb58eeace6e2fdc"
 local function slurp(p)
   local f = io.open(p, "rb")
   if not f then return nil end
-  local d = f:read("*a")
+  local d = CacheBlob.decode(p, f:read("*a"))
   f:close()
   return d
 end

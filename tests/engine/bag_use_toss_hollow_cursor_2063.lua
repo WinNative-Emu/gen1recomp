@@ -10,7 +10,9 @@ love = love or require("tests.love_stub")
 package.loaded["src.core.Sound"] = { play = function() end, playCry = function() end }
 package.loaded["src.core.Music"] = { playMap = function() end }
 package.loaded["src.render.TextBox"] = {
-  new = function(_, text, done) return { textBox = true, text = text, done = done } end,
+  new = function(_, text, done, opts)
+    return { textBox = true, text = text, done = done, opts = opts }
+  end,
   soundOpts = function() return nil end,
 }
 package.loaded["src.ui.BagMenu"] = nil
@@ -111,6 +113,75 @@ do
     check(list.index > 1, "which is not the first row")
     pressA(game, list)
     eq(list.hollowIndex, list.index, "the TM's own row goes hollow")
+  end
+end
+
+-- engine/menus/start_sub_menus.asm:361
+local function useLeavesBox(id, label)
+  local game = freshGame()
+  local list = openOn(game, byId(id))
+  if not check(list ~= nil, label .. ": the bag opened on the row") then return end
+  pressA(game, list)
+  local box = game.stack:top()
+  if not check(getmetatable(box) == Menu, label .. ": the USE/TOSS box is up") then return end
+  eq(box.index, 1, label .. ": the cursor sits on USE")
+  game.input.pressed = "a"
+  box:update(1 / 60)
+  game.input.pressed = nil
+  check(game.stack:top() ~= box, label .. ": USE takes the box off the stack")
+  check(game.stack:top() and game.stack:top().textBox,
+        label .. ": the use flow prints its text")
+  check(list.optionBox == box, label .. ": the box stays painted under the text")
+  eq(box.hollowIndex, 1, label .. ": with the hollow '▷' left on USE")
+  local drawn = false
+  local realDraw = box.draw
+  box.draw = function(self) drawn = true end
+  list.drawItemBox = function() end
+  list:draw()
+  list.drawItemBox = nil
+  box.draw = realDraw
+  check(drawn, label .. ": drawing the list repaints the leftover box")
+  game.stack:pop()
+  drawn = false
+  box.draw = function(self) drawn = true end
+  list.drawItemBox = function() end
+  list:draw()
+  list.drawItemBox = nil
+  box.draw = realDraw
+  check(not drawn, label .. ": the first frame back on the list has no box")
+  check(list.optionBox == nil, label .. ": the redraw erases it before any update")
+  check(list.hollowIndex == nil, label .. ": and the list's '▶' is filled again")
+  list:update(1 / 60)
+  check(list.optionBox == nil, label .. ": the list's next update keeps it erased")
+end
+useLeavesBox("FIX_TM", "TM booted-up text")
+useLeavesBox("FIX_POTION", "potion refusal text")
+
+-- engine/menus/start_sub_menus.asm:416
+do
+  local game = freshGame()
+  local list = openOn(game, byId("FIX_TM"))
+  if check(list ~= nil, "TM YES: the bag opened on the TM row") then
+    pressA(game, list)
+    local box = game.stack:top()
+    game.input.pressed = "a"
+    box:update(1 / 60)
+    game.input.pressed = nil
+    local text = game.stack:top()
+    check(list.optionBox == box, "TM YES: the box is painted under the prompt")
+    local Screens = require("src.ui.Screens")
+    local realPush, pushed = Screens.push, nil
+    Screens.push = function(g, id)
+      pushed = id
+      g.stack:push({ partyMenu = true })
+    end
+    local choice = text and text.opts and text.opts.choice
+    if check(choice ~= nil, "TM YES: the prompt carries the YES/NO choice") then
+      choice(true)
+    end
+    Screens.push = realPush
+    eq(pushed, "PartyMenu", "TM YES: the party menu opens")
+    check(list.optionBox == nil, "TM YES: the party menu wipes the leftover box")
   end
 end
 

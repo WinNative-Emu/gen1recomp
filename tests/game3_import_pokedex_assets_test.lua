@@ -24,6 +24,7 @@ end
 local Extract = require("src.import.gba.pokedex_chrome_extract")
 local Versions = require("src.import.gba.versions")
 local CacheContract = require("src.import.CacheContract")
+local CacheBlob = require("src.import.CacheBlob")
 
 local PAPER_BYTES = 240 * 160 * 4
 local FOOT_BYTES = 16 * 16 * 4
@@ -179,7 +180,7 @@ print("[info] FireRed cache at " .. root)
 local function readFile(rel)
   local f = io.open(root .. "/pokemon/pokedex/" .. rel, "rb")
   if not f then return nil end
-  local data = f:read("*a")
+  local data = CacheBlob.decode(root .. "/pokemon/pokedex/" .. rel, f:read("*a"))
   f:close()
   return data
 end

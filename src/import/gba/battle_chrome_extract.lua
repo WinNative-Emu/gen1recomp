@@ -4,6 +4,7 @@
 
 local Versions = require("src.import.gba.versions")
 local Lz77 = require("src.import.gba.lz77")
+local CacheBlob = require("src.import.CacheBlob")
 
 local BattleChromeExtract = {}
 
@@ -217,7 +218,7 @@ end
 -- pokefirered/src/text.c:1688
 function BattleChromeExtract.bakeHpBoldDigits(get, cfg)
   cfg = cfg or Versions.BATTLE_UI
-  if not cfg.font_bold_glyphs then return nil end
+  if not cfg.font_bold_glyphs and not cfg.rs_font4_glyphs then return nil end
   local raw = {}
   for i = 0, 31 do raw[i + 1] = get(cfg.healthbar_pal + i) end
   local barPal = load_pal(raw, 16)
@@ -226,9 +227,19 @@ function BattleChromeExtract.bakeHpBoldDigits(get, cfg)
   for i = 1, w * h do indices[i] = 0 end
   local codes = { 0xA1, 0xA2, 0xA3, 0xA4, 0xA5, 0xA6, 0xA7, 0xA8, 0xA9, 0xAA, 0xBA }
   for n, id in ipairs(codes) do
+    if cfg.rs_font4_glyphs then
+      -- pokeruby/src/text.c:2676
+      local glyph = cfg.rs_font4_glyphs + get(cfg.rs_font_type1_map + id * 2 + 1) * 32
+      for y = 0, 7 do for x = 0, 7 do
+        local byte = get(glyph + y * 4 + math.floor(x / 2))
+        local v = x % 2 == 0 and byte % 16 or math.floor(byte / 16)
+        indices[y * w + (n - 1) * 8 + x + 1] = v == 15 and 1 or v == 14 and 3 or v
+      end end
+    else
     local glyph = cfg.font_bold_glyphs + 2 * (0x100 * math.floor(id / 16) + 8 * (id % 16))
     -- pokefirered/src/battle_interface.c:900
     decode_bold_half_rows(get, glyph + 2 * 0x80, indices, (n - 1) * 8, w)
+    end
   end
   return indices_to_rgba(indices, barPal, w, h)
 end
@@ -457,6 +468,7 @@ local function pal_list(rom, off, n)
 end
 
 local function window_rows(rom, off, n)
+  if not off or not n then return "{}" end
   local rows = {}
   for w = 0, n - 1 do
     local b = off + w * 8
@@ -498,7 +510,8 @@ function BattleChromeExtract.runRse(rom, cache, opts, cfg)
 
   local tbGfx = Lz77.decompress(get, cfg.textbox_gfx)
   local tbPal = Lz77.decompress(get, cfg.textbox_pal)
-  local tbMap = Lz77.decompress(get, cfg.textbox_tilemap)
+  local tbMap = cfg.textbox_tilemap_raw_size and read_raw(rom, cfg.textbox_tilemap, cfg.textbox_tilemap_raw_size)
+    or Lz77.decompress(get, cfg.textbox_tilemap)
   local tbRows = math.floor(byte_len(tbMap) / 64)
   local textboxRgba, tw, th = bake_tilemap_rgba(tbGfx, tbPal, tbMap, 32, tbRows)
   cache:write(root .. "/textbox.rgba", textboxRgba)
@@ -513,8 +526,9 @@ function BattleChromeExtract.runRse(rom, cache, opts, cfg)
   end
 
   -- pokeemerald/src/graphics.c:358
-  local elTiles = math.floor(cfg.healthbox_elements_size / 32)
-  local elGfx = read_raw(rom, cfg.healthbox_elements, cfg.healthbox_elements_size)
+  local elementBytes = cfg.healthbox_elements_span_size or cfg.healthbox_elements_size
+  local elTiles = math.floor(elementBytes / 32)
+  local elGfx = read_raw(rom, cfg.healthbox_elements, elementBytes)
   cache:write(root .. "/elements.rgba", bake_sheet_rgba(elGfx, barPal, 320, 24))
   cache:write(root .. "/elements_exp.rgba", bake_sheet_rgba(elGfx, hbPal, 320, 24))
 
@@ -543,7 +557,8 @@ function BattleChromeExtract.runRse(rom, cache, opts, cfg)
   cache:write(root .. "/party_summary_bar.rgba",
     bake_sheet_rgba(Lz77.decompress(get, cfg.party_summary_bar), hbPal, 128, 8))
 
-  local winPal = load_pal(Lz77.decompress(get, cfg.window_text_pal), 16)
+  local winPal = load_pal(cfg.window_text_pal_raw and read_raw(rom, cfg.window_text_pal_raw, 32)
+    or Lz77.decompress(get, cfg.window_text_pal), 16)
   local winPalList = {}
   for c = 0, 15 do winPalList[#winPalList + 1] = tostring(winPal[c] or 0) end
   local tbPalBank = load_pal(tbPal, 16)
@@ -595,6 +610,10 @@ function BattleChromeExtract.runRse(rom, cache, opts, cfg)
     pal_list(rom, cfg.healthbox_pal), pal_list(rom, cfg.healthbar_pal), table.concat(winPalList, ", "),
     table.concat(tbPalList, ", "), pal_list(rom, cfg.pp_text_pal),
     window_rows(rom, wt.normal, wc.normal), window_rows(rom, wt.arena, wc.arena))
+  if cfg.gameLayout == "rs" then
+    manifest = manifest:gsub("return {", string.format("return {\n  assetLayout = 'rs', build = %q, game = %q,\n  elementsLayoutVersion = 1, elementsTableTiles = 66, elementsSourceBytes = %d,",
+      Versions.BUILD, Versions.active(), elementBytes), 1)
+  end
   cache:write(root .. "/manifest.lua", manifest)
   return { root = root, textboxW = tw, textboxH = th, terrains = terrainOrder }
 end
@@ -701,6 +720,37 @@ end
 
 function BattleChromeExtract.ready(cache, cacheRoot)
   local root = (cacheRoot or default_cache_root()) .. "/" .. BattleChromeExtract.CACHE_SUB
+  if Versions.BATTLE_UI.gameLayout == "rs" then
+    local function read_file(rel)
+      if cache then return cache.read and cache:read(rel) or nil end
+      local CacheFs = require("src.import.CacheFs")
+      local bytes = CacheFs.readActive and CacheFs.readActive(rel)
+      if bytes then return bytes end
+      if love and love.filesystem then bytes = CacheBlob.readFs(rel) end
+      if bytes then return bytes end
+      local file = io.open(rel, "rb")
+      if not file then return nil end
+      bytes = CacheBlob.decode(rel, file:read("*a")); file:close(); return bytes
+    end
+    local body = read_file(root .. "/manifest.lua")
+    local chunk = type(body) == "string" and load(body, "@battle/manifest.lua", "t", {})
+    local ok, m = false, nil
+    if chunk then ok, m = pcall(chunk) end
+    if not ok or type(m) ~= "table" or m.assetLayout ~= "rs" or m.build ~= Versions.BUILD
+      or m.game ~= Versions.active() or m.format ~= BattleChromeExtract.FORMAT_VERSION
+      or m.elementsLayoutVersion ~= 1 or m.elementsTiles ~= 118
+      or m.elementsTableTiles ~= 66 or m.elementsSourceBytes ~= 3776 then return false end
+    for _, name in ipairs({ "elements.rgba", "elements_exp.rgba" }) do
+      local bytes = read_file(root .. "/" .. name)
+      if not bytes or #bytes ~= 320 * 24 * 4 then return false end
+    end
+    for _, spec in ipairs({ { "healthbox_safari.rgba", 128 * 64 * 4 },
+        { "healthbox_doubles_player.rgba", 128 * 32 * 4 },
+        { "healthbox_doubles_opponent.rgba", 128 * 32 * 4 } }) do
+      local bytes = read_file(root .. "/" .. spec[1])
+      if not bytes or #bytes ~= spec[2] then return false end
+    end
+  end
   local function valid_file(rel, minSize)
     minSize = minSize or 1
     if cache then
@@ -718,7 +768,7 @@ function BattleChromeExtract.ready(cache, cacheRoot)
       if data and #data >= minSize then return true end
     end
     if love and love.filesystem and love.filesystem.read then
-      local ok, data = pcall(love.filesystem.read, rel)
+      local ok, data = pcall(CacheBlob.readFs, rel)
       if ok and data and #data >= minSize then return true end
     end
     local f = io.open(rel, "rb")

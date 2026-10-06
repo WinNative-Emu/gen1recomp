@@ -1061,7 +1061,8 @@ M.VICTORY_ROAD_3F = {
 -- pokered forces the fight on map entry: Agatha's victory arms
 -- SCRIPT_CHAMPIONSROOM_PLAYER_ENTERS (scripts/AgathasRoom.asm), and
 -- ChampionsRoomPlayerEntersScript then runs RivalEntrance_RLEMovement
--- (up 1, right 1, up 3) before ChampionsRoomRivalReadyToBattleScript.
+-- (played back to front: up 3, right 1, up 1) before
+-- ChampionsRoomRivalReadyToBattleScript.
 -- The rival object has no trainer header / sight range, so without that
 -- entrance script the player can walk past (issue #99).  We arm on the
 -- run flag instead of Agatha's victory bit: same observable effect for
@@ -1090,6 +1091,7 @@ local championsRoomRivalScript = {
   -- playBattle("final") then no-ops on the same song, so the theme stays
   -- continuous into the fight
   { "play_music", "Music_FinalBattle" },                    -- 5
+  { "save_end_battle_text", "_RivalDefeatedText" },         -- scripts/ChampionsRoom.asm:65
   { "rival_battle", "OPP_RIVAL3", 1 },                      -- 6
   -- losing halts here; the numeric target this replaced pointed at the
   -- closing warp, which inducted a player who had just lost the fight (#704)
@@ -1098,8 +1100,7 @@ local championsRoomRivalScript = {
   { "set_flag", "EVENT_BEAT_CHAMPION_RIVAL" },              -- 9
   -- ChampionsRoomRivalDefeatedScript re-displays TEXT_CHAMPIONSROOM_RIVAL,
   -- whose text_asm takes the EVENT_BEAT_CHAMPION_RIVAL branch =
-  -- _ChampionsRoomRivalAfterBattleText (the in-battle _RivalDefeatedText
-  -- is the port's generic "<PLAYER> defeated BLUE!" engine line instead).
+  -- _ChampionsRoomRivalAfterBattleText.
   { "show_text", "_ChampionsRoomRivalAfterBattleText" },    -- 10
   -- ChampionsRoomOakArrivesScript: Music_Cities1AlternateTempo
   -- (Cities1, kept into HALL_OF_FAME like BIT_NO_MAP_MUSIC after
@@ -1153,10 +1154,11 @@ M.CHAMPIONS_ROOM = {
     end
     -- RivalEntrance_RLEMovement, then the battle/Oak script (queued
     -- separately so talk-script jump indices stay 1-based as written).
+    -- home/overworld.asm:1844
     ow:queueScript({
-      { "move_player", "up", 1 },
-      { "move_player", "right", 1 },
       { "move_player", "up", 3 },
+      { "move_player", "right", 1 },
+      { "move_player", "up", 1 },
     })
     ow:queueScript(championsRoomRivalScript, { npc = rival })
   end,

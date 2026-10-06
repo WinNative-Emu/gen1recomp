@@ -3,6 +3,7 @@
 
 from pathlib import Path
 import sys
+import zlib
 
 from PIL import Image, ImageOps
 
@@ -29,7 +30,7 @@ def invert(source: Path, destination: Path) -> None:
 
 
 def invert_rgba(source: Path, destination: Path) -> None:
-    raw = source.read_bytes()
+    raw = zlib.decompress(source.read_bytes())
     size = GBA_PIC * GBA_PIC * 4
     if len(raw) < size:
         raise SystemExit(f"{source}: expected {size} bytes of 64x64 RGBA, got {len(raw)}")

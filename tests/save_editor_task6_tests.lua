@@ -239,8 +239,9 @@ do
   Ops.addToPc(S, id)
   Ops.pcItems(S)[id] = Ops.STACK_MAX
   S.dirty = false
-  check(Ops.pcAdjust(S, id, 1) == false, "pcAdjust refuses past the 99 stack cap")
-  eq(Ops.pcItems(S)[id], Ops.STACK_MAX, "a refused pcAdjust changes nothing")
+  check(Ops.pcAdjust(S, id, 1) == true, "pcAdjust past 99 opens a second box slot")
+  eq(Ops.pcItems(S)[id], Ops.STACK_MAX + 1, "the PC total passes 99")
+  eq(#Ops.pcOrder(S), seeded + 2, "the PC order lists the id once per slot")
 
   Ops.pcDrop(S, id)
   eq(Ops.pcItems(S)[id], nil, "pcDrop removes the entry")

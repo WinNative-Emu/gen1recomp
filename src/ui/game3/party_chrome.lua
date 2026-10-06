@@ -5,6 +5,7 @@ local Extract = require("src.import.gba.extract_island1")
 local PartyChromeExtract = require("src.import.gba.party_chrome_extract")
 local FrlgFont = require("src.ui.game3.frlg_font")
 local RomText = require("src.core.game3.rom_text")
+local CacheBlob = require("src.import.CacheBlob")
 
 local PartyChrome = {}
 
@@ -54,10 +55,10 @@ local function read_bytes(rel)
     if type(d) == "string" and #d > 0 then return d end
   end
   if love and love.filesystem and love.filesystem.read then
-    local d = love.filesystem.read(rel)
+    local d = CacheBlob.readFs(rel)
     if type(d) == "string" and #d > 0 then return d end
     local alt = "data/generated/gba/" .. (rel:gsub("^data/generated/gba/", ""))
-    d = love.filesystem.read(alt)
+    d = CacheBlob.readFs(alt)
     if type(d) == "string" and #d > 0 then return d end
   end
   local candidates = {
@@ -67,7 +68,7 @@ local function read_bytes(rel)
   for _, p in ipairs(candidates) do
     local f = io.open(p, "rb")
     if f then
-      local d = f:read("*a")
+      local d = CacheBlob.decode(p, f:read("*a"))
       f:close()
       if d and #d > 0 then return d end
     end
@@ -137,7 +138,14 @@ local function load_status_png()
   return nil
 end
 
-function PartyChrome.install(cache)
+function PartyChrome.install(cache, session)
+  local Profile = require("src.core.game3.profile")
+  local profile = Profile.forSession(session)
+  local policy = profile and profile.ui and profile.ui.party
+  if type(policy) == "string" then policy = require(policy) end
+  local native = type(policy) == "table" and policy.chrome
+  PartyChrome._nativeDelegate = type(native) == "string" and require(native) or native or nil
+  if PartyChrome._nativeDelegate then return PartyChrome._nativeDelegate.install(cache) end
   if not cache or not cache.read then
     local okD, Dataset = pcall(require, "src.core.game3.dataset")
     if okD and Dataset and Dataset.cache then
@@ -344,10 +352,12 @@ local function ensureStatus()
 end
 
 function PartyChrome.ready()
+  if PartyChrome._nativeDelegate then return PartyChrome._nativeDelegate.ready() end
   return PartyChromeExtract.ready(PartyChrome._cache, cache_root())
 end
 
 function PartyChrome.drawBg()
+  if PartyChrome._nativeDelegate then return PartyChrome._nativeDelegate.drawBg() end
   local W, H = Display.W or 240, Display.H or 160
   local bg = ensureBg()
   love.graphics.setColor(1, 1, 1, 1)
@@ -390,6 +400,7 @@ end
 
 --- Draw pret slot panel at window tile coords. kind: main|wide|empty
 function PartyChrome.drawSlot(kind, tileLeft, tileTop, selected, hideHp, multi)
+  if PartyChrome._nativeDelegate then return end
   local slot = ensureSlot(kind == "main" and "main" or (kind == "empty" and "empty" or "wide"), selected, multi)
   local T = Display.TILE or 8
   local px, py = tileLeft * T, tileTop * T
@@ -418,10 +429,12 @@ function PartyChrome.drawSlot(kind, tileLeft, tileTop, selected, hideHp, multi)
 end
 
 function PartyChrome.ballEntry()
+  if PartyChrome._nativeDelegate then return PartyChrome._nativeDelegate.ballEntry() end
   return ensureBalls()
 end
 
 function PartyChrome.statusEntry(frame)
+  if PartyChrome._nativeDelegate then return PartyChrome._nativeDelegate.statusEntry(frame) end
   frame = tonumber(frame)
   if not frame or frame < 1 then return nil, nil end
   local st = ensureStatus()
@@ -430,6 +443,7 @@ function PartyChrome.statusEntry(frame)
 end
 
 function PartyChrome.drawBall(px, py, frame)
+  if PartyChrome._nativeDelegate then return end
   local balls = ensureBalls()
   if not balls then return end
   frame = tonumber(frame) or 0
@@ -445,6 +459,7 @@ function PartyChrome.drawBall(px, py, frame)
 end
 
 function PartyChrome.drawStatus(px, py, frame)
+  if PartyChrome._nativeDelegate then return end
   frame = tonumber(frame)
   if not frame or frame < 1 then return end
   local st = ensureStatus()
@@ -478,6 +493,7 @@ local function buttonText()
 end
 
 function PartyChrome.drawCancelButton(px, py, selected)
+  if PartyChrome._nativeDelegate then return PartyChrome._nativeDelegate.drawCancelButton(px, py, selected) end
   px = px or 184
   py = py or 136
   local btn = ensureCancelButton(selected)
@@ -502,6 +518,7 @@ function PartyChrome.drawCancelButton(px, py, selected)
 end
 
 function PartyChrome.drawConfirmButton(px, py, selected)
+  if PartyChrome._nativeDelegate then return PartyChrome._nativeDelegate.drawConfirmButton(px, py, selected) end
   px = px or 184
   py = py or 128
   local btn = ensureConfirmButton(selected)

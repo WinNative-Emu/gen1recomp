@@ -593,7 +593,7 @@ function Apprentice.message(sess, which)
   local e = map[which]
   if not e then return nil end
   local ref = e[1][id] and e[1][id][e[2]]
-  return ref and ref.ir
+  return ref and require("src.core.game3.rom_text").refIr(ref)
 end
 
 -- pokeemerald/src/apprentice.c:564

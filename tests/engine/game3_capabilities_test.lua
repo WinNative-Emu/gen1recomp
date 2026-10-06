@@ -108,8 +108,8 @@ eq(Capabilities.gate({ version = "firered" }, "tm_case"), true,
 eq(Capabilities.gate({ version = "firered" }, "contests"), false,
   "an unknown feature id reads false (and warns once)")
 
-eq(Capabilities.gate({ version = "ruby" }, "fame_checker"), true,
-  "an RSE id without a profile fails closed to FireRed")
+eq(Capabilities.gate({ version = "not-a-game" }, "fame_checker"), true,
+  "an unregistered id uses the active FireRed profile")
 
 eq(Capabilities.enabled({ vsSeeker = false }, "vs_seeker"), false,
   "enabled() reads the feature's own flag")

@@ -63,10 +63,10 @@ local DEACTIVATE = {
 }
 
 -- pokeemerald/src/field_specials.c:620
-function Story.mauvillePressSwitch(which, get, set, C)
+function Story.mauvillePressSwitch(which, get, set, C, switches)
   local pressed = C:require("metatile_labels", "METATILE_MauvilleGym_PressedSwitch")
   local raised = C:require("metatile_labels", "METATILE_MauvilleGym_RaisedSwitch")
-  for i, xy in ipairs(Story.MAUVILLE_SWITCHES) do
+  for i, xy in ipairs(switches or Story.MAUVILLE_SWITCHES) do
     set(xy[1], xy[2], (i - 1 == which) and pressed or raised, false)
   end
 end
@@ -98,9 +98,9 @@ function Story.mauvilleSetDefaultBarriers(get, set, C)
 end
 
 -- pokeemerald/src/field_specials.c:727
-function Story.mauvilleDeactivatePuzzle(get, set, C)
+function Story.mauvilleDeactivatePuzzle(get, set, C, switches)
   local pressed = C:require("metatile_labels", "METATILE_MauvilleGym_PressedSwitch")
-  for _, xy in ipairs(Story.MAUVILLE_SWITCHES) do set(xy[1], xy[2], pressed, false) end
+  for _, xy in ipairs(switches or Story.MAUVILLE_SWITCHES) do set(xy[1], xy[2], pressed, false) end
   sweep(DEACTIVATE, get, set, C)
 end
 

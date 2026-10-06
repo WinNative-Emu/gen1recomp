@@ -779,6 +779,11 @@ return {
   [0x1BB084] = 0x1BB060, -- :Help_Text_TypeMatchupOwnPokemonWater + 0
   [0x1BB0DF] = 0x1BB0BB, -- :Help_Text_TypeMatchupOwnMoveBug + 0
   [0x1BB156] = 0x1BB132, -- :Help_Text_TypeMatchupOwnPokemonBug + 0
+  [0x1BB981] = 0x1BB95D, -- :CableClub_EventScript_ReadTrainerCard + 0
+  [0x1BB992] = 0x1BB96E, -- :CableClub_EventScript_ReadTrainerCardColored + 0
+  [0x1BB9A3] = 0x1BB97F, -- :CableClub_EventScript_TooBusyToNotice + 0
+  [0x1BB9D4] = 0x1BB9B0, -- :TradeCenter_ConfirmLeaveRoom + 0
+  [0x1BB9F0] = 0x1BB9CC, -- :TradeCenter_TerminateLink + 0
   [0x1BC311] = 0x1BC2ED, -- :CableClub_Text_WelcomeWhichCableClubService + 0
   [0x1BC35E] = 0x1BC33A, -- :CableClub_Text_WhichService + 0
   [0x1BC388] = 0x1BC364, -- :CableClub_Text_TradeMonsUsingLinkCable + 0

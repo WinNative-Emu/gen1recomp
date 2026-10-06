@@ -69,7 +69,13 @@ local function link_menus_active()
   return type(Link) == "table" and Link.link ~= nil and Link.inLinkRoom() == true
 end
 
+local function bag_skin()
+  return require("src.ui.game3.screens").skin("bag", BagMenu._session)
+end
+
 local function actions_for_pocket(pocket, row)
+  local skin = bag_skin()
+  if skin and skin.actionsForPocket then return skin.actionsForPocket(pocket, row, BagMenu) end
   if BagMenu._battle then
     -- src/item_menu.c:1344
     local num = row and ItemsData.toNumericId(row.id)
@@ -156,7 +162,8 @@ end
 
 local function max_showed(total)
   -- src/item_menu.c:1005
-  return math.min(VISIBLE, total)
+  local skin = bag_skin()
+  return math.min(skin and skin.MAX_SHOWN or VISIBLE, total)
 end
 
 local function clamp_cursor()
@@ -287,7 +294,7 @@ local QUIET_ADAPTER = { say = function() end }
 function BagMenu.commitBattlePartyUse(st, itemId, realSlot, mon, beforeUse)
   local PartyMenu = require("src.ui.game3.party_menu")
   local BattleItems = require("src.core.game3.battle.items")
-  local isPp = ItemsData.fieldUseKind(itemId) == "pp"
+  local isPp = ItemUse.fieldUseKind(itemId, BagMenu._session, true) == "pp"
   local function wont_have_effect(err)
     se(SE.SE_SELECT) -- pokefirered/src/party_menu.c:4490
     PartyMenu.showMessage(err or RomText.box("gText_WontHaveEffect"), function()
@@ -381,6 +388,8 @@ function BagMenu.show(sessionBag, opts)
   BagMenu._heldKey = nil
   BagMenu._bagAnim = { n = 0 }
   begin_open(true)
+  local skin = bag_skin()
+  if skin and skin.onShow then skin.onShow(BagMenu, opts) end
   Stack.push("bag", BagMenu, { hideBelow = not BagMenu._battle, fullscreen = not BagMenu._battle })
 end
 
@@ -565,6 +574,13 @@ end
 
 -- src/item_menu.c:1018 DisplayItemMessageInBag
 BagMenu.showMessage = show_bag_message
+
+-- pokeruby/src/pokemon_2.c:1130
+function BagMenu.partyAndStorageFull(session)
+  if type(session) ~= "table" or #(session.party or {}) < 6 then return false end
+  local Storage = require("src.core.game3.storage")
+  return Storage.findOpenSlot(Storage.ensure(session)) == nil
+end
 
 -- src/item_use.c:182
 local function use_field_from_bag(session, bag, id)
@@ -783,6 +799,8 @@ local function handle_menu_input(input)
       local rows = clamp_cursor()
       local row = rows[BagMenu.cursor]
       local party = (BagMenu._session and BagMenu._session.party) or {}
+      local skin = bag_skin()
+      if skin and skin.beforeAction and skin.beforeAction(BagMenu, act, row) then return end
       if act == "CANCEL" or not row then
         BagMenu.mode = "list"
       elseif act == "CHECK_TAG" then
@@ -841,6 +859,10 @@ local function handle_menu_input(input)
               return
             end
             BagMenu._statBoost = { frames = 0, st = st, itemId = row.id, battlerId = battlerId }
+            return
+          elseif BattleItems.isBall(row.id) and BagMenu.partyAndStorageFull(BagMenu._session) then
+            -- pokeruby/src/item_use.c:878
+            show_bag_message(RomText.box(RomText.has("gOtherText_BoxIsFull") and "gOtherText_BoxIsFull" or "gText_BoxFull"))
             return
           else
             -- src/item_use.c:742
@@ -988,7 +1010,8 @@ local function handle_menu_input(input)
         end
       elseif act == "GIVE" then
         local pocket = BagMenu.currentPocket()
-        if pocket == "KEY_ITEMS" or pocket == "TM_CASE" then
+        local canGive = skin and skin.canGive and skin.canGive(row, pocket)
+        if canGive == false or (canGive == nil and (pocket == "KEY_ITEMS" or pocket == "TM_CASE")) then
           BagMenu.mode = "message"
           -- src/item_menu.c:1635
           BagMenu.messageText = RomText.box("gText_ItemCantBeHeld",

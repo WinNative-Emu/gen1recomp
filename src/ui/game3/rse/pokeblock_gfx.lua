@@ -1,4 +1,5 @@
 local Kit = require("src.ui.game3.rse.scene_kit")
+local CacheBlob = require("src.import.CacheBlob")
 
 local Gfx = {}
 Gfx.__index = Gfx
@@ -16,7 +17,7 @@ local function readCache(path)
     end
   end
   if not data and love and love.filesystem and love.filesystem.getInfo(path) then
-    data = love.filesystem.read(path)
+    data = CacheBlob.readFs(path)
   end
   return data
 end

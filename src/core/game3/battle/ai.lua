@@ -273,7 +273,7 @@ function choose_move_core(st, id, opts)
   end
   -- src/battle_ai_script_commands.c:317
   local tid
-  if double and rse then
+  if double and rse and bp.rules.aiDoubles == "per_target" then
     -- pokeemerald/src/battle_ai_script_commands.c:350
     tid = bit_and_flags(random_u16(rng), 2) + ((b.side == "player") and 1 or 0)
     if State.isAbsent(st, tid) then tid = (tid >= 2) and (tid - 2) or (tid + 2) end
@@ -338,7 +338,7 @@ function choose_move_core(st, id, opts)
   end
 
   local slot
-  if rse then
+  if rse and bp.rules.aiMoveSelection ~= "rs" then
     slot = pret_pick_rse(scores, rng, mon)
   else
     slot = pret_pick(scores, rng)
@@ -373,6 +373,20 @@ function Ai.recordLastUsedMove(st, tid)
   local t = State.battler(st, tid)
   if not t then return end
   local h = require("src.core.game3.battle.ai_items").history(st)
+  -- pokeruby/src/battle_ai_script_commands.c:440
+  if BattleProfile.rule(st, "aiMoveHistory") == "rs_position" then
+    h.rsUsedMoves = h.rsUsedMoves or {}
+    local index = math.floor(tid / 2)
+    local history = h.rsUsedMoves[index] or { 0, 0, 0, 0, 0, 0, 0, 0 }
+    h.rsUsedMoves[index] = history
+    for i = 1, 8 do
+      if history[i] == 0 then
+        history[i] = move_num(t.lastMoveId or t.lastMove)
+        return
+      end
+    end
+    return
+  end
   h.usedMoves = h.usedMoves or {}
   local row = h.usedMoves[tid]
   -- pokeemerald/src/battle_main.c:3260
@@ -394,6 +408,9 @@ function Ai.usedMoves(st, tid)
   local State = require("src.core.game3.battle.state")
   local t = State.battler(st, tid)
   local h = st and st._aiHistory
+  if BattleProfile.rule(st, "aiMoveHistory") == "rs_position" then
+    return h and h.rsUsedMoves and h.rsUsedMoves[math.floor(tid / 2)] or { 0, 0, 0, 0, 0, 0, 0, 0 }
+  end
   local row = h and h.usedMoves and h.usedMoves[tid]
   if not row or not t or row.mon ~= State.partyMon(t) then return { 0, 0, 0, 0 } end
   return row
@@ -469,7 +486,9 @@ function Ai.flagsFor(st, opts)
       aiFlags = tonumber(opts.aiFlags or st.aiFlags) or 0
     end
     -- pokeemerald/src/battle_ai_script_commands.c:378
-    if double then aiFlags = bit_or_flags(aiFlags, BattleProfile.aiBit(bp, "DOUBLE_BATTLE")) end
+    if double and bp.rules.aiDoublesFlag ~= false then
+      aiFlags = bit_or_flags(aiFlags, BattleProfile.aiBit(bp, "DOUBLE_BATTLE"))
+    end
   elseif st.safari then
     aiFlags = AI_SCRIPT_SAFARI
   elseif st.roamer then

@@ -1,4 +1,5 @@
 local MapSections = require("src.import.gba.rse.map_sections_extract")
+local Strings = require("src.core.Strings")
 
 local Mapsec = {}
 
@@ -45,7 +46,7 @@ end
 -- pokeemerald/src/region_map.c:1568
 function Mapsec.name(sec)
   local e = Mapsec.entry(sec)
-  return e and e.name or ""
+  return e and e.name and Strings(e.name) or ""
 end
 
 -- pokeemerald/src/map_name_popup.c:403

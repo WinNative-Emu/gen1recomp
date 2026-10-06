@@ -226,6 +226,7 @@ local function listInput(inp)
 end
 
 local function actionsFor(caseId)
+  if st.opts and st.opts.actions then return st.opts.actions[caseId] or st.opts.actions[Pokeblock.CASE.FIELD] end
   return Case.ACTIONS[caseId] or Case.ACTIONS[Pokeblock.CASE.FIELD]
 end
 
@@ -252,6 +253,7 @@ local function textSpeed()
 end
 
 local function startMessage(key, onDone)
+  key = st.opts and st.opts.textAliases and st.opts.textAliases[key] or key
   st.printer = Kit.printer(key, { ctx = { stringVars = { st.tossName } }, speed = textSpeed() })
   st.onPrinted = onDone
 end
@@ -261,7 +263,8 @@ local function beginToss()
   st.phase = "toss"
   st.tossName = Pokeblock.name(Pokeblock.get(st.session, st.itemId))
   startMessage("gText_ThrowAwayVar1", function()
-    st.yesNo = Kit.yesNo(Case.TOSS_YESNO[1], Case.TOSS_YESNO[2])
+    st.yesNo = st.opts and st.opts.makeYesNo and st.opts.makeYesNo()
+      or Kit.yesNo(Case.TOSS_YESNO[1], Case.TOSS_YESNO[2])
     st.phase = "toss_yesno"
   end)
 end
@@ -303,6 +306,13 @@ end
 local function updateSwap(noSwap)
   local from = saved.scroll + saved.row
   st.swapping = false
+  if st.opts and st.opts.swap then
+    st.opts.swap(st, from, noSwap)
+    redrawHighlights()
+    drawInfo(selectedId())
+    st.phase = "list"
+    return
+  end
   -- pokeemerald/src/pokeblock.c:1121
   if not noSwap and st.toSwap ~= from and st.toSwap ~= from - 1 then
     Pokeblock.move(st.session, st.toSwap, from)
@@ -482,7 +492,8 @@ function Case.finish()
   local cb, result, useId, opts = st.onClose, st.result, st.useOnField, st.opts
   if useId ~= nil then
     -- pokeemerald/src/pokeblock.c:1190
-    local Use = require("src.ui.game3.rse.use_pokeblock")
+    local Use = require("src.ui.game3.screens").get("use_pokeblock", st.session)
+      or require("src.ui.game3.rse.use_pokeblock")
     Use.show({
       session = st.session,
       pokeblockId = useId,
@@ -568,6 +579,7 @@ end
 
 function Case.draw()
   if not Case.open then return end
+  if st.opts and st.opts.draw then return st.opts.draw(st, Case) end
   st.colors = st.colors or colors()
   if st.dirty or not st.bg then
     st.bg = gfx():renderMap(st.map, "menu", menuPalette(), { rows = 20, backdrop = true })

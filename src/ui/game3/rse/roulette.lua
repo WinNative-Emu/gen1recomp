@@ -39,9 +39,9 @@ local FLASHUTIL_USE_EXISTING_COLOR = 0x8000
 -- pokeemerald/include/constants/game_stat.h:33
 local GAME_STAT_CONSECUTIVE_ROULETTE_WINS = 29
 
-function UI.new(opts)
+function UI.new(opts, class)
   opts = opts or {}
-  local self = setmetatable({}, UI)
+  local self = setmetatable({}, class or UI)
   self.opts = opts
   self.man = opts.manifest or R.loadTables(opts.cache)
   self.T = self.man.tables
@@ -1562,7 +1562,7 @@ function UI:setBallStuck(s)
     end
     angle = angle + 90
   end
-  local C = require("src.core.game3.constants").of("emerald")
+  local C = self.opts.constants or require("src.core.game3.constants").of("emerald")
   if st.useTaillow then
     self.sound:cry(C:require("species", "SPECIES_TAILLOW"), s.data[0] ~= 0 and -63 or 63)
   else
@@ -1726,7 +1726,7 @@ function SCB.taillowFlyIn(self, s)
     s.y = s.y + row[2]
   else
     self.sound:se("SE_TAILLOW_WING_FLAP")
-    local C = require("src.core.game3.constants").of("emerald")
+    local C = self.opts.constants or require("src.core.game3.constants").of("emerald")
     self.sound:cry(C:require("species", "SPECIES_TAILLOW"), left == 0 and 63 or -63)
     Sprites.startAnim(s, left + 2)
     s.data[1] = 45
@@ -1932,10 +1932,10 @@ end
 local Host = {}
 UI.Host = Host
 
-function UI.open(opts)
+function UI.open(opts, constructor)
   local Stack = require("src.ui.game3.stack")
   local SceneKit = require("src.ui.game3.rse.scene_kit")
-  local screen = UI.new(opts)
+  local screen = (constructor or UI.new)(opts)
   Host._screen = screen
   Host._step = SceneKit.stepper()
   local userDone = opts and opts.onDone
@@ -2101,7 +2101,7 @@ function UI.playEntry(opts)
   local Stack = require("src.ui.game3.stack")
   local SceneKit = require("src.ui.game3.rse.scene_kit")
   local CoinsBox = require("src.ui.game3.coins_box")
-  local e = Entry.new(opts)
+  local e = (opts.entryConstructor or Entry.new)(opts)
   Entry._entry = e
   Entry._step = SceneKit.stepper()
   CoinsBox.show(1, 1, opts.coins or 0)
@@ -2127,9 +2127,12 @@ function UI.playEntry(opts)
         local okH, t = pcall(Rtc.calcLocalTime, opts.session)
         if okH and type(t) == "table" then hours = tonumber(t.hours) or 12 end
       end
-      local screen = UI.open({
+      local screen = (opts.openScreen or UI.open)({
         var8004 = opts.var8004, coins = opts.coins, session = opts.session, hours = hours,
-        partyFlags = R.partyFlags(party), setCoins = opts.setCoins, setVar8004 = opts.setVar8004,
+        partyFlags = opts.partyFlagsFor and opts.partyFlagsFor(party) or R.partyFlags(party),
+        manifest = opts.manifest, cache = opts.cache, constants = opts.constants,
+        headless = opts.headless, random = opts.random, sound = opts.sound,
+        setCoins = opts.setCoins, setVar8004 = opts.setVar8004,
         onDone = function(s)
           Fade.mode, Fade.t, Fade.active = Fade.MODE.TO_BLACK, 16, false
           Fade.begin(Fade.MODE.FROM_BLACK, 1)

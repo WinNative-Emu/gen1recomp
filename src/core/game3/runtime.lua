@@ -466,7 +466,8 @@ function Runtime.install(mod)
   Runtime._mod = mod
   log("Runtime.install — display ownership + START intercept + game.ready")
 
-  local ok, World = pcall(lazyReq, "src.world.gen2.World")
+  local World = package.loaded["src.world.gen2.World"]
+  local ok = type(World) == "table"
   if ok and World and World.step and not World._game3RuntimeStep then
     local prev = World.step
     World.step = function(self, ...)
@@ -507,7 +508,8 @@ function Runtime.install(mod)
   end
 
   -- Own the frame: replace Gen2 drawScene presentation while active.
-  local ok2, Game2 = pcall(lazyReq, "src.core.Game2")
+  local Game2 = package.loaded["src.core.Game2"]
+  local ok2 = type(Game2) == "table"
   if ok2 and Game2 and Game2.drawScene and not Game2._game3Display then
     local prevDraw = Game2.drawScene
     Game2.drawScene = function(self, w, h)

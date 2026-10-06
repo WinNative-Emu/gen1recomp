@@ -43,7 +43,7 @@ Versions.ROM_SIZE = 16777216
 -- v115: LeafGreen profiles, edition-specific title assets and Deoxys stats.
 -- v121: chrome/fonts/japanese_{normal,small}_* and japanese_widths.lua, the
 --       cart's Japanese fonts, for text a Japanese translation mod prints.
-Versions.CACHE_VERSION = 128
+Versions.CACHE_VERSION = 130
 Versions.NATIVE_VERSION = 6
 Versions.OW_VERSION = 3
 Versions.ANIM_VERSION = 1
@@ -2029,6 +2029,13 @@ Versions.NAMED_SCRIPTS = {
   -- data/scripts/white_out.inc:1, :22
   EventScript_AfterWhiteOutHeal = 0x1A8D97,
   EventScript_AfterWhiteOutMomHeal = 0x1A8DD8,
+  -- data/scripts/cable_club.inc:675
+  CableClub_EventScript_ReadTrainerCard = 0x1BB981,
+  CableClub_EventScript_ReadTrainerCardColored = 0x1BB992,
+  CableClub_EventScript_TooBusyToNotice = 0x1BB9A3,
+  -- data/scripts/cable_club.inc:717
+  TradeCenter_ConfirmLeaveRoom = 0x1BB9D4,
+  TradeCenter_TerminateLink = 0x1BB9F0,
 }
 
 do

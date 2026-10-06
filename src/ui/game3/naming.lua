@@ -13,6 +13,30 @@ local OwSprites = require("src.core.game3.ow_sprites")
 local Versions = require("src.import.gba.versions")
 local RomText = require("src.core.game3.rom_text")
 local TextIR = require("src.core.game3.scripting.text_ir")
+local RsNaming = require("src.ui.game3.rs.naming_data")
+local SE = require("src.core.game3.se_ids")
+
+local rsCursorMultiplyShader
+local function dampRsCursor(img, quad, x, y)
+  if rsCursorMultiplyShader == nil then
+    if love.graphics.newShader then
+      local ok, shader = pcall(love.graphics.newShader, [[
+        vec4 effect(vec4 color, Image tex, vec2 tc, vec2 sc) {
+          if (Texel(tex, tc).a < 0.5) discard;
+          return vec4(0.5, 0.5, 0.5, 1.0);
+        }
+      ]])
+      rsCursorMultiplyShader = ok and shader or false
+    else rsCursorMultiplyShader = false end
+  end
+  if not rsCursorMultiplyShader then return end
+  local shader = love.graphics.getShader()
+  love.graphics.setShader(rsCursorMultiplyShader)
+  love.graphics.setBlendMode("multiply", "premultiplied")
+  love.graphics.setColor(1, 1, 1, 1)
+  love.graphics.draw(img, quad, x, y)
+  love.graphics.setShader(shader)
+end
 
 local Naming = { isMenu = true }
 
@@ -32,10 +56,24 @@ Naming.TEMPLATE = {
 -- pokeemerald/include/naming_screen.h:7
 Naming.TEMPLATE_ORDER = { "PLAYER", "BOX", "CAUGHT_MON", "NICKNAME", "WALDA" }
 
+-- A name and a cart string the US code appends after it. The French, Italian
+-- and Spanish carts put the name in the string's STR_VAR_1 instead, wherever
+-- the row places it (pret pokeemerald multi-language, src/naming_screen.c:1746);
+-- a row without one keeps the US order.
+function Naming.nameInto(key, name)
+  name = tostring(name or "")
+  local text = RomText.plain(key, { stringVars = { "\1" } })
+  if text:find("\1", 1, true) then return (text:gsub("\1", function() return name end)) end
+  return name .. text
+end
+
 -- pokeemerald/src/naming_screen.c:1715
 function Naming.monTitle(speciesName)
+  if Versions.active() == "ruby" or Versions.active() == "sapphire" then
+    return RomText.plain("OtherText_PokeName", {stringVars = {[1] = tostring(speciesName or "")}})
+  end
   -- pokeemerald/src/text.c:972
-  return tostring(speciesName or "") .. RomText.plain("gText_PkmnsNickname", { stringVars = {} })
+  return Naming.nameInto("gText_PkmnsNickname", speciesName)
 end
 
 -- pret sKeyboardChars + sPageColumnXPos (cursor).
@@ -135,6 +173,10 @@ local function playSe(id)
   Audio.playSe(id or 5)
 end
 
+local function layoutOf(st)
+  return st and st.layout or L
+end
+
 local function utf8Len(s)
   local n = 0
   for _ in tostring(s or ""):gmatch("[%z\1-\127\194-\244][\128-\191]*") do
@@ -191,6 +233,12 @@ end
 
 local function appendChar(st, ch)
   if not ch then return end
+  if st.rs then
+    st.name = utf8Trim(st.name, st.maxLen - 1) .. ch
+    st.cursorActivation = 0
+    if utf8Len(st.name) >= st.maxLen then st.fullNameWait = true end
+    return
+  end
   if utf8Len(st.name) >= st.maxLen then return end
   st.name = st.name .. ch
   if utf8Len(st.name) >= st.maxLen then
@@ -212,8 +260,16 @@ end
 
 -- pokefirered/src/naming_screen.c:793
 local function commitPage(st)
+  local oldN, wasSide
+  if st.rs then oldN = colCount(st); wasSide = st.col > oldN end
   st.page = st.swapTo or st.page
   st.swapTo = nil
+  if st.rs then
+    local n = colCount(st)
+    st.col = wasSide and n + 1 or math.min(st.col, n)
+    st.cursorAmount, st.cursorStep, st.cursorDelay = 0, 1, 2
+    return
+  end
   if not onButtonCol(st) then
     local n = colCount(st)
     if st.col > n then st.col = n end
@@ -267,7 +323,8 @@ local function sentToPcPages(st, nick)
 end
 
 --- Draw keyboard letters at fixed colX cells (matches cursor grid; ignores glyph-width drift).
-local function drawKeyboardKeys(page, colors)
+local function drawKeyboardKeys(page, colors, layout)
+  local L = layout or L
   local rows = page.rows
   local colX = page.colX
   if not rows or not colX then return end
@@ -290,7 +347,8 @@ end
 local KB_KEYS = { "kb_upper", "kb_lower", "kb_symbols" }
 
 -- pokefirered/src/naming_screen.c:2019
-local function drawKeyboardPage(pageIdx, dy, pages)
+local function drawKeyboardPage(pageIdx, dy, pages, st)
+  local L = layoutOf(st)
   local page = (pages or PAGES)[pageIdx]
   if not page then return end
   love.graphics.push()
@@ -317,7 +375,7 @@ local function drawKeyboardPage(pageIdx, dy, pages)
     end
   end
 
-  drawKeyboardKeys(page, FrlgFont.COLOR.WHITE)
+  drawKeyboardKeys(page, st and st.rs and RsNaming.colors(st.manifest, ({2, 1, 3})[pageIdx]) or FrlgFont.COLOR.WHITE, L)
   love.graphics.pop()
 end
 
@@ -332,9 +390,16 @@ local function playerOwId(gender)
 end
 
 local function drawPlayerIcon(st)
+  local L = layoutOf(st)
   love.graphics.setColor(1, 1, 1, 1)
   local tlX = L.iconCX - L.iconW / 2
   local tlY = L.iconCY - L.iconH / 2
+
+  if st.rs and st.template == "BOX" then
+    local img = st.nativeImages and st.nativeImages[(math.floor((st.nativeFrame or 0) / 2) % 2 == 0) and "pc_icon_off" or "pc_icon_on"]
+    if img then love.graphics.draw(img, 44, 12) end
+    return
+  end
 
   if st.template == "NICKNAME" or st.template == "CAUGHT_MON" then
     local species = tonumber(st.species) or 0
@@ -379,18 +444,22 @@ local function drawPlayerIcon(st)
     end
   end
 
-  local gid = playerOwId(st.gender)
+  local gid = st.rs and (OwSprites.avatarGraphicsId("NORMAL", st.gender == 1 or st.gender == "female" or st.gender == "F", nil, "rival")
+    or ((st.gender == 1 or st.gender == "female" or st.gender == "F") and 105 or 100)) or playerOwId(st.gender)
   local spr = OwSprites.get(gid)
   if spr and spr.image then
     local tick = math.floor((st.blink or 0) * 60 / 8) % 4
+    local rsFrame, rsFlip
+    if st.rs then rsFrame, rsFlip = RsNaming.playerFrame(st) end
     local frame = OwSprites.pose(spr, "down", false, false, {
-      frame = ({ 3, 0, 4, 0 })[tick + 1] or 0,
+      frame = rsFrame or ({ 3, 0, 4, 0 })[tick + 1] or 0,
     })
     local q = spr.quads[frame]
     if q then
       local ox = tlX + (L.iconW - spr.width) / 2
       local oy = tlY + (L.iconH - spr.height)
-      love.graphics.draw(spr.image, q, ox, oy)
+      if rsFlip then love.graphics.draw(spr.image, q, ox + spr.width, oy, 0, -1, 1)
+      else love.graphics.draw(spr.image, q, ox, oy) end
       return
     end
   end
@@ -422,7 +491,12 @@ local KB_ORDER = { { id = "UPPER", kb = 2 }, { id = "LOWER", kb = 1 }, { id = "O
 function Naming.pagesFromKeyboard(kb)
   if type(kb) ~= "table" or type(kb.chars) ~= "table" then return nil end
   local pages = {}
-  for i, entry in ipairs(KB_ORDER) do
+  local order = KB_ORDER
+  if type(kb.pageOrder) == "table" then
+    order = {}
+    for i, id in ipairs(kb.pageOrder) do order[i] = {id = id, kb = i} end
+  end
+  for i, entry in ipairs(order) do
     local chars = kb.chars[entry.kb]
     local count = kb.columnCounts and kb.columnCounts[entry.kb] or 8
     local rows = {}
@@ -457,6 +531,8 @@ function Naming.open(opts)
   end
   local man = cacheManifest()
   local tpl = Naming.templateFromManifest(man, opts.template or "PLAYER")
+  local rs = RsNaming.matches(man)
+  if Versions.active() == "ruby" or Versions.active() == "sapphire" then assert(rs, "native RS naming manifest missing") end
   local okF, Fade = pcall(require, "src.ui.game3.fade")
   if okF and Fade and Fade.clear then
     Fade.clear()
@@ -483,7 +559,26 @@ function Naming.open(opts)
     session = opts.session,
     sentToPc = opts.sentToPc,
     pages = man and Naming.pagesFromKeyboard(man.keyboard) or nil,
+    rs = rs, manifest = rs and man or nil,
+    layout = rs and RsNaming.layout(man) or nil,
+    monGender = opts.monGender or opts.gender,
   }
+  if rs then
+    st.page = (tpl.initialPage or 0) + 1
+    st.name = tpl.copyExistingString == 0 and "" or tostring(opts.initialText or opts.seed or "")
+    st.nativeFrame, st.repeatCounter, st.savedKeyRow = 0, 16, 1
+    st.cursorAmount, st.cursorStep, st.cursorDelay = 0, 1, 2
+    st.nativeImages = {}
+    for _, key in ipairs({"pc_icon_off", "pc_icon_on", "cursor_glow", "cursor_base"}) do
+      if man[key] and love and love.graphics and love.graphics.newImage then
+        local ok, img = pcall(love.graphics.newImage, man[key])
+        if ok then
+          if img.setFilter then img:setFilter("nearest", "nearest") end
+          st.nativeImages[key] = img
+        end
+      end
+    end
+  end
   Naming._state = st
   Naming.openFlag = true
   Stack.push("naming", Naming, { hideBelow = true, fullscreen = true })
@@ -527,6 +622,7 @@ function Naming.update(dt)
   -- touching the blink timer, so keep that here.
   if st.pcPages then return end
   st.blink = (st.blink or 0) + (dt or 1 / 60)
+  if st.rs then RsNaming.tick(st) end
   if st.swapT ~= nil then
     st.swapT = st.swapT + 4
     if st.swapT >= 128 then
@@ -543,7 +639,10 @@ function Naming.handleInput(input)
   local st = Naming._state
   if st.finished then return end
   -- Input is ignored while the page swap runs (the original returned here).
-  if st.swapT ~= nil then return end
+  if st.swapT ~= nil then
+    if st.rs then RsNaming.direction(st, input) end
+    return
+  end
   -- pokefirered/src/naming_screen.c:759
   if st.pcPages then
     if input and input.wasPressed and input:wasPressed("a") then
@@ -558,6 +657,31 @@ function Naming.handleInput(input)
 
   local function pressed(k)
     return input and input.wasPressed and input:wasPressed(k)
+  end
+
+  if st.rs then
+    local direction = RsNaming.direction(st, input)
+    if st.fullNameWait then return end
+    if pressed("a") then
+      if onButtonCol(st) then
+        if st.btn == 1 then cyclePage(st)
+        elseif st.btn == 2 then playSe(SE.SE_BALL); backspace(st)
+        else
+          playSe(SE.SE_SELECT)
+          local nick = confirm(st)
+          local pages = sentToPcPages(st, nick)
+          if pages then st.pcPages, st.pcPage, st.pcResult = pages, 1, nick
+          else Naming.close(nick) end
+        end
+      else
+        playSe(SE.SE_SELECT)
+        appendChar(st, cellAt(st))
+      end
+    elseif pressed("b") then playSe(SE.SE_BALL); backspace(st)
+    elseif pressed("select") then cyclePage(st)
+    elseif pressed("start") then st.col, st.row, st.btn = colCount(st) + 1, 4, 3
+    elseif direction then RsNaming.move(st, direction) end
+    return
   end
 
   if pressed("select") then
@@ -715,6 +839,7 @@ end
 
 local function blitButtonBorder(btnIdx)
   local st = Naming._state
+  local L = layoutOf(st)
   local pulse = pulseAmt(st)
   local bx = L.btnCursorX or 188
   local by = (L.btnCursorY and L.btnCursorY[btnIdx]) or (btnIdx == 1 and 77 or (btnIdx == 2 and 106 or 128))
@@ -724,6 +849,17 @@ local function blitButtonBorder(btnIdx)
 
   local r = 1.0
   local gb = (8 / 255) + pulse * (220 / 255)
+
+  if st.rs then
+    local palettes = st.manifest.palettes.sprites
+    local p = palettes[btnIdx == 1 and 4 or 6]
+    local index = btnIdx == 2 and 12 or 14
+    love.graphics.setColor(RsNaming.tint(p[index + 1], st.glowAmount or 0, st.glowAmount or 0, st.glowAmount or 0))
+    local img = NamingChrome.get(glowKey)
+    if img then love.graphics.draw(img, frameX, frameY) end
+    love.graphics.setColor(1, 1, 1, 1)
+    return
+  end
 
   local glowImg = NamingChrome.get(glowKey)
   if glowImg then
@@ -762,6 +898,7 @@ end
 function Naming.draw()
   if not Naming.openFlag or not Naming._state then return end
   local st = Naming._state
+  local L = layoutOf(st)
   local W, H = Display.W, Display.H
   local page = pageInfo(st)
 
@@ -781,14 +918,14 @@ function Naming.draw()
     local dIn = gbaSin(st.swapT, 40)
     local dOut = gbaSin(st.swapT + 128, 40)
     if st.swapT < 64 then
-      drawKeyboardPage(st.swapTo, dIn, st.pages)
-      drawKeyboardPage(st.page, dOut, st.pages)
+      drawKeyboardPage(st.swapTo, dIn, st.pages, st)
+      drawKeyboardPage(st.page, dOut, st.pages, st)
     else
-      drawKeyboardPage(st.page, dOut, st.pages)
-      drawKeyboardPage(st.swapTo, dIn, st.pages)
+      drawKeyboardPage(st.page, dOut, st.pages, st)
+      drawKeyboardPage(st.swapTo, dIn, st.pages, st)
     end
   else
-    drawKeyboardPage(st.page, 0, st.pages)
+    drawKeyboardPage(st.page, 0, st.pages, st)
   end
 
   local nextPage = st.page % #pagesOf(st) + 1
@@ -821,34 +958,39 @@ function Naming.draw()
   end
   blit("back_button", L.backX, L.backY)
   blit("ok_button", L.okX, L.okY)
-  if onSide and st.btn then
-    blitButtonBorder(st.btn)
+  if (onSide and st.btn) or (st.rs and st.swapT ~= nil) then
+    blitButtonBorder(st.rs and st.swapT ~= nil and 1 or st.btn)
   end
 
   -- 5) Title + icon + typed name (above KB)
   love.graphics.setColor(1, 1, 1, 1)
   -- Clamp to the text-entry window so an over-long title cannot spill over the
   -- frame (pret blits glyphs into the window buffer and clips there).
-  drawText(st.title, L.titleX, L.titleY, { maxWidth = L.titleMaxW })
+  local textColors = st.rs and RsNaming.colors(st.manifest, 0) or nil
+  drawText(st.title, L.titleX, L.titleY, { maxWidth = L.titleMaxW, colors = textColors })
 
   drawPlayerIcon(st)
+  if st.rs and (st.template == "NICKNAME" or st.template == "CAUGHT_MON")
+    and (st.monGender == 0 or st.monGender == 1 or st.monGender == "male" or st.monGender == "female") then
+    drawText((st.monGender == 1 or st.monGender == "female") and "♀" or "♂", 160, 32, {colors = textColors})
+  end
 
-  local baseX = math.floor((W - st.maxLen * 8) / 2) + 6
+  local baseX = st.rs and RsNaming.nameX(st.maxLen) or math.floor((W - st.maxLen * 8) / 2) + 6
   local chars = {}
   for ch in tostring(st.name):gmatch("[%z\1-\127\194-\244][\128-\191]*") do
     chars[#chars + 1] = ch
   end
-  local caret = #chars + 1
+  local caret = st.rs and math.min(#chars + 1, st.maxLen) or #chars + 1
   for i = 1, st.maxLen do
     local x = baseX + (i - 1) * 8
     if chars[i] then
-      drawText(chars[i], x, L.charY)
+      drawText(chars[i], x, L.charY, {colors = textColors})
     end
     local und = NamingChrome.get("underscore")
     if und then
       local bobY = 0
       if i == caret then
-        local bob = math.floor(st.blink * 8) % 4
+        local bob = st.rs and math.floor(((st.caretFrame or 1) - 1) / 9) % 4 or math.floor(st.blink * 8) % 4
         bobY = ({ 2, 3, 2, 1 })[bob + 1] or 2
       end
       love.graphics.setColor(1, 1, 1, 1)
@@ -857,7 +999,7 @@ function Naming.draw()
   end
   local arrow = NamingChrome.get("input_arrow")
   if arrow then
-    local bob = math.floor(st.blink * 8) % 4
+    local bob = st.rs and (math.floor((st.nativeFrame or 0) / 8) + 1) % 4 or math.floor(st.blink * 8) % 4
     local x2 = ({ 0, -4, -2, -1 })[bob + 1] or 0
     love.graphics.setColor(1, 1, 1, 1)
     love.graphics.draw(arrow, baseX + L.arrowXOfs + x2, L.arrowY)
@@ -868,8 +1010,23 @@ function Naming.draw()
   if not onButtonCol(st) and st.swapT == nil then
     local x = L.cursorBaseX + (page.colX[st.col] or 0)
     local y = L.cursorBaseY + (st.row - 1) * 16
-    local img, q = NamingChrome.cursorQuad(0)
+    local cursorFrame = st.rs and st.cursorActivation and (st.cursorActivation <= 8 and 1 or 2) or 0
+    local img, q = NamingChrome.cursorQuad(cursorFrame)
     if img and q then
+      if st.rs then
+        dampRsCursor(img, q, x, y)
+        love.graphics.setBlendMode("add", "alphamultiply")
+        love.graphics.setColor(1, 1, 1, 12 / 16)
+        love.graphics.draw(st.nativeImages.cursor_base or img, q, x, y)
+        local mask = st.nativeImages.cursor_glow
+        if mask then
+          local a = st.cursorAmount or 0
+          local r, g, b = RsNaming.tint(st.manifest.palettes.sprites[5][2], math.floor(a / 2), a, a)
+          love.graphics.setColor(r, g, b, 12 / 16)
+          love.graphics.draw(mask, q, x, y)
+        end
+        love.graphics.setBlendMode("alpha", "alphamultiply")
+      else
       local pulse = pulseAmt(st)
       love.graphics.setColor(1, 1, 1, 12 / 16)
       love.graphics.draw(img, q, x, y)
@@ -877,6 +1034,7 @@ function Naming.draw()
       love.graphics.setColor(pulse * 0.55, pulse * 0.55, pulse * 0.55, 1)
       love.graphics.draw(img, q, x, y)
       love.graphics.setBlendMode("alpha")
+      end
       love.graphics.setColor(1, 1, 1, 1)
     else
       love.graphics.setColor(1, 0.1, 0.1, 0.75)
@@ -887,9 +1045,11 @@ function Naming.draw()
   -- 7) Banner — pret PrintControls / WIN_BANNER (bg0, 30×2 tiles).
   -- Fill PIXEL_FILL(15) of GetTextWindowPalette(2) = RGB(0,123,197), then
   -- gText_MoveOkBack right-aligned in FONT_SMALL (keypad icons ≈ + / A / B).
-  love.graphics.setColor(L.bannerR, L.bannerG, L.bannerB, 1)
-  love.graphics.rectangle("fill", 0, 0, W, L.bannerH)
-  require("src.ui.game3.pokedex_chrome").drawControlInfo(RomText.plain("gText_MoveOkBack"), W - 4, 0)
+  if not st.rs then
+    love.graphics.setColor(L.bannerR, L.bannerG, L.bannerB, 1)
+    love.graphics.rectangle("fill", 0, 0, W, L.bannerH)
+    require("src.ui.game3.pokedex_chrome").drawControlInfo(RomText.plain("gText_MoveOkBack"), W - 4, 0)
+  end
 
   -- pokefirered/src/naming_screen.c:753
   if st.pcPages then

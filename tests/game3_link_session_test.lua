@@ -452,7 +452,7 @@ eq(reconnectCtx.nativePoll(), true, "the reconnect special resumes after both se
 towerPeer:close("test_cleanup")
 Link.reset()
 
-print("[test] ExitLinkRoom counts each seat once and seat-less exits one by one")
+print("[test] ExitLinkRoom leaves at once; the rest of the room stays linked")
 local function stubLink(nseats, queue)
   local s = { nseats = nseats, seat = 0, open = true, queue = queue }
   function s:update() end
@@ -476,18 +476,43 @@ local function queueExit(lk)
   Link.link = lk
   Link.exitQueued = true
 end
-local anon = stubLink(3, { {}, {} })
-queueExit(anon)
+local solo = stubLink(4, {})
+queueExit(solo)
 Link.update(0)
-eq(#mapLoads, 1, "two seat-less exits fill a 3-seat room")
-check(not anon.open, "and the link is closed")
-local dup = stubLink(3, { { seat = 1 }, { seat = 1 } })
-queueExit(dup)
-Link.update(0)
-eq(#mapLoads, 0, "the same seat twice is one exit")
-dup.queue[1] = { seat = 2 }
-Link.update(0)
-eq(#mapLoads, 1, "the second seat completes it")
+eq(#mapLoads, 1, "the leaver warps out without waiting on the others")
+check(not solo.open, "and its link is closed")
+
+local exitRoom, trio = FakeRelay.links({ game = game, seats = 3 })
+for _ = 1, 4 do for _, l in ipairs(trio) do l:update(0) end end
+check(trio[1]:isReady() and trio[2]:isReady() and trio[3]:isReady(), "three seats handshake")
+trio[2]:send({ type = Game3Link.EXIT, seat = 1 })
+trio[2]:close("exit_link_room")
+trio[2]:leave()
+for _ = 1, 3 do trio[1]:update(0); trio[3]:update(0) end
+check(trio[1]:isOpen() and trio[3]:isOpen(), "a graceful leave keeps the link open for the others")
+eq(#trio[1]:players(), 2, "the departed seat is gone from the link players")
+eq(trio[1].departed[1], true, "and is recorded as departed")
+eq(#exitRoom.players, 2, "the leaver left the relay room")
+
+local soloRoom, duo = FakeRelay.links({ game = game, seats = 2 })
+for _ = 1, 4 do duo[1]:update(0); duo[2]:update(0) end
+duo[2]:send({ type = Game3Link.EXIT, seat = 1 })
+duo[2]:close("exit_link_room")
+duo[2]:leave()
+for _ = 1, 3 do duo[1]:update(0) end
+check(duo[1]:isOpen(), "the last player in the room keeps a working link")
+eq(#duo[1]:players(), 1, "with only itself left")
+local LT = require("src.core.game3.link.trade")
+Link.reset()
+Link.attach(duo[1])
+local okSeat = pcall(function()
+  local yielded = LT.enterTradeSeat(ctx, adapters)
+  if yielded and ctx.nativePoll then eq(ctx.nativePoll(), true, "a trade seat with nobody left fails instead of waiting") end
+end)
+check(okSeat, "trade seat failure path runs")
+eq(LT.state, "off", "the seat wait ends in CABLE_SEAT_FAILED")
+duo[1]:close("test_cleanup")
+Link.reset()
 
 print("[test] a 4-seat link card is the seat's own, never the last one received")
 Link.reset()

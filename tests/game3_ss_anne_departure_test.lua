@@ -8,6 +8,7 @@ local Std = require("src.core.game3.scripting.stdscripts")
 local Natives = require("src.core.game3.scripting.natives")
 local SSAnneCutscene = require("src.core.game3.ss_anne_cutscene")
 local Objects = require("src.core.game3.objects")
+local Player = require("src.core.game3.player")
 
 local playedSEs = {}
 local Audio = require("src.core.game3.audio")
@@ -50,6 +51,7 @@ local mockBoat = {
 }
 Objects._byId[1] = mockBoat
 Objects._order = { 1 }
+Player.cellX, Player.cellY = 32, 14
 
 local task = SSAnneCutscene.start()
 assert_true(SSAnneCutscene.isActive(), "cutscene is active")
@@ -89,16 +91,16 @@ assert_eq(mockBoat.raiseX, -14, "boat object raiseX is -14")
 -- Verify wake animation
 assert_true(SSAnneCutscene._wake.x2 > 0, "wake drifting right relative to boat")
 
--- Advance to near exit (travel distance 216 px = 216 * 5 = 1080 frames)
-local prevSmokesCount = #SSAnneCutscene._smokes
-for f = 71, 1079 do
+-- pokefirered/src/ss_anne.c:119
+for f = 71, 1045 do
   task()
 end
+assert_eq(SSAnneCutscene._boatOffset, 209, "boat offset is 209 px at frame 1045")
 
 assert_eq(SSAnneCutscene._phase, "run", "still run phase before distance reached")
 assert_true(#playedSEs == 1, "only 1 horn so far")
 
--- Frame 1080 reaches 216 px offset and triggers exit horn
+-- pokefirered/src/ss_anne.c:119
 task()
 assert_eq(SSAnneCutscene._phase, "finish", "switched to finish phase")
 assert_eq(#playedSEs, 2, "second horn played on departure")

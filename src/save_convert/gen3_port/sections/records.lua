@@ -271,6 +271,13 @@ local function putSummed(x, w, off, spec, size, partyOff, mons, rec)
     if not zero(slice(w, off, size - 4)) then w:fill(off, size, 0) end
     return
   end
+  if x.L.FAMILY == "emerald" and size == R.TOWER_SIZE and rec._recordMixNativeBytes then
+    local cross = require("src.core.game3.link.rs_record_cross_bytes")
+    if cross.raw(rec._recordMixNativeBytes, size) then
+      w:bytes(off, cross.renderTower(x.codec, rec))
+      return
+    end
+  end
   putSpec(x, w, off, spec, rec)
   putParty(x, w, off + partyOff, mons, rec.party)
   if zero(slice(w, off, size - 4)) then
@@ -446,6 +453,7 @@ local function bytesAt(s, off, n)
 end
 
 return function(Rse)
+  Rse.Records = R
   Rse.defineSection({
     name = "frontierRecords",
     fields = { "frontier" },

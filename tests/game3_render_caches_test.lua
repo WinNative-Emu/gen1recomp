@@ -11,6 +11,7 @@
 --   * bag: listPocket rows are reused until the pocket changes.
 
 package.path = package.path .. ";./?.lua"
+local CacheBlob = require("src.import.CacheBlob")
 
 local passed, failed = 0, 0
 local function test(name, fn)
@@ -89,7 +90,7 @@ love = {
   filesystem = {
     read = function(path)
       counts.fsRead = counts.fsRead + 1
-      if path:find("trainers/front/", 1, true) then return string.rep("\0", 64 * 64 * 4) end
+      if path:find("trainers/front/", 1, true) then return CacheBlob.deflate(string.rep("\0", 64 * 64 * 4)) end
       return nil
     end,
   },

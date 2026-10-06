@@ -1,5 +1,4 @@
 -- Which game this process is running: Red (the historical default), Blue,
--- Yellow, Gold, Silver, Crystal, FireRed, or LeafGreen.  One source of truth for
 -- everything that differs by version -- the accepted ROM hash, the import
 -- manifest, where the extracted cache lives, and the save-file suffix -- so
 -- the importer, cache mount, SaveData, title screen and palette all agree.
@@ -161,12 +160,44 @@ GameVersion.VERSIONS = {
     cartShape = "gba", cartShell = "#1f9e6e",
     cartLabel = "assets/labels/emerald.png",
   },
+  -- pokeruby/include/constants/global.h:9
+  ruby = {
+    id = "ruby", label = "Ruby", displayName = "Pokemon Ruby",
+    launcherName = "Ruby", beta = true,
+    sha1 = "f28b6ffc97847e94a6c21a63cacf633ee5c8df1e",
+    revisions = {
+      { sha1 = "f28b6ffc97847e94a6c21a63cacf633ee5c8df1e", label = "1.0" },
+      { sha1 = "610b96a9c9a7d03d2bafb655e7560ccff1a6d894", label = "1.1" },
+      { sha1 = "5b64eacf892920518db4ec664e62a086dd5f5bc8", label = "1.2" },
+    },
+    manifest = "tools/rom_manifest_ruby.json",
+    cachePrefix = "ruby/", saveSuffix = "_ruby",
+    generation = 3, engine = "game3", layout = "rse", gameCode = 2,
+    cartShape = "gba", cartShell = "#b92e32",
+    cartLabel = "assets/labels/ruby.png",
+  },
+  -- pokeruby/include/constants/global.h:8
+  sapphire = {
+    id = "sapphire", label = "Sapphire", displayName = "Pokemon Sapphire",
+    launcherName = "Sapphire", beta = true,
+    sha1 = "3ccbbd45f8553c36463f13b938e833f652b793e4",
+    revisions = {
+      { sha1 = "3ccbbd45f8553c36463f13b938e833f652b793e4", label = "1.0" },
+      { sha1 = "4722efb8cd45772ca32555b98fd3b9719f8e60a9", label = "1.1" },
+      { sha1 = "89b45fb172e6b55d51fc0e61989775187f6fe63c", label = "1.2" },
+    },
+    manifest = "tools/rom_manifest_sapphire.json",
+    cachePrefix = "sapphire/", saveSuffix = "_sapphire",
+    generation = 3, engine = "game3", layout = "rse", gameCode = 1,
+    cartShape = "gba", cartShell = "#355ec4",
+    cartLabel = "assets/labels/sapphire.png",
+  },
 }
 
 local NO_FIXES = {}
 
--- Launcher column order.  Append only (src/mods/ModProfile.lua encodes by index).
-GameVersion.ORDER = { "red", "blue", "yellow", "gold", "silver", "crystal", "firered", "leafgreen", "emerald" }
+-- Launcher column order.
+GameVersion.ORDER = { "red", "blue", "yellow", "gold", "silver", "crystal", "firered", "leafgreen", "ruby", "sapphire", "emerald" }
 
 GameVersion.current = "red"
 

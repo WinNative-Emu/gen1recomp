@@ -4,6 +4,7 @@ local RomText = require("src.core.game3.rom_text")
 local FrlgFont = require("src.ui.game3.frlg_font")
 local Chrome = require("src.ui.game3.chrome")
 local Pal = require("src.core.game3.pal_fade")
+local CacheBlob = require("src.import.CacheBlob")
 
 local Kit = {}
 
@@ -60,7 +61,7 @@ function Kit.rgbaImage(path, w, h)
   local okC, CacheFs = pcall(require, "src.import.CacheFs")
   if okC and CacheFs and CacheFs.read then data = CacheFs.read(path) end
   if (not data) and love and love.filesystem and love.filesystem.getInfo(path) then
-    data = love.filesystem.read(path)
+    data = CacheBlob.readFs(path)
   end
   if type(data) == "string" and #data == w * h * 4 and love and love.image then
     local ok, id = pcall(love.image.newImageData, w, h, "rgba8", data)

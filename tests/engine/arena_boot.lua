@@ -96,7 +96,7 @@ end
 
 rejects({ profile = NONE }, "a spec with no profile")
 rejects({ profile = profile({ engine = 3 }) }, "an unknown engine")
-rejects({ profile = profile({ version = "ruby" }) }, "an unknown version")
+rejects({ profile = profile({ version = "not-a-game" }) }, "an unknown version")
 rejects({ profile = profile({ kind = "cart" }) }, "a cart profile with no cart")
 rejects({ profile = profile({ rule = { partySize = 9 } }) }, "partySize above 6")
 rejects({ profile = profile({ rule = { forceLevel = 500 } }) }, "an out of range forceLevel")

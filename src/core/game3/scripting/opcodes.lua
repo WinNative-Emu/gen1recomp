@@ -5,11 +5,14 @@ local COMMON = require("src.core.game3.scripting.opcodes_common")
 local TAILS = {
   firered = "src.core.game3.scripting.opcodes_frlg",
   emerald = "src.core.game3.scripting.opcodes_emerald",
+  ruby = "src.core.game3.scripting.opcodes_rs",
 }
 
-local function build(tail)
+local function build(tail, limit)
   local t = {}
-  for byte, row in pairs(COMMON) do t[byte] = row end
+  for byte, row in pairs(COMMON) do
+    if not limit or byte <= limit then t[byte] = row end
+  end
   local max = 0
   for byte, row in pairs(tail) do
     t[byte] = row
@@ -53,8 +56,13 @@ local STD_EMERALD = {
   MSGBOX_POKENAV = 10,
 }
 
+local STD_RS = {}
+for name, id in pairs(Opcodes.STD) do
+  if id < 8 then STD_RS[name] = id end
+end
+
 -- pokeemerald/asm/macros/event.inc:1024
-local BRAILLE_FORMAT_SIZE = { firered = 0, emerald = 6 }
+local BRAILLE_FORMAT_SIZE = { firered = 0, emerald = 6, ruby = 6 }
 
 Opcodes.LOCALID_PLAYER = 0xFF
 
@@ -105,13 +113,14 @@ function Opcodes.forGame(version)
   if game == "firered" then
     tbl, max = Opcodes.TABLE, Opcodes.MAX
   else
-    tbl, max = build(require(assert(TAILS[game], "no opcode table for " .. game)))
+    tbl, max = build(require(assert(TAILS[game], "no opcode table for " .. game)),
+      game == "ruby" and 0xC5 or nil)
   end
   set = setmetatable({
     game = game,
     TABLE = tbl,
     MAX = max,
-    STD = game == "firered" and Opcodes.STD or STD_EMERALD,
+    STD = game == "firered" and Opcodes.STD or game == "ruby" and STD_RS or STD_EMERALD,
     TRAINER_BATTLE = trainerBattleTypes(game),
     brailleFormatSize = BRAILLE_FORMAT_SIZE[game] or 0,
   }, SetMethods)

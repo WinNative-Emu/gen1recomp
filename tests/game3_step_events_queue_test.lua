@@ -67,6 +67,7 @@ print("=== 2. VS Seeker Battery Management across Locomotion Modes ===")
 
 local session = {
   repelSteps = 10,
+  vars = { [0x4020] = 10 },
   bag = Bag.new(),
   party = {
     { species = 25, nickname = "PIKACHU", hp = 20, maxHp = 20, friendship = 70 },
@@ -78,6 +79,7 @@ for i = 1, 5 do
 end
 check(VsSeeker.getBattery(session) == 0, "VS Seeker does not charge while it is not in the bag")
 session.repelSteps = 10
+session.vars[0x4020] = 10
 Bag.add(session.bag, ItemsData.ITEM_VS_SEEKER, 1)
 
 -- Step counting across locomotion modes

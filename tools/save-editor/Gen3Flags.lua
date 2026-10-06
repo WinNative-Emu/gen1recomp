@@ -11,6 +11,10 @@ local Gen3Flags = {}
 local TRAINERS_CACHE = nil
 local RSE_CACHE = {}
 
+local function isRs(game) return game == "ruby" or game == "sapphire" end
+-- pokeruby/include/constants/flags.h:773
+local RS_TRAINER_START, RS_TRAINER_COUNT = 0x500, 694
+
 local function rseGame()
   local v = GameVersion.get()
   if GameVersion.layout(v) == "rse" then return v end
@@ -27,8 +31,8 @@ local function loadTrainersRse(game)
   local hit = RSE_CACHE[game]
   if hit then return hit end
   local C = constants(game)
-  local start = C:require("flags", "TRAINER_FLAGS_START")
-  local count = C:require("trainers", "TRAINERS_COUNT")
+  local start = isRs(game) and RS_TRAINER_START or C:require("flags", "TRAINER_FLAGS_START")
+  local count = isRs(game) and RS_TRAINER_COUNT or C:require("trainers", "TRAINERS_COUNT")
   local names = C.trainers.byId and C.trainers.byId.TRAINER_ or {}
   local trainers = {}
   for id = 1, count - 1 do
@@ -163,14 +167,16 @@ end
 local function rseCategories(game, extraDirs)
   local C = constants(game)
   local F, V = C.flags.byName, C.vars.byName
-  local sys, dailyEnd = F.SYSTEM_FLAGS, F.DAILY_FLAGS_END
-  local tStart, tEnd = F.TRAINER_FLAGS_START, F.TRAINER_FLAGS_END
+  local sys, dailyEnd = F.SYSTEM_FLAGS, isRs(game) and 0x8FF or F.DAILY_FLAGS_END
+  local tStart = isRs(game) and RS_TRAINER_START or F.TRAINER_FLAGS_START
+  local tEnd = isRs(game) and RS_TRAINER_START + RS_TRAINER_COUNT - 1 or F.TRAINER_FLAGS_END
+  local tempEnd = isRs(game) and F.FLAG_TEMP_1F or F.TEMP_FLAGS_END
   local out = { story = {}, trainers = loadTrainersRse(game), items = {}, toggles = {}, system = {}, vars = {} }
   local function add(list, name, id, width)
     list[#list + 1] = { name = name, id = id, label = string.format("%s (0x%0" .. (width or 3) .. "X)", name, id) }
   end
   for name, id in pairs(F) do
-    if type(id) == "number" and name:find("^FLAG_") and id > F.TEMP_FLAGS_END and id <= dailyEnd then
+    if type(id) == "number" and name:find("^FLAG_") and id > tempEnd and id <= dailyEnd then
       local trainer = id >= tStart and id <= tEnd
       if name:find("^FLAG_HIDDEN_ITEM_") or name:find("^FLAG_ITEM_") then
         add(out.items, name, id)

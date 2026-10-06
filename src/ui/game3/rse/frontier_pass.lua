@@ -149,12 +149,32 @@ local function updateHighlight(cur, prev)
   local _ = g
 end
 
+-- pokeemerald/src/frontier_pass.c:530
+local function description(i)
+  return RomText.irOr(RomText.key("sPassAreaDescriptions", i), man().descriptions[i + 1])
+end
+
+-- pokeemerald/src/frontier_pass.c:556
+local LANDMARK_TEXTS = {
+  { "gText_BattleTower3", "gText_BattleTowerDesc" },
+  { "gText_BattleDome2", "gText_BattleDomeDesc" },
+  { "gText_BattlePalace2", "gText_BattlePalaceDesc" },
+  { "gText_BattleArena2", "gText_BattleArenaDesc" },
+  { "gText_BattleFactory2", "gText_BattleFactoryDesc" },
+  { "gText_BattlePike2", "gText_BattlePikeDesc" },
+  { "gText_BattlePyramid2", "gText_BattlePyramidDesc" },
+}
+
+local function landmarkText(i, field)
+  local labels = LANDMARK_TEXTS[i + 1]
+  return RomText.irOr(labels and labels[field == "name" and 1 or 2], man().landmarks[i + 1][field])
+end
+
 local function describe(area)
-  local d = man().descriptions
   if area == A.RECORD and not st.hasRecord then
-    st.desc = textOf(d[A.NOTHING + 1])
+    st.desc = textOf(description(A.NOTHING))
   elseif area ~= A.NOTHING then
-    st.desc = textOf(d[area + 1])
+    st.desc = textOf(description(area))
   else
     st.desc = nil
   end
@@ -456,6 +476,10 @@ function Map.show()
   Map.pal:beginFade(PalFade.ALL, 0, 16, 0, PalFade.WHITE)
   Map.image = nil
   Map.head = Map.headPosition()
+  Map.landmarks = {}
+  for i = 0, NUM_FACILITIES - 1 do
+    Map.landmarks[i] = { name = textOf(landmarkText(i, "name")), description = textOf(landmarkText(i, "description")) }
+  end
 end
 
 -- pokeemerald/src/frontier_pass.c:1582
@@ -544,9 +568,9 @@ function Map.draw()
   love.graphics.draw(Map.image, 0, 0)
   local lm = man().landmarks
   for i = 0, NUM_FACILITIES - 1 do
-    drawText(textOf(lm[i + 1].name), 160 + 4, 8 + i * 16 + 1, colors(i == Map.pos and 2 or 1), "narrow")
+    drawText(Map.landmarks[i].name, 160 + 4, 8 + i * 16 + 1, colors(i == Map.pos and 2 or 1), "narrow")
   end
-  drawText(textOf(lm[Map.pos + 1].description), 16 + 4, 128, colors(0))
+  drawText(Map.landmarks[Map.pos].description, 16 + 4, 128, colors(0))
   local cur = spriteFrame("cursor", 4, 16, 16, p.cursor)
   love.graphics.draw(cur, 155 + 8, Map.cursorY - 8, 0, -1, 1)
   local mark = lm[Map.pos + 1]

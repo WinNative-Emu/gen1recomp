@@ -1,4 +1,5 @@
 local Kit = require("src.ui.game3.rse.scene_kit")
+local Strings = require("src.core.Strings")
 local FrlgFont = require("src.ui.game3.frlg_font")
 local RomText = require("src.core.game3.rom_text")
 local Pal = require("src.core.game3.pal_fade")
@@ -7,6 +8,13 @@ local List = require("src.ui.game3.rse.pokedex_list")
 local Area = require("src.ui.game3.rse.pokedex_area")
 local Cry = require("src.ui.game3.rse.pokedex_cry")
 local Mapsec = require("src.ui.game3.rse.mapsec")
+local RsPolicy = require("src.ui.game3.rs.pokedex_policy")
+local function nativeRs() return Gfx.manifest().assetLayout == "rs" end
+local rsTextNames = {gText_CryOf = "CryOf", gText_SizeComparedTo = "SizeComparedTo", gText_SelectorArrow = "RightPointingTriangle",
+  gText_SearchingPleaseWait = "Searching", gText_SearchCompleted = "SearchComplete", gText_NoMatchingPkmnWereFound = "NoMatching"}
+local function dexText(key)
+  return nativeRs() and assert(Gfx.manifest().strings[assert(rsTextNames[key], "native RS dex text alias")]) or RomText.plain(key)
+end
 
 local Pokedex = {}
 
@@ -105,11 +113,13 @@ function Pokedex.context(s)
     owned = function(nat) return dexFlag(s, nat, "owned") end,
     hoennNumber = Pokedex.hoennNumber,
     firstChar = function(nat)
+      if nativeRs() then return man.speciesFirstChar[Pokedex.speciesOf(nat)] or 0 end
       local name = pokemon().name(Pokedex.speciesOf(nat)) or ""
       return name:byte(1) or 0
     end,
     bodyColor = function(nat) return man.bodyColor[Pokedex.speciesOf(nat)] end,
     types = function(nat)
+      if nativeRs() then return man.speciesTypes[Pokedex.speciesOf(nat)] end
       local t = pokemon().types(Pokedex.speciesOf(nat))
       return { t[1], t[2] }
     end,
@@ -232,8 +242,14 @@ end
 
 local function textColors(s, fgIdx, shIdx)
   local pal = bgPalRead(s)
+  if nativeRs() then
+    local w = Gfx.manifest().windows[(s.page == PAGE.CRY or s.page == PAGE.SIZE) and "cry" or "info"]
+    return {fg = Gfx.color(pal[w.paletteNum * 16 + w.foreground]), shadow = Gfx.color(pal[w.paletteNum * 16 + w.shadow]),
+      bg = w.background == 0 and {0, 0, 0, 0} or Gfx.color(pal[w.paletteNum * 16 + w.background])}
+  end
   return { fg = Gfx.color(pal[fgIdx or 15]), shadow = Gfx.color(pal[shIdx or 3]), bg = { 0, 0, 0, 0 } }
 end
+function Pokedex.textOptions(s) return {colors = textColors(s), font = "normal"} end
 
 local function spritePal()
   local p = Gfx.manifest().palettes.hoenn
@@ -495,6 +511,7 @@ end
 
 -- pokeemerald/src/pokedex.c:2777
 local function createInterfaceSprites(s, page)
+  if nativeRs() then s.sprites = RsPolicy.interfaceSprites(s, page); return end
   local sp = {}
   local function add(t) sp[#sp + 1] = t; return t end
   add({ kind = "arrow", tile = 1, w = 16, h = 8, x = 184, y = 4, prio = 0, down = false, data2 = 0 })
@@ -892,6 +909,24 @@ end
 -- pokeemerald/src/pokedex.c:4102
 local function monInfo(s, nat, nationalNumber, owned, newEntry)
   local e = entryFor(nat)
+  if nativeRs() then
+    local strings, out = Gfx.manifest().strings, {}
+    if newEntry then
+      local t = strings.RegisterComplete
+      out[#out + 1] = {text = t, x = 16 + math.floor((208 - FrlgFont.measure(t)) / 2), y = 0}
+    end
+    local num = nationalNumber and nat or (Pokedex.hoennNumber(nat) or nat)
+    out[#out + 1] = {text = string.format("%03d", num), x = 104, y = 24}
+    out[#out + 1] = {text = pokemon().name(Pokedex.speciesOf(nat)) or Gfx.manifest().tenDashes, x = 128, y = 24}
+    local category = owned and ((e.category or "") .. " " .. strings.UnknownPoke:match("[^? ]+.*$")) or strings.UnknownPoke
+    local cx = 88 + (owned and (FrlgFont.measure(strings.UnknownPoke) - FrlgFont.measure(category)) or 0)
+    out[#out + 1] = {text = category, x = cx, y = 40}
+    out[#out + 1] = {text = owned and Pokedex.heightText(e.height or 0) or strings.UnknownHeight, x = 128, y = 56}
+    out[#out + 1] = {text = owned and RsPolicy.weightText(e.weight or 0) or strings.UnknownWeight, x = 128, y = 72}
+    local desc = s.descriptionPage == 1 and e.description2 or e.description
+    out[#out + 1] = {text = owned and (desc or "") or "", x = 16, y = 104}
+    return out
+  end
   local out = {}
   if newEntry then
     local t = RomText.plain("gText_PokedexRegistration")
@@ -901,7 +936,12 @@ local function monInfo(s, nat, nationalNumber, owned, newEntry)
   out[#out + 1] = { text = RomText.plain("gText_NumberClear01") .. string.format("%03d", num), x = 0x60, y = 0x19 }
   local sp = Pokedex.speciesOf(nat)
   out[#out + 1] = { text = sp ~= 0 and pokemon().name(sp) or Gfx.manifest().tenDashes, x = 0x84, y = 0x19 }
-  local category = owned and ((e.category or "") .. " " .. RomText.plain("gText_Pokemon")) or RomText.plain("gText_5MarksPokemon")
+  local category
+  if owned then
+    category = Strings(e.category or "") .. " " .. RomText.plain("gText_Pokemon")
+  else
+    category = RomText.plain("gText_5MarksPokemon")
+  end
   out[#out + 1] = { text = category, x = 0x64, y = 0x29 }
   out[#out + 1] = { text = RomText.plain("gText_HTHeight"), x = 0x60, y = 0x39 }
   out[#out + 1] = { text = RomText.plain("gText_WTWeight"), x = 0x60, y = 0x49 }
@@ -912,7 +952,7 @@ local function monInfo(s, nat, nationalNumber, owned, newEntry)
     out[#out + 1] = { text = RomText.plain("gText_UnkHeight"), x = 0x81, y = 0x39 }
     out[#out + 1] = { text = RomText.plain("gText_UnkWeight"), x = 0x81, y = 0x49 }
   end
-  local desc = owned and (e.description or "") or ""
+  local desc = owned and Strings(e.description or "") or ""
   local w = 0
   for line in (desc .. "\n"):gmatch("(.-)\n") do w = math.max(w, FrlgFont.measure(line) or 0) end
   out[#out + 1] = { text = desc, x = w < 240 and math.floor((240 - w) / 2) or 0, y = 95 }
@@ -923,19 +963,21 @@ Pokedex.monInfo = monInfo
 -- pokeemerald/src/pokedex.c:3880
 local function selectBar(s, submenu, selected)
   local m = Gfx.map(submenu and "select_sub" or "select_main")
+  local width = nativeRs() and 5 or 7
   for i = 0, 3 do
-    local row = i * 7 + 1
+    local row = i * width + 1
     local pal
     if submenu then
-      pal = (i == selected or i == 3) and 2 or 4
+      pal = (i == selected or i == (nativeRs() and 0 or 3)) and 2 or 4
     else
       pal = (i == selected) and 2 or 4
     end
-    for j = 0, 6 do
+    for j = 0, width - 1 do
       m[row + j] = m[row + j] % 4096 + pal * 4096
       m[row + j + 32] = m[row + j + 32] % 4096 + pal * 4096
     end
   end
+  if nativeRs() then for j = 25, 29 do for _, off in ipairs({0, 32}) do m[j + off] = m[j + off] % 4096 + 4 * 4096 end end end
   return layer("select", Gfx.renderMap(m, "menu", bgPal(s)), 0)
 end
 
@@ -952,6 +994,7 @@ function tasks.loadInfo(s)
   if st == 0 then
     if not s.pal:fadeActive() then
       s.page = PAGE.INFO
+      if nativeRs() then s.descriptionPage = 0 end
       s.state = 1
     end
   elseif st == 1 then
@@ -974,7 +1017,7 @@ function tasks.loadInfo(s)
     s.state = 4
   elseif st == 4 then
     info.text = monInfo(s, info.dexNum, s.dexMode ~= List.DEX_MODE_HOENN, info.owned, false)
-    info.footprint = footprintImage(info.dexNum)
+    info.footprint = (not nativeRs() or info.owned) and footprintImage(info.dexNum) or nil
     s.state = 5
   elseif st == 5 then
     if not info.monDone then
@@ -1037,13 +1080,22 @@ function tasks.infoInput(s, inp)
   end
   if new.a then
     local sc = s.selectedScreen
-    if sc == SCREEN.AREA or sc == SCREEN.CRY or (sc == SCREEN.SIZE and info.owned) then
+    if nativeRs() and sc == 0 then
+      if info.owned then
+        s.descriptionPage = 1 - (s.descriptionPage or 0)
+        info.text = monInfo(s, info.dexNum, s.dexMode ~= List.DEX_MODE_HOENN, true, false)
+        local m = Gfx.map("info")
+        for _, i in ipairs({0x165, 0x185}) do m[i] = m[i] + s.descriptionPage end
+        s.bg[3].img = Gfx.renderMap(m, "menu", bgPal(s))
+        se("SE_PIN")
+      end
+    elseif sc == (nativeRs() and 1 or SCREEN.AREA) or sc == (nativeRs() and 2 or SCREEN.CRY) or (sc == (nativeRs() and 3 or SCREEN.SIZE) and info.owned) then
       s.pal:beginFade(Pal.ALL, 0, 0, 16, Pal.BLACK)
       s.fadeExempt = { select = true }
-      s.screenSwitchState = sc + 1
+      s.screenSwitchState = nativeRs() and sc or sc + 1
       s.fn = "switchFromInfo"
       se("SE_PIN")
-    elseif sc == SCREEN.SIZE then
+    elseif sc == (nativeRs() and 3 or SCREEN.SIZE) then
       se("SE_FAILURE")
     else
       s.pal:beginFade(Pal.ALL, 0, 0, 16, Pal.BLACK)
@@ -1052,13 +1104,13 @@ function tasks.infoInput(s, inp)
     end
     return
   end
-  if new.left and s.selectedScreen > 0 then
+  if (new.left or nativeRs() and new.l and RsPolicy.lr(s.session, new)) and s.selectedScreen > 0 then
     s.selectedScreen = s.selectedScreen - 1
     s.bg[1] = selectBar(s, false, s.selectedScreen)
     se("SE_DEX_PAGE")
     return
   end
-  if new.right and s.selectedScreen < SCREEN.CANCEL then
+  if (new.right or nativeRs() and new.r and RsPolicy.lr(s.session, new)) and s.selectedScreen < SCREEN.CANCEL then
     s.selectedScreen = s.selectedScreen + 1
     s.bg[1] = selectBar(s, false, s.selectedScreen)
     se("SE_DEX_PAGE")
@@ -1124,16 +1176,16 @@ local function areaContext(s)
   end
   local roamer
   local r = s.session and s.session.roamer
-  if type(r) == "table" and tonumber(r.species) then
+  if type(r) == "table" and (tonumber(r.species) or nativeRs()) then
     local g, n
     if r.map then
       local key = MapCatalog.slotKeyFor and MapCatalog.slotKeyFor(r.map)
       if type(key) == "string" then g, n = key:match("^(%d+):(%d+)$") end
     end
-    roamer = { species = tonumber(r.species), active = r.active ~= false, group = tonumber(g), num = tonumber(n) }
+    roamer = { species = nativeRs() and Gfx.manifest().area.roamerSpecies or tonumber(r.species), active = r.active ~= false, group = tonumber(g), num = tonumber(n) }
   end
   local area = Gfx.manifest().area
-  local alteringCaveId = tonumber(Flags.getVar(store, nil, C:var("VAR_ALTERING_CAVE_WILD_SET"))) or 0
+  local alteringCaveId = not nativeRs() and tonumber(Flags.getVar(store, nil, C:var("VAR_ALTERING_CAVE_WILD_SET"))) or 0
   local numTables = 9
   if alteringCaveId >= numTables then alteringCaveId = 0 end
   return {
@@ -1144,8 +1196,14 @@ local function areaContext(s)
       special = C:map("MAP_SAFARI_ZONE_NORTHWEST").group,
     },
     mapsecOf = mapsecOf,
-    correct = function(sec) return RegionMap.correctSpecialMapSecId({ session = s.session }, sec) end,
-    alteringCaveMapSec = mapsecOf(C:map("MAP_ALTERING_CAVE").group, C:map("MAP_ALTERING_CAVE").num),
+    correct = function(sec)
+      if nativeRs() then
+        for _, pair in ipairs(RegionMap.manifest().specialPlaces) do if pair[1] == sec then return pair[2] end end
+        return sec
+      end
+      return RegionMap.correctSpecialMapSecId({ session = s.session }, sec)
+    end,
+    alteringCaveMapSec = not nativeRs() and mapsecOf(C:map("MAP_ALTERING_CAVE").group, C:map("MAP_ALTERING_CAVE").num) or nil,
     alteringCaveId = alteringCaveId,
     roamer = roamer,
     flag = function(id) return Flags.getFlag(store, nil, id) == true end,
@@ -1161,7 +1219,10 @@ Pokedex.areaContext = areaContext
 local function glowImage(tilemap)
   local pal = {}
   for i = 0, 255 do pal[i] = 0 end
-  Gfx.loadPalette(pal, "areaGlow", Area.GLOW_PALETTE * 16)
+  if nativeRs() then
+    for i = 0, tilemap.n - 1 do tilemap[i] = tilemap[i] % 4096 end
+  end
+  Gfx.loadPalette(pal, "areaGlow", nativeRs() and 0 or Area.GLOW_PALETTE * 16)
   return Gfx.renderMap(tilemap, "area_glow", pal, { rows = Area.SCREEN_HEIGHT })
 end
 
@@ -1171,11 +1232,11 @@ function tasks.loadArea(s)
   if st == 0 then
     if not s.pal:fadeActive() then
       s.page = PAGE.AREA
-      s.selectedScreen = SCREEN.AREA
+      s.selectedScreen = nativeRs() and 1 or SCREEN.AREA
       s.state = 1
     end
   elseif st == 1 then
-    s.bg = { [1] = selectBar(s, true, 0) }
+    s.bg = { [1] = selectBar(s, true, nativeRs() and 1 or 0) }
     local RegionMap = require("src.ui.game3.rse.region_map")
     local species = Pokedex.speciesOf(item(s, s.selected).dexNum)
     local found = Area.findMapsWithMon(species, areaContext(s))
@@ -1184,33 +1245,46 @@ function tasks.loadArea(s)
     Gfx.loadPalette(pal, "areaMap", 112)
     s.area = {
       found = found,
-      map = Gfx.renderMap8(Gfx.map("area_map"), "area_map", pal),
+      map = nativeRs() and Kit.image(Gfx.manifest().areaMap.png) or Gfx.renderMap8(Gfx.map("area_map"), "area_map", pal),
       glow = glowImage(Area.buildGlowTilemap(found.overworld, RegionMap.mapSecAt, Gfx.manifest().area.glowMapping)),
       state = 0,
     }
     local rm = { session = s.session }
-    RegionMap.initFromPlayer(rm)
+    if not nativeRs() then RegionMap.initFromPlayer(rm) end
     local cur = (package.loaded["src.core.game3.map"] or {}).currentDef
     local def = cur and cur() or {}
     local offMap = false
-    for _, id in ipairs(RegionMap.manifest().offMap) do
+    for _, id in ipairs(RegionMap.manifest().offMap or {}) do
       if id == tonumber(def.regionMapSectionId) then offMap = true end
     end
-    s.area.player = not offMap and { x = rm.cursorX * 8 + 4, y = rm.cursorY * 8 + 4 + 8, blink = rm.playerIsInCave } or nil
+    if nativeRs() then s.area.player = RsPolicy.areaRegion(RegionMap.manifest(), s.session)
+    else s.area.player = not offMap and { x = rm.cursorX * 8 + 4, y = rm.cursorY * 8 + 4 + 8, blink = rm.playerIsInCave } or nil end
     s.area.markers = Area.markerPositions(found.special, Mapsec.entry)
     s.area.unknown = #found.overworld == 0 and #found.special == 0
     s.area.glowState = Area.newGlow(#found.overworld, #found.special)
     s.state = 2
   elseif st == 2 then
+    if nativeRs() then s.state = 3; return end
     s.fadeExempt = { select = true }
     s.pal:beginFade(Pal.ALL, 0, 16, 0, Pal.BLACK)
     s.shown = true
     s.state = 3
   elseif st == 3 then
+    if nativeRs() then s.state = 4; return end
     s.screenSwitchState = 0
     s.state = 0
     s.fn = "areaInput"
     s.area.inputState = 0
+  elseif nativeRs() and st < 16 then
+    s.state = st + 1
+  elseif nativeRs() and st == 16 then
+    s.fadeExempt = {select = true}
+    s.pal:beginFade(Pal.ALL, 0, 16, 0, Pal.BLACK)
+    s.state = 17
+  elseif nativeRs() and st == 17 then
+    s.shown, s.state = true, 18
+  elseif nativeRs() and st == 18 and not s.pal:fadeActive() then
+    s.screenSwitchState, s.state, s.fn, s.area.inputState = 0, 0, "areaInput", 1
   end
 end
 
@@ -1234,7 +1308,7 @@ function tasks.areaInput(s, inp)
     if new.b then
       a.choice = 1
       se("SE_PC_OFF")
-    elseif new.right then
+    elseif new.right or nativeRs() and new.r and RsPolicy.lr(s.session, new) then
       a.choice = 2
       se("SE_DEX_PAGE")
     else
@@ -1313,7 +1387,7 @@ function tasks.loadCry(s)
     if not s.pal:fadeActive() then
       audio().pauseBgm()
       s.page = PAGE.CRY
-      s.selectedScreen = SCREEN.CRY
+      s.selectedScreen = nativeRs() and 2 or SCREEN.CRY
       s.state = 1
     end
   elseif st == 1 then
@@ -1327,7 +1401,7 @@ function tasks.loadCry(s)
     s.bg = { [3] = layer("cry", s.cryBg[false], 2) }
     s.state = 2
   elseif st == 2 then
-    s.bg[1] = selectBar(s, true, 1)
+    s.bg[1] = selectBar(s, true, nativeRs() and 2 or 1)
     s.state = 3
   elseif st == 3 then
     s.state = 4
@@ -1335,8 +1409,8 @@ function tasks.loadCry(s)
     local nat = item(s, s.selected).dexNum
     local sp = Pokedex.speciesOf(nat)
     s.cryText = {
-      { text = RomText.plain("gText_CryOf"), x = 82, y = 33 },
-      { text = sp ~= 0 and pokemon().name(sp) or "-----", x = 82, y = 49 },
+      { text = dexText("gText_CryOf"), x = nativeRs() and 80 or 82, y = nativeRs() and 32 or 33 },
+      { text = sp ~= 0 and pokemon().name(sp) or "-----", x = 82, y = nativeRs() and 48 or 49 },
     }
     s.state = 5
   elseif st == 5 then
@@ -1345,6 +1419,11 @@ function tasks.loadCry(s)
       affine = false, scaleY = 1 } }
     s.state = 6
   elseif st == 6 then
+    if nativeRs() then
+      s.cryWaveSetup = (s.cryWaveSetup or 0) + 1
+      if s.cryWaveSetup < 3 then return end
+      s.cryWaveSetup = nil
+    end
     local bgGfx = Gfx.bytes("cry_bg")
     local tile = {}
     for y = 0, 7 do
@@ -1357,11 +1436,16 @@ function tasks.loadCry(s)
     s.cry.pcm = cryPcm(crySpecies(s))
     s.state = 7
   elseif st == 7 then
+    if nativeRs() then
+      s.cryMeterSetup = (s.cryMeterSetup or 0) + 1
+      if s.cryMeterSetup < 3 then return end
+      s.cryMeterSetup = nil
+    end
     local man = Gfx.manifest()
     local meterPal = man.palettes.cryMeter
     local needlePal = man.palettes.cryNeedle
-    local meter = { n = 80 }
-    for i = 0, 79 do meter[i] = i + 9 * 4096 end
+    local meter = nativeRs() and Gfx.map("cry_meter") or { n = 80 }
+    for i = 0, 79 do meter[i] = (nativeRs() and meter[i] or i) + 9 * 4096 end
     local pal = {}
     for i = 0, 255 do pal[i] = 0 end
     for i = 0, 15 do pal[144 + i] = meterPal[i + 1] end
@@ -1405,8 +1489,8 @@ function tasks.cryInput(s, inp)
     se(sound)
   end
   if new.b then return leave(1, "SE_PC_OFF") end
-  if new.left then return leave(2, "SE_DEX_PAGE") end
-  if new.right then
+  if new.left or nativeRs() and new.l and RsPolicy.lr(s.session, new) then return leave(2, "SE_DEX_PAGE") end
+  if new.right or nativeRs() and new.r and RsPolicy.lr(s.session, new) then
     if not item(s, s.selected).owned then
       se("SE_FAILURE")
     else
@@ -1440,20 +1524,20 @@ function tasks.loadSize(s)
   if st == 0 then
     if not s.pal:fadeActive() then
       s.page = PAGE.SIZE
-      s.selectedScreen = SCREEN.SIZE
+      s.selectedScreen = nativeRs() and 3 or SCREEN.SIZE
       s.state = 1
     end
   elseif st == 1 then
     s.bg = { [3] = layer("size", Gfx.renderMap(Gfx.map("size"), "menu", bgPal(s)), 2) }
     s.state = 2
   elseif st == 2 then
-    s.bg[1] = selectBar(s, true, 2)
+    s.bg[1] = selectBar(s, true, nativeRs() and 3 or 2)
     s.state = 3
   elseif st == 3 then
     local name = s.session and (s.session.name or s.session.playerName) or ""
-    local t = RomText.plain("gText_SizeComparedTo") .. tostring(name)
+    local t = dexText("gText_SizeComparedTo") .. tostring(name)
     local w = FrlgFont.measure(t) or 0
-    s.sizeText = { text = t, x = w < 240 and math.floor((240 - w) / 2) or 0, y = 121 }
+    s.sizeText = { text = t, x = nativeRs() and (24 + 96 - math.floor(w / 2)) or (w < 240 and math.floor((240 - w) / 2) or 0), y = nativeRs() and 120 or 121 }
     s.state = 4
   elseif st == 4 then
     s.state = 5
@@ -1491,7 +1575,7 @@ function tasks.sizeInput(s, inp)
     s.screenSwitchState = 1
     s.fn = "switchFromSize"
     se("SE_PC_OFF")
-  elseif new.left then
+  elseif new.left or nativeRs() and new.l and RsPolicy.lr(s.session, new) then
     s.pal:beginFade(Pal.ALL, 0, 0, 16, Pal.BLACK)
     s.fadeExempt = { select = true }
     s.screenSwitchState = 2
@@ -1509,8 +1593,54 @@ function tasks.switchFromSize(s)
   end
 end
 
+local function cartText(key, fallback)
+  if key and RomText.has(key) then return RomText.plain(key) end
+  return fallback
+end
+
+-- pokeemerald/src/pokedex.c:1330
+local TYPE_OPTION = { "gText_DexSearchTypeNone" }
+for _, t in ipairs({ 0, 1, 2, 3, 4, 5, 6, 7, 8, 10, 11, 12, 13, 14, 15, 16, 17 }) do
+  TYPE_OPTION[#TYPE_OPTION + 1] = RomText.key("gTypeNames", t)
+end
+local SEARCH_OPTION_TEXTS = {
+  [SEARCH.NAME] = { titles = { "gText_DexSearchDontSpecify", "gText_DexSearchAlphaABC", "gText_DexSearchAlphaDEF",
+    "gText_DexSearchAlphaGHI", "gText_DexSearchAlphaJKL", "gText_DexSearchAlphaMNO", "gText_DexSearchAlphaPQR",
+    "gText_DexSearchAlphaSTU", "gText_DexSearchAlphaVWX", "gText_DexSearchAlphaYZ" } },
+  [SEARCH.COLOR] = { titles = { "gText_DexSearchDontSpecify", "gText_DexSearchColorRed", "gText_DexSearchColorBlue",
+    "gText_DexSearchColorYellow", "gText_DexSearchColorGreen", "gText_DexSearchColorBlack", "gText_DexSearchColorBrown",
+    "gText_DexSearchColorPurple", "gText_DexSearchColorGray", "gText_DexSearchColorWhite", "gText_DexSearchColorPink" } },
+  [SEARCH.TYPE_LEFT] = { titles = TYPE_OPTION },
+  [SEARCH.TYPE_RIGHT] = { titles = TYPE_OPTION },
+  [SEARCH.ORDER] = {
+    titles = { "gText_DexSortNumericalTitle", "gText_DexSortAtoZTitle", "gText_DexSortHeaviestTitle",
+      "gText_DexSortLightestTitle", "gText_DexSortTallestTitle", "gText_DexSortSmallestTitle" },
+    descriptions = { "gText_DexSortNumericalDescription", "gText_DexSortAtoZDescription",
+      "gText_DexSortHeaviestDescription", "gText_DexSortLightestDescription", "gText_DexSortTallestDescription",
+      "gText_DexSortSmallestDescription" },
+  },
+  [SEARCH.MODE] = {
+    titles = { "gText_DexHoennTitle", "gText_DexNatTitle" },
+    descriptions = { "gText_DexHoennDescription", "gText_DexNatDescription" },
+  },
+}
+-- pokeemerald/src/pokedex.c:1017
+local TOPBAR_DESCRIPTIONS = { "gText_SearchForPkmnBasedOnParameters", "gText_SwitchPokedexListings",
+  "gText_ReturnToPokedex" }
+-- pokeemerald/src/pokedex.c:1042
+local ITEM_DESCRIPTIONS = { "gText_ListByFirstLetter", "gText_ListByBodyColor", "gText_ListByType",
+  "gText_ListByType", "gText_SelectPokedexListingMode", "gText_SelectPokedexMode", "gText_ExecuteSearchSwitch" }
+
+local function topBarDescription(i)
+  return cartText(TOPBAR_DESCRIPTIONS[i + 1], Gfx.manifest().search.topBar[i + 1].description)
+end
+
+local function itemDescription(i)
+  return cartText(ITEM_DESCRIPTIONS[i + 1], Gfx.manifest().search.items[i + 1].description)
+end
+
 -- pokeemerald/src/pokedex.c:1437
-local function searchOptionTexts(which)
+local function searchOptionList(which)
   local sm = Gfx.manifest().search
   if which == SEARCH.NAME then return sm.names end
   if which == SEARCH.COLOR then return sm.colors end
@@ -1519,6 +1649,23 @@ local function searchOptionTexts(which)
   if which == SEARCH.MODE then return sm.modes end
   return {}
 end
+
+local function searchOptionTexts(which)
+  local list = searchOptionList(which)
+  local keys = SEARCH_OPTION_TEXTS[which]
+  if not keys then return list end
+  local out = {}
+  for i, t in ipairs(list) do
+    out[i] = {
+      title = cartText(keys.titles[i], t.title),
+      description = cartText(keys.descriptions and keys.descriptions[i], t.description),
+    }
+  end
+  return out
+end
+Pokedex.searchOptionTexts = searchOptionTexts
+Pokedex.topBarDescription = topBarDescription
+Pokedex.itemDescription = itemDescription
 
 local function searchSel(q, which)
   local c = q.cursor[which] or 0
@@ -1543,6 +1690,12 @@ Pokedex.searchModeSelection = searchModeSelection
 local function searchHighlights(s, q)
   local sm = Gfx.manifest().search
   local m = Gfx.map(s.nationalEnabled and "search_national" or "search_hoenn")
+  if nativeRs() and not s.nationalEnabled then
+    for i = 0, 16 do
+      m[0x140 + i], m[0x160 + i] = m[0x180 + i], m[0x1A0 + i]
+      m[0x180 + i], m[0x1A0 + i] = 1, 1
+    end
+  end
   local function rect(flags, x, y, w)
     for i = 0, w - 1 do
       for dy = 0, 1 do
@@ -1595,13 +1748,19 @@ local function searchHighlights(s, q)
   if q.paramBox then
     -- pokeemerald/src/pokedex.c:5440
     m[0x11] = 0xC0B
-    for i = 0x12, 0x1E do m[i] = 0x80D end
+    local right = nativeRs() and 0x1C or 0x1E
+    for i = 0x12, right do m[i] = 0x80D end
     for j = 1, 12 do
       m[0x11 + j * 32] = 0x40A
-      for i = 0x12, 0x1E do m[j * 32 + i] = 2 end
+      for i = 0x12, right do m[j * 32 + i] = 2 end
     end
     m[0x1B1] = 0x40B
-    for i = 0x12, 0x1E do m[0x1A0 + i] = 0xD end
+    for i = 0x12, right do m[0x1A0 + i] = 0xD end
+    if nativeRs() then
+      m[0x1D] = 0x80B
+      for j = 1, 12 do m[j * 32 + 0x1D] = 0xA end
+      m[0x1BD] = 0xB
+    end
   end
   local pal = {}
   for i = 0, 255 do pal[i] = 0 end
@@ -1611,7 +1770,7 @@ end
 
 local function searchText(s, q)
   local out = {}
-  local function add(text, x, y) out[#out + 1] = { text = text, x = x, y = y } end
+  local function add(text, x, y) out[#out + 1] = { text = text, x = x, y = nativeRs() and y - 1 or y } end
   local function title(which, x, y)
     local texts = searchOptionTexts(which)
     local t = texts[searchSel(q, which) + 1]
@@ -1638,9 +1797,9 @@ local function searchText(s, q)
       if not t then break end
       add(t.title, 152, i * 16 + 9)
     end
-    add(RomText.plain("gText_SelectorArrow"), 144, (q.cursor[q.menuItem] or 0) * 16 + 9)
+    add(dexText("gText_SelectorArrow"), 144, (q.cursor[q.menuItem] or 0) * 16 + 9)
   end
-  add(q.message or "", 8, 121)
+  add(q.message or "", nativeRs() and 9 or 8, 121)
   s.searchText = out
 end
 
@@ -1676,7 +1835,7 @@ function tasks.loadSearch(s)
   elseif st == 1 then
     local q = s.searchState
     setDefaultSearchModeAndOrder(s, q)
-    setSearchMessage(q, Gfx.manifest().search.topBar[TOPBAR.SEARCH + 1].description)
+    setSearchMessage(q, topBarDescription(TOPBAR.SEARCH))
     s.searchArrows = {
       { x = 184, y = 4, down = false, data2 = 0, invisible = true },
       { x = 184, y = 108, down = true, data2 = 0, invisible = true },
@@ -1694,7 +1853,7 @@ function tasks.loadSearch(s)
       s.state = 0
       s.fn = "searchTopBar"
       s.searchState.phase = "topbar"
-      setSearchMessage(s.searchState, Gfx.manifest().search.topBar[s.searchState.topBar + 1].description)
+      setSearchMessage(s.searchState, topBarDescription(s.searchState.topBar))
       refreshSearch(s)
     end
   end
@@ -1704,7 +1863,6 @@ end
 function tasks.searchTopBar(s, inp)
   local new = inp.new or {}
   local q = s.searchState
-  local sm = Gfx.manifest().search
   if new.b then
     se("SE_PC_OFF")
     s.fn = "exitSearch"
@@ -1725,20 +1883,20 @@ function tasks.searchTopBar(s, inp)
       return
     end
     q.phase = "menu"
-    setSearchMessage(q, sm.items[q.menuItem + 1].description)
+    setSearchMessage(q, itemDescription(q.menuItem))
     refreshSearch(s)
     return
   end
   if new.left and q.topBar > TOPBAR.SEARCH then
     se("SE_DEX_PAGE")
     q.topBar = q.topBar - 1
-    setSearchMessage(q, sm.topBar[q.topBar + 1].description)
+    setSearchMessage(q, topBarDescription(q.topBar))
     refreshSearch(s)
   end
   if new.right and q.topBar < TOPBAR.CANCEL then
     se("SE_DEX_PAGE")
     q.topBar = q.topBar + 1
-    setSearchMessage(q, sm.topBar[q.topBar + 1].description)
+    setSearchMessage(q, topBarDescription(q.topBar))
     refreshSearch(s)
   end
 end
@@ -1760,7 +1918,7 @@ function tasks.searchMenu(s, inp)
     setDefaultSearchModeAndOrder(s, q)
     q.phase = "topbar"
     s.fn = "searchTopBar"
-    setSearchMessage(q, sm.topBar[q.topBar + 1].description)
+    setSearchMessage(q, topBarDescription(q.topBar))
     refreshSearch(s)
     return
   end
@@ -1781,7 +1939,7 @@ function tasks.searchMenu(s, inp)
         se("SE_PC_OFF")
         s.fn = "exitSearch"
       else
-        setSearchMessage(q, RomText.plain("gText_SearchingPleaseWait"))
+        setSearchMessage(q, dexText("gText_SearchingPleaseWait"))
         refreshSearch(s)
         s.fn = "startSearch"
         se("SE_DEX_SEARCH")
@@ -1806,7 +1964,7 @@ function tasks.searchMenu(s, inp)
     if nxt ~= 0xFF then
       se(sound)
       q.menuItem = nxt
-      setSearchMessage(q, sm.items[q.menuItem + 1].description)
+      setSearchMessage(q, itemDescription(q.menuItem))
       refreshSearch(s)
     end
   end
@@ -1834,10 +1992,10 @@ function tasks.waitSearch(s)
   if q.searchFrames < 60 then return end
   if s.list.count ~= 0 then
     se("SE_SUCCESS")
-    setSearchMessage(q, RomText.plain("gText_SearchCompleted"))
+    setSearchMessage(q, dexText("gText_SearchCompleted"))
   else
     se("SE_FAILURE")
-    setSearchMessage(q, RomText.plain("gText_NoMatchingPkmnWereFound"))
+    setSearchMessage(q, dexText("gText_NoMatchingPkmnWereFound"))
   end
   refreshSearch(s)
   s.fn = "searchDone"
@@ -1857,7 +2015,7 @@ function tasks.searchDone(s, inp)
     else
       s.fn = "searchMenu"
       q.phase = "menu"
-      setSearchMessage(q, Gfx.manifest().search.items[q.menuItem + 1].description)
+      setSearchMessage(q, itemDescription(q.menuItem))
       refreshSearch(s)
       se("SE_BALL")
     end
@@ -1869,8 +2027,7 @@ function tasks.searchParam(s, inp)
   local new, rep = inp.new or {}, inp.rep or {}
   local q = s.searchState
   local mi = q.menuItem
-  local texts = searchOptionTexts(mi)
-  local maxOption = #texts - 1
+  local maxOption = #searchOptionList(mi) - 1
   if new.a or new.b then
     se(new.a and "SE_PIN" or "SE_BALL")
     if new.b then
@@ -1879,7 +2036,7 @@ function tasks.searchParam(s, inp)
     end
     q.paramBox = false
     q.phase = "menu"
-    setSearchMessage(q, Gfx.manifest().search.items[mi + 1].description)
+    setSearchMessage(q, itemDescription(mi))
     refreshSearch(s)
     s.fn = "searchMenu"
     return
@@ -1904,7 +2061,7 @@ function tasks.searchParam(s, inp)
   end
   if moved then
     se("SE_SELECT")
-    local t = texts[searchSel(q, mi) + 1]
+    local t = searchOptionTexts(mi)[searchSel(q, mi) + 1]
     setSearchMessage(q, t and t.description or "")
     refreshSearch(s)
   end
@@ -1952,11 +2109,24 @@ function tasks.caught(s)
     end
   elseif st == 1 then
     local pal = Gfx.bgPalette("hoenn")
+    local map = Gfx.map("info")
+    if nativeRs() then
+      local source = Gfx.manifest().palettes.hoenn
+      for i = 0, 239 do pal[i] = 0 end
+      for i = 1, 79 do pal[32 + i] = source[i + 1] end
+      for i = 0, math.min(639, map.n - 1) do map[i] = (map[i] + 0x2000) % 65536 end
+      s.descriptionPage = 0
+    end
     c.basePal = pal
-    s.bg = { [3] = layer("info", Gfx.renderMap(Gfx.map("info"), "menu", pal), 3) }
-    local flash = Gfx.bgPalette("hoenn")
-    for i = 1, 7 do flash[48 + i] = Gfx.manifest().palettes.hoenn[49 + i] end
-    c.flashImg = Gfx.renderMap(Gfx.map("info"), "menu", flash)
+    c.map = map
+    s.bg = { [3] = layer("info", Gfx.renderMap(map, "menu", pal), 3) }
+    local flash = {}; for i = 0, 255 do flash[i] = pal[i] end
+    for i = 1, 7 do
+      if nativeRs() then flash[80 + i] = Gfx.manifest().palettes.registrationFlash[i + 1]
+      else flash[48 + i] = Gfx.manifest().palettes.hoenn[49 + i] end
+    end
+    c.flashPal = flash
+    c.normalImg, c.flashImg = s.bg[3].img, Gfx.renderMap(map, "menu", flash)
     c.footprint = footprintImage(c.dexNum)
     s.state = 2
   elseif st == 2 then
@@ -1988,7 +2158,15 @@ end
 function tasks.caughtInput(s, inp)
   local new = inp.new or {}
   local c = s.caught
-  if new.a or new.b then
+  local flipped = nativeRs() and not new.b and new.a and (s.descriptionPage or 0) == 0
+  if flipped then
+    s.descriptionPage = 1
+    c.text = monInfo(s, c.dexNum, s.nationalEnabled, true, true)
+    for _, i in ipairs({0x165, 0x185}) do c.map[i] = c.map[i] + 1 end
+    c.normalImg, c.flashImg = Gfx.renderMap(c.map, "menu", c.basePal), Gfx.renderMap(c.map, "menu", c.flashPal)
+    se("SE_PIN")
+  end
+  if (new.a and not flipped) or new.b then
     s.pal:beginFade(Pal.BG, 0, 0, 16, Pal.BLACK)
     s.fadeExempt = { mon = true }
     c.mon.cb = "slideToCenter"
@@ -2027,8 +2205,7 @@ function Pokedex.frame(s, inp)
   end
   if s.searchArrows and s.fn == "searchParam" then
     local q = s.searchState
-    local texts = searchOptionTexts(q.menuItem)
-    local last = #texts - 1
+    local last = #searchOptionList(q.menuItem) - 1
     for _, a in ipairs(s.searchArrows) do
       local off = q.scroll[q.menuItem] or 0
       if a.down then
@@ -2163,8 +2340,15 @@ local function listRowsText(s)
     if y > 160 then y = y - 256 end
     if y > -16 and y < 160 then
       if row.owned then love.graphics.draw(ball, 136, y) end
-      FrlgFont.draw(numPrefix .. row.num, 144, y + 1, { colors = colors, font = "narrow" })
-      FrlgFont.draw(row.name, 176, y + 1, { colors = colors, font = "narrow" })
+      if nativeRs() then
+        local number = Gfx.sprite("number", 0, 8, 16, spritePal())
+        love.graphics.draw(number, 144, y)
+        FrlgFont.draw(row.num, 152, y, {colors = colors, font = "normal"})
+        FrlgFont.draw(row.name, 172, y, {colors = colors, font = "normal"})
+      else
+        FrlgFont.draw(numPrefix .. row.num, 144, y + 1, { colors = colors, font = "narrow" })
+        FrlgFont.draw(row.name, 176, y + 1, { colors = colors, font = "narrow" })
+      end
     end
   end
 end
@@ -2194,14 +2378,14 @@ local function drawInfo(s)
   drawText(info.text, colors)
   if info.footprint then
     -- pokeemerald/src/pokedex.c:4583
-    tintMask(info.footprint, Gfx.color(Gfx.manifest().palettes.messageBox[3]), 25 * 8, 8 * 8)
+    tintMask(info.footprint, Gfx.color(Gfx.manifest().palettes.messageBox[nativeRs() and 2 or 3]), 25 * 8, 8 * 8)
   end
 end
 
 local function drawArea(s)
   local a = s.area
   if not a then return end
-  drawLayer(layer("area_map", a.map, 3, 0, -8))
+  if nativeRs() then love.graphics.draw(a.map, 0, 0) else drawLayer(layer("area_map", a.map, 3, 0, -8)) end
   local g = a.glowState
   if a.glow and g then
     love.graphics.setShader(alphaShader())
@@ -2289,7 +2473,8 @@ end
 local function drawSearch(s)
   drawLayer(s.bg[3])
   local pal = Gfx.manifest().palettes.searchMenu
-  local colors = { fg = Gfx.color(pal[16]), shadow = Gfx.color(pal[3]), bg = { 0, 0, 0, 0 } }
+  local colors = nativeRs() and textColors(s)
+    or { fg = Gfx.color(pal[16]), shadow = Gfx.color(pal[3]), bg = { 0, 0, 0, 0 } }
   drawText(s.searchText, colors)
   for _, a in ipairs(s.searchArrows or {}) do
     if not a.invisible then
@@ -2305,12 +2490,12 @@ local function drawCaught(s)
   if not c then return end
   local l = s.bg[3]
   if l then
-    l.img = c.flash and c.flashImg or l.img
+    l.img = c.flash and c.flashImg or (nativeRs() and c.normalImg or l.img)
     drawLayer(l)
   end
-  drawText(c.text, { fg = Gfx.color(c.basePal[15]), shadow = Gfx.color(c.basePal[3]), bg = { 0, 0, 0, 0 } })
+  drawText(c.text, nativeRs() and textColors(s) or { fg = Gfx.color(c.basePal[15]), shadow = Gfx.color(c.basePal[3]), bg = { 0, 0, 0, 0 } })
   if c.footprint then
-    tintMask(c.footprint, Gfx.color(Gfx.manifest().palettes.messageBox[3]), 25 * 8, 8 * 8)
+    tintMask(c.footprint, Gfx.color(Gfx.manifest().palettes.messageBox[nativeRs() and 2 or 3]), 25 * 8, 8 * 8)
   end
 end
 

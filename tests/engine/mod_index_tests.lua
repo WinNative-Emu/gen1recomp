@@ -488,6 +488,28 @@ do
     "a cart is filtered by the game it plays as")
   eq(#ModIndex.filter(carts, { game = "gen1" }), 1,
     "and only that game")
+
+  local hoenn = {
+    { id = "ruby_run", kind = "cart", base = "ruby" },
+    { id = "sapphire_run", kind = "cart", base = "sapphire" },
+    { id = "rs_mod", games = { "ruby", "sapphire" } },
+    { id = "fr_mod", games = { "firered" } },
+  }
+  local function ids(rows)
+    local out = {}
+    for _, row in ipairs(rows) do out[#out + 1] = row.id end
+    return table.concat(out, ",")
+  end
+  eq(ids(ModIndex.filter(hoenn, { game = "ruby" })), "ruby_run,rs_mod",
+    "a Ruby filter keeps the Ruby cart and the Ruby/Sapphire mod")
+  eq(ids(ModIndex.filter(hoenn, { game = "sapphire" })), "sapphire_run,rs_mod",
+    "a Sapphire filter keeps the Sapphire cart and the Ruby/Sapphire mod")
+  eq(ids(ModIndex.filter(hoenn, { game = "rse" })), "ruby_run,sapphire_run,rs_mod",
+    "rse covers Ruby and Sapphire")
+  eq(ids(ModIndex.filter(hoenn, { game = "gen3" })), "ruby_run,sapphire_run,rs_mod,fr_mod",
+    "gen3 covers every Gen 3 base")
+  eq(ids(ModIndex.filter(hoenn, { game = "frlg" })), "fr_mod",
+    "frlg leaves the Hoenn games out")
 end
 
 do

@@ -464,11 +464,13 @@ function UI:taskShowContestResults(tid, d)
       saveLinkContestResults(sess, c)
       if c.standings[c.playerIndex] == 0 then incrementGameStat(sess, GAME_STAT_WON_LINK_CONTEST) end
       local okF, FieldRse = pcall(require, "src.core.game3.scripting.natives_field_rse")
-      if okF and FieldRse and FieldRse.tryGainNewFanFromCounter and sess and not self.opts.noFieldHooks then
+      local id = require("src.core.game3.profile").forSession(sess).id
+      local nativeRs = id == "ruby" or id == "sapphire"
+      if not nativeRs and okF and FieldRse and FieldRse.tryGainNewFanFromCounter and sess and not self.opts.noFieldHooks then
         pcall(FieldRse.tryGainNewFanFromCounter, FANCOUNTER_FINISHED_CONTEST)
       end
       local okN, NC = pcall(require, "src.core.game3.scripting.natives_contest")
-      if okN and NC and NC.onResultsShown and sess then NC.onResultsShown(c, sess) end
+      if not nativeRs and okN and NC and NC.onResultsShown and sess then NC.onResultsShown(c, sess) end
     end
     if self:pal():fadeActive() then return end
     if not self.linkResultsPersisted and not self.opts.noFieldHooks then
@@ -501,12 +503,16 @@ function UI:taskShowContestResults(tid, d)
   end
   if self:pal():fadeActive() then return end
   d[0] = 0
-  incrementGameStat(sess, GAME_STAT_ENTERED_CONTEST)
-  if c.standings[c.playerIndex] == 0 then incrementGameStat(sess, GAME_STAT_WON_CONTEST) end
+  local id = require("src.core.game3.profile").forSession(sess).id
+  local nativeRs = id == "ruby" or id == "sapphire"
+  if not nativeRs then
+    incrementGameStat(sess, GAME_STAT_ENTERED_CONTEST)
+    if c.standings[c.playerIndex] == 0 then incrementGameStat(sess, GAME_STAT_WON_CONTEST) end
+  end
   local okN, NC = pcall(require, "src.core.game3.scripting.natives_contest")
-  if okN and NC and NC.onResultsShown and sess then NC.onResultsShown(c, sess) end
+  if not nativeRs and okN and NC and NC.onResultsShown and sess then NC.onResultsShown(c, sess) end
   local okF, FieldRse = pcall(require, "src.core.game3.scripting.natives_field_rse")
-  if okF and FieldRse and FieldRse.tryGainNewFanFromCounter and sess and not self.opts.noFieldHooks then
+  if not nativeRs and okF and FieldRse and FieldRse.tryGainNewFanFromCounter and sess and not self.opts.noFieldHooks then
     pcall(FieldRse.tryGainNewFanFromCounter, FANCOUNTER_FINISHED_CONTEST)
   end
   self:setFunc(tid, "taskAnnouncePreliminaryResults")
@@ -747,6 +753,14 @@ function UI:taskTrySetContestInterviewData(tid, d)
       Rse.call("tv", "bravoTrainerPokemonProfileBeforeInterview2", nil, nil, c.standings[c.playerIndex],
         c.category, c.rank, mon)
     end
+  end
+  local sess = self.session
+  local id = require("src.core.game3.profile").forSession(sess).id
+  if (id == "ruby" or id == "sapphire") and sess and not self.rsResultsSaved then
+    self.rsResultsSaved = true
+    if not self.opts.noFieldHooks then require("src.core.game3.rse.fan_club_lifecycle_rs").onContestResults(sess) end
+    local NC = require("src.core.game3.scripting.natives_contest")
+    NC.onResultsShown(c, sess)
   end
   self.hwFade = { y = 0 }
   d[1] = 0
@@ -1085,7 +1099,7 @@ UI.Host = Host
 function UI.open(opts)
   local Stack = require("src.ui.game3.stack")
   local SceneKit = require("src.ui.game3.rse.scene_kit")
-  local screen = UI.new(opts)
+  local screen = ((opts and opts.sceneClass) or UI).new(opts)
   Host._screen = screen
   Host._step = SceneKit.stepper()
   local userDone = opts and opts.onDone

@@ -26,11 +26,19 @@ local function s16(v)
   return v
 end
 
+local function nativePolicy()
+  return require("src.core.game3.profile").forSession(Town.session()).oldMan
+end
+
 local function numPhonemeSongs()
+  local policy = nativePolicy()
+  if policy and policy.bardNumPhonemeSongs then return policy.bardNumPhonemeSongs end
   return require("src.core.game3.constants").of("emerald"):require("songs", "NUM_PHONEME_SONGS")
 end
 
 local function firstPhonemeSong()
+  local policy = nativePolicy()
+  if policy and policy.bardFirstPhonemeSong then return policy.bardFirstPhonemeSong end
   local C = require("src.core.game3.constants").of("emerald")
   return C:require("songs", "PH_TRAP_BLEND")
 end
@@ -60,7 +68,10 @@ function Bard.isWordInvalid(word)
   if groupId >= Town.EC_NUM_GROUPS then return true end
   local d = Town.data().bard
   local n
-  if groupId == G.POKEMON or groupId == G.POKEMON_NATIONAL then
+  local policy = nativePolicy()
+  if policy and policy.bardNativeGroups then
+    n = d.groups[groupId] and d.groups[groupId].words or 0
+  elseif groupId == G.POKEMON or groupId == G.POKEMON_NATIONAL then
     n = d.pokemon.words
   elseif groupId == G.MOVE_1 or groupId == G.MOVE_2 then
     n = d.moves.words
@@ -78,7 +89,10 @@ function Bard.templatesFor(word)
   local index = bit.band(word, 0x1FF)
   local d = Town.data().bard
   local tbl
-  if groupId == G.POKEMON or groupId == G.POKEMON_NATIONAL then
+  local policy = nativePolicy()
+  if policy and policy.bardNativeGroups then
+    tbl = d.groups[groupId]
+  elseif groupId == G.POKEMON or groupId == G.POKEMON_NATIONAL then
     tbl = d.pokemon
   elseif groupId == G.MOVE_1 or groupId == G.MOVE_2 then
     tbl = d.moves

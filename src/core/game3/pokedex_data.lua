@@ -5,6 +5,7 @@ local Extract = require("src.import.gba.extract_island1")
 local Dex = require("src.core.game3.dex")
 local Pokemon = require("src.core.game3.pokemon")
 local RomText = require("src.core.game3.rom_text")
+local CacheBlob = require("src.import.CacheBlob")
 
 local PokedexData = {}
 
@@ -40,7 +41,7 @@ local function read_bytes(rel)
   for _, p in ipairs(candidates) do
     local f = io.open(p, "rb")
     if f then
-      local d = f:read("*a")
+      local d = CacheBlob.decode(p, f:read("*a"))
       f:close()
       if d and #d > 0 then return d end
     end

@@ -154,6 +154,10 @@ function Menu:draw()
       Font.draw(line, (self.tx + 3) * 8, (self.ty + i - 1) * 8)
     end
   end
+  -- The choices are black with or without a title: tile glyphs come out
+  -- black whatever the color, but TTF text (a translation's font) draws in
+  -- the current one, which is white after the box and the previous frame.
+  love.graphics.setColor(0, 0, 0, 1)
   local visible = (self.maxVisible and math.min(self.maxVisible, #self.items))
     or #self.items
   -- Row Y: pokered's boxed menus anchor the choices to the BOTTOM interior

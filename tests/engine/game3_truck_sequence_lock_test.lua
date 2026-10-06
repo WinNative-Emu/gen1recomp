@@ -47,4 +47,21 @@ Truck.step(seq)
 check(seq.done, "truck sequence completes on frame 120 of state 5")
 eq(Field.isLocked(), false, "movement is unlocked after truck sequence completes")
 
+local Task=require("src.core.game3.task")
+Task.clear()
+local mutations=0
+local fake={setMetatile=function() mutations=mutations+1 end,drawWholeMapView=function() end,
+  lock=function() end,blackout=function() end,fadeActive=function() return false end,
+  fadeInFromBlack=function() mutations=mutations+1 end,setCameraPanning=function() mutations=mutations+1 end,
+  setBoxOffset=function() mutations=mutations+1 end,playSe=function() mutations=mutations+1 end,
+  installPanAhead=function() end}
+Truck.execute(fake)
+eq(Task.count(),1,"truck owns one spawned task")
+Task.update(1/60)
+Truck.reset()
+local afterReset=mutations
+eq(Task.count(),0,"truck reset removes its active task")
+for _=1,900 do Task.update(1/60) end
+eq(mutations,afterReset,"cancelled truck never writes to the subsequent map")
+eq(Truck.isRunning(),false,"reset leaves sequence stopped")
 T.finish("game3_truck_sequence_lock_test")

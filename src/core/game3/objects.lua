@@ -731,6 +731,88 @@ function Objects.foreignKey(mapId, localId)
   return f and f[tostring(mapId) .. ":" .. tostring(tonumber(localId) or localId)] or nil
 end
 
+-- pokeemerald/src/load_save.c:180
+function Objects.snapshot()
+  if not Objects._mapId then return nil end
+  local protos = {}
+  for _, def in ipairs(Objects._defs or {}) do
+    local lid = tonumber(def.localId or def.index) or 0
+    if lid > 0 then protos[lid] = newEventObject(def) end
+  end
+  local list = {}
+  for _, lid in ipairs(Objects._order) do
+    local eo, p = Objects._byId[lid], protos[lid]
+    if eo and p and lid > 0 and lid < FOREIGN_BASE and not eo.foreignMap then
+      local row = { l = lid }
+      local diff = false
+      local function put(k, v, base)
+        if v ~= base then row[k], diff = v, true end
+      end
+      if eo.hidden then
+        if not p.hidden then row.h, diff = 1, true end
+      else
+        local x, y = eo.cellX, eo.cellY
+        if eo.moving and eo.targetX then x, y = eo.targetX, eo.targetY end
+        put("x", tonumber(x), p.cellX)
+        put("y", tonumber(y), p.cellY)
+        put("hx", tonumber(eo.homeX), p.homeX)
+        put("hy", tonumber(eo.homeY), p.homeY)
+        put("f", eo.facing, p.facing)
+        put("m", tonumber(eo.movementType), p.movementType)
+        put("e", tonumber(eo.elevation), p.elevation)
+        put("c", tonumber(eo.currentElevation), p.currentElevation)
+        if (eo.invisible == true) ~= (p.invisible == true) then row.i, diff = eo.invisible and 1 or 0, true end
+        if p.hidden then diff = true end
+      end
+      if diff then list[#list + 1] = row end
+    end
+  end
+  return { mapId = Objects._mapId, list = list }
+end
+
+local function placeObject(eo, x, y, homeX, homeY)
+  eo.cellX, eo.cellY = x, y
+  eo.px, eo.py = x * CELL, y * CELL
+  eo.targetX, eo.targetY = x, y
+  eo.homeX, eo.homeY = homeX or x, homeY or y
+  eo.moving, eo.progress = false, 0
+  if eo.def then eo.def.x, eo.def.y = x, y end
+end
+
+-- pokeemerald/src/load_save.c:188
+-- pokeemerald/src/event_object_movement.c:1715
+function Objects.restoreSnapshot(snap)
+  if type(snap) ~= "table" or type(snap.list) ~= "table" or snap.mapId ~= Objects._mapId then return false end
+  for _, row in ipairs(snap.list) do
+    local lid = type(row) == "table" and tonumber(row.l) or 0
+    if lid > 0 and lid < FOREIGN_BASE then
+      local eo = Objects._byId[lid]
+      if row.h then
+        if eo and not eo.hidden then
+          eo.hidden, eo.visible = true, false
+          if eo.def then eo.def.hidden = true end
+          Objects._tracks[lid] = nil
+        end
+      else
+        if not eo or eo.hidden then eo = respawnFromTemplate(lid) end
+        if eo then
+          local x, y, hx, hy = tonumber(row.x), tonumber(row.y), tonumber(row.hx), tonumber(row.hy)
+          if x or y or hx or hy then
+            placeObject(eo, x or eo.cellX, y or eo.cellY, hx or eo.homeX, hy or eo.homeY)
+          end
+          local mt = tonumber(row.m)
+          if mt and mt ~= tonumber(eo.movementType) then Objects.setTrainerMovementType(eo, mt) end
+          if type(row.f) == "string" then eo.facing = row.f end
+          if tonumber(row.e) then eo.elevation = tonumber(row.e) end
+          if tonumber(row.c) then eo.currentElevation = tonumber(row.c) end
+          if row.i ~= nil then eo.invisible = tonumber(row.i) == 1 end
+        end
+      end
+    end
+  end
+  return true
+end
+
 function Objects.find(localId)
   localId = tonumber(localId) or 0
   if Objects.isPlayer(localId) then
@@ -844,7 +926,7 @@ function Objects.forDraw()
     local eo = Objects._byId[lid]
     -- src/event_object_movement.c:8014
     if eo and eo.visible and not eo.hidden and not eo.invisible
-        and (eo.foreignMap ~= nil or not offMap(Objects._bounds, eo)) then
+        and (eo.foreignMap ~= nil or eo.moving or eo.scriptBusy or (Objects._tracks and Objects._tracks[eo.localId] ~= nil) or not offMap(Objects._bounds, eo)) then
       n = n + 1
       list[n] = eo
     end
@@ -866,6 +948,9 @@ function Objects.forDraw()
       vrec.sprite = GfxIds.spriteFor(gid)
       vrec.graphicsId = gid
       vrec.raiseY = tonumber(vo.y2) or 0
+      vrec.px, vrec.py, vrec.moving = vo.px, vo.py, vo.moving == true
+      vrec.targetX, vrec.targetY = vo.targetX, vo.targetY
+      vrec.animClock, vrec.stepFrames, vrec.stepFlip = tonumber(vo.animClock) or 0, vo.stepFrames, vo.stepFlip
       if not offMap(Objects._bounds, vrec) then
         n = n + 1
         list[n] = vrec
@@ -919,6 +1004,8 @@ function Objects.blocks(tx, ty, exceptLocalId, elevation)
   for i = 1, VirtualObjects.slots() do
     local vo = VirtualObjects.nth(i)
     if vo and vo.solid == true and tonumber(vo.x) == tx and tonumber(vo.y) == ty then return true end
+    -- pokeruby/src/overworld.c:2709
+    if vo and vo.solid == true and tonumber(vo.prevX) == tx and tonumber(vo.prevY) == ty then return true end
   end
   return false
 end

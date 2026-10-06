@@ -35,14 +35,11 @@ PartyMenu.isOpaque = true
 -- MEWMON instead painted every bar with MEWMON's shades, which is why a
 -- full bar came out black and a low one purple (#274, absorbing #272).
 --
--- Two rects differ from the packet's, both because this port draws pixels
+-- One rect differs from the packet's, because this port draws pixels
 -- where the hardware drew OAM over BG:
 --   * the icon block is rows 0-11, not the packet's 0-12 -- row 12 is the
 --     message box's top edge, which on hardware was BG under an OBJ-free
 --     part of the block; here it would take MEWMON instead of the base.
---   * the bar blocks sit one tile right of the packet's 05-11 because this
---     port's bar starts at tile 5 where party_menu.asm:71-76 starts it at
---     4; the span is the same "left cap + six fill tiles".
 function PartyMenu:sgbPalettes(game)
   local P = require("src.render.PaletteFX")
   local base = P.pal(game.data, "GREENBAR")
@@ -65,7 +62,7 @@ function PartyMenu:sgbPalettes(game)
       if self.heal and self.heal.mon == mon then hp = self.heal.from end
       local bar = P.pal(game.data, P.barPalName(hp, mon.stats.hp))
       if bar then
-        zones[#zones + 1] = P.zone(bar, 6, i * 2 - 1, 12, i * 2 - 1)
+        zones[#zones + 1] = P.zone(bar, 5, i * 2 - 1, 11, i * 2 - 1)
       end
     end
   end
@@ -466,7 +463,10 @@ end
 
 function PartyMenu:update(dt)
   -- icon animation counter; 320 = a whole cycle at every HP speed
-  self.blink = ((self.blink or 0) + 1) % 320
+  -- home/pokemon.asm:243
+  if not (self.submenu or self.chosenHollow or self.heal or self.swapAnim) then
+    self.blink = ((self.blink or 0) + 1) % 320
+  end
   -- The bar fill owns the menu while it runs: UpdateHPBar2 is a blocking
   -- predef in item_effects.asm, so no button is read until it lands (#252).
   local heal = self.heal
@@ -497,6 +497,7 @@ function PartyMenu:update(dt)
     end
     if anim.frames < 10 or (playing and anim.frames < 30) then return end
     self.swapAnim = nil
+    self.blink = 0 -- home/window.asm:16
     if self.game.data then
       require("src.core.Sound").play(self.game.data, "Swap")
     end
@@ -524,6 +525,7 @@ function PartyMenu:update(dt)
       self.subIndex = self.subIndex < n and self.subIndex + 1 or 1
     elseif input:wasPressed("b") then
       self.submenu = nil
+      self.blink = 0 -- home/window.asm:16
     elseif input:wasPressed("a") then
       local mon = party[self.index]
       if followerUnavailable(self.game, mon) then
@@ -595,6 +597,7 @@ function PartyMenu:update(dt)
           return
         end
         self.submenu = nil -- engine/menus/start_sub_menus.asm:66
+        self.chosenHollow = true
         ow:useFlashFieldMove(function() self:close() end)
         return
       elseif action == "surf" then
@@ -614,6 +617,7 @@ function PartyMenu:update(dt)
           -- trySurf closes this menu when its text does (#385)
           local fx, fy = ow.player:facingCell()
           self.submenu = nil -- engine/menus/start_sub_menus.asm:66
+          self.chosenHollow = true
           ow:trySurf(fx, fy, function() self:close() end)
           return
         end
@@ -687,6 +691,7 @@ function PartyMenu:update(dt)
             return
           end
           self.submenu = nil -- engine/menus/start_sub_menus.asm:66
+          self.chosenHollow = true
           ow:useStrengthFieldMove(mon, function() self:close() end)
           return
         elseif ow and ow.useFieldMove then
@@ -739,6 +744,7 @@ function PartyMenu:update(dt)
         return
       end
       self.submenu = nil
+      self.blink = 0 -- home/window.asm:16
     end
     return
   end
@@ -754,12 +760,15 @@ function PartyMenu:update(dt)
   if grid then
     self.index = grid
     self.game.partyMenuSavedIndex = self.index
+    self.blink = 0 -- home/window.asm:16
   elseif input:wasPressed("up") then
     self.index = self.index > 1 and self.index - 1 or math.max(1, #party)
     self.game.partyMenuSavedIndex = self.index -- HandlePartyMenuInput #768
+    self.blink = 0 -- home/window.asm:16
   elseif input:wasPressed("down") then
     self.index = self.index < #party and self.index + 1 or 1
     self.game.partyMenuSavedIndex = self.index -- HandlePartyMenuInput #768
+    self.blink = 0 -- home/window.asm:16
   elseif input:wasPressed("b") then
     self.game.stack:pop()
     if self.onCancel then self.onCancel() end
@@ -964,11 +973,11 @@ function PartyMenu:draw()
       for _, m in ipairs(def.tmhm or {}) do
         if m == self.tmhm.move then can = true break end
       end
-      -- right-aligned so the shorter "ABLE" shares "NOT ABLE"'s right edge
+      -- engine/menus/party_menu.asm:93
       if can then
-        Font.draw(Strings("ABLE"), 120, y + 8)
+        Font.draw(Strings("ABLE"), 96, y + 8)
       else
-        Font.draw(Strings("NOT ABLE"), 88, y + 8)
+        Font.draw(Strings("NOT ABLE"), 96, y + 8)
       end
     elseif self.evoStone then
       -- party_menu.asm:114 .evolutionStoneMenu: an EVOLVE_ITEM row matching
@@ -979,10 +988,11 @@ function PartyMenu:draw()
           can = true break
         end
       end
+      -- engine/menus/party_menu.asm:160
       if can then
-        Font.draw(Strings("ABLE"), 120, y + 8)
+        Font.draw(Strings("ABLE"), 96, y + 8)
       else
-        Font.draw(Strings("NOT ABLE"), 88, y + 8)
+        Font.draw(Strings("NOT ABLE"), 96, y + 8)
       end
     else
       if mon.hp <= 0 then
@@ -1006,7 +1016,8 @@ function PartyMenu:draw()
         shown = { hp = math.floor(self.heal.shown), stats = mon.stats }
       end
       love.graphics.setColor(1, 1, 1, 1)
-      HudTiles.drawHPBar(self.game.data, 5, (y + 8) / 8, shown, nil, barZoned)
+      -- engine/menus/party_menu.asm:71
+      HudTiles.drawHPBar(self.game.data, 4, (y + 8) / 8, shown, nil, barZoned)
       love.graphics.setColor(0, 0, 0, 1)
       Font.draw(("%3d/%3d"):format(shown.hp, mon.stats.hp), 104, y + 8)
     end

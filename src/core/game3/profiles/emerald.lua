@@ -1,7 +1,7 @@
 local BLOCKS = {
   "map", "species", "badges", "capabilities", "nativeModules", "coreSpecials", "extractors",
   "font", "battle", "ui", "boot", "audio", "clock", "field", "save", "rse", "dex", "dexArea",
-  "bag", "trainers", "heal", "regionMap", "text", "saveRules", "optionsBlock",
+  "bag", "trainers", "heal", "regionMap", "text", "saveRules", "optionsBlock", "weather",
 }
 
 local row = {

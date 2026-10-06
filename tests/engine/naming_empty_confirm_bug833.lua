@@ -7,9 +7,9 @@
 -- DisplayNameRaterScreen takes .playerCancelled and keeps the old nickname.
 -- Nothing in the original invents a letter, so NamingScreen:confirm must hand
 -- the caller "" rather than the literal "A" when nothing was typed -- both via
--- START and via the ED cell.  The two fallbacks that are load bearing stay:
--- presets[1] for player/rival naming (oak_speech2.asm ChoosePlayerName never
--- accepts an empty name) and opts.default for the Name Rater cancel.
+-- START and via the ED cell.  Player/rival naming (oak_speech2.asm
+-- ChoosePlayerName never accepts an empty name) re-opens the grid, and
+-- opts.default still covers the Name Rater cancel.
 --   luajit tests/engine/naming_empty_confirm_bug833.lua
 
 package.path = "./?.lua;./?/init.lua;" .. package.path
@@ -107,14 +107,34 @@ press(ns, game, "a")
 press(ns, game, "start")
 eq(res.name, "A", "a genuinely typed A still comes back as A")
 
--- ---------------------------------------------------------------- presets fallback (player / rival)
--- ChoosePlayerName / ChooseRivalName (engine/movie/oak_speech/oak_speech2.asm)
--- compare wStringBuffer to '@' and re-open rather than accept an empty name;
--- the port answers the same need with its presets fallback, which #833 must
--- not disturb.
+-- ---------------------------------------------------------------- player / rival re-prompt
+-- engine/movie/oak_speech/oak_speech2.asm:20
 ns, game, res = newScreen({ title = "YOUR NAME?", maxLen = 7, presets = { "RED", "ASH" } })
+ns.row, ns.col, ns.lower = 3, 4, true
 press(ns, game, "start")
-eq(res.name, "RED", "an empty confirm with presets still yields presets[1]")
+check(not res.fired, "an empty player/rival name does not confirm")
+eq(#game.stack.states, 1, "the naming screen stays up on an empty START")
+eq(ns.row, 1, "re-entry puts the cursor back on row 1")
+eq(ns.col, 1, "re-entry puts the cursor back on column 1")
+eq(ns.lower, true, "wAlphabetCase carries over the re-entry")
+check((ns.whiteout or 0) > 0, "the re-entry whites the screen out")
+ns.lower = false
+press(ns, game, "a")
+eq(#ns.glyphs, 0, "input is ignored while the screen is white")
+for _ = 1, 60 do ns:update(1 / 60) end
+eq(ns.whiteout, 0, "the whiteout ends")
+local edR, edC = edCell(ns)
+ns.row, ns.col = edR, edC
+press(ns, game, "a")
+check(not res.fired, "ED with nothing typed re-prompts too")
+eq(#game.stack.states, 1, "the naming screen is still up after an empty ED")
+for _ = 1, 60 do ns:update(1 / 60) end
+ns.row, ns.col = 1, 1
+press(ns, game, "a")
+press(ns, game, "start")
+check(res.fired, "a typed player name confirms")
+eq(res.name, "A", "the typed name comes back, never presets[1]")
+eq(#game.stack.states, 0, "a typed confirm pops the naming screen")
 
 -- ---------------------------------------------------------------- default fallback (Name Rater)
 -- DisplayNameRaterScreen jumps to .playerCancelled on '@' and keeps the

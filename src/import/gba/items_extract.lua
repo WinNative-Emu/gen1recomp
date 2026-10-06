@@ -184,7 +184,7 @@ function ItemsExtract.run(rom, cache, opts)
   local itemStride = assert(Versions.ITEM_STRIDE, "items_extract: no ITEM_STRIDE key")
   local layout = Layouts.active()
   local pocketNames = Layouts.pockets(layout)
-  local syms = rawget(Versions.module(), "SYMS")
+  local syms = Versions.SYMS
 
   local lines = {
     "-- Auto-generated from GBA ROM gItems table. DO NOT EDIT DIRECTLY.",

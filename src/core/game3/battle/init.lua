@@ -177,7 +177,7 @@ local function link_mon_from(foe)
   return Damage.ensureStats(mon, mon.level)
 end
 
-local function foe_mon_from(foe, link)
+local function foe_mon_from(foe, link, trainerPolicy)
   if link then return link_mon_from(foe) end
   if type(foe) ~= "table" then
     return Damage.ensureStats({
@@ -187,6 +187,8 @@ local function foe_mon_from(foe, link)
   end
   local Pokemon = require("src.core.game3.pokemon")
   local Rng = require("src.core.game3.rng")
+  local nativeTrainer = trainerPolicy and foe.nativeNpcTrainer
+  if nativeTrainer then foe = trainerPolicy.prepareMon(foe) end
   local species = foe.species or foe.id or 16
   local personality = foe.personality
   if personality == nil then
@@ -255,6 +257,9 @@ local function foe_mon_from(foe, link)
     dvs = foe.dvs,
     friendship = foe.friendship,
   }
+  if nativeTrainer or foe.otId ~= nil or foe.otSecretId ~= nil then
+    mon.otId, mon.otSecretId = foe.otId, foe.otSecretId
+  end
   if not mon.moves or #mon.moves == 0 then
     -- pokefirered/src/pokemon.c:2265
     local moves, pp, maxPp = Pokemon.movesAtLevel(mon.species, mon.level)
@@ -390,6 +395,15 @@ function Battle.linkEndText(st, outcome, ran)
   return BattleText.get(BattleText.BATTLEEND, Adapter.fill(st, { outcome = out, linkRan = ran and true or nil }))
 end
 
+local function capture_rs_results(st, outcome)
+  if not st or not st.resultPolicy then return end
+  st.resultPolicy.captureFinishState(st, outcome)
+  if st.battleResults._rsFinishSnapshot and st.onResultsReady and not st._rsResultsReady then
+    st._rsResultsReady = true
+    st.onResultsReady(outcome, st)
+  end
+end
+
 local function finish(result)
   if not Battle._active then return end
   local pst = Battle._st
@@ -421,6 +435,7 @@ local function finish(result)
       st.result = st.facility:finalResult(st, st.result)
       result = st.result
     end
+    capture_rs_results(st, st.result)
     local Runtime=package.loaded["src.core.game3.runtime"]
     local session=Runtime and Runtime.getSession()
     -- pokeemerald/src/battle_main.c:5221
@@ -496,15 +511,20 @@ function Battle.start(opts)
       return nil, "the peer sent no party"
     end
   else
-    foeMon = foe_mon_from(opts.foe)
+    local trainerPolicy = not (opts.wild or opts.battleTower or opts.eReader or opts.secretBase)
+      and BattleProfile.get(opts.session).trainerParty
+    local nativeTrainer = trainerPolicy
+      and opts.foe and opts.foe.nativeNpcTrainer and opts.foe.party and not opts.foeParty
+    if not nativeTrainer then foeMon = foe_mon_from(opts.foe, nil, trainerPolicy) end
     foeParty = opts.foeParty
     if not foeParty and opts.foe and opts.foe.party then
       foeParty = {}
       for _, fm in ipairs(opts.foe.party) do
-        foeParty[#foeParty + 1] = foe_mon_from(fm)
+        foeParty[#foeParty + 1] = foe_mon_from(fm, nil, trainerPolicy)
       end
     end
-    if foeParty and foeParty[1] and type(opts.foe) == "table" and opts.foe.species == nil and opts.foe.id == nil then
+    if foeParty and foeParty[1] and (nativeTrainer
+        or (type(opts.foe) == "table" and opts.foe.species == nil and opts.foe.id == nil)) then
       foeMon = foeParty[1]
     end
     -- pokeemerald/src/pokemon.c:6678
@@ -515,6 +535,7 @@ function Battle.start(opts)
       if held and held ~= 0 then foeMon.item = held end
     end
   end
+  if opts.onPartyCreated then opts.onPartyCreated() end
   Moves.loadRomPack(opts.cache)
   local double = (opts.double == true) and not opts.wild
   local multi = (linkBattle and double and type(opts.multi) == "table") and opts.multi or nil
@@ -575,6 +596,8 @@ function Battle.start(opts)
     local session = opts.session
       or (Runtime and Runtime.getSession and Runtime.getSession())
     st.session = session
+    st.enigmaBerries = opts.enigmaBerries
+    require("src.core.game3.battle.held_items").installEnigmaState(st)
     st.pyramid = opts.pyramid == true
     st.dex = opts.dex or (session and session.dex)
     Ui.bindState(st, session)
@@ -620,6 +643,9 @@ function Battle.start(opts)
   end
   Anim.syncDisplayFromState(st)
   Battle._st = st
+  st.resultPolicy = BattleProfile.of(st).results
+  if st.resultPolicy then st.battleResults = st.resultPolicy.new() end
+  st.onResultsReady = opts.onResultsReady
   Battle._adapter = Adapter.new(st, function(text) Ui.push(text) end)
   Battle._onDone = opts.onDone
   Battle._active = true
@@ -653,17 +679,7 @@ function Battle.start(opts)
   end
 
   local BattleBg = require("src.core.game3.battle.bg")
-  local terrain = opts.terrain
-  -- pokefirered/src/battle_main.c:689
-  if terrain == nil and (opts.mapBehavior ~= nil or opts.mapType ~= nil) then
-    terrain = BattleBg.resolveFromBehavior(opts.mapBehavior, opts.mapKind, opts.mapType)
-  end
-  if terrain == nil and opts.mapKind then
-    terrain = BattleBg.resolveFromMapKind(opts.mapKind)
-  end
-  if terrain == nil then
-    terrain = BattleBg.TERRAIN.BUILDING
-  end
+  local terrain = BattleBg.resolveOpts(opts)
   st.terrain = terrain
   -- pokefirered/src/battle_bg.c:714
   BattleBg.setTerrain(BattleBg.resolveOverride(terrain, {
@@ -679,6 +695,7 @@ function Battle.start(opts)
     recordedLink = opts.recordedLink,
     groudon = opts.groudon,
     kyogre = opts.kyogre,
+    kyogreGroudon = opts.kyogreGroudon,
     rayquaza = opts.rayquaza,
   }))
 
@@ -701,7 +718,7 @@ function Battle.start(opts)
   st.trainerClassName = trainerInfo and trainerInfo.className or opts.trainerClassName
   st.trainerName = (trainerInfo and trainerInfo.name) or opts.trainerName
   -- pokefirered/src/trainer_tower.c:447, src/battle_tower.c:1340
-  if st.trainerTower or st.eReader then
+  if (st.trainerTower or st.eReader) and type(opts.frontierTrainer) ~= "table" then
     local facilityClass = tonumber(opts.foe and opts.foe.trainerClass)
     local tower = require("src.core.game3.trainer_tower").pack()
     local classes = tower and tower.facilityClassTrainerClass
@@ -1477,6 +1494,7 @@ Battle._mergeLeveledSet = merge_leveled_set
 local function begin_evo_or_end()
   local st = Battle._st
   Battle._pendingEnd = Battle._pendingEnd or "win"
+  capture_rs_results(st, Battle._pendingEnd)
   if Battle._pendingEnd ~= "win" or not st then
     Battle._phase = "ending"
     return
@@ -1761,6 +1779,8 @@ local function begin_trainer_win(st)
         twoOpponents = st.kinds and st.kinds.twoOpponents,
         trainerIdB = st.trainerIdB,
         moneyMultiplier = st.moneyMultiplier or 1,
+        secretBaseLevel = bp.rules.secretBasePrize and st.secretBase
+          and tonumber(st.foeParty and st.foeParty[1] and st.foeParty[1].level) or nil,
       })
       Prize.apply(session, amount)
       Ui.push(Prize.moneyMessage(session.name or pname, amount))
@@ -3541,12 +3561,28 @@ function D.run(act)
 end
 
 -- pokefirered/data/battle_scripts_2.s:87
+local function capture_rs_caught(catchRes)
+  local st = Battle._st
+  if not st or not st.resultPolicy or Wally.active(st) or not catchRes
+      or not catchRes.success or catchRes.pending or catchRes._rsGiveFailed
+      or not catchRes.mon or catchRes._rsCaptured then return end
+  local enemy = State.battler(st, 1)
+  if not enemy or not enemy.mon then return end
+  st.resultPolicy.giveCaughtMon(st.battleResults, {
+    species = Pokemon.speciesOf(enemy.mon),
+    nicknameBytes = require("src.core.game3.rs.tv_queries").nicknameBytes(st.session, catchRes.mon),
+    nicknameText = Pokemon.displayMonName(catchRes.mon),
+  })
+  catchRes._rsCaptured = true
+end
+
 local function finish_catch_flow(catchRes, ename, nicknamed)
   if catchRes and catchRes.location == "pc" then
     local Runtime = package.loaded["src.core.game3.runtime"]
     local session = Runtime and Runtime.getSession and Runtime.getSession()
     local Storage = require("src.core.game3.storage")
-    require("src.core.game3.battle.catching").givePending(session, catchRes)
+    catchRes._rsGiveFailed = not require("src.core.game3.battle.catching").givePending(session, catchRes)
+    capture_rs_caught(catchRes)
     -- pokefirered/src/battle_script_commands.c:9617
     local page = Storage.pcTransferMessage(session, ename)
     if not nicknamed then
@@ -3555,6 +3591,7 @@ local function finish_catch_flow(catchRes, ename, nicknamed)
       return
     end
   end
+  capture_rs_caught(catchRes)
   Ui.clearCaughtDexScene()
   Battle._actions = {}
   Battle._pendingEnd = "catch"
@@ -3569,9 +3606,10 @@ local function start_post_catch_flow(catchRes)
       or Wally.active(Battle._st))) then
     if catchRes and catchRes.pending then
       local Runtime = package.loaded["src.core.game3.runtime"]
-      require("src.core.game3.battle.catching").givePending(
+      catchRes._rsGiveFailed = not require("src.core.game3.battle.catching").givePending(
         Runtime and Runtime.getSession and Runtime.getSession(), catchRes)
     end
+    capture_rs_caught(catchRes)
     Battle._actions = {}
     Battle._pendingEnd = "catch"
     Battle._phase = "ending"

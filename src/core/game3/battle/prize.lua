@@ -166,6 +166,10 @@ end
 -- pokeemerald/src/battle_script_commands.c:5635
 function Prize.rewardRse(trainerId, opts)
   opts = opts or {}
+  -- pokeruby/src/battle_script_commands.c:5467
+  if opts.secretBaseLevel then
+    return 20 * opts.secretBaseLevel * (tonumber(opts.moneyMultiplier) or 1)
+  end
   local amount = Prize.calcRse(trainerId, opts)
   if opts.twoOpponents and opts.trainerIdB then
     amount = amount + Prize.calcRse(opts.trainerIdB, opts)
@@ -303,6 +307,14 @@ function Prize.pickup(party, random, rules)
   random = random or require("src.core.game3.rng").Random
   if rules and rules.pickup == "level_bands" then return pickup_banded(party, random, rules) end
   local Pokemon = require("src.core.game3.pokemon")
+  local items = Prize.PICKUP_ITEMS
+  if rules and rules.pickup == "rs_flat" then
+    local C = require("src.core.game3.constants").of(rules.pickupGame)
+    items = {}
+    for j, row in ipairs(rules.pickupItems) do
+      items[j] = { C:require("items", row[1]), row[2] }
+    end
+  end
   for i = 1, 6 do
     local mon = party[i]
     if type(mon) == "table" then
@@ -317,10 +329,10 @@ function Prize.pickup(party, random, rules)
         and random() % 10 == 0 then
         local r = random() % 100
         local j = 1
-        while j <= 15 and not (Prize.PICKUP_ITEMS[j][2] > r) do
+        while j < #items and not (items[j][2] > r) do
           j = j + 1
         end
-        local itemId = Prize.PICKUP_ITEMS[j][1]
+        local itemId = items[j][1]
         mon.item = itemId
         mon.heldItem = itemId
         picked[#picked + 1] = { slot = i, item = itemId }

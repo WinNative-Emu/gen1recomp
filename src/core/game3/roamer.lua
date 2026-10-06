@@ -41,7 +41,8 @@ function Roamer.initRse(session, createLatios)
   local cfg = rse_cfg(session)
   if not (session and cfg) then return false end
   local C = require("src.core.game3.constants").of(require("src.core.game3.constants").versionOf(session))
-  local species = C:require("species", cfg.species[createLatios and 1 or 0])
+  -- pokeruby/include/constants/species.h:1282
+  local species = C:require("species", cfg.fixedSpecies or cfg.species[createLatios and 1 or 0])
   local Party = require("src.core.game3.party")
   local tmp = { party = {}, name = session.name, trainerId = session.trainerId, secretId = session.secretId,
     gender = session.gender }

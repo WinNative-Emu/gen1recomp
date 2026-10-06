@@ -71,6 +71,13 @@ end
 function FakeRelay:drop(s)
   s.transport.closed = true
   s.online = false
+  local g = self:groupOf(s)
+  if g and g.leader == s.id then
+    self:groupBroadcast(g, self:groupStateMsg(g))
+  elseif g then
+    self:leaveGroup(s, true)
+    s.groupLost = g.leader
+  end
 end
 
 function FakeRelay:forget(s)
@@ -560,9 +567,50 @@ function FakeRelay:handleInviteReply(s, msg)
 end
 
 function FakeRelay:groupStateMsg(g)
+  local function people(list)
+    local out = copy(list)
+    for _, p in ipairs(out) do
+      local s = self.sessions[p.id]
+      p.online = s ~= nil and s.online == true
+    end
+    return out
+  end
   return { type = "group_state", leader = g.leader, activity = g.activity,
-           min = g.min, max = g.max, members = copy(g.members),
-           pending = copy(g.pending) }
+           min = g.min, max = g.max, members = people(g.members),
+           pending = people(g.pending) }
+end
+
+function FakeRelay:groupOf(s)
+  if self.groups[s.id] then return self.groups[s.id] end
+  for _, g in pairs(self.groups) do
+    for _, list in ipairs({ g.members, g.pending }) do
+      for _, p in ipairs(list) do
+        if p.id == s.id then return g end
+      end
+    end
+  end
+  return nil
+end
+
+function FakeRelay:leaveGroup(s, quiet)
+  local g = self:groupOf(s)
+  if not g then return end
+  if g.leader == s.id then
+    self.groups[s.id] = nil
+    s.recruiting = nil
+    self:groupBroadcast(g, { type = "group_closed", leader = g.leader, why = "leader_left" })
+    return
+  end
+  for _, list in ipairs({ g.members, g.pending }) do
+    for i = #list, 1, -1 do
+      if list[i].id == s.id then table.remove(list, i) end
+    end
+  end
+  for i, m in ipairs(g.members) do m.seat = i - 1 end
+  local lead = self.sessions[g.leader]
+  if lead and lead.recruiting then lead.recruiting.joined = #g.members end
+  if not quiet then self:to(s, { type = "group_closed", leader = g.leader, why = "left" }) end
+  self:groupBroadcast(g, self:groupStateMsg(g))
 end
 
 function FakeRelay:groupBroadcast(g, msg)
@@ -648,12 +696,7 @@ function FakeRelay:handleGroup(s, msg)
     g.pending = {}
     self:groupBroadcast(g, { type = "group_closed", leader = g.leader, why = "started" })
   elseif kind == "group_leave" then
-    local g = self.groups[s.id]
-    if g then
-      self.groups[s.id] = nil
-      s.recruiting = nil
-      self:groupBroadcast(g, { type = "group_closed", leader = g.leader, why = "leader_left" })
-    end
+    self:leaveGroup(s, false)
   end
 end
 
@@ -818,7 +861,11 @@ function FakeRelay:handle(s, msg)
     if self:plazaInstance(s) then self:to(s, self:plazaStateMsg(s)) end
     local q = self.queue[s.id]
     if q then self:to(s, { type = "direct_state", activity = q.activity, queued = true }) end
-    if self.groups[s.id] then self:to(s, self:groupStateMsg(self.groups[s.id])) end
+    if self.groups[s.id] then self:groupBroadcast(self.groups[s.id], self:groupStateMsg(self.groups[s.id])) end
+    if s.groupLost and not self:groupOf(s) then
+      self:to(s, { type = "group_closed", leader = s.groupLost, why = "left" })
+    end
+    s.groupLost = nil
     for _, inv in pairs(self.invites) do
       if inv.to == s.id then
         self:to(s, { type = "invite_in", id = inv.id,

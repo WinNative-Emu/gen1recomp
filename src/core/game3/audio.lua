@@ -9,6 +9,7 @@ local Mix = require("src.core.game3.m4a_mix")
 local Player = require("src.core.game3.m4a_player")
 local SE = require("src.core.game3.se_ids")
 local Song = require("src.core.game3.song_ids")
+local Warm = require("src.core.game3.warm")
 local ffiOk, ffi = pcall(require, "ffi")
 
 local Audio = {}
@@ -44,6 +45,7 @@ function Audio.questLogGating()
 end
 
 local function rse_policy()
+  if Audio.mapMusicPolicy() == "rs" then return lazyReq("src.core.game3.audio_policy_rs") end
   if Audio.mapMusicPolicy() ~= "rse" then return nil end
   return lazyReq("src.core.game3.audio_policy_rse")
 end
@@ -287,14 +289,20 @@ function Audio.legendaryBattleSong(species, opts)
   return songs[entry]
 end
 
-function Audio.applyOptions(session)
-  local Options = lazyReq("src.core.game3.options")
-  local o = Options.ensure(session)
-  local mono = (tonumber(o.sound) or 0) == 0
+-- pokeruby/src/libs/m4a.c:1738
+function Audio.setCryStereo(value)
+  local mono = (tonumber(value) or 0) == 0
   if mono ~= Audio._mono then
     Audio._mono = mono
     Audio.pushMixOptions()
   end
+  return mono and 0 or 1
+end
+
+function Audio.applyOptions(session)
+  local Options = lazyReq("src.core.game3.options")
+  local o = Options.ensure(session)
+  return Audio.setCryStereo(o.sound)
 end
 
 local function bgm_gain(volume)
@@ -810,6 +818,7 @@ Audio.SE_LOOP_MAX_SEC = 2.5
 Audio.SE_ONESHOT_MAX_SEC = 30
 
 function Audio._seRawClear()
+  Audio._cryCache, Audio._cryCacheN = nil, 0
   Audio._seRaw = {}
   Audio._seRawFrames = 0
   Audio._seRawTick = 0
@@ -912,6 +921,55 @@ function Audio._seSourceFor(id, rawL, rawR, master, pan, mono, loop)
   return src
 end
 
+local function bake_se(id, opts, memoable)
+  local slot = { voices = {} }
+  -- SE must run the M4A sequencer (SE_SELECT is CGB pulse, not voice0 PCM).
+  local ok = Player.start(Audio._pack, Audio._cache, slot, id, { forceSeq = true })
+  if not ok then
+    warn_once("se:" .. tostring(id), "SE " .. tostring(id) .. " missing")
+    return nil
+  end
+
+  local loop = opts.loop
+  if loop == nil then
+    -- SE_LOW_HEALTH and any track with GOTO before FINE are hardware loops.
+    loop = (id == SE.SE_LOW_HEALTH) or Audio._songHasGoto(slot)
+  end
+
+  local loopBody = loop and opts.loop == nil and id ~= SE.SE_LOW_HEALTH
+  -- pokefirered/src/battle_anim_special.c:1200
+  local cut = ((loop and not loopBody) or id == SE.SE_EXP)
+  local maxSec = opts.maxSec
+    or (cut and Audio.SE_LOOP_MAX_SEC or Audio.SE_ONESHOT_MAX_SEC)
+  local rawL, rawR, loopStart = Player.bakeSlot(slot, {
+    raw = true,
+    maxSec = maxSec,
+    stopOnGoto = loop and true or false,
+    loopBody = loopBody,
+  })
+  if not cut and opts.maxSec == nil and type(rawL) == "table"
+    and #rawL >= math.floor(Mix.SAMPLE_RATE * maxSec) then
+    warn_once("selen:" .. tostring(id),
+      "SE " .. tostring(id) .. " hit the " .. tostring(maxSec) .. "s bake ceiling")
+  end
+  if memoable then Audio._seRawPut(id, loop and true or false, rawL, rawR, loopStart) end
+  return loop and true or false, rawL, rawR, loopStart
+end
+
+function Audio.prewarmSe(id, priority)
+  id = SE.resolve(id)
+  if id == nil or not Audio.isReady() then return false end
+  if Audio._seRaw and Audio._seRaw[id] then return false end
+  local info = Audio.songInfo(id)
+  if info and info.kind == "fanfare" then return false end
+  return Warm.add("se:" .. tostring(id), function()
+    if Audio._seRaw and Audio._seRaw[id] then return end
+    local loop, rawL, rawR = bake_se(id, {}, true)
+    if loop == nil or loop then return end
+    Audio._seSourceFor(id, rawL, rawR, Audio._sfxVolume or 1, Audio.normalizePan(nil), Audio._mono, false)
+  end, priority)
+end
+
 function Audio.playSe(id, opts)
   opts = opts or {}
   id = SE.resolve(id)
@@ -931,42 +989,14 @@ function Audio.playSe(id, opts)
   Audio._stopSePlayer(mplay)
 
   local memoable = opts.loop == nil and opts.maxSec == nil
+  if memoable then Warm.flush("se:" .. tostring(id)) end
   local hit = memoable and Audio._seRawGet(id) or nil
   local loop, rawL, rawR, loopStart
   if hit then
     loop, rawL, rawR, loopStart = hit.loop, hit.rawL, hit.rawR, hit.loopStart
   else
-    local slot = { voices = {} }
-    -- SE must run the M4A sequencer (SE_SELECT is CGB pulse, not voice0 PCM).
-    local ok = Player.start(Audio._pack, Audio._cache, slot, id, { forceSeq = true })
-    if not ok then
-      warn_once("se:" .. tostring(id), "SE " .. tostring(id) .. " missing")
-      return false
-    end
-
-    loop = opts.loop
-    if loop == nil then
-      -- SE_LOW_HEALTH and any track with GOTO before FINE are hardware loops.
-      loop = (id == SE.SE_LOW_HEALTH) or Audio._songHasGoto(slot)
-    end
-
-    local loopBody = loop and opts.loop == nil and id ~= SE.SE_LOW_HEALTH
-    -- pokefirered/src/battle_anim_special.c:1200
-    local cut = ((loop and not loopBody) or id == SE.SE_EXP)
-    local maxSec = opts.maxSec
-      or (cut and Audio.SE_LOOP_MAX_SEC or Audio.SE_ONESHOT_MAX_SEC)
-    rawL, rawR, loopStart = Player.bakeSlot(slot, {
-      raw = true,
-      maxSec = maxSec,
-      stopOnGoto = loop and true or false,
-      loopBody = loopBody,
-    })
-    if not cut and opts.maxSec == nil and type(rawL) == "table"
-      and #rawL >= math.floor(Mix.SAMPLE_RATE * maxSec) then
-      warn_once("selen:" .. tostring(id),
-        "SE " .. tostring(id) .. " hit the " .. tostring(maxSec) .. "s bake ceiling")
-    end
-    if memoable then Audio._seRawPut(id, loop and true or false, rawL, rawR, loopStart) end
+    loop, rawL, rawR, loopStart = bake_se(id, opts, memoable)
+    if loop == nil then return false end
   end
 
   local pan = Audio.normalizePan(opts.pan)
@@ -1038,6 +1068,7 @@ function Audio._buildSeSoundData(L, R, master, pan, mono)
   master = master or 1
   local gainL, gainR = Audio._seGains(pan)
   local gl, gr = master * gainL, master * gainR
+  local warm = package.loaded["src.core.game3.warm"]
   local ptr
   if ffiOk and ffi and sd.getFFIPointer then
     local okP, p = pcall(sd.getFFIPointer, sd)
@@ -1061,6 +1092,7 @@ function Audio._buildSeSoundData(L, R, master, pan, mono)
       sd:setSample(i - 1, 1, l)
       sd:setSample(i - 1, 2, r)
     end
+    if warm and i % 4096 == 0 then warm.yield() end
   end
   return sd
 end
@@ -1208,6 +1240,16 @@ function Audio.isSePlaying(id)
   return false
 end
 
+-- pokeemerald/src/sound.c:624
+-- pokeruby/src/sound.c:554
+function Audio.isSpecialSePlaying()
+  for _, src in ipairs(Audio._seSources) do
+    local meta = Audio._seMeta[src]
+    if meta and tonumber(meta.player) == 3 and src:isPlaying() then return true end
+  end
+  return false
+end
+
 function Audio.waitSe(id, cb)
   -- Poll in update via callback list
   Audio._waitSe = Audio._waitSe or {}
@@ -1321,6 +1363,67 @@ function Audio.waitFanfare(cb)
   if not Audio._fanfareActive and cb then cb() end
 end
 
+Audio.CRY_CACHE_MAX = 24
+
+local function cry_inputs(mode, pan, volume)
+  mode = tonumber(mode) or 0
+  local cfg = Audio.config()
+  -- pokeruby/src/sound.c:364
+  if cfg.cryModeMax and (mode < 0 or mode > cfg.cryModeMax) then mode = 0 end
+  local params = Sample.cryParams(mode, volume or cfg.cryDefaultVolume, cfg.cryModeOverrides)
+  return params, pan and pan ~= 0 and Audio.normalizePan(pan) or nil
+end
+
+local function cry_meta(slot)
+  local cry = slot and slot.info
+  if not (cry and cry.cryIndex ~= nil) then return nil end
+  local c = Audio._pack.index.cries[cry.cryIndex]
+  return c and Audio._pack.samples[c.sampleId], cry.cryIndex
+end
+
+local function cry_render(slot, params, pan, mode, volume)
+  local meta, cryIndex = cry_meta(slot)
+  if not meta then return nil end
+  local key = table.concat({ tostring(cryIndex), tostring(mode), tostring(volume), tostring(pan),
+    Audio._mono and "m" or "s" }, ":")
+  Warm.flush("cry:" .. key)
+  local cache = Audio._cryCache or {}
+  Audio._cryCache = cache
+  local hit = cache[key]
+  if hit then return hit.sd, hit.info end
+  local pcm = Sample.loadPcm(Audio._pack.samplesBin, meta)
+  if not pcm then return nil end
+  local sd, info = Sample.renderCry(pcm, Mix.waveRate(meta.freq), params, {
+    outRate = Mix.SAMPLE_RATE,
+    pan = pan,
+    mono = Audio._mono,
+  })
+  if sd then
+    Audio._cryCacheN = (Audio._cryCacheN or 0) + 1
+    if Audio._cryCacheN > Audio.CRY_CACHE_MAX then
+      Audio._cryCache, Audio._cryCacheN = {}, 1
+      cache = Audio._cryCache
+    end
+    cache[key] = { sd = sd, info = info }
+  end
+  return sd, info
+end
+
+function Audio.prewarmCry(species, mode, pan, priority)
+  species = tonumber(species) or species
+  if species == nil or not Audio.isReady() then return false end
+  local params, npan = cry_inputs(mode, pan, nil)
+  local slot = Player.startCry(Audio._pack, species, { pitch = 1.0 })
+  local _, cryIndex = cry_meta(slot)
+  if cryIndex == nil then return false end
+  local key = table.concat({ tostring(cryIndex), tostring(tonumber(mode) or 0), "nil", tostring(npan),
+    Audio._mono and "m" or "s" }, ":")
+  if Audio._cryCache and Audio._cryCache[key] then return false end
+  return Warm.add("cry:" .. key, function()
+    cry_render(slot, params, npan, tonumber(mode) or 0, nil)
+  end, priority)
+end
+
 -- pokefirered/src/sound.c:333
 function Audio.playCry(species, mode, pan)
   species = tonumber(species) or species
@@ -1333,7 +1436,7 @@ function Audio.playCry(species, mode, pan)
     noDuck = o.noDuck == true
   end
   mode = tonumber(mode) or 0
-  local params = Sample.cryParams(mode, volume, Audio.config().cryModeOverrides)
+  local params, npan = cry_inputs(mode, pan, volume)
   local doubles = params.mode == 1 or noDuck
   Audio._cryParams = params
   log(string.format("playCry species=%s mode=%d", tostring(species), params.mode))
@@ -1347,24 +1450,14 @@ function Audio.playCry(species, mode, pan)
     return false
   end
   Audio._crySlot = slot
-  local cry = slot.info
-  local meta = nil
-  if cry and cry.cryIndex ~= nil then
-    local c = Audio._pack.index.cries[cry.cryIndex]
-    if c then meta = Audio._pack.samples[c.sampleId] end
-  end
-  local pcm = meta and Sample.loadPcm(Audio._pack.samplesBin, meta)
-  if pcm then
+  if cry_meta(slot) then
     Audio._crySource = nil
     if not doubles then
       Audio._duck = 85 / 256
       Audio._duckHold = 2
       apply_bgm_gain()
     end
-    local sd, info = Sample.renderCry(pcm, Mix.waveRate(meta.freq), params, {
-      outRate = Mix.SAMPLE_RATE,
-      pan = pan and pan ~= 0 and Audio.normalizePan(pan) or nil,
-    })
+    local sd, info = cry_render(slot, params, npan, mode, volume)
     if info then
       Audio._cryUntil = (Audio._cryClock or 0) + info.frames
     end

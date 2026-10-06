@@ -590,6 +590,8 @@ function Player.bakeSlot(slot, opts)
     else
       idle = 0
     end
+    local warm = package.loaded["src.core.game3.warm"]
+    if warm then warm.yield() end
   end
   if #L == 0 then
     L[1] = 0

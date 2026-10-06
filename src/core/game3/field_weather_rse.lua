@@ -71,6 +71,13 @@ local function playSe(name)
   if id then pcall(Audio.playSe, id) end
 end
 
+local function weatherPolicy()
+  local ok, Profile = pcall(lazyReq, "src.core.game3.profile")
+  if not ok then return nil end
+  local okRow, row = pcall(Profile.forSession, nil)
+  return okRow and type(row) == "table" and type(row.weather) == "table" and row.weather or nil
+end
+
 local function sePlaying()
   local Audio = package.loaded["src.core.game3.audio"]
   if Audio and Audio.isSePlaying then
@@ -197,9 +204,12 @@ end
 local SPRITE_SHADER = [[
 extern Image lut;
 extern Image dlut;
+extern Image amask;
 extern float mode;
 extern float row;
 extern float dtable;
+extern float useMask;
+extern vec2 maskSize;
 vec4 effect(vec4 color, Image tex, vec2 tc, vec2 sc)
 {
   vec4 c = Texel(tex, tc);
@@ -207,7 +217,9 @@ vec4 effect(vec4 color, Image tex, vec2 tc, vec2 sc)
   vec3 v = floor(c.rgb * 31.0 + 0.5);
   vec3 o;
   if (mode < 1.5) {
-    float y = (row + 0.5) / 38.0;
+    float r = row;
+    if (useMask > 0.5 && r < 18.5 && Texel(amask, sc / maskSize).r > 0.5) r = r + 19.0;
+    float y = (r + 0.5) / 38.0;
     o.r = Texel(lut, vec2((v.r + 0.5) / 32.0, y)).r;
     o.g = Texel(lut, vec2((v.g + 0.5) / 32.0, y)).r;
     o.b = Texel(lut, vec2((v.b + 0.5) / 32.0, y)).r;
@@ -229,6 +241,15 @@ vec4 effect(vec4 color, Image tex, vec2 tc, vec2 sc)
   vec4 c = Texel(tex, tc);
   if (c.a <= 0.0) return vec4(1.0, 1.0, 1.0, 1.0);
   return vec4(k, k, k, 1.0);
+}
+]]
+
+local MASK_WRITE_SHADER = [[
+extern float code;
+vec4 effect(vec4 color, Image tex, vec2 tc, vec2 sc)
+{
+  if (Texel(tex, tc).a * color.a <= 0.0) discard;
+  return vec4(code, 0.0, 0.0, 1.0);
 }
 ]]
 
@@ -278,8 +299,10 @@ local function loadAssets()
   end
   local okS, shader = pcall(love.graphics.newShader, SPRITE_SHADER)
   local okM, mask = pcall(love.graphics.newShader, MASK_SHADER)
+  local okW, maskWrite = pcall(love.graphics.newShader, MASK_WRITE_SHADER)
   if okS and okM then
     out.shader, out.mask = shader, mask
+    if okW then out.maskWrite = maskWrite end
     out.lut, out.dlut = buildLuts()
     shader:send("lut", out.lut)
     shader:send("dlut", out.dlut)
@@ -427,7 +450,7 @@ local function blankState()
   S.droughtBrightnessStage, S.droughtLastBrightnessStage, S.droughtTimer, S.droughtState = 0, 0, 0, 0
   S.totalCamX, S.totalCamY = 0, 0
   S.lastCamX, S.lastCamY = nil, nil
-  S.offX, S.offY = 0, -8
+  S.offX, S.offY = 0, -40
   S.abnormal = nil
   S.currentAbnormal = WEATHER_DOWNPOUR
   S.frames = 0
@@ -497,7 +520,9 @@ end
 
 -- pokeemerald/src/field_weather.c:1060
 function R.playRainStoppingSoundEffect()
-  if not sePlaying() then return end
+  local Audio = package.loaded["src.core.game3.audio"]
+  -- pokeruby/src/field_weather.c:1214
+  if not (Audio and Audio.isSpecialSePlaying and Audio.isSpecialSePlaying()) then return end
   if S.rainStrength == 0 then playSe("SE_RAIN_STOP")
   elseif S.rainStrength == 1 then playSe("SE_DOWNPOUR_STOP")
   else playSe("SE_THUNDERSTORM_STOP") end
@@ -638,8 +663,14 @@ end
 local function Drought_Main()
   if S.initStep == 0 then
     if S.palProcessingState ~= PAL_CHANGING then S.initStep = S.initStep + 1 end
-  elseif S.initStep == 1 or S.initStep == 2 then
+  elseif S.initStep == 1 then
+    S.droughtLoadFrames = 0
     S.initStep = S.initStep + 1
+  elseif S.initStep == 2 then
+    S.droughtLoadFrames = (S.droughtLoadFrames or 0) + 1
+    local policy = weatherPolicy()
+    -- pokeruby/src/field_weather.c:1033
+    if S.droughtLoadFrames >= (policy and policy.droughtPaletteLoadFrames or 1) then S.initStep = S.initStep + 1 end
   elseif S.initStep == 3 then
     droughtStateInit()
     S.initStep = S.initStep + 1
@@ -1627,8 +1658,10 @@ function R.start()
 end
 
 function R.restart()
+  local rainStrength = S.rainStrength
   S.started = false
   R.start()
+  S.rainStrength = rainStrength
 end
 
 function R.stop()
@@ -1769,12 +1802,17 @@ end
 function R.update()
   if not S.started then return end
   S.frames = S.frames + 1
+  local initFrame = false
   if not S.initialized then
     if not S.readyForInit then return end
+    -- pokeruby/src/field_weather.c:322
     weatherInit()
+    initFrame = true
   end
   tickAbnormal()
-  if S.currWeather ~= S.nextWeather then
+  if initFrame then
+    S.initialized = true
+  elseif S.currWeather ~= S.nextWeather then
     if not funcs(S.currWeather)[4]() and S.palProcessingState ~= PAL_FADING_OUT then
       funcs(S.nextWeather)[1]()
       S.colorMapStepCounter = 0
@@ -1804,12 +1842,13 @@ function R.setCamera(camX, camY)
   end
   S.lastCamX, S.lastCamY = camX, camY
   S.offX = s16(S.totalCamX)
-  S.offY = s16(S.totalCamY - 8)
+  -- pokeruby/src/field_camera.c:465
+  S.offY = s16(S.totalCamY - 32 - 8)
 end
 
 function R.resetCamera()
   S.totalCamX, S.totalCamY = 0, 0
-  S.offX, S.offY = 0, -8
+  S.offX, S.offY = 0, -40
 end
 
 
@@ -1850,6 +1889,7 @@ local function spriteSheetFor(A, s)
 end
 
 local function colorMapUniforms(shader, kind)
+  shader:send("useMask", 0)
   local idx = S.colorMapIndex
   if idx > 0 then
     shader:send("mode", 1)
@@ -1983,6 +2023,15 @@ local function drawCloudSprites(A, camX, camY, ox, oy)
       end
     end
   end)
+  local FxRse = package.loaded["src.core.game3.field_effects_rse"]
+  if FxRse and FxRse.coverWorldRect then
+    -- pokeruby/src/field_weather_effects.c:49
+    for _, s in ipairs(S.cloudSprites) do
+      if s.inUse and not s.invisible then
+        FxRse.coverWorldRect(s.worldX + s.x - 32, s.worldY - 32, 64, 64, camX, camY)
+      end
+    end
+  end
 end
 
 local function drawPriority2(A, camX, camY, ox, oy, cw, ch)
@@ -2020,6 +2069,62 @@ local function drawPriority1(A, ox, oy, cw, ch)
   if mapped then love.graphics.setShader() end
 end
 
+R._maskOn = false
+
+local function beginActorMask(A)
+  R._maskOn = false
+  if not (A.shader and A.maskWrite) or S.colorMapIndex <= 0 then return end
+  local policy = weatherPolicy()
+  if not (policy and policy.fixedObjectPaletteSlots) then return end
+  local cur = love.graphics.getCanvas()
+  if not cur then return end
+  local w, h = cur:getWidth(), cur:getHeight()
+  local m = R._maskCanvas
+  if not m or m:getWidth() ~= w or m:getHeight() ~= h then
+    if m and m.release then m:release() end
+    m = love.graphics.newCanvas(w, h, { dpiscale = cur.getDPIScale and cur:getDPIScale() or 1 })
+    m:setFilter("nearest", "nearest")
+    R._maskCanvas = m
+  end
+  love.graphics.push("all")
+  love.graphics.setCanvas(m)
+  love.graphics.clear(0, 0, 0, 0)
+  love.graphics.pop()
+  R._maskOn = true
+end
+
+local function useActorMask(A, cw, ch)
+  local m = R._maskCanvas
+  if not (R._maskOn and m and m:getWidth() == cw and m:getHeight() == ch) then return end
+  A.shader:send("amask", m)
+  A.shader:send("maskSize", { cw, ch })
+  A.shader:send("useMask", 1)
+end
+
+-- pokeruby/src/field_weather.c:580
+function R.actorMaskCode(paletteSlot)
+  local m = R.manifest()
+  local types = m and m.color_map_types
+  local t = types and paletteSlot and types[16 + paletteSlot + 1]
+  return t == COLOR_MAP_CONTRAST and 1 or 0
+end
+
+function R.maskActive() return R._maskOn end
+
+function R.writeActorMask(code, drawFn)
+  if not R._maskOn then return end
+  local A = loadAssets()
+  if not (A and A.maskWrite and R._maskCanvas) then return end
+  love.graphics.push("all")
+  love.graphics.setCanvas(R._maskCanvas)
+  love.graphics.setShader(A.maskWrite)
+  A.maskWrite:send("code", code)
+  love.graphics.setBlendMode("replace", "premultiplied")
+  love.graphics.setColor(1, 1, 1, 1)
+  drawFn()
+  love.graphics.pop()
+end
+
 -- pokeemerald/src/field_weather.c:459 ApplyColorMap
 local function colorMapPass(A, cw, ch, exchangeCanvas)
   if S.colorMapIndex == 0 or not A.shader then return end
@@ -2046,6 +2151,7 @@ local function colorMapPass(A, cw, ch, exchangeCanvas)
     love.graphics.setBlendMode("replace", "premultiplied")
     love.graphics.setColor(1, 1, 1, 1)
     colorMapUniforms(A.shader, COLOR_MAP_DARK_CONTRAST)
+    useActorMask(A, cw, ch)
     love.graphics.setShader(A.shader)
     love.graphics.draw(cur, 0, 0)
     love.graphics.pop()
@@ -2065,6 +2171,7 @@ local function colorMapPass(A, cw, ch, exchangeCanvas)
   love.graphics.draw(cur, 0, 0)
   love.graphics.setCanvas(cur)
   colorMapUniforms(A.shader, COLOR_MAP_DARK_CONTRAST)
+  useActorMask(A, cw, ch)
   love.graphics.setShader(A.shader)
   love.graphics.draw(tmp, 0, 0)
   love.graphics.pop()
@@ -2074,9 +2181,11 @@ R._belowFrame = -1
 
 function R.drawBelow(camX, camY, canvasW, canvasH)
   R._belowFrame = S.frames
+  R._maskOn = false
   if not S.started or not S.initialized then return end
   local A = loadAssets()
   if not A then return end
+  beginActorMask(A)
   local ox = math.floor((canvasW - SCREEN_W) / 2)
   local oy = math.floor((canvasH - SCREEN_H) / 2)
   love.graphics.push("all")
@@ -2086,6 +2195,7 @@ end
 
 function R.draw(camX, camY, canvasW, canvasH, exchangeCanvas)
   R.setCamera(camX, camY)
+  if R._belowFrame ~= S.frames then R._maskOn = false end
   if not S.started or not S.initialized then return end
   local A = loadAssets()
   if not A then return end

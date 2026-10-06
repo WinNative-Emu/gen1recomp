@@ -36,7 +36,10 @@ body:
         - Silver
         - Crystal
         - FireRed
+        - LeafGreen
         - Emerald
+        - Ruby
+        - Sapphire
         - N/A
     validations:
       required: true

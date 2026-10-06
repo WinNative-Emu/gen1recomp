@@ -3531,6 +3531,7 @@ function RomImporter:update(dt)
   self:_pumpModInstall()
   self:_pumpCartInstall()
   self:_pumpCartFill()
+  self:_pumpIdSync()
   self:_pumpUpdateAll()
   if self:_fireAutoUpdateAll() then return end
   self:_pumpExtract()
@@ -5725,7 +5726,7 @@ function RomImporter:keypressed(key)
     return
   end
   if self._modConfirm or self._modVersions or self._modReleaseNotes
-      or self._findDetails or self._appPatchNotes then
+      or self._findDetails or self._appPatchNotes or self._idSyncResult then
     -- Focus navigation belongs to the visible modal as well as the launcher
     -- beneath it. Route arrows and an already-armed confirm before this guard
     -- returns; unarmed Enter still falls through to the modal guard. Keep this
@@ -5741,6 +5742,8 @@ function RomImporter:keypressed(key)
         self._modReleaseNotes = nil
       elseif self._appPatchNotes then
         self._appPatchNotes = nil
+      elseif self._idSyncResult then
+        self._idSyncResult = nil
       else
         self._modConfirm = nil
         self._modVersions = nil
@@ -6157,8 +6160,9 @@ function RomImporter:_restoreActiveCarts(opts)
 end
 
 local CART_RAIL = { red = "railRed", blue = "railBlue", yellow = "railGold",
-                    gold = "railAmber", silver = "railSilver",
-                    emerald = "railEmerald" }
+                    gold = "railAmber", silver = "railSilver", crystal = "railCrystal",
+                    firered = "railFireRed", leafgreen = "railLeafGreen",
+                    emerald = "railEmerald", ruby = "railRuby", sapphire = "railSapphire" }
 local CART_START_VERSION = "1.0.0"
 
 local function cartShellHex(version)
@@ -6430,6 +6434,90 @@ function RomImporter:_selectSlot(scope, id)
     SaveData.setActiveSlot(scope, id)
   end
   self.activeSlot[scope] = id
+end
+
+function RomImporter:askIdSync(version)
+  local scope = self:slotScope(version)
+  self:_ensureSlots(scope)
+  local slotId = self.activeSlot[scope]
+  local slot
+  for _, row in ipairs(self.slots[scope] or {}) do
+    if row.id == slotId and row.exists then slot = row end
+  end
+  if not slot then
+    self._idSyncResult = { title = Strings("ID Sync"),
+      body = Strings("Select a save for this game first. Its trainer ID is the one every other save takes.") }
+    return
+  end
+  local SaveData = require("src.core.SaveData")
+  local TrainerIdSync = require("src.core.TrainerIdSync")
+  local cart = cartOfScope(scope)
+  local okRead, source = pcall(function()
+    if cart then return SaveData.readCartSlotSource(cart, slot.id) end
+    return SaveData.readSlotSource(scope, slot.id)
+  end)
+  local save = okRead and source and SaveData.decode(source) or nil
+  local id = save and TrainerIdSync.playerIdOf(save,
+    TrainerIdSync.generationOf(save, version)) or nil
+  local who = slot.label or slot.name or slot.id
+  self._modConfirm = {
+    title = Strings("ID Sync"),
+    yesLabel = Strings("Sync"),
+    lines = {
+      Strings("Sync trainer ID with all other saves?"),
+      id and Strings("Every save takes %s's ID No. %05d. Pokemon caught in any of your saves, or traded between them, are synced too.", who, id)
+        or Strings("Every save takes %s's ID. Pokemon caught in any of your saves, or traded between them, are synced too.", who),
+    },
+    onYes = function() self:_startIdSync(scope, slot.id) end,
+  }
+end
+
+function RomImporter:_startIdSync(scope, slotId)
+  local TrainerIdSync = require("src.core.TrainerIdSync")
+  local ok, job = pcall(TrainerIdSync.newJob, { scope = scope, slot = slotId })
+  if not ok then
+    self._idSyncResult = { title = Strings("ID Sync"), body = tostring(job) }
+    return
+  end
+  self._idSync = job
+  self._busy = { title = Strings("Syncing trainer ID"), detail = "", progress = 0 }
+end
+
+function RomImporter:_pumpIdSync()
+  local job = self._idSync
+  if not job then return end
+  local ok, done = pcall(job.step, job)
+  if ok and not done then
+    if self._busy then
+      self._busy.progress = job:progress()
+      local n = math.min(job.at, #job.entries)
+      self._busy.detail = job.phase == "read"
+        and Strings("Reading saves %d / %d", n, #job.entries)
+        or Strings("Updating saves %d / %d", n, #job.entries)
+    end
+    return
+  end
+  self._idSync = nil
+  self:_clearBusy()
+  self.slots = {}
+  if not ok or job.error then
+    self._idSyncResult = { title = Strings("ID Sync failed"), body = tostring(ok and job.error or done) }
+    return
+  end
+  local body = Strings("Trainer ID %05d is now on every save. %d save(s) updated.", job.newId, job.written)
+  if #job.failed > 0 then
+    body = body .. "\n\n" .. Strings("%d save(s) could not be written: %s", #job.failed, job.failed[1])
+  end
+  local eng = job.written > 0 and self:_syncEngine() or nil
+  if eng and eng.state.enabled and eng:linked() then
+    if eng:busy() then
+      eng:noteSaveWritten()
+    else
+      pcall(eng.syncNow, eng)
+    end
+    body = body .. "\n\n" .. Strings("Save sync is uploading the updated saves.")
+  end
+  self._idSyncResult = { title = Strings("ID Sync"), body = body }
 end
 
 -- Inline slot rename (#205): right-click arms a modal text field; Enter

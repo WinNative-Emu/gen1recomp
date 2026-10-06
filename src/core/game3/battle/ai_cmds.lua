@@ -831,7 +831,12 @@ local function mon_has_move(battler, moveId)
 end
 
 local function rse_history(vm)
-  return require("src.core.game3.battle.profile").rule(vm.st, "aiMoveHistory") == "battler"
+  local rule = require("src.core.game3.battle.profile").rule(vm.st, "aiMoveHistory")
+  return rule == "battler" or rule == "rs_position"
+end
+
+local function rs_history(vm)
+  return require("src.core.game3.battle.profile").rule(vm.st, "aiMoveHistory") == "rs_position"
 end
 
 local function history_moves(vm)
@@ -841,7 +846,7 @@ end
 
 local function list_has(list, moveId)
   local want = tonumber(moveId) or Moves.numForName(moveId)
-  for i = 1, 4 do
+  for i = 1, #list do
     if list[i] ~= 0 and list[i] == want then return true end
   end
   return false
@@ -861,7 +866,7 @@ end
 local function rse_has_move(vm, op, negate)
   local which = tonumber(op.battler) or 0
   local list
-  if which == 1 or (which == 3 and negate) then
+  if which == 1 or (which == 3 and (negate or rs_history(vm))) then
     list = own_moves(vm.user)
   elseif which == 3 then
     local State = require("src.core.game3.battle.state")
@@ -884,6 +889,11 @@ local function rse_has_effect(vm, op, negate)
       if mv ~= 0 and move_effect(mv) == op.effect then found = true end
     end
   else
+    -- pokeruby/src/battle_ai_script_commands.c:1546
+    if rs_history(vm) then
+      if negate then next_ip(vm) else branch(vm, op.target) end
+      return
+    end
     local hist = history_moves(vm)
     local gate = negate and hist or own_moves(vm.user)
     for i = 1, 4 do

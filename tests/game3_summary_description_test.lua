@@ -30,6 +30,15 @@ check(SummaryData.moveDescription(71, "VOL-VIE"):find("absorbs half", 1, true) ~
   "a renamed move still finds its description")
 check(SummaryData.abilityDescription(9, "STATIK") == "Paralyzes on contact.",
   "a renamed ability still finds its description")
+check(Pokemon.abilityName(9) == "STATIK",
+  "an ability name falls back to the current displayed source")
+
+Strings.load({ strings = { STATIK = "STATIQUE" } })
+check(Pokemon.abilityName(9) == "STATIQUE",
+  "the shared ability-name getter translates the current displayed name")
+check(Pokemon.romAbilityName(9) == "STATIC",
+  "the ROM ability name remains stable for ID-based lookups")
+Strings.load({})
 
 Strings.load({ strings = { ["Paralyzes on contact."] = "Paralyse au contact." } })
 check(SummaryData.abilityDescription(9, "STATIK") == "Paralyse au contact.",

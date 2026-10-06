@@ -119,18 +119,38 @@ local function buyOne(game, stack)
   return menu, list, qty
 end
 
+require("src.core.GameVersion").set("red")
+
+local function fill(game, n)
+  for i = 1, n do
+    local id = "FILLER_" .. i
+    game.save.inventory[id] = 1
+    game.save.bagOrder[#game.save.bagOrder + 1] = id
+  end
+end
+
 do
   local game = newGame(3000, 99)
+  eq(Bag.add(game.save, "POKE_BALL", 1, game.data), true,
+     "AddItemToInventory puts a 100th POKe BALL in a new slot")
+  eq(game.save.inventory.POKE_BALL, 100, "the total is 100")
+  eq(Bag.slots(game.save, game.data), 2, "split over two slots")
+end
+
+do
+  local game = newGame(3000, 99)
+  fill(game, 19)
   eq(Bag.add(game.save, "POKE_BALL", 1, game.data), false,
-     "AddItemToInventory refuses a 100th POKe BALL")
+     "a full bag refuses the overflow slot")
   eq(game.save.inventory.POKE_BALL, 99, "and adds nothing")
 end
 
 for _, case in ipairs({
-  { name = "bag full", money = 3000, count = 99, text = BAG_FULL },
+  { name = "bag full", money = 3000, count = 99, fill = 19, text = BAG_FULL },
   { name = "not enough money", money = 100, count = nil, text = NO_MONEY },
 }) do
   local game, events, stack = newGame(case.money, case.count)
+  fill(game, case.fill or 0)
   local menu, list, qty = buyOne(game, stack)
   local box = stack[#stack]
   if check(getmetatable(box) == TextBox, case.name .. ": a text box is pushed") then

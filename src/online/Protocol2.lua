@@ -41,12 +41,13 @@ Protocol2.DIRECT_ACTIVITIES = { battle_single = true, battle_double = true,
   battle_multi = true, trade = true }
 
 Protocol2.LINK_ACTIVITIES = { "record_corner", "berry_blender", "contest_cool", "contest_beauty",
-  "contest_cute", "contest_smart", "contest_tough", "battle_tower", "battle_tower_open" }
+  "contest_cute", "contest_smart", "contest_tough", "battle_tower", "battle_tower_open", "mystery_event" }
 -- pokeemerald/src/data/union_room.h:641
 Protocol2.LINK_CAPACITY = {
   record_corner = { 2, 4 }, berry_blender = { 2, 4 }, contest_cool = { 2, 4 }, contest_beauty = { 2, 4 },
   contest_cute = { 2, 4 }, contest_smart = { 2, 4 }, contest_tough = { 2, 4 },
   battle_tower = { 2, 2 }, battle_tower_open = { 2, 2 } }
+Protocol2.LINK_CAPACITY.mystery_event = { 2, 2 }
 for _, a in ipairs(Protocol2.LINK_ACTIVITIES) do
   Protocol2.ACTIVITIES[#Protocol2.ACTIVITIES + 1] = a
   Protocol2.ACTIVITY_RULESET[a] = "g3_link"

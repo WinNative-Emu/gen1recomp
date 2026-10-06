@@ -30,6 +30,7 @@ local PAL = {
   red         = { 255, 80, 90 },   -- destructive
   blue        = { 76, 163, 240 },  -- links, in-panel navigation
   buttonBlue  = { 36, 106, 181 }, -- darker fill for white action labels
+  buttonPurple = { 88, 44, 140 },
   steel       = { 120, 120, 120 }, -- disabled
   -- the version rail is the one piece of brand colour that stays
   railRed     = { 255, 60, 72 },
@@ -41,6 +42,8 @@ local PAL = {
   railLeafGreen = { 38, 162, 78 }, -- LeafGreen cartridge (vibrant deep forest green)
   railFireRed = { 220, 48, 48 },   -- FireRed cartridge (deeper red than Red)
   railEmerald = { 31, 158, 110 },
+  railRuby = { 185, 46, 50 },
+  railSapphire = { 53, 94, 196 },
 }
 -- Semantic aliases kept so ported call sites read the same as before.
 PAL.cardBorder = PAL.line
@@ -320,6 +323,7 @@ end
 local railColors = {
   PAL.railRed, PAL.railBlue, PAL.railGold, PAL.railAmber, PAL.railSilver,
   PAL.railCrystal, PAL.railFireRed, PAL.railLeafGreen, PAL.railEmerald,
+  PAL.railRuby, PAL.railSapphire,
 }
 
 -- One seamless sweep every 24 seconds. Pixel strips keep this in the same

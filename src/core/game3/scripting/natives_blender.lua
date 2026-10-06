@@ -1,6 +1,7 @@
 local Std = require("src.core.game3.scripting.stdscripts")
 local Rse = require("src.core.game3.rse.init")
 local Blender = require("src.core.game3.rse.berry_blender")
+local RsPolicy = require("src.core.game3.rs.berry_blender_policy")
 
 local NativesBlender = {}
 
@@ -34,6 +35,7 @@ NativesBlender.last = nil
 function NativesBlender.doBerryBlending(ctx, adapters, opts)
   opts = opts or {}
   local sess = session()
+  local nativeRS = RsPolicy.matches(require("src.core.game3.profile").forSession(sess).id)
   local opponents = Rse.specialVar(ctx, VAR_0x8004)
   local linkSession
   local playerNames, numPlayers
@@ -75,7 +77,8 @@ function NativesBlender.doBerryBlending(ctx, adapters, opts)
       linkSession = linkSession,
       numPlayers = numPlayers,
       playerNames = playerNames,
-      blendMaster = not Rse.flag("FLAG_HIDE_LILYCOVE_CONTEST_HALL_BLEND_MASTER", sess),
+      blendMaster = not nativeRS and not Rse.flag("FLAG_HIDE_LILYCOVE_CONTEST_HALL_BLEND_MASTER", sess),
+      version = require("src.core.game3.profile").forSession(sess).id,
       playerName = playerName(sess),
       frameType = frameType(sess),
       chooseBerry = opts.chooseBerry,
@@ -95,6 +98,7 @@ end
 -- pokeemerald/src/berry_blender.c:3755
 function NativesBlender.recordWindow(sess)
   local M = Blender.manifest()
+  if RsPolicy.matches(require("src.core.game3.profile").forSession(sess).id) then return RsPolicy.recordWindow(sess,M) end
   local t = M.texts
   local tpl = M.recordWindow
   local FrlgFont = require("src.ui.game3.frlg_font")

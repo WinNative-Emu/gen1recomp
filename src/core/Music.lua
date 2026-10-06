@@ -23,8 +23,8 @@ local function applyVolume(src)
       fading = state.fade ~= nil,
       optionScale = volumeScale,
     }
-    local ok, Game = pcall(require, "src.core.Game")
-    if ok and Game then
+    local Game = package.loaded["src.core.Game"]
+    if type(Game) == "table" then
       local ow = Game.overworld
       if ow and ow.player then
         ctx.x, ctx.y = ow.player.cellX, ow.player.cellY

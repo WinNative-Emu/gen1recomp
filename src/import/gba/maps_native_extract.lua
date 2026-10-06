@@ -75,7 +75,7 @@ end
 -- pokeemerald/include/global.fieldmap.h:64
 local function tileset_inits(rom, version)
   local F = Family.active()
-  local S = F:syms()
+  local S = Versions.SYMS or F:syms()
   local out = {}
   local base = (version and version.g_map_layouts) or Versions.G_MAP_LAYOUTS
   local seen = {}

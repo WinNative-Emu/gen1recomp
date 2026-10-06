@@ -12,8 +12,10 @@ return function(game)
   local PaletteFX = require("src.render.PaletteFX")
   local SpriteRenderer = require("src.render.SpriteRenderer")
 
+  local failed = false
   local function check(label, ok)
     U.log(ok and "PASS" or "FAIL", label)
+    if not ok then failed = true end
     return ok
   end
 
@@ -24,7 +26,7 @@ return function(game)
   U.wait(30)
   local ow = game.overworld
   check("overworld is up", ow ~= nil)
-  if not ow then while true do coroutine.yield() end end
+  if not ow then love.event.quit(1) return end
 
   local npc
   for _, e in ipairs(ow.entities) do
@@ -82,7 +84,7 @@ return function(game)
             U.shot(game, DIR .. "/bug1948_wipe_ogred.png"))
       local ok, last = replayRecord()
       local sp = ow.player.sprite
-      local want = SpriteRenderer.obpImage(sp.def.image, PaletteFX.ogObj())
+      local want = SpriteRenderer.obpImage(sp.def.image, PaletteFX.ogObjWorld())
       local dmg = SpriteRenderer.obpImage(sp.def.image, PaletteFX.dmgObj())
       check("the ogred wipe replay queued a redraw", ok and last ~= nil)
       check("the replayed survivor is the ogObj bake, not the DMG bake",
@@ -108,7 +110,5 @@ return function(game)
   U.log("green, NOT DMG gray.")
   U.log("bug1948_wipe_black.png: solid black, nobody left.")
 
-  while true do
-    coroutine.yield()
-  end
+  love.event.quit(failed and 1 or 0)
 end

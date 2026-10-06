@@ -348,9 +348,15 @@ local function bake_back_pic(rom, gender)
   local size = sizeLo + sizeHi * 256
   if size < 0x800 then size = 0x2800 end
   local frames = math.max(1, math.floor(size / 0x800))
-  local tiles = {}
-  for i = 0, size - 1 do
-    tiles[i + 1] = rom:get(tileFile + i) or 0
+  local tiles
+  if Versions.TRAINER_BACK_PIC_COMPRESSED then
+    tiles = Lz77.decompress(get, tileFile)
+    assert(type(tiles) == "table" and #tiles == size, "trainer_extract: compressed back picture size mismatch")
+  else
+    tiles = {}
+    for i = 0, size - 1 do
+      tiles[i + 1] = rom:get(tileFile + i) or 0
+    end
   end
   local okP, palBytes = pcall(Lz77.decompress, get, palFile)
   if not okP or type(palBytes) ~= "table" then return nil end
@@ -633,9 +639,12 @@ function TrainerExtract.run(rom, cache, opts)
 
   local pack = TrainerExtract.extract(rom, opts)
   cache:write(cacheRoot .. "/trainers.lua", pack_to_lua(pack))
+  local backInfo = Versions.TRAINER_BACK_PIC_COMPRESSED and string.format(
+    ', build = %q, backPicCompression = "lz77", backPicCount = %d, backPicFrames = 4',
+    Versions.BUILD, TrainerExtract.backPicCount()) or ""
   cache:write(root .. "/manifest.lua", string.format(
-    "return { version = %d, trainerCount = %d, classCount = %d }\n",
-    pack.version, pack.trainerCount, pack.classCount))
+    "return { version = %d, trainerCount = %d, classCount = %d%s }\n",
+    pack.version, pack.trainerCount, pack.classCount, backInfo))
 
   for gender = 0, TrainerExtract.backPicCount() - 1 do
     local rgba = bake_back_pic(rom, gender)

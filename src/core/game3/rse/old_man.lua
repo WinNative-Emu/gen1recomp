@@ -100,6 +100,10 @@ end
 function OldMan.saveBardSongLyrics(sess)
   sess = Town.session(sess)
   local b = OldMan.state(sess)
+  local policy = require("src.core.game3.profile").forSession(sess).oldMan
+  if policy and policy.saveBardSongLyrics then
+    return policy.saveBardSongLyrics(sess, b)
+  end
   b.playerName = Town.playerName(sess)
   b.playerTrainerId = tonumber(sess and sess.trainerId) or 0
   for i = 1, OldMan.NUM_BARD_SONG_WORDS do b.songLyrics[i] = b.newSongLyrics[i] end
@@ -267,6 +271,12 @@ end
 -- pokeemerald/src/mauville_old_man.c:1310
 local function recordNewStat(slot, stat, sess)
   local s = OldMan.state(sess)
+  local policy = require("src.core.game3.profile").forSession(Town.session(sess)).oldMan
+  if policy and policy.recordStoryStat then
+    local value = OldMan.gameStat(stat, sess)
+    policy.recordStoryStat(Town.session(sess), s, slot, stat, value)
+    return value, storyByStat(stat).action
+  end
   s.gameStatIDs[slot + 1] = stat
   s.trainerNames[slot + 1] = Town.playerName(sess):sub(1, 7)
   s.statValues[slot + 1] = OldMan.gameStat(stat, sess)
@@ -343,6 +353,10 @@ end
 function OldMan.traderDoTrade(receive, give, slot, sess)
   local Inv = require("src.core.game3.rse.decoration_inventory")
   local t = OldMan.state(sess)
+  local policy = require("src.core.game3.profile").forSession(Town.session(sess)).oldMan
+  if policy and policy.traderDoTrade then
+    return policy.traderDoTrade(Town.session(sess), t, receive, give, slot)
+  end
   Inv.remove(give, sess)
   Inv.add(receive, sess)
   t.playerNames[slot + 1] = Town.playerName(sess)

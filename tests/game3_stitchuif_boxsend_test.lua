@@ -55,10 +55,19 @@ end
 local key = nil
 local input = { wasPressed = function(_, k) return key == k end }
 
+local function settle()
+  for _ = 1, 600 do
+    if not (BoxStorageUI.isOpen() and BoxStorageUI.isPresentationBusy()) then return end
+    BoxStorageUI.update(0)
+  end
+end
+
 local function press(k)
+  settle()
   key = k
   BoxStorageUI.handleInput(input)
   key = nil
+  settle()
 end
 
 local function fill_box(session, boxId)

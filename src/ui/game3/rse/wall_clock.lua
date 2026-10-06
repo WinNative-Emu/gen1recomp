@@ -145,6 +145,7 @@ function WallClock.new(opts)
     frames = 0,
   }, WallClock)
   if not self.man then error("wall clock: data/generated/gba/wallclock/manifest.lua missing from the cache", 2) end
+  if self.man.layout == "rs" then self.nativePolicy = require("src.ui.game3.rs.wall_clock_policy") end
   if mode == WallClock.MODE.VIEW then
     -- pokeemerald/src/wallclock.c:728
     initClockWithRtc(self)
@@ -205,15 +206,18 @@ function WallClock:frame(inp)
     setClockInput(self, inp)
   elseif st == "ask_confirm" then
     -- pokeemerald/src/wallclock.c:27
-    self.confirm = Kit.yesNo(self.man.confirmWindow.tilemapLeft, self.man.confirmWindow.tilemapTop,
-      { frameType = self.frameType, initial = 0 })
+    if self.nativePolicy then self.confirm = self.nativePolicy.confirm(self.frameType)
+    else
+      self.confirm = Kit.yesNo(self.man.confirmWindow.tilemapLeft, self.man.confirmWindow.tilemapTop,
+        { frameType = self.frameType, initial = 0 })
+    end
     self.state = "confirm_input"
   elseif st == "confirm_input" then
     -- pokeemerald/src/wallclock.c:28
     local r = self.confirm:input(inp)
     if r == 0 then
       Kit.playSe("SE_SELECT")
-      self.confirm = nil
+      if not self.nativePolicy then self.confirm = nil end
       self.state = "confirmed"
     elseif r == 1 or r == -1 then
       Kit.playSe("SE_SELECT")
@@ -283,6 +287,12 @@ function WallClock:draw()
   local hx, hy = handOffset(man, self.t.hourAngle)
   drawSprite(Kit.image(s.hour_hand.variants[g]), 120 + hx, 80 + hy, math.rad(self.t.hourAngle))
   drawSprite(Kit.image(s.minute_hand.variants[g]), 120 + mx, 80 + my, math.rad(self.t.minuteAngle))
+  if self.nativePolicy then
+    self.nativePolicy.draw(self)
+    Kit.drawFade(self.pal, 0)
+    self.nativePolicy.drawCursor(self)
+    return
+  end
   local tp = man.palettes and man.palettes.textPrompt
   local label = self.mode == WallClock.MODE.VIEW and "gText_Cancel4" or "gText_Confirm3"
   local w2 = man.windows and man.windows[2]

@@ -1,3 +1,4 @@
+local CacheBlob = require("src.import.CacheBlob")
 local Tower = {}
 
 -- pokefirered/include/constants/trainer_tower.h:30
@@ -152,12 +153,12 @@ local function read_bytes(rel)
     if okR and type(d) == "string" and #d > 0 then return d end
   end
   if type(love) == "table" and love.filesystem and love.filesystem.read then
-    local okR, d = pcall(love.filesystem.read, rel)
+    local okR, d = pcall(CacheBlob.readFs, rel)
     if okR and type(d) == "string" and #d > 0 then return d end
   end
   local f = io.open(rel, "rb")
   if f then
-    local d = f:read("*a")
+    local d = CacheBlob.decode(rel, f:read("*a"))
     f:close()
     if type(d) == "string" and #d > 0 then return d end
   end

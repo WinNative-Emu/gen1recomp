@@ -48,8 +48,9 @@ local ROD_KINDS = {
   ITEM_OLD_ROD = 0, ITEM_GOOD_ROD = 1, ITEM_SUPER_ROD = 2,
 }
 
-function M.bind(E, H)
+function M.bind(E, H, policy)
   local R = { everyStep = true }
+  local rs = policy and policy.nativeRS == true
 
   local function C() return H.constants() end
 
@@ -101,7 +102,7 @@ function M.bind(E, H)
     local hi = tonumber(entry.maxLevel or entry.level) or lo
     if hi < lo then lo, hi = hi, lo end
     local rand = Rng.Random() % (hi - lo + 1)
-    local ab = lead_ability()
+    local ab = not rs and lead_ability()
     if ab and (ab == ability("ABILITY_HUSTLE") or ab == ability("ABILITY_VITAL_SPIRIT")
         or ab == ability("ABILITY_PRESSURE")) then
       if Rng.Random() % 2 == 0 then return hi end
@@ -139,6 +140,7 @@ function M.bind(E, H)
 
   -- pokeemerald/src/wild_encounter.c:938
   local function ability_index(slots, typeId, abilityName)
+    if rs then return nil end
     local ab = lead_ability()
     if not ab or ab ~= ability(abilityName) then return nil end
     if Rng.Random() % 2 ~= 0 then return nil end
@@ -147,6 +149,7 @@ function M.bind(E, H)
 
   -- pokeemerald/src/wild_encounter.c:897
   local function ability_allows(level)
+    if rs then return true end
     local mon = lead()
     if is_egg(mon) then return true end
     local ab = ability_of(mon)
@@ -177,7 +180,7 @@ function M.bind(E, H)
       end
     end
     local mon = lead()
-    if not is_egg(mon) and ability_of(mon) == ability("ABILITY_SYNCHRONIZE") and Rng.Random() % 2 == 0 then
+    if not rs and not is_egg(mon) and ability_of(mon) == ability("ABILITY_SYNCHRONIZE") and Rng.Random() % 2 == 0 then
       return (tonumber(mon and mon.personality) or 0) % NUM_NATURES
     end
     return Rng.Random() % NUM_NATURES
@@ -198,7 +201,7 @@ function M.bind(E, H)
     local Pokemon = require("src.core.game3.pokemon")
     local meta = Pokemon.speciesMeta(species)
     local ratio = meta and tonumber(meta.genderRatio)
-    local cuteCharm = not (ratio == MON_MALE or ratio == MON_FEMALE or ratio == MON_GENDERLESS)
+    local cuteCharm = not rs and not (ratio == MON_MALE or ratio == MON_FEMALE or ratio == MON_GENDERLESS)
     local mon = lead()
     if cuteCharm and not is_egg(mon) and ability_of(mon) == ability("ABILITY_CUTE_CHARM")
         and Rng.Random() % 3 ~= 0 then
@@ -218,7 +221,16 @@ function M.bind(E, H)
     repeat
       p = Rng.Random32()
     until p % NUM_NATURES == nature
-    return { species = species, level = level, personality = p }
+    local enc = { species = species, level = level, personality = p }
+    if rs then
+      -- pokeruby/src/pokemon_1.c:1445
+      local iv1, iv2 = Rng.Random(), Rng.Random()
+      enc.ivs = {
+        hp = iv1 % 32, atk = math.floor(iv1 / 32) % 32, def = math.floor(iv1 / 1024) % 32,
+        spe = iv2 % 32, spa = math.floor(iv2 / 32) % 32, spd = math.floor(iv2 / 1024) % 32,
+      }
+    end
+    return enc
   end
   R.createWild = create_wild
 
@@ -261,17 +273,17 @@ function M.bind(E, H)
     end
     if not (opts and opts.ignoreAbility) and not is_egg(mon) then
       local ab = ability_of(mon)
-      if ab == ability("ABILITY_STENCH") and opts and opts.pyramidFloor then
+      if not rs and ab == ability("ABILITY_STENCH") and opts and opts.pyramidFloor then
         r = math.floor(r * 3 / 4)
       elseif ab == ability("ABILITY_STENCH") then
         r = math.floor(r / 2)
       elseif ab == ability("ABILITY_ILLUMINATE") then
         r = r * 2
-      elseif ab == ability("ABILITY_WHITE_SMOKE") then
+      elseif not rs and ab == ability("ABILITY_WHITE_SMOKE") then
         r = math.floor(r / 2)
-      elseif ab == ability("ABILITY_ARENA_TRAP") then
+      elseif not rs and ab == ability("ABILITY_ARENA_TRAP") then
         r = r * 2
-      elseif ab == ability("ABILITY_SAND_VEIL") then
+      elseif not rs and ab == ability("ABILITY_SAND_VEIL") then
         local Weather = package.loaded["src.core.game3.weather"]
         local w = Weather and Weather.get and Weather.get()
         if w == C():require("weather", "WEATHER_SANDSTORM") then r = math.floor(r / 2) end
@@ -299,6 +311,7 @@ function M.bind(E, H)
 
   -- pokeemerald/src/wild_encounter.c:541
   local function sootopolis_blocks(mapId)
+    if rs then return false end
     if not current_map_is(mapId, "MAP_SOOTOPOLIS_CITY") then return false end
     return flag("FLAG_LEGENDARIES_IN_SOOTOPOLIS")
   end
@@ -312,6 +325,11 @@ function M.bind(E, H)
 
   local function is_bridge_over_water(behavior)
     local MB = require("src.core.game3.mb")
+    if rs then
+      -- pokeruby/src/metatile_behavior.c:874
+      local raw = MB.translator(C().game).raw(behavior)
+      return raw ~= nil and raw >= 0x70 and raw <= 0x73
+    end
     for _, name in ipairs(BRIDGE_OVER_WATER) do
       if behavior == MB.id(name) then return true end
     end
@@ -386,9 +404,9 @@ function M.bind(E, H)
 
   function R.standard(mapId, cur, prev, terrain)
     -- pokeemerald/src/wild_encounter.c:578
-    if facilityEncounter("src.core.game3.rse.frontier.pyramid", "FLOOR_MAP", mapId, cur, prev) then return nil end
+    if not rs and facilityEncounter("src.core.game3.rse.frontier.pyramid", "FLOOR_MAP", mapId, cur, prev) then return nil end
     -- pokeemerald/src/wild_encounter.c:563
-    if facilityEncounter("src.core.game3.rse.frontier.pike", "WILD_ROOM", mapId, cur, prev) then return nil end
+    if not rs and facilityEncounter("src.core.game3.rse.frontier.pike", "WILD_ROOM", mapId, cur, prev) then return nil end
     E.ensureLoaded()
     local t = H.table_for(mapId)
     if not t then return nil end
@@ -458,6 +476,7 @@ function M.bind(E, H)
 
   -- pokeemerald/src/wild_encounter.c:704
   function R.sweetScentFacility(mapId)
+    if rs then return nil end
     for _, f in ipairs({
       { "src.core.game3.rse.frontier.pike", "WILD_ROOM" },
       { "src.core.game3.rse.frontier.pyramid", "FLOOR_MAP" },
@@ -525,7 +544,7 @@ function M.bind(E, H)
   R.wildExtra = wild_extra
 
   local function feebas_random(state)
-    state.v = (1103515245 * state.v + 12345) % 4294967296
+    state.v = (Rng.mulU32(1103515245, state.v) + 12345) % 4294967296
     return math.floor(state.v / 65536)
   end
 
@@ -613,12 +632,12 @@ function M.bind(E, H)
     local rnd = Rng.Random() % 100
     local noItem, notRare = 45, 95
     local mon = lead()
-    if not is_egg(mon) and ability_of(mon) == ability("ABILITY_COMPOUND_EYES") then
+    if not rs and not is_egg(mon) and ability_of(mon) == ability("ABILITY_COMPOUND_EYES") then
       noItem, notRare = 20, 80
     end
     local meta = Pokemon.speciesMeta(species) or {}
     local common, rare = tonumber(meta.itemCommon) or 0, tonumber(meta.itemRare) or 0
-    if opts.alteringCave then
+    if not rs and opts.alteringCave then
       local rows = wild_extra().alteringCaveHeldItems
       -- pokeemerald/src/pokemon.c:6669
       local id = 0

@@ -171,7 +171,11 @@ function StepEvents.onStepTaken(session, game)
 
   local isRse = require("src.core.game3.profile").family(session) == "rse"
   local mcOn = isRse and require("src.core.game3.capabilities").gate(session, "match_call")
-  if mcOn then
+  local RsRematch = isRse and require("src.core.game3.rs.rematch")
+  if RsRematch and RsRematch.enabled(session) then
+    -- pokeruby/src/field_control_avatar.c:576
+    RsRematch.incrementStepCounter(session)
+  elseif mcOn then
     -- pokeemerald/src/field_control_avatar.c:543
     require("src.core.game3.rse.match_call").incrementRematchStepCounter(session)
   end
@@ -356,9 +360,12 @@ function StepEvents.onStepTaken(session, game)
   end
 
   if isRse and require("src.core.game3.special_scene_rse").countSSTidalStep(1) then
-    -- pokeemerald/src/field_control_avatar.c:599
+    -- pokeruby/src/field_control_avatar.c:593
     local Space = require("src.core.game3.scripting.space")
-    local key = Space.scriptKey("SSTidalCorridor_EventScript_ReachedStepCount")
+    local id = require("src.core.game3.profile").forSession(session).id
+    local name = (id == "ruby" or id == "sapphire") and "gUnknown_0815FD0D"
+      or "SSTidalCorridor_EventScript_ReachedStepCount"
+    local key = Space.scriptKey(name)
     if key and Space.startScript(key) then
       StepEvents.onRepelStep(session, game)
       return
@@ -380,12 +387,11 @@ function StepEvents.onRepelStep(session, game)
   local Py = package.loaded["src.core.game3.rse.frontier.pyramid"]
   -- pokeemerald/src/wild_encounter.c:854
   if (Pike and Pike.inBattlePike(session)) or (Py and Py.inPyramid(session)) then return end
-  local repelVar = Sem.var(session, "repelSteps")
-  local repelSteps = tonumber(session.repelSteps or session.vars[repelVar]) or 0
+  local repelSteps = tonumber(Sem.getVar(session, "repelSteps")) or 0
   if repelSteps > 0 then
     repelSteps = repelSteps - 1
     session.repelSteps = repelSteps
-    session.vars[repelVar] = repelSteps
+    Sem.setVar(session, "repelSteps", repelSteps)
 
     if repelSteps == 0 then
       push_event({

@@ -28,6 +28,7 @@ print("[info] FireRed cache at " .. cacheRoot)
 local FameChecker = require("src.core.game3.fame_checker")
 local Ui = require("src.ui.game3.fame_checker")
 local Stack = require("src.ui.game3.stack")
+local CacheBlob = require("src.import.CacheBlob")
 
 local PERSON = FameChecker.PERSON
 local PICK = FameChecker.PICKSTATE
@@ -131,7 +132,7 @@ do
   local f = io.open(path, "rb")
   check(f ~= nil, "the trainer pic is in the cache today")
   if f then
-    local bytes = f:read("*a")
+    local bytes = CacheBlob.decode(path, f:read("*a"))
     f:close()
     eq(#bytes, 64 * 64 * 4, "it is a 64x64 RGBA sprite")
   end

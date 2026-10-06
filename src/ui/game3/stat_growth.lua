@@ -40,6 +40,7 @@ function StatGrowth.open(mon, oldStats, newStats, onDone, opts)
   StatGrowth._page = 1
   StatGrowth._onDone = onDone
   StatGrowth._box = box
+  StatGrowth._nativePages = nil
   StatGrowth._pos = opts.pos or (box and { x = box.x, y = box.y, w = box.w, h = box.h }) or { x = 19, y = 1, w = 10, h = 11 }
 end
 
@@ -56,6 +57,7 @@ function StatGrowth.close(opts)
   StatGrowth._oldStats = nil
   StatGrowth._newStats = nil
   StatGrowth._page = 1
+  StatGrowth._nativePages = nil
   local cb = StatGrowth._onDone
   StatGrowth._onDone = nil
   if wasOpen and cb and not (opts and opts.silent) then cb() end
@@ -94,6 +96,38 @@ function StatGrowth.draw()
   local isPage1 = (StatGrowth._page == 1)
 
   local box = StatGrowth._box
+  if box and box.layout == "rs" then
+    -- pokeruby/src/battle_script_commands.c:5777
+    local pages = StatGrowth._nativePages
+    if not pages then
+      pages = {}
+      for page = 1, 2 do
+        local parts = {}
+        for i, key in ipairs(box.stats) do
+          parts[#parts + 1] = RomText.at(box.names, i - 1)
+          parts[#parts + 1] = string.char(0xFC, 0x13, ((i - 1) % 2) * 72 + 46)
+          local value = tonumber(newS[key]) or 0
+          if page == 1 then
+            value = value - (tonumber(oldS[key]) or 0)
+            parts[#parts + 1] = RomText.plain(value < 0 and "BattleText_Dash" or "BattleText_Plus")
+          end
+          parts[#parts + 1] = string.char(0xFC, 0x14, 6)
+          parts[#parts + 1] = string.format(page == 1 and "%2d" or "%3d", page == 1 and math.abs(value) or value)
+          parts[#parts + 1] = string.char(0xFC, 0x14, 0)
+          parts[#parts + 1] = i % 2 == 0 and "\n" or string.char(0xFC, 0x11, 8)
+        end
+        pages[page] = table.concat(parts)
+      end
+      StatGrowth._nativePages = pages
+    end
+    -- pokeruby/src/battle_bg.c:266
+    FrlgFont.draw(pages[StatGrowth._page], winX * 8, winY * 8, {
+      font = "native_3", linePitch = 16, maxWidth = winW * 8,
+      colors = { fg = { 74 / 255, 74 / 255, 74 / 255, 1 },
+        shadow = { 214 / 255, 214 / 255, 206 / 255, 1 }, bg = { 0, 0, 0, 0 } },
+    })
+    return
+  end
   if box then
     local ui = uiBlock()
     local keys = ui and ui.party and ui.party.text and ui.party.text.levelUpStats or {}

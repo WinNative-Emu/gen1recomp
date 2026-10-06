@@ -420,8 +420,9 @@ end
 function AnimPack.writeRse(rom, cache, root, bundles, midLists, version, opts)
   local Family = require("src.import.gba.family")
   local F = Family.active()
-  local S = F:syms()
-  local Data = require("src.import.gba.tileset_anims_" .. F.game)
+  local S = Versions.SYMS or F:syms()
+  local dataGame = (F.game == "ruby" or F.game == "sapphire") and "rs" or F.game
+  local Data = require("src.import.gba.tileset_anims_" .. dataGame)
   local inits = opts and opts.tilesetInits or {}
   local pairsTbl = (version and version.tileset_pairs) or Versions.TILESET_PAIRS or {}
   local names = {}

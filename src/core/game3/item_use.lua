@@ -9,6 +9,21 @@ local RomText = require("src.core.game3.rom_text")
 local Capabilities = require("src.core.game3.capabilities")
 
 local ItemUse = {}
+function ItemUse.effect(id, session)
+  if (ItemsData.toNumericId(id) or tonumber(id)) == 175 then
+    local e = require("src.core.game3.rs.enigma").itemEffect(session)
+    if e then return e end
+  end
+  local info = ItemsData.info(id)
+  return info and info.effect
+end
+function ItemUse.fieldUseKind(id, session, inBattle)
+  if (ItemsData.toNumericId(id) or tonumber(id)) == 175 then
+    local e = require("src.core.game3.rs.enigma").itemEffect(session)
+    if e then return require("src.core.game3.rs.enigma").fieldKind(e, inBattle) end
+  end
+  return ItemsData.fieldUseKind(id)
+end
 
 local function player_name(session)
   return tostring((session and (session.name or session.playerName)) or "")
@@ -18,16 +33,22 @@ local function mon_text(key, mon, v2)
   return (RomText.box(key, { stringVars = { Pokemon.displayMonName(mon), v2 } }))
 end
 
+local function is_rs()
+  local id = require("src.core.game3.profile").forSession().id
+  return id == "ruby" or id == "sapphire"
+end
+
 -- src/party_menu.c:4528 Task_DisplayHPRestoredMessage
 local function hp_restored_text(mon, restored)
-  return mon_text("gText_PkmnHPRestoredByVar2", mon, tostring(restored))
+  return mon_text(is_rs() and "gOtherText_HPRestoredBy" or "gText_PkmnHPRestoredByVar2", mon, tostring(restored))
 end
 
 -- src/item_use.c:191 PrintNotTheTimeToUseThat
 local function not_the_time(session)
   if require("src.core.game3.profile").family(session) == "rse" then
     -- pokeemerald/src/item_use.c:158 DisplayDadsAdviceCannotUseItemMessage
-    return (RomText.box("gText_DadsAdvice", { playerName = player_name(session) }))
+    -- pokeruby/src/item_use.c:146
+    return (RomText.box(is_rs() and "gOtherText_DadsAdvice" or "gText_DadsAdvice", { playerName = player_name(session) }))
   end
   return (RomText.box("gText_OakForbidsUseOfItemHere", { playerName = player_name(session) }))
 end
@@ -92,6 +113,10 @@ end
 --- Apply heal to one party slot. Returns ok, restoredAmount
 function ItemUse.healMon(session, mon, id)
   if not mon then return false, 0 end
+  if (ItemsData.toNumericId(id) or tonumber(id)) == 175 and require("src.core.game3.rs.enigma").matches(session) then
+    local changed, detail = ItemUse.applyEnigmaItem(session, mon, 1)
+    return changed, detail.restored
+  end
   local kind = ItemsData.medicineKind(id)
   local maxHp = tonumber(mon.maxHp) or tonumber(mon.maxhp) or 0
   local hp = tonumber(mon.hp) or 0
@@ -148,6 +173,14 @@ local CURED_TEXT = {
   status = "gText_PkmnBecameHealthy",
 }
 
+-- pokeruby/src/party_menu.c:3594
+local CURED_TEXT_RS = {
+  poison = "gOtherText_CuredPoisoning", sleep = "gOtherText_WokeUp",
+  burn = "gOtherText_BurnHealed", freeze = "gOtherText_ThawedOut",
+  paralysis = "gOtherText_CuredParalysis", confusion = "gOtherText_SnapConfusion",
+  infatuation = "gOtherText_GotOverLove", status = "gOtherText_BecameHealthy",
+}
+
 -- pokefirered/src/party_menu.c:4412
 local FLUTES = { [39] = true, [40] = true, [41] = true }
 function ItemUse.isFlute(id)
@@ -155,9 +188,8 @@ function ItemUse.isFlute(id)
 end
 
 -- pokefirered/src/party_menu.c:5345 GetItemEffectType
-function ItemUse.cureKind(id)
-  local info = ItemsData.info(id)
-  local e = info and info.effect
+function ItemUse.cureKind(id, session)
+  local e = ItemUse.effect(id, session)
   if type(e) ~= "table" then return nil end
   local statusCure = bit.band(tonumber(e[4]) or 0, 0x3F)
   if statusCure == 0x01 then return "confusion" end
@@ -168,17 +200,22 @@ end
 -- pokefirered/src/party_menu.c:4510
 function ItemUse.medicineText(mon, hpBefore, cured)
   local gained = (tonumber(mon and mon.hp) or 0) - (tonumber(hpBefore) or 0)
-  if gained > 0 then return hp_restored_text(mon, gained) end
-  return mon_text(CURED_TEXT[cured] or CURED_TEXT.status, mon)
+  local rs = is_rs()
+  if gained > 0 then
+    -- pokeruby/src/party_menu.c:3492
+    if rs and (tonumber(hpBefore) or 0) == 0 then return mon_text("gOtherText_RegainedHealth", mon) end
+    return hp_restored_text(mon, gained)
+  end
+  local texts = rs and CURED_TEXT_RS or CURED_TEXT
+  return mon_text(texts[cured] or texts.status, mon)
 end
 
 -- pokefirered/src/pokemon.c:4511
-function ItemUse.clearStatus(mon, id)
+function ItemUse.clearStatus(mon, id, session, effectOverride)
   if not mon then return false, nil end
   local st, sleep = mon_status(mon)
   if not st and sleep <= 0 then return false, nil end
-  local info = ItemsData.info(id)
-  local e = info and info.effect
+  local e = effectOverride or ItemUse.effect(id, session)
   if type(e) ~= "table" then return false, nil end
   local mask = bit.band(tonumber(e[4]) or 0, 0x3E)
   local have = STATUS_BIT[st] or ((sleep > 0) and 0x20) or 0
@@ -252,22 +289,27 @@ end
 
 -- src/party_menu.c:5455 TryGiveItemOrMailToSelectedMon
 function ItemUse.checkGive(session, id, partySlot)
+  local profile = require("src.core.game3.profile").forSession(session)
+  local rs = profile.id == "ruby" or profile.id == "sapphire"
   local party = session and session.party
   local mon = party and party[partySlot]
-  if not mon then return "noparty", nil, no_pokemon_text() end
+  if not mon then return "noparty", nil, rs and RomText.box("gOtherText_NoPokemon") or no_pokemon_text() end
   local pocket = ItemsData.pocketOf(id)
-  if pocket == "KEY_ITEMS" or pocket == "TM_CASE" then
+  -- pokeruby/src/item_menu.c:2298
+  local cannotHold = rs and (tonumber(ItemsData.info(id).importance) or 0) ~= 0
+      or (not rs and (pocket == "KEY_ITEMS" or pocket == "TM_CASE"))
+  if cannotHold then
     -- src/item_menu.c:1635
-    return "cant_hold", nil, (RomText.box("gText_ItemCantBeHeld", { stringVars = { ItemsData.displayName(id) } }))
+    return "cant_hold", nil, (RomText.box(rs and "gOtherText_CantBeHeld" or "gText_ItemCantBeHeld", { stringVars = { ItemsData.displayName(id) } }))
   end
   local prev = held_item(mon)
   if not prev then return "give", nil, nil end
   if require("src.core.game3.mail").isMailItem(ItemsData.toNumericId(prev) or prev) then
     -- src/party_menu.c:5600 DisplayItemMustBeRemovedFirstMessage
-    return "mail", prev, (RomText.box("gText_RemoveMailBeforeItem"))
+    return "mail", prev, (RomText.box(rs and "gOtherText_MailMustBeRemoved" or "gText_RemoveMailBeforeItem"))
   end
   -- src/party_menu.c:1601 DisplayAlreadyHoldingItemSwitchMessage
-  return "switch", prev, mon_text("gText_PkmnAlreadyHoldingItemSwitch", mon, ItemsData.displayName(prev))
+  return "switch", prev, mon_text(rs and "gOtherText_AlreadyHolding" or "gText_PkmnAlreadyHoldingItemSwitch", mon, ItemsData.displayName(prev))
 end
 
 -- src/party_menu.c:5487 GiveItemToSelectedMon
@@ -281,18 +323,22 @@ function ItemUse.giveHeld(session, bag, id, partySlot, source)
   mon.heldItem = mon.item
   source.remove(id)
   -- src/party_menu.c:1586
-  return mon_text("gText_PkmnWasGivenItem", mon, itemName)
+  local profile = require("src.core.game3.profile").forSession(session)
+  local rs = profile.id == "ruby" or profile.id == "sapphire"
+  return mon_text(rs and "gOtherText_WasGivenToHold" or "gText_PkmnWasGivenItem", mon, itemName)
 end
 
 -- src/party_menu.c:5563 Task_HandleSwitchItemsFromBagYesNoInput
 function ItemUse.switchHeld(session, bag, id, partySlot, source)
   source = source or ItemUse.bagGiveSource(bag)
   local mon = session.party[partySlot]
+  local profile = require("src.core.game3.profile").forSession(session)
+  local rs = profile.id == "ruby" or profile.id == "sapphire"
   local prev = held_item(mon)
   source.remove(id)
   if not Bag.add(bag, prev, 1) then
     source.restore(id)
-    return false, bag_full_text(prev)
+    return false, rs and RomText.box("gOtherText_BagFullCannotRemoveItem") or bag_full_text(prev)
   end
   mon.item = ItemsData.toNumericId(id) or id
   mon.heldItem = mon.item
@@ -300,7 +346,7 @@ function ItemUse.switchHeld(session, bag, id, partySlot, source)
   require("src.core.game3.quest_log_recorder").event(session, "SwappedHeldItemsOnMon",
     { Pokemon.displayMonName(mon), ItemsData.displayName(prev), ItemsData.displayName(id) })
   -- src/party_menu.c:1615
-  return true, (RomText.box("gText_SwitchedPkmnItem",
+  return true, (RomText.box(rs and "gOtherText_TakenAndReplaced" or "gText_SwitchedPkmnItem",
     { stringVars = { ItemsData.displayName(id), ItemsData.displayName(prev) } }))
 end
 
@@ -592,7 +638,7 @@ function ItemUse.needsPartyTarget(id)
   if not id then return false end
   local info = ItemsData.info(id)
   if not info then return false end
-  local use = ItemsData.fieldUseKind(id)
+  local use = ItemUse.fieldUseKind(id)
   if use == "heal" or use == "status" or use == "revive" or use == "tm"
       or use == "pp" or use == "level" or use == "evo" or use == "vitamin" then
     return true
@@ -660,12 +706,23 @@ function ItemUse.useVitamin(session, mon, itemId)
   if not mon then return false, "none", no_pokemon_text() end
   local num = ItemsData.toNumericId(itemId) or tonumber(itemId)
   local key = VITAMIN_STAT[num]
+  local enigma = num == 175 and require("src.core.game3.rs.enigma").matches(session)
+  local e
+  if enigma then
+    e = ItemUse.effect(itemId, session)
+    key = ({[12] = "atk", [13] = "hp", [14] = "spa", [15] = "spd", [16] = "spe", [17] = "def"})[require("src.core.game3.rs.enigma").effectType(e)]
+  end
   if not key then
     return false, "no_effect", wont_have_effect()
   end
   -- pokefirered/src/party_menu.c:4405 NotUsingHPEVItemOnShedinja
   if key == "hp" and (tonumber(mon.species or mon.speciesId) or 0) == 303 then
     return false, "no_effect", wont_have_effect()
+  end
+  if enigma then
+    local changed = ItemUse.applyEnigmaItem(session, mon, 1)
+    if not changed then return false, "no_effect", wont_have_effect() end
+    return true, "vitamin", mon_text("gText_PkmnBaseVar2StatIncreased", mon, RomText.plain(VITAMIN_STAT_TEXT_RSE[key]))
   end
   local gained = Pokemon.raiseEvFromItem(mon, key, VITAMIN_ADD_EV)
   if not gained or gained <= 0 then
@@ -689,9 +746,8 @@ local function s8(v)
 end
 
 -- pokefirered/src/pokemon.c:4001
-local function pp_effect(id)
-  local info = ItemsData.info(id)
-  local e = info and info.effect
+local function pp_effect(id, session)
+  local e = ItemUse.effect(id, session)
   if type(e) ~= "table" then return nil end
   local e4, e5 = tonumber(e[5]) or 0, tonumber(e[6]) or 0
   local idx = 7
@@ -750,13 +806,13 @@ local function pp_bonus(mon, s)
 end
 
 -- pokefirered/src/pokemon.c:4202, :4344, :4463
-local function pp_plan(mon, id, moveSlot)
-  local e = pp_effect(id)
+local function pp_plan(mon, id, moveSlot, session, override)
+  local e = override or pp_effect(id, session)
   if not e or not mon then return nil, nil end
   local out = {}
   if e.up or e.max then
     local s = tonumber(moveSlot)
-    if s and has_move(mon, s) then
+    if s and (has_move(mon, s) or (e.native and s >= 1 and s <= 4)) then
       local n = pp_bonus(mon, s)
       local cur = pp_with_bonus(mon, s, n)
       local nn
@@ -772,7 +828,7 @@ local function pp_plan(mon, id, moveSlot)
     end
   elseif e.heal then
     for s = 1, 4 do
-      if (not e.one or s == tonumber(moveSlot)) and has_move(mon, s) then
+      if (not e.one or s == tonumber(moveSlot)) and (has_move(mon, s) or e.native) then
         local max = pp_with_bonus(mon, s, pp_bonus(mon, s))
         local cur = tonumber(mon.pp and mon.pp[s]) or 0
         if cur ~= max then
@@ -796,8 +852,11 @@ function ItemUse.ppItemBoosts(id)
 end
 
 -- pokefirered/src/pokemon.c:4529
-function ItemUse.ppItemHasEffect(mon, id, moveSlot)
-  local plan = pp_plan(mon, id, moveSlot)
+function ItemUse.ppItemHasEffect(mon, id, moveSlot, session)
+  if (ItemsData.toNumericId(id) or tonumber(id)) == 175 and require("src.core.game3.rs.enigma").matches(session) then
+    return ItemUse.applyEnigmaItem(session, mon, moveSlot, {preview = true})
+  end
+  local plan = pp_plan(mon, id, moveSlot, session)
   return plan ~= nil and #plan > 0
 end
 
@@ -811,18 +870,22 @@ function ItemUse.ppItemText(mon, id, moveSlot)
   return (RomText.box("gText_PPWasRestored"))
 end
 
-function ItemUse.applyPpItem(mon, id, moveSlot, battler, session)
-  local plan, e = pp_plan(mon, id, moveSlot)
+local function apply_pp_changes(mon, plan, battler, native)
   if not plan or #plan == 0 then return false end
+  if native and type(mon.ppBonusesPacked) ~= "number" then
+    local packed = 0
+    for s = 1, 4 do packed = bit.bor(packed, bit.lshift(pp_bonus(mon, s), (s - 1) * 2)) end
+    mon.ppBonusesPacked = packed
+  end
   mon.pp = mon.pp or {}
   for _, c in ipairs(plan) do
     mon.pp[c.slot] = c.pp
     if c.max then
       mon.maxPp = mon.maxPp or {}
       mon.maxPp[c.slot] = c.max
-      if type(mon.ppBonusesPacked) == "number" then
+      if native or type(mon.ppBonusesPacked) == "number" then
         local shift = (c.slot - 1) * 2
-        mon.ppBonusesPacked = bit.bor(bit.band(mon.ppBonusesPacked, bit.bnot(bit.lshift(3, shift))),
+        mon.ppBonusesPacked = bit.bor(bit.band(mon.ppBonusesPacked or 0, bit.bnot(bit.lshift(3, shift))),
           bit.lshift(c.bonus, shift))
       end
     end
@@ -834,11 +897,121 @@ function ItemUse.applyPpItem(mon, id, moveSlot, battler, session)
       bMon.pp[c.slot] = c.pp
     end
   end
+  return true
+end
+
+function ItemUse.applyPpItem(mon, id, moveSlot, battler, session)
+  if (ItemsData.toNumericId(id) or tonumber(id)) == 175 and require("src.core.game3.rs.enigma").matches(session) then
+    return ItemUse.applyEnigmaItem(session, mon, moveSlot, {battler = battler})
+  end
+  local plan, e = pp_plan(mon, id, moveSlot, session)
+  if not apply_pp_changes(mon, plan, battler) then return false end
   -- pokefirered/src/pokemon.c:3976
   if e.friendship then
     Pokemon.itemFriendship(mon, e.friendship, { mapSec = Pokemon.currentMapSec(session) })
   end
   return true
+end
+
+local function copy_item_mon(value, seen)
+  if type(value) ~= "table" then return value end
+  seen = seen or {}
+  if seen[value] then return seen[value] end
+  local out = {}; seen[value] = out
+  for key, row in pairs(value) do out[key] = copy_item_mon(row, seen) end
+  return out
+end
+
+function ItemUse.applyEnigmaItem(session, mon, moveSlot, opts)
+  opts = opts or {}
+  local Enigma = require("src.core.game3.rs.enigma")
+  if not mon or not Enigma.matches(session) then return false end
+  local previousCalculation = Enigma.levelUpHP()
+  if opts.preview then mon = copy_item_mon(mon) end
+  local e = opts.effect or ItemUse.effect(175, session)
+  local restored, unsupported, levelUpHP = 0, nil, opts.levelUpHP
+  if levelUpHP == nil then levelUpHP = previousCalculation end
+  if levelUpHP == nil then levelUpHP = opts.state and opts.state.levelUpHP or session and session.levelUpHP end
+  local function calculated(oldMax)
+    local delta = (tonumber(mon.maxHp or mon.maxhp) or oldMax) - oldMax
+    levelUpHP = delta == 0 and 1 or delta
+    if not opts.preview then
+      Enigma.recordStatCalculation(oldMax, tonumber(mon.maxHp or mon.maxhp) or oldMax)
+      if opts.state then opts.state.levelUpHP = levelUpHP
+      elseif session then session.levelUpHP = levelUpHP end
+    end
+  end
+  local function pp(operation)
+    operation.native = true
+    local plan = pp_plan(mon, 175, moveSlot or 1, session, operation)
+    local target = not opts.preview and opts.battler or nil
+    return apply_pp_changes(mon, plan, target, true)
+  end
+  local changed, detail = Enigma.applyEffects(e, {
+    volatile = opts.volatile,
+    stats = opts.stats,
+    level = function()
+      local level = tonumber(mon.level) or 1
+      if level >= 100 then return false end
+      local oldMax, hp = tonumber(mon.maxHp or mon.maxhp) or 0, tonumber(mon.hp) or 0
+      mon.level = level + 1
+      mon.exp = require("src.core.game3.battle.experience").expForLevel(mon, mon.level)
+      Pokemon.applyStats(mon, session)
+      local max = tonumber(mon.maxHp or mon.maxhp) or oldMax
+      mon.hp = hp == 0 and 0 or math.min(max, hp + max - oldMax)
+      calculated(oldMax)
+      if not opts.preview and opts.emitLevel ~= false then ItemUse.levelUpEvent(mon, mon.level) end
+      return true
+    end,
+    status = function()
+      local asleep = mon.status == "SLP" or mon.status == 5 or (tonumber(mon.sleep) or 0) > 0
+      local changed = ItemUse.clearStatus(mon, 175, session, e)
+      if not opts.preview and changed and asleep and opts.battler and bit.band(e[4] or 0, 0x20) ~= 0 then
+        opts.battler.expNightmare = nil
+      end
+      return changed
+    end,
+    ev = function(key, amount)
+      if Pokemon.evCount(mon) >= 510 then return "abort" end
+      if (tonumber(Pokemon.evsOf(mon)[key]) or 0) >= 100 then return "skip" end
+      local oldMax = tonumber(mon.maxHp or mon.maxhp) or 0
+      Pokemon.raiseEvFromItem(mon, key, amount)
+      calculated(oldMax)
+      return "applied"
+    end,
+    hp = function(amount, revive)
+      local hp, max = tonumber(mon.hp) or 0, tonumber(mon.maxHp or mon.maxhp) or 0
+      if (revive and hp ~= 0) or (not revive and hp == 0) or hp == max then return false end
+      if amount == 255 then amount = max - hp
+      elseif amount == 254 then amount = math.max(1, math.floor(max / 2))
+      elseif amount == 253 then
+        if levelUpHP == nil then unsupported = "levelUpHP"; return false end
+        amount = levelUpHP
+      end
+      mon.hp = math.min(max, hp + amount)
+      restored = restored + mon.hp - hp
+      if not opts.preview and opts.hpApplied then opts.hpApplied(hp, max, revive) end
+      return true
+    end,
+    ppBoost = function(max) return pp({up = not max, max = max}) end,
+    ppHeal = function(amount, one) return pp({heal = amount, one = one}) end,
+    evolve = function()
+      if opts.preview then
+        return require("src.core.game3.evolution").itemTarget(mon, 175, session) ~= nil
+      end
+      return ItemUse.useEvolutionStone(session, mon, 175, opts.bag)
+    end,
+    friendshipTier = function()
+      local n = Pokemon.friendshipOf(mon)
+      return n < 100 and 1 or n < 200 and 2 or 3
+    end,
+    friendship = function(tier, amount)
+      Pokemon.itemFriendship(mon, {[tier] = amount}, {mapSec = Pokemon.currentMapSec(session)})
+    end,
+  })
+  detail.restored, detail.unsupported, detail.mon = restored, unsupported, mon
+  if opts.preview then Enigma.restoreStatCalculation(previousCalculation) end
+  return changed, detail
 end
 
 function ItemUse.useEvolutionStone(session, mon, itemId, bag)
@@ -1047,7 +1220,7 @@ end
 local function useField(session, bag, id, partySlot, moveSlot)
   local info = ItemsData.info(id)
   if not info then return false, "unknown", Strings("Unknown item.") end
-  local use = ItemsData.fieldUseKind(id)
+  local use = ItemUse.fieldUseKind(id, session)
 
   if require("src.core.game3.profile").family(session) == "rse" then
     local n = ItemsData.toNumericId(id) or tonumber(id)
@@ -1101,9 +1274,8 @@ local function useField(session, bag, id, partySlot, moveSlot)
 
   -- src/item_use.c:550 FieldUseFunc_Repel
   if use == "repel" then
-    local vars = type(session.vars) == "table" and session.vars or nil
-    local repelVar = require("src.core.game3.field_semantics").var(session, "repelSteps")
-    if (tonumber(session.repelSteps) or (vars and tonumber(vars[repelVar])) or 0) > 0 then
+    local Sem = require("src.core.game3.field_semantics")
+    if (tonumber(Sem.getVar(session, "repelSteps")) or 0) > 0 then
       -- src/item_use.c:559
       return false, "repel", (RomText.box("gText_RepelEffectsLingered"))
     end
@@ -1112,7 +1284,7 @@ local function useField(session, bag, id, partySlot, moveSlot)
       or 100
     session.repelSteps = steps
     -- src/item_use.c:567 VarSet(VAR_REPEL_STEP_COUNT)
-    if vars then vars[repelVar] = steps end
+    Sem.setVar(session, "repelSteps", steps)
     Bag.remove(bag, id, 1)
     -- src/item_use.c:579 RemoveUsedItem
     local t = RomText.box("gText_PlayerUsedVar2",
@@ -1218,7 +1390,38 @@ local function useField(session, bag, id, partySlot, moveSlot)
     local _
     local num = ItemsData.toNumericId(id) or tonumber(id)
 
-    if use == "tm" then
+    local enigma = num == 175 and require("src.core.game3.rs.enigma").matches(session)
+    if enigma then
+      local typ = require("src.core.game3.rs.enigma").effectType(ItemUse.effect(id, session))
+      if typ == 13 and (tonumber(mon.species or mon.speciesId) or 0) == 303 then
+        return false, "noeffect", wont_have_effect()
+      end
+      if use == "pp" and moveSlot == nil and ItemUse.ppItemNeedsMove(id) then
+        return false, "need_move", nil
+      end
+      if typ == 10 then
+        local pages = {}
+        for _, target in ipairs(party) do
+          local applied, detail = ItemUse.applyEnigmaItem(session, target, 1, {bag = bag})
+          if applied then pages[#pages + 1] = hp_restored_text(target, detail.restored) end
+        end
+        ok = #pages > 0
+        if ok then text = table.concat(pages, "\f") end
+      else
+        local detail
+        local hpBefore = tonumber(mon.hp) or 0
+        ok, detail = ItemUse.applyEnigmaItem(session, mon, moveSlot or 1, {bag = bag})
+        if ok then
+          if use == "pp" then text = ItemUse.ppItemText(mon, id, moveSlot or 1)
+          elseif use == "level" then text = mon_text("gText_PkmnElevatedToLvVar2", mon, tostring(mon.level))
+          elseif (tonumber(mon.hp) or 0) > hpBefore then text = ItemUse.medicineText(mon, hpBefore, ItemUse.cureKind(id, session))
+          elseif use == "vitamin" then
+            local key = ({[12]="atk",[13]="hp",[14]="spa",[15]="spd",[16]="spe",[17]="def"})[typ]
+            text = mon_text("gText_PkmnBaseVar2StatIncreased", mon, RomText.plain(VITAMIN_STAT_TEXT_RSE[key]))
+          else text = ItemUse.medicineText(mon, tonumber(mon.hp) or 0, ItemUse.cureKind(id, session)) end
+        end
+      end
+    elseif use == "tm" then
       return ItemUse.useTm(session, bag, id, partySlot)
     elseif use == "evo" then
       ok, _, text = ItemUse.useEvolutionStone(session, mon, id, bag)
@@ -1226,7 +1429,7 @@ local function useField(session, bag, id, partySlot, moveSlot)
       ok, _, text = ItemUse.useRareCandy(session, mon)
     -- pokefirered/src/pokemon.c:4258
     elseif use == "revive" or num == ITEM_REVIVAL_HERB then
-      if num == 45 then -- Sacred Ash
+      if num == 45 or (num == 175 and require("src.core.game3.rs.enigma").effectType(ItemUse.effect(id, session)) == 10) then -- Sacred Ash
         -- src/party_menu.c:5280 Task_SacredAshDisplayHPRestored
         local pages = {}
         for _, m in ipairs(party) do
@@ -1240,12 +1443,14 @@ local function useField(session, bag, id, partySlot, moveSlot)
       else
         local max = num == 25 or num == ITEM_REVIVAL_HERB or tostring(id) == "MAX_REVIVE"
         local restored
-        ok, restored = ItemUse.revive(mon, max)
+        if num == 175 and require("src.core.game3.rs.enigma").matches(session) then ok, restored = ItemUse.healMon(session, mon, id)
+        else ok, restored = ItemUse.revive(mon, max) end
         if ok then text = hp_restored_text(mon, restored) end
       end
     elseif use == "status" then
-      local stOk, cured = ItemUse.clearStatus(mon, id)
+      local stOk, cured = ItemUse.clearStatus(mon, id, session)
       ok = stOk
+      if num == 175 and require("src.core.game3.rs.enigma").matches(session) then ok = ItemUse.healMon(session, mon, id) or ok end
       if ok then text = mon_text(CURED_TEXT[cured] or CURED_TEXT.status, mon) end
     elseif use == "pp" then
       if moveSlot == nil and ItemUse.ppItemNeedsMove(id) then

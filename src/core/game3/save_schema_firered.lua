@@ -138,6 +138,19 @@ local function pokedex_view(v)
   return { mode = mode, order = order }
 end
 
+-- pokeemerald/src/load_save.c:196
+local function object_events(session)
+  local Objects = package.loaded["src.core.game3.objects"]
+  local Runtime = package.loaded["src.core.game3.runtime"]
+  if type(Objects) == "table" and Objects.snapshot and type(Runtime) == "table" and Runtime.getSession
+      and Runtime.getSession() == session and Objects._mapId ~= nil and Objects._mapId == session.map then
+    return Objects.snapshot()
+  end
+  local snap = session.objectEvents
+  if type(snap) == "table" and snap.mapId == session.map then return snap end
+  return nil
+end
+
 --- Factory for a pristine New Game after Oak intro finishes.
 function Schema.newGame(opts)
   opts = opts or {}
@@ -191,14 +204,16 @@ function Schema.newGame(opts)
   }
   -- pret new_game.c: SeedWildEncounterRng(Random()) after title SeedRngAndSetTrainerId.
   local Rng = require("src.core.game3.rng")
-  if opts.trainerIdLower ~= nil then
+  if rules.newGameTrainerIds then
+    session.trainerId, session.secretId = rules.newGameTrainerIds(opts)
+  elseif opts.trainerIdLower ~= nil then
     -- pokeemerald/src/new_game.c:84
     session.trainerId = math.floor(tonumber(opts.trainerIdLower) or 0) % 65536
   else
     session.trainerId = Rng.seedNewGame({ seed = opts.rngSeed })
   end
   -- pokefirered/src/new_game.c:56 InitPlayerTrainerId
-  session.secretId = Rng.Random()
+  if not rules.newGameTrainerIds then session.secretId = Rng.Random() end
   session.id = session.trainerId
   session.playerId = session.trainerId
   Rng.captureToSession(session)
@@ -207,6 +222,10 @@ function Schema.newGame(opts)
   rules.newGamePcItems(session.storage)
   rules.newGameInit(session, opts)
   require("src.core.game3.save_sections").newGame(session, version)
+  if rules.finishNewGameInit then
+    rules.finishNewGameInit(session, opts)
+    Rng.captureToSession(session)
+  end
   Options.ensure(session)
   -- Plan naming: text_speed / l_equals_a aliases mirror Options fields.
   session.options.text_speed = session.options.textSpeed
@@ -284,6 +303,8 @@ function Schema.toSaveTable(session)
     gcnLinkFlags = tonumber(session.gcnLinkFlags) or 0,
     -- pokefirered/include/global.h:770
     flashLevel = tonumber(session.flashLevel),
+    -- pokeemerald/include/global.h:1018
+    objectEvents = object_events(session),
     move_overlay = session.move_overlay or {},
     trainerId = session.trainerId,
     secretId = session.secretId,
@@ -402,6 +423,8 @@ function Schema.fromSaveTable(save)
     gcnLinkFlags = tonumber(save.gcnLinkFlags) or 0,
     -- pokefirered/include/global.h:770
     flashLevel = tonumber(save.flashLevel),
+    -- pokeemerald/include/global.h:1018
+    objectEvents = type(save.objectEvents) == "table" and save.objectEvents or nil,
     move_overlay = save.move_overlay or {},
     trainerId = save.trainerId,
     secretId = save.secretId,

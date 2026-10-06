@@ -148,7 +148,9 @@ end
 local function read_mail()
   local mail = selected_mail()
   Mailbox.state = "reading"
-  require("src.ui.game3.rse.mail").read(mail, {
+  local reader = require("src.ui.game3.rs.player_pc_policy").matches(Mailbox._session)
+    and "src.ui.game3.rs.mail_reader" or "src.ui.game3.rse.mail"
+  require(reader).read(mail, {
     session = Mailbox._session,
     onClose = function() back_to_list() end,
   })
@@ -326,7 +328,10 @@ function Mailbox.draw()
     local pitch = Window.optionHeight()
     for i = 1, #OPTIONS do
       local y = o.top * 8 + 1 + (i - 1) * pitch
-      Window.printPx(RomText.plain(RomText.key("gMailboxMailOptions", i - 1)), o.left * 8 + 8, y)
+      local rsLabels = {"OtherText_Read", "gOtherText_MoveToBag", "OtherText_Give", "gOtherText_CancelNoTerminator"}
+      local key = require("src.ui.game3.rs.player_pc_policy").matches(Mailbox._session) and rsLabels[i]
+        or RomText.key("gMailboxMailOptions", i - 1)
+      Window.printPx(RomText.plain(key), o.left * 8 + 8, y)
       if i == Mailbox.optCursor then Window.cursorPx(o.left * 8, y) end
     end
   elseif st == "confirm" then

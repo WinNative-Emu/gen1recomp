@@ -418,8 +418,8 @@ local function collectNeighborActors(actors, baseIndex, hostMapId, hostDef, camX
             local p = nb.perm[lid]
             local ox = p and p.x or tonumber(obj.x) or 0
             local oy = p and p.y or tonumber(obj.y) or 0
-            local out = bounds and (ox < 0 or oy < 0
-              or ox >= bounds.w or oy >= bounds.h)
+            local out = bounds and (ox < -16 or oy < -16
+              or ox >= bounds.w + 16 or oy >= bounds.h + 16)
             -- src/event_object_movement.c:8014
             if tonumber(obj.movementType) == 0x4C then out = true end
             local gid = obj.graphicsId or obj.graphics
@@ -550,6 +550,11 @@ FieldView.applyDrawOrder = applyDrawOrder
 
 local owOpts = {}
 
+local function weatherMask()
+  local W = package.loaded["src.core.game3.field_weather_rse"]
+  return W and W.maskActive and W.maskActive() and W or nil
+end
+
 local function drawSingleActor(game, mapDef, a, camX, camY)
   local daytime = daytimeFor(game, mapDef)
   local OwSprites = modOwSprites()
@@ -577,6 +582,14 @@ local function drawSingleActor(game, mapDef, a, camX, camY)
     opts.alpha = a.alpha
     drew = OwSprites.draw(
       a.graphicsId, a.x, a.y, camX, camY, a.facing, a.walkPhase, a.stepFlip, opts)
+    local W = drew and weatherMask()
+    if W then
+      local spr = OwSprites.getDraw(a.graphicsId)
+      -- pokeruby/src/field_weather.c:580
+      W.writeActorMask(W.actorMaskCode(spr and spr.paletteSlot), function()
+        OwSprites.draw(a.graphicsId, a.x, a.y, camX, camY, a.facing, a.walkPhase, a.stepFlip, opts)
+      end)
+    end
   end
   if not drew then
     local sr = getSpriteRenderer(
@@ -1744,6 +1757,8 @@ function FieldView.draw(game, canvasW, canvasH, opts)
   -- pret BG1: metatile top layer covers normal OW sprites (roofs, desk counters, trees).
   if usedNative and not opts.actorsOnly then
     drawNativeOverTiles()
+    local W = weatherMask()
+    if W then W.writeActorMask(0, drawNativeOverTiles) end
   end
 
   -- Draw Game3 actors with elevated priority (over BG1 / overhead layer, e.g. bridges/cliffs/jumping/escalators).
@@ -1758,6 +1773,8 @@ function FieldView.draw(game, canvasW, canvasH, opts)
     local FieldEffects = modFieldEffects()
     if FieldEffects and FieldEffects.drawFront then
       FieldEffects.drawFront(camX, camY, py)
+      local W = weatherMask()
+      if W then W.writeActorMask(0, function() FieldEffects.drawFront(camX, camY, py) end) end
     end
   end
 
@@ -1792,6 +1809,10 @@ function FieldView.draw(game, canvasW, canvasH, opts)
     end
   end
 
+  if not opts.actorsOnly then
+    local crisis = package.loaded["src.core.game3.rse.weather_flash_rs"]
+    if crisis and crisis.drawField then crisis.drawField() end
+  end
   drawFlashMask(canvasW, canvasH)
 
   love.graphics.setColor(1, 1, 1, 1)

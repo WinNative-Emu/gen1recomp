@@ -980,7 +980,9 @@ end
 local function interviewAfterBravoTrainerBattleTowerProfile(session, ctxv)
   local show = shows(session)[Tv._curSlot]
   if not show then return end
-  local iv = ctxv.towerInterview or {}
+  local row = rse().profile(session)
+  local policy = row and row.tv
+  local iv = policy and policy.towerInterview and policy.towerInterview(session) or ctxv.towerInterview or {}
   show.kind = Tv.TVSHOW_BRAVO_TRAINER_BATTLE_TOWER_PROFILE
   show.active = true
   show.playerName = playerName(session)
@@ -989,12 +991,17 @@ local function interviewAfterBravoTrainerBattleTowerProfile(session, ctxv)
   show.defeatedSpecies = n(iv.opponentSpecies)
   show.numFights = n(iv.numFights)
   show.wonTheChallenge = iv.wonTheChallenge == true or iv.wonTheChallenge == 1
+  show.battleOutcome = iv.battleOutcome
   -- pokeemerald/include/constants/battle_frontier.h:51
   show.btLevel = n(iv.lvlMode) == 0 and 50 or 100
   show.interviewResponse = n(ctxv.var8004)
   storeIdNormal(show, session)
   show.playerLanguage = Tv.GAME_LANGUAGE
-  show.opponentLanguage = tonumber(iv.opponentLanguage) or Tv.GAME_LANGUAGE
+  if policy and policy.towerInterview then
+    show.opponentLanguage = nil
+  else
+    show.opponentLanguage = tonumber(iv.opponentLanguage) or Tv.GAME_LANGUAGE
+  end
 end
 
 -- pokeemerald/src/tv.c:2846
@@ -2072,7 +2079,7 @@ function Tv.checkForPlayersHouseNews(opts)
   if opts.mapGroup ~= opts.housesGroup then return Tv.PLAYERS_HOUSE_TV_NONE end
   local want = opts.gender == 0 and opts.brendanNum or opts.mayNum
   if opts.mapNum ~= want then return Tv.PLAYERS_HOUSE_TV_NONE end
-  if opts.flag("FLAG_SYS_TV_LATIAS_LATIOS") then return Tv.PLAYERS_HOUSE_TV_LATI end
+  if opts.flag(opts.latiFlag or "FLAG_SYS_TV_LATIAS_LATIOS") then return Tv.PLAYERS_HOUSE_TV_LATI end
   if opts.flag("FLAG_SYS_TV_HOME") then return Tv.PLAYERS_HOUSE_TV_MOVIE end
   return Tv.PLAYERS_HOUSE_TV_LATI
 end
@@ -2290,7 +2297,8 @@ function Tv.mixExport(session)
   for slot = 0, Tv.NUM_NORMAL_TVSHOW_SLOTS - 1 do
     if Tv.groupOf(sending[slot].kind) == Tv.TVGROUP.NORMAL then sending[slot].active = false end
   end
-  local raw = require("src.save_convert.Gen3Save").forVersion("emerald").recordMixTvPrefix(session, sending)
+  local row = rse().profile(session)
+  local raw = require("src.save_convert.Gen3Save").forVersion(row and row.id or "emerald").recordMixTvPrefix(session, sending)
   local sum = 0
   for i = 1, 256 do sum = sum + raw:byte(i) end
   out.tvShowByteSum = sum % 256
@@ -3757,6 +3765,56 @@ do
     SaveSections.register("tv", def)
   end
 end
+
+local function lifecycleCall(session, method, ...)
+  if type(session) ~= "table" then return false end
+  local p = require("src.core.game3.profile").forSession(session)
+  local policy = p.tv and p.tv.lifecycle
+  if type(policy) == "string" then policy = require(policy) end
+  if type(policy) ~= "table" then return false end
+  if type(policy[method]) == "function" then return true, policy[method](session, ...) end
+  if policy.unsupported and policy.unsupported[method] then return true end
+  return false
+end
+local function lifecycleMethod(method)
+  local original = assert(Tv[method], "TV lifecycle function missing: " .. method)
+  Tv[method] = function(session, ...)
+    local handled, a, b, c = lifecycleCall(sessionOf(session), method, ...)
+    if handled then return a, b, c end
+    return original(session, ...)
+  end
+end
+for _, method in ipairs({
+  "clearTVShowData", "resetGabbyAndTy", "findAnyShowOnAir", "gabbyAndTyBeforeInterview", "gabbyAndTyAfterInterview", "tryPutPokemonTodayOnAir",
+  "initWorldOfMastersShowAttempt", "tryPutPokemonTodayFailedOnTheAir", "tryPutSmartShopperOnAir",
+  "bravoTrainerPokemonProfileBeforeInterview1", "bravoTrainerPokemonProfileBeforeInterview2",
+  "syncOutbreak", "endMassOutbreak", "tryStartRandomMassOutbreak", "recordFishingAttempt", "tryPutFishingAdviceOnAir",
+  "tryPutRandomPokeNewsOnAir", "updatePerDay", "interviewBefore", "interviewAfter", "onBattleEnd",
+  "tryPutTodaysRivalTrainerOnAir", "tryPutTrendWatcherOnAir", "tryPutTreasureInvestigatorsOnAir",
+  "tryPutFindThatGamerOnAir", "tryPutBreakingNewsOnAir", "tryPutSecretBaseVisitOnAir", "tryPutLotteryWinnerReportOnAir",
+  "tryPutBattleSeminarOnAir", "tryPutSafariFanClubOnAir", "tryPutSpotTheCutiesOnAir", "putSpotTheCutiesOnAir",
+  "tryPutTrainerFanClubOnAir", "tryPutFrontierTVShowOnAir", "tryPutSecretBaseSecretsOnAir",
+  "incrementDailySlotsUses", "incrementDailyRouletteUses", "incrementDailyWildBattles", "incrementDailyBerryBlender",
+  "incrementDailyPlantedBerries", "incrementDailyPickedBerries", "incrementDailyBattlePoints",
+}) do lifecycleMethod(method) end
+do
+  local original = Tv.shouldApplyPokeNews
+  Tv.shouldApplyPokeNews = function(kind, session, talked)
+    local handled, value = lifecycleCall(sessionOf(session), "shouldApplyPokeNews", kind, talked)
+    if handled then return value end
+    return original(kind, session, talked)
+  end
+end
+local function lifecycleNoSession(method)
+  local original = Tv[method]
+  Tv[method] = function(...)
+    local handled, a, b, c = lifecycleCall(sessionOf(nil), method, ...)
+    if handled then return a, b, c end
+    return original(...)
+  end
+end
+lifecycleNoSession("alertPlayedSlotMachine")
+lifecycleNoSession("alertPlayedRoulette")
 
 local NO_SESSION = {
   shouldApplyPokeNews = true, setPokemonAnglerSpecies = true, alertPlayedSlotMachine = true,

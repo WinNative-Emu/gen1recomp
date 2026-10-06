@@ -1,6 +1,5 @@
 local Ops = require("Ops")
 local Gen = require("Gen")
-local Bag = require("src.inventory.Bag")
 local M = {}
 local Touch = require("TouchEditor")
 local Motion = require("Motion")
@@ -135,8 +134,8 @@ local function drawView(S, Kit, x, y, w, h)
   end
   local pc = S.itemView == "pc"
   local prefix = pc and "pc" or "bag"
-  local function call(verb, id, value)
-    return Ops[prefix .. verb](S, id, value)
+  local function call(verb, id, value, slot)
+    return Ops[prefix .. verb](S, id, value, slot)
   end
   if not compact then
     local half = (inner - gap) / 2
@@ -186,8 +185,7 @@ local function drawView(S, Kit, x, y, w, h)
     end
     return
   end
-  local order = pc and Ops.pcOrder(S) or Bag.order(S.save, S.data)
-  local quantities = pc and S.save.pcItems or S.save.inventory
+  local order = Ops.stackRows(S, pc)
   local pagerY = y + h - pad - row
   local bodyH = math.max(0, pagerY - gap - cy)
   -- Reserve the complete confirmation label before arming Drop, so its
@@ -211,13 +209,15 @@ local function drawView(S, Kit, x, y, w, h)
   local drawn, shift = Kit.list(S, offsetKey, cx, cy, inner, bodyH, #order, itemH)
   Kit.pushClip(cx, cy, inner, bodyH)
   for i = 1, drawn do
-    local id = order[S[offsetKey] + i]
-    if id == nil then
+    local entry = order[S[offsetKey] + i]
+    if entry == nil then
       break
     end
+    local id, slot = entry.id, entry.slot
+    local key = tostring(id) .. (slot > 1 and ("#" .. slot) or "")
     local by = cy + (i - 1) * itemH - shift
     local def = S.data.items[id]
-    local count = quantities[id] or 0
+    local count = entry.count or 0
     local max = Ops.itemMax(S, id, pc)
     local issue = not require("Legality").integer(count, 1, max)
       and ("Saved stack must be a whole number from 1 to " .. max) or nil
@@ -236,7 +236,7 @@ local function drawView(S, Kit, x, y, w, h)
     then
       Touch.open(S, Kit, {
         mode = "number",
-        id = "item-" .. tostring(id),
+        id = "item-" .. key,
         title = def and def.name or tostring(id),
         value = count,
         savedValue = count,
@@ -247,7 +247,7 @@ local function drawView(S, Kit, x, y, w, h)
           help = "Set the stack size. Max fills it; Drop removes it.",
         },
         apply = function(v)
-          return call("Adjust", id, v - count)
+          return call("Adjust", id, v - count, slot)
         end,
       })
     end
@@ -258,7 +258,7 @@ local function drawView(S, Kit, x, y, w, h)
       "Increase",
       "Max",
       pc and "Bag" or "PC",
-      Ops.armLabel(S, prefix .. "-drop-" .. tostring(id), "Drop"),
+      Ops.armLabel(S, prefix .. "-drop-" .. key, "Drop"),
     }
     for j, label in ipairs(labels) do
       local actionRow = math.floor((j - 1) / actionCols)
@@ -277,7 +277,7 @@ local function drawView(S, Kit, x, y, w, h)
         })
       then
         if j == 1 then
-          call("Adjust", id, -1)
+          call("Adjust", id, -1, slot)
         elseif j == 2 then
           call("Adjust", id, 1)
         elseif j == 3 then
@@ -287,11 +287,11 @@ local function drawView(S, Kit, x, y, w, h)
         elseif
           Ops.arm(
             S,
-            prefix .. "-drop-" .. tostring(id),
+            prefix .. "-drop-" .. key,
             "Drop this entire stack? Tap again to confirm"
           )
         then
-          call("Drop", id)
+          call("Drop", id, slot)
         end
       end
       actionX = actionX + bw + gap

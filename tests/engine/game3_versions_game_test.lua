@@ -20,7 +20,7 @@ check(VersionsGame.game("leafgreen") == Frlg,
 check(VersionsGame.game(nil) == Frlg,
   "nil resolves the active game's table")
 check(VersionsGame.game("") == Frlg, "an empty id resolves the active game")
-check(not pcall(VersionsGame.game, "ruby"),
+check(not pcall(VersionsGame.game, "unknown"),
   "an unregistered id raises instead of reading FireRed offsets")
 
 VersionsGame.reset()

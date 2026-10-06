@@ -27,6 +27,7 @@ local Seagallop = require("src.import.gba.seagallop_extract")
 local BattleChrome = require("src.import.gba.battle_chrome_extract")
 local CacheContract = require("src.import.CacheContract")
 local Versions = require("src.import.gba.versions")
+local CacheBlob = require("src.import.CacheBlob")
 
 local function fakeRom(str)
   return {
@@ -256,7 +257,7 @@ print("[info] FireRed cache at " .. root)
 local function readFile(rel)
   local f = io.open(root .. "/" .. rel, "rb")
   if not f then return nil end
-  local data = f:read("*a")
+  local data = CacheBlob.decode(root .. "/" .. rel, f:read("*a"))
   f:close()
   return data
 end

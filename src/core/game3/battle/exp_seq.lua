@@ -5,6 +5,7 @@ local State = require("src.core.game3.battle.state")
 local LearnMove = require("src.core.game3.battle.learn_move")
 local Pokemon = require("src.core.game3.pokemon")
 local BattleText = require("src.core.game3.battle.battle_text")
+local LevelUpStreaks = require("src.core.game3.battle.level_up_streaks")
 
 local ExpSeq = {}
 
@@ -31,6 +32,8 @@ ExpSeq._leveled = nil -- {[partyIndex]=true}
 ExpSeq._pendingStatGrowth = nil
 
 function ExpSeq.reset()
+  LevelUpStreaks.reset()
+  ExpSeq._epoch = (ExpSeq._epoch or 0) + 1
   ExpSeq._steps = nil
   ExpSeq._i = 1
   ExpSeq._waiting = false
@@ -61,6 +64,7 @@ function ExpSeq.leveledSet()
 end
 
 local function finish()
+  LevelUpStreaks.reset()
   ExpSeq._steps = nil
   ExpSeq._i = 1
   ExpSeq._waiting = false
@@ -135,6 +139,8 @@ function ExpSeq.begin(awards, pushMsg, thenMsgs, opts)
           add("level", {
             side = key,
             isBench = isBench,
+            partyIndex = pi,
+            controllerId = entry.expGetterBattlerId or (entry.battler and entry.battler.id) or 0,
             mon = mon,
             level = step.grewTo,
             hp = step.hp or (mon and tonumber(mon.hp)),
@@ -237,12 +243,13 @@ local function run_step(step)
       local bid = (type(side) == "number") and side or nil
       if bid then side = State.sideOf(bid) end
       ExpSeq._lvlAnimWait = true
+      local epoch = ExpSeq._epoch
       Anim.launchSpecial("LVL_UP", {
         attackerSide = side,
         targetSide = side,
         attackerId = bid,
         targetId = bid,
-        onEnd = function() ExpSeq._lvlAnimWait = false end,
+        onEnd = function() if ExpSeq._epoch == epoch then ExpSeq._lvlAnimWait = false end end,
       })
       return
     end
@@ -256,6 +263,13 @@ local function run_step(step)
           p.displayHp = d.hp or d.maxHp
         end
       end
+    end
+    -- pokefirered/src/battle_controller_player.c:1155
+    if not ExpSeq._headless and not d._vertical then
+      d._vertical = true
+      local Ui = package.loaded["src.core.game3.battle.ui"]
+      if Ui and LevelUpStreaks.begin({st = Ui._st, controllerId = d.controllerId,
+          mon = d.mon, partyIndex = d.partyIndex, snapshot = Ui.levelUpSpriteSnapshot}) then return end
     end
     do
       local Audio = require("src.core.game3.audio")
@@ -304,6 +318,9 @@ local function run_step(step)
 end
 
 function ExpSeq.update()
+  if LevelUpStreaks.busy() then
+    if not LevelUpStreaks.update() then return false end
+  end
   if LearnMove.busy() then
     LearnMove.pump()
     return false

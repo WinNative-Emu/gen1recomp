@@ -79,10 +79,16 @@ function RecordMix.fromWire(v)
 end
 
 -- pokeemerald/src/record_mixing.c:220 PrepareExchangePacket
-function RecordMix.packet(session, multiplayerId)
+function RecordMix.packet(session, multiplayerId, partners)
   session = sessionOf(session)
   local sess = type(session) == "table" and session or {}
   local MixUtil = require("src.core.game3.rse.record_mix_util")
+  if Family.isRubySapphire(sess.version or Family.activeVersion()) then
+    return require("src.core.game3.link.rs_record_mix").packet(sess, tonumber(multiplayerId) or 0)
+  end
+  if sess.version == "emerald" and require("src.core.game3.link.rs_record_cross").anyRS(partners) then
+    return require("src.core.game3.link.rs_record_cross").packet(sess, tonumber(multiplayerId) or 0)
+  end
   local out = {
     version = sess.version or Family.activeVersion(),
     trainerId = tonumber(sess.trainerId or sess.id) or 0,
@@ -116,6 +122,22 @@ function RecordMix.receive(session, packets, myIndex, logger)
   local players = {}
   for i, p in ipairs(packets or {}) do players[i] = type(p) == "table" and deep(p) or {} end
   myIndex = tonumber(myIndex) or 1
+  local Cross = require("src.core.game3.link.rs_record_cross")
+  if Cross.mixed(session, players) then
+    local applied = Cross.receive(session, players, myIndex)
+    RecordMix.last = { players = #players, myIndex = myIndex, applied = applied }
+    return applied
+  end
+  if Family.isRubySapphire(type(session) == "table" and session.version or Family.activeVersion()) then
+    local applied = require("src.core.game3.link.rs_record_mix").receive(session, players, myIndex)
+    RecordMix.last = { players = #players, myIndex = myIndex, applied = applied }
+    return applied
+  end
+  for _, player in ipairs(players) do
+    if Family.isRubySapphire(player.version) then
+      return { unsupportedReason = "rs_record_mixing_cross_family_not_implemented" }
+    end
+  end
   local applied = {}
   local randSum = call(system("daycareMail"), "randSum", players[1]) or 0
   local bases = {}
@@ -198,13 +220,25 @@ function RecordMix.playerSpotTriggered(ctx, adapters)
   end
   local LB = require("src.core.game3.link.battle")
   local spot = L.getVar(ctx, LB.VAR_0x8005)
+  local isRs = Family.isRubySapphire(type(session) == "table" and session.version or Family.activeVersion())
+  local partners = lk.players and lk:players() or {}
+  local nativeRsGroup = isRs or require("src.core.game3.link.rs_record_cross").anyRS(partners)
+  for _, player in ipairs(partners) do
+    if nativeRsGroup and not Family.isRubySapphire(player.version) and player.version ~= "emerald" then
+      local applied = { unsupportedReason = "rs_record_mixing_unsupported_partner" }
+      RecordMix.last = { applied = applied }
+      RecordMix.state = "off"
+      L.closeLink(applied.unsupportedReason)
+      return false
+    end
+  end
   -- pokeemerald/src/record_mixing.c:321
-  varSet(ctx, session, "VAR_TEMP_MIXED_RECORDS", 1)
-  local mine = RecordMix.packet(session, spot)
+  varSet(ctx, session, isRs and "VAR_TEMP_0" or "VAR_TEMP_MIXED_RECORDS", 1)
+  local mine = RecordMix.packet(session, spot, partners)
   mine.spot = spot
   lk:send({ type = RecordMix.MSG.PACKET, spot = spot, packet = RecordMix.toWire(mine) })
   RecordMix.state = "mixing"
-  message("gText_MixingRecords")
+  message(isRs and "gOtherText_MixingRecordsWithFriend" or "gText_MixingRecords")
   local got = {}
   local Natives = require("src.core.game3.scripting.natives")
   local yielded = Natives.yieldHost(ctx, adapters, function() end)
@@ -212,9 +246,18 @@ function RecordMix.playerSpotTriggered(ctx, adapters)
     RecordMix.state = "off"
     return false
   end
-  local ticks = 0
+  local ticks, shown = 0, nil
   ctx.nativePoll = function()
     ticks = ticks + 1
+    if shown then
+      -- pokeruby/src/record_mixing.c:157
+      shown = shown + 1
+      if shown <= 60 then return false end
+      local okM, Message = pcall(require, "src.ui.game3.message")
+      if okM and Message.closeStay then Message.closeStay() end
+      RecordMix.state = "done"
+      return true
+    end
     local live = L.link
     if not (live and live:isOpen()) then
       RecordMix.state = "off"
@@ -240,6 +283,12 @@ function RecordMix.playerSpotTriggered(ctx, adapters)
       if row.mine then myIndex = i end
     end
     local applied = RecordMix.receive(session, packets, myIndex, adapters and adapters.log)
+    if applied and applied.unsupportedReason then
+      RecordMix.state = "off"
+      RecordMix.last = { players = #packets, myIndex = myIndex, applied = applied }
+      L.closeLink(applied.unsupportedReason)
+      return true
+    end
     local gift = applied and applied.gift
     if type(gift) == "table" and (tonumber(gift.item) or 0) ~= 0 then
       -- pokeemerald/src/record_mixing.c:976
@@ -248,7 +297,10 @@ function RecordMix.playerSpotTriggered(ctx, adapters)
     end
     -- pokeemerald/src/record_mixing.c:333
     flagSet(session, "FLAG_SYS_MIX_RECORD")
-    message("gText_RecordMixingComplete")
+    if message(isRs and "gOtherText_MixingComplete" or "gText_RecordMixingComplete") then
+      shown = 0
+      return false
+    end
     RecordMix.state = "done"
     return true
   end

@@ -80,6 +80,11 @@ local function ashGrass(_game, data)
         Steps.setMetatile(a.x, a.y, a.metatile)
         local FieldEffects = package.loaded["src.core.game3.field_effects"]
         if FieldEffects and FieldEffects.startAsh then FieldEffects.startAsh(a.x, a.y) end
+        -- pokeruby/src/field_effect_helpers.c:922
+        local px, py = destCoords()
+        if FieldEffects and FieldEffects.tallGrassAt and Collision.isGrass and Collision.isGrass(px, py) then
+          FieldEffects.tallGrassAt(px, py, true)
+        end
         table.remove(pending, i)
       end
     end
@@ -326,8 +331,11 @@ end
 
 -- pokeemerald/src/field_tasks.c:785 SetCrackedFloorHoleMetatile
 local function setCrackedFloorHole(x, y)
-  local id = Steps.metatileAt(x, y) == metatile("Cave_CrackedFloor") and metatile("Cave_CrackedFloor_Hole")
-    or metatile("Pacifidlog_SkyPillar_CrackedFloor_Hole")
+  local C = constants()
+  -- pokeruby/src/field_tasks.c:663
+  local cracked = C:id("metatile_labels", "METATILE_Cave_CrackedFloor") or 0x22F
+  local id = Steps.metatileAt(x, y) == cracked and (C:id("metatile_labels", "METATILE_Cave_CrackedFloor_Hole") or 0x206)
+    or (C:id("metatile_labels", "METATILE_Pacifidlog_SkyPillar_CrackedFloor_Hole") or 0x237)
   Steps.setMetatile(x, y, id)
 end
 

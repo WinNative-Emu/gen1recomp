@@ -17,11 +17,12 @@ VersionsRse.FIELDMAP = {
   METATILE_ATTR_BYTES = 2,
 }
 
-function VersionsRse.new(game)
-  local S = Syms.of(game)
+function VersionsRse.new(game, build)
+  local S = Syms.of(build or game)
   local V = {}
 
   V.GAME = game
+  V.BUILD = build or game
   V.FAMILY = VersionsRse.FAMILY
   V.FIELDMAP = VersionsRse.FIELDMAP
   V.ROM_SIZE = 16777216

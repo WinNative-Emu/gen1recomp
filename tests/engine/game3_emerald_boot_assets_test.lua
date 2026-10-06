@@ -59,9 +59,11 @@ check(png:find("tRNS", 1, true) ~= nil, "transparent png has tRNS")
 check(K.encodeIndexed(1, 1, { 0 }, { [0] = 0 }, false):find("tRNS", 1, true) == nil, "opaque png has no tRNS")
 eq(select(1, K.pngSize(K.encodeGray(4, 5, K.blank(4, 5)))), 4, "gray png width")
 
-local stored = K.zlibStored(string.rep("a", 70000))
-eq(stored:byte(1), 0x78, "zlib header")
-eq(#stored, 2 + 70000 + 5 * 2 + 4, "two stored blocks plus adler")
+local CacheBlob = require("src.import.CacheBlob")
+local deflated = CacheBlob.deflate(string.rep("a", 70000), 9)
+eq(deflated:byte(1), 0x78, "zlib header")
+check(#deflated < 1000, "png idat is deflated")
+eq(CacheBlob.inflate(deflated), string.rep("a", 70000), "deflate round trip")
 
 local mods = {
   "extract_intro_emerald", "intro_credits_gfx_extract", "extract_title_rse",

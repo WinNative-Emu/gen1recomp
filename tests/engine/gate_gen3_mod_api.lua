@@ -8,8 +8,10 @@ local Schemas = require("src.mods.Schemas")
 
 T.eq(GameVersion.generation("firered"), 3, "FireRed is Gen 3")
 T.eq(GameVersion.generation("leafgreen"), 3, "LeafGreen is Gen 3")
-T.eq(table.concat(ModTargets.expand("gen3"), ","), "firered,leafgreen,emerald",
+T.eq(table.concat(ModTargets.expand("gen3"), ","), "firered,leafgreen,ruby,sapphire,emerald",
   "gen3 is every Gen 3 game")
+T.eq(table.concat(ModTargets.expand("rse"), ","), "ruby,sapphire,emerald",
+  "rse is the Hoenn games")
 
 local function manifest(extra)
   local raw = { id = "fix", name = "Fixture", version = "1.0.0",
