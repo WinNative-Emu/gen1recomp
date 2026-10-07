@@ -373,7 +373,8 @@ function ItemUse.takeFromMon(session, bag, partySlot)
     return false, "none", mon_text("gText_PkmnNotHolding", mon)
   end
   if not Bag.canAdd(bag, held, 1) then
-    return false, "bag_full", bag_full_text(held)
+    -- pokeruby/src/party_menu.c:3098
+    return false, "bag_full", is_rs() and RomText.box("gOtherText_BagFullCannotRemoveItem") or bag_full_text(held)
   end
   mon.item = nil
   mon.heldItem = nil
@@ -562,6 +563,10 @@ function ItemUse.checkTmPreflight(mon, tmId)
   end
   local moveName = Pokemon.moveName(moveId)
   local species = tonumber(mon.species or mon.speciesId)
+  -- pokeruby/src/party_menu.c:3230
+  if is_rs() and Pokemon.knowsMove(mon, moveId) then
+    return "knows", mon_text("gText_PkmnAlreadyKnows", mon, moveName), moveId, moveName
+  end
   if not Pokemon.canLearnTmItem(species, tmId) then
     -- src/party_menu.c:4779
     return "incompatible", mon_text("gText_PkmnCantLearnMove", mon, moveName), moveId, moveName
@@ -702,6 +707,18 @@ local VITAMIN_STAT_TEXT_RSE = {
   spe = "gText_Speed2", spa = "gText_SpAtk3", spd = "gText_SpDef3",
 }
 
+-- pokeruby/src/party_menu.c:3623
+local VITAMIN_STAT_TEXT_RS = {
+  hp = "gOtherText_Hp2", atk = "gOtherText_Attack", def = "gOtherText_Defense",
+  spe = "gOtherText_Speed", spa = "gOtherText_SpAtk2", spd = "gOtherText_SpDef2",
+}
+
+local function vitamin_stat_name(session, key)
+  if is_rs() then return RomText.plain(VITAMIN_STAT_TEXT_RS[key]) end
+  local rse = require("src.core.game3.profile").family(session) == "rse"
+  return RomText.plain((rse and VITAMIN_STAT_TEXT_RSE or VITAMIN_STAT_TEXT)[key])
+end
+
 function ItemUse.useVitamin(session, mon, itemId)
   if not mon then return false, "none", no_pokemon_text() end
   local num = ItemsData.toNumericId(itemId) or tonumber(itemId)
@@ -722,7 +739,7 @@ function ItemUse.useVitamin(session, mon, itemId)
   if enigma then
     local changed = ItemUse.applyEnigmaItem(session, mon, 1)
     if not changed then return false, "no_effect", wont_have_effect() end
-    return true, "vitamin", mon_text("gText_PkmnBaseVar2StatIncreased", mon, RomText.plain(VITAMIN_STAT_TEXT_RSE[key]))
+    return true, "vitamin", mon_text("gText_PkmnBaseVar2StatIncreased", mon, vitamin_stat_name(session, key))
   end
   local gained = Pokemon.raiseEvFromItem(mon, key, VITAMIN_ADD_EV)
   if not gained or gained <= 0 then
@@ -730,8 +747,7 @@ function ItemUse.useVitamin(session, mon, itemId)
   end
   Pokemon.itemFriendship(mon, Pokemon.VITAMIN_FRIENDSHIP_CHANGE,
     { mapSec = Pokemon.currentMapSec(session) })
-  local statTextKey = require("src.core.game3.profile").family(session) == "rse" and VITAMIN_STAT_TEXT_RSE or VITAMIN_STAT_TEXT
-  local t = mon_text("gText_PkmnBaseVar2StatIncreased", mon, RomText.plain(statTextKey[key]))
+  local t = mon_text("gText_PkmnBaseVar2StatIncreased", mon, vitamin_stat_name(session, key))
   return true, "vitamin", t
 end
 
@@ -1165,6 +1181,38 @@ function ItemUse.useRod(session, id)
   return true, "rod", nil
 end
 
+local FACING_DELTA = { up = { 0, -1 }, down = { 0, 1 }, left = { -1, 0 }, right = { 1, 0 } }
+
+-- pokeemerald/src/item_use.c:696 ItemUseOutOfBattle_WailmerPail
+-- pokeruby/src/item_use.c:667
+function ItemUse.useWailmerPail(session)
+  local P = package.loaded["src.core.game3.player"] or require("src.core.game3.player")
+  local Objects = package.loaded["src.core.game3.objects"] or require("src.core.game3.objects")
+  local d = FACING_DELTA[P.facing or "down"] or FACING_DELTA.down
+  local eo = Objects.at(P.cellX + d[1], P.cellY + d[2])
+  local label
+  local gfx = eo and (eo.graphicsId or (eo.def and (eo.def.graphicsId or eo.def.gfx)))
+  local sudowoodo = not is_rs()
+    and require("src.core.game3.constants").active(session):id("event_objects", "OBJ_EVENT_GFX_SUDOWOODO")
+  -- pokeemerald/src/item_use.c:721 TryToWaterSudowoodo
+  if eo and sudowoodo and tonumber(gfx) == sudowoodo then
+    label = "BattleFrontier_OutsideEast_EventScript_WaterSudowoodo"
+  -- pokeemerald/src/berry.c:1032 TryToWaterBerryTree
+  elseif eo and eo.berryTree and require("src.core.game3.rse.berry_trees").water(eo.berryTree.id) then
+    -- pokeruby/src/item_use.c:683
+    label = is_rs() and "S_WaterBerryTreeFromBag" or "BerryTree_EventScript_ItemUseWailmerPail"
+  end
+  if not label then return false, "key", not_the_time(session) end
+  local Space = require("src.core.game3.scripting.space")
+  local key = Space.scriptKey(label)
+  if not key then error("wailmer pail: " .. label .. " is not in the script cache", 0) end
+  local lid = eo.localId or (eo.def and eo.def.localId)
+  -- pokeemerald/src/item_use.c:735 ItemUseOnFieldCB_WailmerPailSudowoodo
+  local function onField() Space.startScript(key, lid) end
+  if not ItemUse.setUpOnFieldCallback(onField) then onField() end
+  return true, "on_field", nil
+end
+
 -- pokefirered/src/item_use.c:359 FieldUseFunc_PokeFlute
 function ItemUse.usePokeFlute(session)
   local woke = false
@@ -1229,6 +1277,10 @@ local function useField(session, bag, id, partySlot, moveSlot)
       -- pokeemerald/src/item_use.c:150 ItemUseOutOfBattle_CannotUse
       return false, "none", not_the_time(session)
     end
+  end
+
+  if info.fieldUseName == "ItemUseOutOfBattle_WailmerPail" then
+    return ItemUse.useWailmerPail(session)
   end
 
   if info.fieldUseName == "ItemUseOutOfBattle_PokeblockCase" then
@@ -1417,7 +1469,7 @@ local function useField(session, bag, id, partySlot, moveSlot)
           elseif (tonumber(mon.hp) or 0) > hpBefore then text = ItemUse.medicineText(mon, hpBefore, ItemUse.cureKind(id, session))
           elseif use == "vitamin" then
             local key = ({[12]="atk",[13]="hp",[14]="spa",[15]="spd",[16]="spe",[17]="def"})[typ]
-            text = mon_text("gText_PkmnBaseVar2StatIncreased", mon, RomText.plain(VITAMIN_STAT_TEXT_RSE[key]))
+            text = mon_text("gText_PkmnBaseVar2StatIncreased", mon, vitamin_stat_name(session, key))
           else text = ItemUse.medicineText(mon, tonumber(mon.hp) or 0, ItemUse.cureKind(id, session)) end
         end
       end
@@ -1451,7 +1503,8 @@ local function useField(session, bag, id, partySlot, moveSlot)
       local stOk, cured = ItemUse.clearStatus(mon, id, session)
       ok = stOk
       if num == 175 and require("src.core.game3.rs.enigma").matches(session) then ok = ItemUse.healMon(session, mon, id) or ok end
-      if ok then text = mon_text(CURED_TEXT[cured] or CURED_TEXT.status, mon) end
+      local texts = is_rs() and CURED_TEXT_RS or CURED_TEXT
+      if ok then text = mon_text(texts[cured] or texts.status, mon) end
     elseif use == "pp" then
       if moveSlot == nil and ItemUse.ppItemNeedsMove(id) then
         return false, "need_move", nil
@@ -1469,7 +1522,7 @@ local function useField(session, bag, id, partySlot, moveSlot)
         text = hp_restored_text(mon, restored)
       elseif ok then
         -- src/party_menu.c:4366
-        text = mon_text(CURED_TEXT.status, mon)
+        text = mon_text((is_rs() and CURED_TEXT_RS or CURED_TEXT).status, mon)
       end
     end
 

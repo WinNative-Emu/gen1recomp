@@ -420,12 +420,10 @@ local function discoverModSchemas(opts)
         local flag = require("src.core.SaveData").modEnabled(opts, m.id)
         local enabled = flag == true or (flag == nil and not m.experimental)
         if enabled and not SaveData.isSafeMode(opts) then
-          local chunk = fs.load(path .. "/" .. m.options_schema)
-          if chunk then
-            local okR, schema = pcall(chunk)
-            if okR and type(schema) == "table" then
-              out[#out + 1] = { id = m.id, name = m.name or m.id, schema = schema }
-            end
+          local rel = path .. "/" .. m.options_schema
+          local schema = require("src.mods.Sandbox").evalData(fs.read(rel), "@" .. rel)
+          if schema then
+            out[#out + 1] = { id = m.id, name = m.name or m.id, schema = schema }
           end
         end
       end
@@ -817,6 +815,20 @@ function LauncherSettings.open(hooks, version)
           return true
         end,
       },
+      {
+        label = Strings("Showcase Music"),
+        value = function() return volLabel(opts.boxMusicVol) end,
+        step = function(dir)
+          opts.boxMusicVol = stepVolume(opts.boxMusicVol, dir or 1)
+          require("src.box.Showcase").setVolume(opts.boxMusicVol)
+          return true
+        end,
+      },
+      {
+        label = Strings("Showcase Cry"),
+        value = function() return volLabel(opts.boxCryVol) end,
+        step = function(dir) opts.boxCryVol = stepVolume(opts.boxCryVol, dir or 1); return true end,
+      },
     },
   }
   local Window = require("src.import.LauncherWindow")
@@ -829,6 +841,12 @@ function LauncherSettings.open(hooks, version)
         {value="fullscreen", label=Strings("Fullscreen")}},
       selected = Window.mode,
       select = function(value) Window.observe(0); return Window.apply(value) end,
+    })
+  end
+  if hooks and hooks.openExtras then
+    table.insert(launcher.rows, 1, {
+      label = Strings("Extras"), actionLabel = Strings("Open"),
+      action = function() hooks.openExtras(); return false end,
     })
   end
   local RomSources = require("src.import.RomSources")

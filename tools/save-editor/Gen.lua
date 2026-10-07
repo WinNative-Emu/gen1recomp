@@ -458,6 +458,26 @@ function Gen.setBuenaPoints(save, amount, version)
   return true
 end
 
+Gen.BERRY_POWDER_MAX = 99999 -- pokefirered/src/berry_powder.c:13
+
+function Gen.hasBerryPowder(save, version)
+  if type(save) ~= "table" or Gen.of(save, version) ~= 3 then return false end
+  local v = versionOf(save, version)
+  return v == "firered" or v == "leafgreen" or v == "emerald"
+end
+
+function Gen.berryPowder(save, version)
+  if not Gen.hasBerryPowder(save, version) then return 0 end
+  return tonumber(save.berryPowder) or 0
+end
+
+function Gen.setBerryPowder(save, amount, version)
+  if not Gen.hasBerryPowder(save, version) or type(amount) ~= "number" or amount ~= amount
+      or amount < 0 or amount > Gen.BERRY_POWDER_MAX or amount ~= math.floor(amount) then return false end
+  save.berryPowder = amount
+  return true
+end
+
 function Gen.playerGender(save)
   if type(save) ~= "table" then return "male" end
   if save.gender == 1 or (save.player and (save.player.gender == 1 or save.player.gender == "female")) then

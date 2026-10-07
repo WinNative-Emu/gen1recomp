@@ -10,18 +10,26 @@ local G2 = require("tests.fixtures.save.gen2_build")
 
 local K = {}
 
-function K.gen1Available()
-  return loadfile("data/generated/pokemon.lua") ~= nil
+local function resolveGen1(version)
+  local dir = os.getenv("GEN1_" .. version:upper() .. "_CACHE") or os.getenv(version:upper() .. "_CACHE")
+    or (os.getenv("HOME") .. "/Library/Application Support/LOVE/pokemon-love2d/" .. version)
+  local generated = SaveConvert.gen1DataFromDir(dir)
+  if not generated and version == "red" then generated = SaveConvert.gen1DataFromDir(".") end
+  return generated
+end
+
+function K.gen1Available(versions)
+  for _, version in ipairs(versions or { "red", "blue", "yellow" }) do
+    if not resolveGen1(version) then return false end
+  end
+  return true
 end
 
 local stamped = {}
 local supplied = {}
 function K.gen1Data(version)
   if not supplied[version] then
-    local dir = os.getenv("GEN1_" .. version:upper() .. "_CACHE") or os.getenv(version:upper() .. "_CACHE")
-      or (os.getenv("HOME") .. "/Library/Application Support/LOVE/pokemon-love2d/" .. version)
-    local generated = SaveConvert.gen1DataFromDir(dir)
-    if not generated and version == "red" then generated = SaveConvert.gen1DataFromDir(".") end
+    local generated = resolveGen1(version)
     assert(generated, "missing " .. version .. " fixture cache; set " .. version:upper() .. "_CACHE")
     SaveConvert.setGen1DataStub(generated, version)
     supplied[version] = generated

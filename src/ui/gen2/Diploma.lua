@@ -25,13 +25,6 @@
 --   hlcoord 2, 8    .Certification, five `next`-joined lines that PlaceString
 --                   walks one row down at column 2 apiece: rows 8-12
 --
--- COLOUR.  _CGB_Diploma (engine/gfx/cgb_layouts.asm) loads all eight
--- DiplomaPalettes sets and then WipeAttrmap zeroes the attrmap, so every tile
--- on the screen -- art and text alike -- draws through set 0.  The strings go
--- down with Chrome.printThrough rather than Chrome.print for that reason: a
--- black print over the art would be the one thing on screen not going through
--- the palette.
---
 -- WaitPressAorB_BlinkCursor just parks on A or B; there is no menu here.
 
 local Chrome = require("src.ui.gen2.Chrome")
@@ -82,10 +75,9 @@ function Diploma:update(_dt)
   end
 end
 
--- Set 0 of DiplomaPalettes, the one WipeAttrmap leaves the whole screen on.
+-- engine/gfx/cgb_layouts.asm:495
 function Diploma:palette()
-  local palettes = self.gfx and self.gfx.palettes
-  return palettes and palettes[1] or nil
+  return self.gfx and self.gfx.bgPalette
 end
 
 function Diploma:image(path)

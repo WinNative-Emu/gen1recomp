@@ -86,6 +86,10 @@ local function drawView(S, Kit, x, y, w, h)
       fields[#fields + 1] = { "buenaPoints", "Buena points", Gen.buenaPoints(S.save, S.version), 30,
         "Blue Card points for Buena's prizes. Choose 0 to 30." }
     end
+    if Gen.hasBerryPowder(S.save, S.version) then
+      fields[#fields + 1] = { "berryPowder", "Berry Powder", Gen.berryPowder(S.save, S.version),
+        Gen.BERRY_POWDER_MAX, "Powder from Berry Crush, spent at the Berry Powder shop. Choose 0 to 99999." }
+    end
     for _, f in ipairs(fields) do
       cy = cy
         + Touch.value(

@@ -193,7 +193,7 @@ eq(order[1], "start", "a caller that faded for itself gets no lead-in")
 
 print("[test] 4. OT identity, the outsider rule and the met stamps")
 -- pokefirered/src/pokemon.c:5974 IsOtherTrainer
-check(not Pokemon.isOtherTrainer(4242, "RED", session), "the player's own mon is not an outsider")
+check(not Pokemon.isOtherTrainer(4242 + (session.secretId or 0) * 65536, "RED", session), "the player's own mon is not an outsider")
 check(Pokemon.isOtherTrainer(1985, "RED", session), "a different trainer id is an outsider")
 check(Pokemon.isOtherTrainer(4242, "BLUE", session), "the same id with another name is an outsider")
 -- pokefirered/src/pokemon.c:5985
@@ -354,5 +354,45 @@ check(Trade.refusalText(Trade.CANT_TRADE_NATIONAL):find("can't be traded", 1, tr
 eq(Trade.refusalText(Trade.CAN_TRADE_MON), nil, "a tradeable mon has no refusal text")
 check(Trade.badEggText():find("can't be taken", 1, true) ~= nil,
   "the bad-egg abort is pret's cable club text: " .. Trade.badEggText())
+
+print("[test] 8. The player's secret id settles before ownership is compared")
+do
+  local Catching = require("src.core.game3.battle.catching")
+  local Schema = require("src.core.game3.save_schema_firered")
+  local legacy = { version = "firered", name = "RED", trainerId = 4242, party = {} }
+  check(Party.giveMon(legacy, 4, 5, ""), "a gift mon on a save with no secret id")
+  local starter = legacy.party[1]
+  check(starter.otSecretId ~= nil, "the gift mon is stamped with a secret id")
+  eq(Catching.playerSecretId(legacy), starter.otSecretId, "a wild battle reuses the gift mon's secret id")
+  check(not Pokemon.isTradedMon(starter, legacy), "the gift mon stays the player's own after a wild battle")
+  local bare = { name = "RED", trainerId = 4242, party = { { species = 4, otId = 4242, otName = "RED" } } }
+  eq(Catching.playerSecretId(bare), 0, "an own mon with no secret id pins the player's to zero, not a random roll")
+  check(not Pokemon.isTradedMon(bare.party[1], bare), "so that mon is never counted as traded")
+
+  local function save(secretId, party)
+    return { schemaVersion = 1, engine = "game3", version = "firered", name = "RED", trainerId = 4242,
+      secretId = secretId, party = party, dex = { seen = {}, owned = {} },
+      map = "FR_PALLET_TOWN", x = 5, y = 6, facing = "down", flags = {}, vars = {} }
+  end
+  local loaded = Schema.fromSaveTable(save(42, {
+    { species = 4, speciesId = 4, level = 5, hp = 20, maxHp = 20, otId = 4242, otName = "RED" },
+    { species = 7, speciesId = 7, level = 5, hp = 20, maxHp = 20, otId = 4242, otName = "RED", otSecretId = 7 },
+  }))
+  eq(loaded.party[1].otSecretId, 42, "a missing own secret id is filled from the player's")
+  eq(loaded.party[2].otSecretId, 7, "a foreign same-name same-TID mon keeps its secret id on load")
+  check(Pokemon.isTradedMon(loaded.party[2], loaded), "and is still an outsider")
+  local again = Schema.fromSaveTable(Schema.toSaveTable(loaded))
+  eq(again.party[2].otSecretId, 7, "a second save and load still leaves the foreign secret id alone")
+  check(Pokemon.isTradedMon(again.party[2], again), "and it is still an outsider after the reload")
+  check(not Pokemon.isTradedMon(again.party[1], again), "the player's own mon stays own")
+
+  local old = Schema.fromSaveTable(save(nil, {
+    { species = 4, speciesId = 4, level = 5, hp = 20, maxHp = 20, otId = 4242, otName = "RED" },
+  }))
+  eq(old.secretId, 0, "a save with no secret ids anywhere settles the player's to zero at load")
+  eq(old.party[1].otSecretId, 0, "and stamps it on the own mon")
+  eq(Catching.playerSecretId(old), 0, "a later wild battle keeps that secret id")
+  check(not Pokemon.isTradedMon(old.party[1], old), "so the starter is never traded")
+end
 
 finish()

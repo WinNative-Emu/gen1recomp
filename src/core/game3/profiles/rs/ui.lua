@@ -62,6 +62,50 @@ TextAliases.Text_CantDive = "CannotUseDiveText"
 TextAliases.Text_WantToSurface = "UnderwaterUseDivePromptText"
 TextAliases.Text_CantSurface = "UnderwaterCannotUseDiveText"
 TextAliases.Text_FailSweetScent = "SweetScentNothingHereText"
+-- pokeruby/src/party_menu.c:3224
+TextAliases.gText_PkmnAlreadyKnows = "gOtherText_AlreadyKnows"
+TextAliases.gText_PkmnCantLearnMove = "gOtherText_NotCompatible"
+TextAliases.gText_PkmnNeedsToReplaceMove = "gOtherText_WantsToLearn"
+-- pokeruby/src/party_menu.c:3267
+TextAliases.gText_PkmnLearnedMove3 = "gOtherText_LearnedMove"
+-- pokeruby/src/party_menu.c:3337
+TextAliases.gText_WhichMoveToForget = "gOtherText_WhichMoveToForget2"
+-- pokeruby/src/party_menu.c:3381
+TextAliases.gText_12PoofForgotMove = "gOtherText_ForgetMove123_2"
+-- pokeruby/src/party_menu.c:3404
+TextAliases.gText_StopLearningMove2 = "gOtherText_StopTryingTo"
+-- pokeruby/src/party_menu.c:3437
+TextAliases.gText_MoveNotLearned = "gOtherText_DidNotLearnMove2"
+-- pokeruby/src/party_menu.c:251
+TextAliases.gText_RestoreWhichMove = "OtherText_RestoreWhatMove"
+TextAliases.gText_BoostPp = "OtherText_BoostPP"
+-- pokeruby/src/party_menu.c:3624
+TextAliases.gText_PkmnBaseVar2StatIncreased = "gOtherText_WasRaised"
+-- pokeruby/src/party_menu.c:3648
+TextAliases.gText_MovesPPIncreased = "gOtherText_PPIncreased"
+TextAliases.gText_PPWasRestored = "gOtherText_PPRestored"
+-- pokeruby/src/party_menu.c:3654
+TextAliases.gText_WontHaveEffect = "gOtherText_WontHaveAnyEffect"
+-- pokeruby/src/party_menu.c:4037
+TextAliases.gText_PkmnElevatedToLvVar2 = "gOtherText_ElevatedTo"
+-- pokeruby/src/party_menu.c:3079
+TextAliases.gText_PkmnNotHolding = "gOtherText_NotHoldingAnything"
+-- pokeruby/src/party_menu.c:3108
+TextAliases.gText_ReceivedItemFromPkmn = "gOtherText_ReceivedTheThingFrom"
+-- pokeruby/src/item_menu.c:2103
+TextAliases.gText_ThereIsNoPokemon = "gOtherText_NoPokemon"
+-- pokeruby/src/item_use.c:151
+TextAliases.gText_CantDismountBike = "gOtherText_CantGetOffBike"
+-- pokeruby/src/item_use.c:603
+TextAliases.gText_CoinCase = "gOtherText_Coins3"
+-- pokeruby/src/item_use.c:780
+TextAliases.gText_PlayerUsedVar2 = "gOtherText_UsedItem"
+-- pokeruby/src/item_use.c:793
+TextAliases.gText_RepelEffectsLingered = "gOtherText_RepelLingers"
+-- pokeruby/src/item_use.c:819
+TextAliases.gText_UsedVar2WildLured = "gOtherText_UsedFlute"
+-- pokeruby/src/item_use.c:828
+TextAliases.gText_UsedVar2WildRepelled = "gOtherText_UsedRepel"
 for key, value in pairs(require("src.ui.game3.rs.hall_of_fame_policy").aliases) do
   TextAliases[key] = value
 end

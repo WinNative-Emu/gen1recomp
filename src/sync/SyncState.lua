@@ -47,6 +47,8 @@ function SyncState.sanitize(raw)
   out.code1 = code(raw.code1)
   out.code2 = code(raw.code2)
   out.lastSyncAt = num(raw.lastSyncAt) or 0
+  out.boxRev = num(raw.boxRev)
+  out.boxFingerprint = str(raw.boxFingerprint)
   if type(raw.revs) == "table" then
     for key, rev in pairs(raw.revs) do
       local n = num(rev)

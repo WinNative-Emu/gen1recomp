@@ -43,7 +43,7 @@ function Reader.content(mail, man)
     local parts = {}
     for i = 1, line.words do
       local id = tonumber(mail.words and mail.words[word]) or 65535
-      parts[#parts + 1] = Easy.rawWord(id)
+      parts[#parts + 1] = Easy.word(id)
       if i < line.words and id ~= 65535 then parts[#parts + 1] = " " end
       word = word + 1
     end

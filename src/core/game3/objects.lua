@@ -1371,16 +1371,14 @@ local function advanceTrack(lid, tr, game)
       if eo == Player() then
         Player().setVisible(false)
       elseif eo then
-        eo.hidden = true
-        eo.visible = false
+        eo.invisible = true
       end
     elseif act.kind == "show" then
       -- pokefirered/src/event_object_movement.c:7061
       if eo == Player() then
         Player().setVisible(true)
       elseif eo then
-        eo.hidden = false
-        eo.visible = true
+        eo.invisible = false
       end
     end
   end
@@ -2027,14 +2025,18 @@ local function copyTick(eo)
   local P = Player()
   if not (c and P) then return end
   if not c.playerInit then c.playerInit = P.facing end
-  local moving = P.moving and true or false
-  local started = moving and not c.wasMoving
-  local finished = c.wasMoving and not moving
-  c.wasMoving = moving
+  local serial = P.stepSerial or 0
+  if c.serial == nil then c.serial = serial end
+  if c.serial == serial then return end
+  -- pokeemerald/src/event_object_movement.c:4170
+  if not P.moving then
+    c.serial = serial
+    return
+  end
+  if eo.moving or eo.frozen or eo.scriptBusy then return end
+  c.serial = serial
   local okF, Faraway = pcall(lazyReq, "src.core.game3.faraway_island")
   local mew = okF and Faraway and Faraway.isMew(eo)
-  if finished and mew then Faraway.updateStepCounter() end
-  if not started or eo.moving or eo.frozen or eo.scriptBusy then return end
   local dir
   if mew then
     -- pokeemerald/src/event_object_movement.c:4206
@@ -2054,6 +2056,16 @@ local function copyTick(eo)
   end
   beginStep(eo, eo.cellX + d[1], eo.cellY + d[2])
   if P.running or P.biking then eo.stepFrames = RUN_FRAMES end
+  -- pokeemerald/src/event_object_movement.c:8048
+  if mew and Faraway.shouldShakeGrass() and isPokeGrass(eo.targetX, eo.targetY) then
+    local MB = lazyReq("src.core.game3.mb")
+    local Coll = Collision()
+    local long = Coll.behavior(eo.targetX, eo.targetY) == MB.id("LONG_GRASS")
+    local okFx, FxRse = pcall(lazyReq, "src.core.game3.field_effects_rse")
+    if okFx and FxRse then
+      FxRse.spawnAt(long and "long_grass" or "tall_grass", eo.targetX, eo.targetY, 8, 8, { layer = "front" })
+    end
+  end
 end
 
 function Objects.tickRse(eo)

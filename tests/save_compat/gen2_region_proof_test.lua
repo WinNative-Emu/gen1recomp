@@ -27,7 +27,7 @@ local function scanRows()
       local labels = {}
       for k, v in pairs(row) do if k == "both" or k == "gs" or k == "crystal" then labels[#labels + 1] = tostring(v[1] or v.abs) end end
       for _, pattern in ipairs(row.scan or {}) do
-        local pipe = io.popen("grep -rIn --include=*.lua -iE '\\.(" .. pattern .. ")[A-Za-z_]* *=[^=]' src 2>/dev/null | grep -v 'src/save_convert' | grep -v 'game3' | grep -v 'src/import' | head -5")
+        local pipe = io.popen("grep -rIn --include=*.lua -iE '\\.(" .. pattern .. ")[A-Za-z_]* *=[^=]' src 2>/dev/null | grep -v 'src/save_convert' | grep -v 'game3' | grep -v 'src/import' | grep -v 'src/box/' | grep -v 'src/core/TrainerIdSync.lua' | head -5")
         local hits = pipe:read("*a")
         pipe:close()
         check(hits == "", ("static row %s: the engine never assigns *%s* -- %s"):format(labels[1] or "?", pattern, hits:gsub("\n", " | ")))

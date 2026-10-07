@@ -375,6 +375,15 @@ local function monFp(mon)
   return table.concat(parts, ",")
 end
 
+function Gen2Save.rewriteCarrierId(mon, id)
+  local raw = mon.cartRaw
+  if type(raw) ~= "string" or #raw < 16 then mon.otId = id; return end
+  local unchanged = mon.cartRawFp == nil or mon.cartRawFp == monFp(mon)
+  mon.cartRaw = raw:sub(1, 12) .. ("%04X"):format(id) .. raw:sub(17)
+  mon.otId = id
+  if unchanged then mon.cartRawFp = monFp(mon) end
+end
+
 -- The first 32 bytes, which a box mon and a party mon share.
 local function decodeSharedMon(t, o, x, crystal, size)
   local moves, slots, gap, emptyPp = {}, {}, false, nil

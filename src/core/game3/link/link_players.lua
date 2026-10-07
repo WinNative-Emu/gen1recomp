@@ -225,7 +225,22 @@ local function spawnAll(lk, own)
       snap(r, M._base.x + seat, M._base.y)
       M._remotes[seat] = r
     end
+    local r = M._remotes[seat]
+    if r then r.name = type(player.name) == "string" and player.name or r.name end
   end
+end
+
+local BUSY_KIND = { tradeCenter = "trade", colosseum2P = "battle", colosseum4P = "battle", recordCorner = "busy" }
+
+function M.statusKind(seat)
+  local r = M._remotes[seat]
+  if not (r and r.busy) then return nil end
+  return BUSY_KIND[M._mapId] or "busy"
+end
+
+function M.nameOf(seat)
+  local r = M._remotes[seat]
+  return r and r.name or nil
 end
 
 function M.update()
@@ -254,6 +269,7 @@ function M.update()
   end
   if warping then return true end
   M._mapId = mapId
+  if not package.loaded["src.ui.game3.link_tags"] then pcall(require, "src.ui.game3.link_tags") end
   spawnAll(lk, own)
   sendLocal(lk, mapId)
   for seat, r in pairs(M._remotes) do

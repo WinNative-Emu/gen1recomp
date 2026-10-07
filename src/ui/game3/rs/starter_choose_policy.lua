@@ -23,18 +23,19 @@ function Policy.categoryText(category, pokemon)
   return category:sub(1, 11) .. " " .. pokemon
 end
 
-function Policy.affineScale(matrix)
-  return matrix ~= 0 and 256 / matrix or 0
+-- pokeruby/src/sprite.c:1302
+function Policy.affineScale(scale)
+  return scale / 256
 end
 
-function Policy.drawAffine(cx, cy, matrix, halfSize, draw)
+function Policy.drawAffine(cx, cy, scale, halfSize, draw)
   local G = love.graphics
   G.push("all")
   local x0, y0 = G.transformPoint(cx - halfSize, cy - halfSize)
   local x1, y1 = G.transformPoint(cx + halfSize, cy + halfSize)
   G.intersectScissor(math.floor(math.min(x0, x1)), math.floor(math.min(y0, y1)),
     math.ceil(math.abs(x1 - x0)), math.ceil(math.abs(y1 - y0)))
-  draw(Policy.affineScale(matrix))
+  draw(Policy.affineScale(scale))
   G.pop()
 end
 

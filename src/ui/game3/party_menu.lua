@@ -137,6 +137,7 @@ local function action_texts(list)
   PartyMenu._actionTexts = { list = list, texts = texts }
   return texts
 end
+PartyMenu._actionTextsFor = action_texts
 
 local FR_INSETS = { msgX = 2, msgY = 2, actX = 9, actY = 2, cursorX = 1 }
 local function textInsets()
@@ -944,6 +945,7 @@ function PartyMenu.show(sessionParty, moveOverlay, opts)
   end
   opts = opts or {}
   PartyMenu._order = nil
+  PartyMenu._rsPrompt = nil
   if opts.mode == "battle_switch" or opts.mode == "battle_faint" or (opts.mode == "use" and opts.battleOrder) then
     local party0 = sessionParty or (opts.session and opts.session.party)
     local ov0 = moveOverlay or (opts.session and (opts.session.move_overlay or opts.session.moveOverlay))

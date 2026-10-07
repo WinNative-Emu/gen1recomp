@@ -963,7 +963,7 @@ local function handle_menu_input(input)
                 Field.useItemfinder(session, true)
               end)
               return
-            elseif ok and kind == "escape" then
+            elseif ok and (kind == "escape" or kind == "on_field") then
               -- pokefirered/src/item_use.c:159 SetUpItemUseOnFieldCallback
               begin_exit(true, function()
                 BagMenu.close()

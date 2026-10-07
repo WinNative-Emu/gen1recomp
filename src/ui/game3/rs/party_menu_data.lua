@@ -12,12 +12,23 @@ local function menuData()
   return assert(require("src.ui.game3.rse.scene_kit").manifest(Data.manifest).party)
 end
 
+-- pokeruby/src/pokemon_menu.c:126
+Data.actionLabels = {"OtherText_Summary", "OtherText_Switch2", "OtherText_Item", "gOtherText_CancelNoTerminator",
+  "OtherText_Give2", "OtherText_Take2", "OtherText_Take", "OtherText_Mail", "OtherText_Read2",
+  "gOtherText_CancelNoTerminator"}
+
 function Data.actionText(action, fields)
+  local RomText = require("src.core.game3.rom_text")
   local nativeId = Data.actionIds[action]
-  if nativeId then return assert(menuData().cursorOptions[nativeId + 1]) end
-  if Data.extraLabels[action] then return require("src.core.game3.rom_text").plain(Data.extraLabels[action]) end
+  if nativeId then
+    local label = Data.actionLabels[nativeId + 1]
+    if RomText.has(label) then return RomText.plain(label) end
+    return assert(menuData().cursorOptions[nativeId + 1])
+  end
+  if Data.extraLabels[action] then return RomText.plain(Data.extraLabels[action]) end
   assert(fields and fields.index[action] ~= nil, "unknown native RS party action: " .. tostring(action))
-  return action
+  local move = fields.moves and fields.moves[fields.index[action] + 1]
+  return move and require("src.core.game3.pokemon").moveName(move) or action
 end
 
 function Data.buildActions(mon, party, fields)
@@ -152,11 +163,23 @@ function Data.drawDescription(desc, x, y)
   love.graphics.draw(image, quad, x, y)
 end
 
-local function prompt(id, width)
+local function promptText(id, name)
+  local RomText = require("src.core.game3.rom_text")
+  local key = RomText.key("PartyMenuPromptTexts", id)
+  if RomText.has(key) then return RomText.plain(key, {stringVars = {name or ""}}) end
+  return assert(require("src.ui.game3.rse.scene_kit").manifest("rse/party").prompts[id + 1])
+end
+
+local function prompt(ui, anchor, id, width)
+  local memo = ui._rsPrompt
+  if not (memo and memo.anchor == anchor and memo.id == id) then
+    local mon = id == 5 and ui._party and ui._party[ui.cursor]
+    memo = {anchor = anchor, id = id, text = promptText(id, mon and require("src.core.game3.pokemon").displayName(mon))}
+    ui._rsPrompt = memo
+  end
   local Chrome = require("src.ui.game3.chrome")
   Chrome.stdFrame(1, 17, width, 2)
-  require("src.ui.game3.frlg_font").draw(assert(require("src.ui.game3.rse.scene_kit").manifest("rse/party").prompts[id + 1]), 8, 136,
-    require("src.ui.game3.rs.party_chrome").textOptions("menu"))
+  require("src.ui.game3.frlg_font").draw(memo.text, 8, 136, require("src.ui.game3.rs.party_chrome").textOptions("menu"))
 end
 
 function Data.drawActions(ui, item)
@@ -166,9 +189,10 @@ function Data.drawActions(ui, item)
   local left = item and (30 - (width + 1)) or 19
   local top = item and (20 - (count * 2 + 2)) or (18 - count * 2)
   local Font = require("src.ui.game3.frlg_font")
-  prompt(item and ui._submenuKind ~= "MAIL" and 13 or 5, item and (ui._submenuKind == "MAIL" and 18 or 21) or 17)
+  prompt(ui, actions, item and ui._submenuKind ~= "MAIL" and 13 or 5, item and (ui._submenuKind == "MAIL" and 18 or 21) or 17)
   require("src.ui.game3.chrome").stdFrame(left + 1, top + 1, width - 1, count * 2)
-  for i, action in ipairs(actions) do Font.draw(Data.actionText(action, ui._fieldMoveData), (left + 1) * 8, (top + 1) * 8 + (i - 1) * 16,
+  local texts = ui._actionTextsFor(actions)
+  for i in ipairs(actions) do Font.draw(texts[i], (left + 1) * 8, (top + 1) * 8 + (i - 1) * 16,
     require("src.ui.game3.rs.party_chrome").textOptions("menu")) end
   local cursor = item and ui.itemActionCursor or ui.actionCursor
   require("src.ui.game3.rs.menu_cursor").draw((left + 1) * 8, (top + 1) * 8 + (cursor - 1) * 16, (width - 1) * 8)
@@ -180,7 +204,7 @@ function Data.drawPrompt(ui)
   elseif ui.mode == "give" then id = 4
   elseif ui.mode == "move_tutor" then id = 20
   elseif ui.mode == "use" then id = require("src.core.game3.items_data").isTm(ui._item) and 2 or 3 end
-  prompt(id, 22)
+  prompt(ui, ui.mode, id, 22)
 end
 
 function Data.yesNoLabels()

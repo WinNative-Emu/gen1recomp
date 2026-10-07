@@ -789,6 +789,17 @@ function Ops.setTrainerProperty(S, key, value)
     if Gen.buenaPoints(S.save, S.version) == n then return true end
     if not Gen.setBuenaPoints(S.save, n, S.version) then return Ops.say(S, "Invalid Crystal Buena state") end
     return Ops.mark(S, "Buena points updated")
+  elseif key == "berryPowder" then
+    if not Gen.hasBerryPowder(S.save, S.version) then
+      return Ops.say(S, "Berry Powder is only in FireRed, LeafGreen and Emerald")
+    end
+    local n = tonumber(value)
+    if not n or n ~= n or n < 0 or n > Gen.BERRY_POWDER_MAX or n ~= math.floor(n) then
+      return Ops.say(S, "Berry Powder must be a whole number from 0 to 99999")
+    end
+    if Gen.berryPowder(S.save, S.version) == n then return true end
+    Gen.setBerryPowder(S.save, n, S.version)
+    return Ops.mark(S, "Berry Powder updated")
   else
     local max = ({id=65535,secretId=65535,money=999999,coins=9999})[key]
     local n=tonumber(value)

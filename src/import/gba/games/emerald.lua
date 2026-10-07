@@ -3,7 +3,7 @@ local VersionsRse = require("src.import.gba.versions_rse")
 local V = VersionsRse.new("emerald")
 local sym, count = V.sym, V.count
 
-V.CACHE_VERSION = 15
+V.CACHE_VERSION = 16
 V.NATIVE_VERSION = 2
 V.OW_VERSION = 1
 V.ANIM_VERSION = 1
@@ -151,6 +151,8 @@ V.TRAINER_PIC_COUNT = count("gTrainerFrontPicTable", 8)
 V.TRAINER_BACK_PIC_TABLE = sym("gTrainerBackPicTable")
 V.TRAINER_BACK_PIC_PAL_TABLE = sym("gTrainerBackPicPaletteTable")
 V.TRAINER_BACK_PIC_COUNT = count("gTrainerBackPicTable", 8)
+-- pokeemerald/src/data/trainer_graphics/back_pic_anims.h:119
+V.TRAINER_BACK_ANIMS_TABLE = sym("gTrainerBackAnimsPtrTable")
 V.TRAINER_MONEY_TABLE = sym("gTrainerMoneyTable")
 V.FACILITY_CLASS_TO_PIC = sym("gFacilityClassToPicIndex")
 V.FACILITY_CLASS_TO_PIC_INDEX = V.FACILITY_CLASS_TO_PIC

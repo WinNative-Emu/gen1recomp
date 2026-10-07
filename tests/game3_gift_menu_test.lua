@@ -21,7 +21,7 @@ love = love or require("tests.love_stub")
 local romBundle = require("tests.game3_cache").bundle()
 if not romBundle then
   local LIST_ROWS = { sListMenuItems_CardsOrNews = 3, sListMenuItems_ReceiveSendToss = 4, sListMenuItems_ReceiveToss = 3,
-    sListMenuItems_WirelessOrFriend = 3 }
+    sListMenuItems_WirelessOrFriend = 3, sListMenuItems_ReceiveSend = 3, sListMenuItems_Receive = 2 }
   package.loaded["src.core.game3.rom_text"] = {
     plain = function(key) return key end, box = function(key) return key end,
     ascii = function(key) return key end, has = function() return true end,
@@ -145,12 +145,12 @@ local function giftSession(save)
 end
 
 local function openWireless(st, d, isNews)
-  if isNews then
-    d.step("down")
-    d.step("a")
-    return
-  end
+  if isNews then d.step("down") end
   d.step("a")
+  if st.state == Ui.STATE.SAVED_VIEW then
+    d.step("a")
+    d.step("a")
+  end
   d.waitFor(function() return st.state == Ui.STATE.SEARCHING end)
 end
 
@@ -259,7 +259,11 @@ do
   teq(rows[3], "EXIT", "EXIT is the third row")
 
   step("a")
-  eq(st.state, Ui.STATE.SEARCHING, "WONDER CARDS fetches the card list at once")
+  -- pokefirered/src/mystery_gift_menu.c:1147 MG_STATE_DONT_HAVE_ANY
+  eq(st.state, Ui.STATE.RESULT_MSG, "with no card held the don't-have text comes first")
+  eq(feedTransport.calls, 0, "nothing is fetched yet")
+  d.waitFor(function() return st.state == Ui.STATE.SEARCHING end)
+  eq(st.state, Ui.STATE.SEARCHING, "then WONDER CARDS fetches the card list")
   eq(feedTransport.calls, 1, "one request goes out")
   eq(WirelessIcon.anim(), "searching", "the wireless icon plays its searching anim")
   tcheck(type(st.prompt) == "string" and st.prompt:find("Searching for a WIRELESS"),
@@ -306,7 +310,22 @@ print("[test] 5. The list marks the held card and opens it")
 do
   local d = driver(st)
   d.step("a")
-  eq(st.state, Ui.STATE.SEARCHING, "WONDER CARDS fetches again")
+  -- pokefirered/src/mystery_gift_menu.c:1390 MG_STATE_LOAD_GIFT
+  eq(st.state, Ui.STATE.SAVED_VIEW, "WONDER CARDS shows the held card first")
+  eq(Ui.card(st).titleText, "MYSTIC TICKET", "the saved card is on screen")
+  local okSaved, errSaved = pcall(Ui.draw, st)
+  tcheck(okSaved, "the saved card draws: " .. tostring(errSaved))
+  d.step("a")
+  eq(st.state, Ui.STATE.GIFT_MENU, "A opens the card's menu")
+  eq(#st.rows, 3, "a keep-only card offers RECEIVE, TOSS and CANCEL")
+  eq(st.giftActions[2], "toss", "the second row tosses")
+  local okMenu, errMenu = pcall(Ui.draw, st)
+  tcheck(okMenu, "the card menu draws: " .. tostring(errMenu))
+  d.step("b")
+  eq(st.state, Ui.STATE.SAVED_VIEW, "B goes back to the card")
+  d.step("a")
+  d.step("a")
+  eq(st.state, Ui.STATE.SEARCHING, "RECEIVE fetches again")
   d.waitFor(function() return st.state ~= Ui.STATE.SEARCHING end)
   eq(st.state, Ui.STATE.OFFER_LIST, "the list opens")
   local lm = ListStub.last
@@ -378,7 +397,7 @@ print("[test] 7. Wonder News over WIRELESS COMMUNICATION")
 do
   local st2, d, sess2 = freshScreen(okFeed())
   openWireless(st2, d, true)
-  eq(st2.state, Ui.STATE.SEARCHING, "WONDER NEWS fetches the list at once")
+  eq(st2.state, Ui.STATE.SEARCHING, "WONDER NEWS fetches the list")
   searchResult(st2, d)
   eq(st2.state, Ui.STATE.OFFER_LIST, "the news list opens")
   eq(#ListStub.last.items, 1, "only news rows are listed")
@@ -404,9 +423,10 @@ do
   d.step("a")
   d.waitFor(function() return st2.state == Ui.STATE.MAIN_MENU and not st2.msg end)
   eq(MysteryGift.getSavedCard(sess2).idNumber, 7, "the MEW card is installed")
-  local giftFlag = MysteryGift.receivedGiftFlag(MysteryGift.getSavedCard(sess2).flagId)
-  check(giftFlag ~= nil, "the MEW card has a received-gift flag")
-  MysteryGift.setFlag(sess2, giftFlag, true)
+  check(MysteryGift.isGiftNotReceived(sess2), "the MEW is not collected yet")
+  local rec = MysteryGift.ensure(sess2)
+  rec.deliveredIds = { 7 }
+  check(MysteryGift.wasDelivered(sess2, MysteryGift.getSavedCard(sess2)), "a Pokemon card is tracked by its ID number")
   MysteryGift.clearCardAndRelated(sess2)
   check(not MysteryGift.validateSavedCard(sess2), "then tossed")
 
@@ -439,7 +459,7 @@ print("[test] 9. Replacing a held card asks first")
 do
   local st2, d, sess2 = freshScreen(okFeed())
   MysteryGift.receiveCard(sess2, MysteryGift.builtins()[2].card)
-  d.step("a")
+  openWireless(st2, d, false)
   eq(st2.state, Ui.STATE.SEARCHING, "WONDER CARDS fetches the list")
   searchResult(st2, d)
   d.step("a")
@@ -582,11 +602,109 @@ do
   teq(locked.rows[2], "EXIT", "row 2 is EXIT")
   Ui.update(locked, function(k) return k == "a" end, 1 / 60)
   check(locked.isNews, "the first row opens the news branch")
-  eq(locked.state, Ui.STATE.SEARCHING, "which fetches the news list")
+  eq(locked.state, Ui.STATE.RESULT_MSG, "which says no news is held before fetching")
 
   local open = Ui.new({ session = giftSession({}), onSave = function() return true end })
   eq(#open.rows, 3, "the passphrase adds WONDER CARDS back")
   teq(open.rows[1], "WONDER CARDS", "on the first row")
+end
+
+print("[test] 14. Receiving Wonder News from the relay saves it and sets the reward")
+do
+  local save = {}
+  local st2, d, sess2 = freshScreen(okFeed(), save)
+  local before = #fanfares
+  openWireless(st2, d, true)
+  searchResult(st2, d)
+  d.step("a")
+  eq(st2.state, Ui.STATE.NEWS_VIEW, "the news opens")
+  d.step("a")
+  eq(st2.state, Ui.STATE.RESULT_MSG, "A receives it")
+  check(MysteryGift.validateSavedNews(sess2), "the news is saved")
+  check(MysteryGift.hasClaimedNews(sess2, 1), "and claimed")
+  eq(#fanfares, before + 1, "the received fanfare plays")
+  tcheck(st2.msg ~= nil and tostring(st2.msg.text):find("NEWS"), "with the news-received text")
+  eq(MysteryGift.getSavedNewsMetadata(sess2).newsType, MysteryGift.WONDER_NEWS_NONE,
+    "the reward is not set before the message ends")
+  d.waitFor(function() return st2.state == Ui.STATE.SAVE end)
+  -- pokefirered/src/mystery_gift_menu.c:1369 WonderNews_SetReward(WONDER_NEWS_RECV_WIRELESS)
+  eq(MysteryGift.getSavedNewsMetadata(sess2).newsType, MysteryGift.WONDER_NEWS_RECV_WIRELESS,
+    "the wireless reward is set once the message is done")
+  d.waitFor(function() return st2.state == Ui.STATE.MAIN_MENU and not st2.msg end)
+  check(type(save.modData) == "table" and save.modData.mysteryGift.news ~= nil, "the news reached the save")
+
+  openWireless(st2, d, true)
+  eq(st2.state, Ui.STATE.SEARCHING, "the saved news offers RECEIVE")
+  searchResult(st2, d)
+  eq(ListStub.last.items[1].colors, ListStub.COLOR_WHITE, "the held news prints greyed")
+  MysteryGift.getSavedNewsMetadata(sess2).newsType = MysteryGift.WONDER_NEWS_NONE
+  d.step("a")
+  d.step("a")
+  eq(st2.state, Ui.STATE.RESULT_MSG, "the same news again ends the link")
+  tcheck(st2.msg ~= nil and tostring(st2.msg.text):find("already"), "with the already-had text")
+  d.waitFor(function() return st2.state == Ui.STATE.MAIN_MENU end)
+  eq(MysteryGift.getSavedNewsMetadata(sess2).newsType, MysteryGift.WONDER_NEWS_NONE,
+    "already-had news earns no reward")
+end
+
+print("[test] 15. The saved card menu tosses a card")
+do
+  local save = {}
+  local saves = 0
+  local sess2 = giftSession(save)
+  local st2 = Ui.new({ session = sess2, fetch = { transport = okFeed() },
+    onSave = function(s) saves = saves + 1 return MysteryGift.applyToSave(s, save) end })
+  local d = driver(st2)
+  check(MysteryGift.receiveCard(sess2, MysteryGift.builtins()[2].card), "an uncollected AURORA card is held")
+  d.step("a")
+  eq(st2.state, Ui.STATE.SAVED_VIEW, "the held card shows")
+  d.step("a")
+  d.step("down")
+  d.step("a")
+  eq(st2.state, Ui.STATE.ASK_TOSS, "TOSS asks first")
+  check(st2.yesno ~= nil, "with a yes/no")
+  d.step("a")
+  check(st2.yesno ~= nil and st2.state == Ui.STATE.ASK_TOSS, "an uncollected gift asks a second time")
+  d.step("b")
+  eq(st2.state, Ui.STATE.GIFT_MENU, "NO goes back to the menu")
+  check(MysteryGift.validateSavedCard(sess2), "and keeps the card")
+  d.step("down")
+  d.step("a")
+  d.step("a")
+  d.step("a")
+  check(not MysteryGift.validateSavedCard(sess2), "YES twice throws the card away")
+  d.waitFor(function() return st2.state == Ui.STATE.MAIN_MENU and not st2.msg end)
+  eq(saves, 1, "the toss is saved once")
+  check(save.modData.mysteryGift.card == nil, "the save has no card")
+end
+
+print("[test] 16. A shareable card has no SEND row")
+do
+  local sess2 = giftSession({})
+  local st2 = Ui.new({ session = sess2, onSave = function() return true end })
+  local d = driver(st2)
+  check(MysteryGift.receiveCard(sess2, MysteryGift.builtins()[4].card), "a shareable STAMP CARD is held")
+  d.step("a")
+  d.step("a")
+  eq(#st2.rows, 3, "the menu is RECEIVE, TOSS and CANCEL")
+  eq(table.concat(st2.giftActions, ","), "receive,toss,cancel", "with no send action")
+  check(MysteryGift.sendToFriend == nil, "there is no friend-send hook")
+  d.step("b")
+  d.step("b")
+  eq(st2.state, Ui.STATE.MAIN_MENU, "B twice goes back to the menu")
+end
+
+print("[test] 17. Held news offers RECEIVE and CANCEL only")
+do
+  local sess2 = giftSession({})
+  local st2 = Ui.new({ session = sess2, onSave = function() return true end })
+  local d = driver(st2)
+  check(MysteryGift.receiveNews(sess2, { id = 3, sendType = 1, titleText = "NEWS", bodyText = {} }), "shareable news is held")
+  d.step("down")
+  d.step("a")
+  eq(st2.state, Ui.STATE.SAVED_VIEW, "the held news shows")
+  d.step("a")
+  eq(table.concat(st2.giftActions, ","), "receive,cancel", "news has no send or toss")
 end
 
 if failed == 0 then

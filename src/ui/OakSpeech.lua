@@ -842,8 +842,10 @@ function OakSpeech:draw()
     love.graphics.setColor(0, 0, 0, 1)
     for i, line in ipairs(self.shrinkText) do
       local y = (12 + 2 * i) * 8
-      for j, code in ipairs(line) do
-        Font.drawCode(code, 8 + (j - 1) * 8, y)
+      local pen = 8
+      for _, code in ipairs(line) do
+        Font.drawCode(code, pen, y)
+        pen = pen + Font.advanceOf(code)
       end
     end
     love.graphics.setColor(1, 1, 1, 1)

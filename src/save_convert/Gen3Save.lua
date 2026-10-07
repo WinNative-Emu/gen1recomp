@@ -31,6 +31,12 @@ local function build(L)
     Gen3Save.MSG.emerald = "That is an Emerald save, not Ruby/Sapphire."
   end
   Gen3Save.L = L
+  local BOX_FLAGS_OFFSET = L.FAMILY == "rs" and 0x312F or L.FAMILY == "emerald" and 0x31C7 or 0x30BB
+  Gen3Save.BOX_FLAGS_OFFSET = BOX_FLAGS_OFFSET
+
+  function Gen3Save.boxFlagsOf(save)
+    return require("src.core.game3.save_mon").boxFlags(save)
+  end
 
   local U32 = 4294967296
 
@@ -75,8 +81,31 @@ local function build(L)
     return REVERSE
   end
 
-  function Gen3Save.decodeString(s, off, len)
+  local JAPANESE, JAPANESE_REVERSE
+  local function japanese()
+    if not JAPANESE then
+      JAPANESE, JAPANESE_REVERSE = {}, {}
+      for ch, code in pairs(require("src.ui.game3.frlg_font").JAPANESE_GLYPHS) do
+        if JAPANESE[code] == nil or ch < JAPANESE[code] then JAPANESE[code] = ch end
+        JAPANESE_REVERSE[ch] = code
+      end
+    end
+    return JAPANESE, JAPANESE_REVERSE
+  end
+
+  local function latin(c, kana) return c == 0x00 or c >= 0xA1 and c <= 0xAA or c >= 0xB1 or not kana and c >= 0xAB end
+
+  function Gen3Save.decodeString(s, off, len, language, fullwidth)
     local map, out = charmap(), {}
+    local jp = language == L.LANGUAGE_JAPANESE and japanese() or nil
+    local kana = false
+    if jp then
+      for k = 0, len - 1 do
+        local c = u8(s, off + k)
+        if c == 0xFF then break end
+        if c >= 0x01 and c <= 0xA0 then kana = true; break end
+      end
+    end
     local i = 0
     while i < len do
       local c = u8(s, off + i)
@@ -86,18 +115,19 @@ local function build(L)
         out[#out + 1] = sym
         i = i + 2
       else
-        out[#out + 1] = map[c] or string.format("{%02X}", c)
+        out[#out + 1] = jp and (fullwidth or not latin(c, kana) or not map[c]) and jp[c] or map[c] or string.format("{%02X}", c)
         i = i + 1
       end
     end
     return table.concat(out)
   end
 
-  function Gen3Save.encodeString(str, len, pad)
+  function Gen3Save.encodeString(str, len, pad, language)
     local r, out, i = reverse(), {}, 1
+    local jr = language == L.LANGUAGE_JAPANESE and select(2, japanese()) or nil
     str = str or ""
     local function put(tok)
-      local code = r[tok]
+      local code = jr and jr[tok] or r[tok]
       if code then
         out[#out + 1] = code
       elseif EXTRA_REVERSE[tok] and #out + 2 <= len then
@@ -128,6 +158,56 @@ local function build(L)
     local t = {}
     for k = 1, len do t[k] = string.char(out[k]) end
     return table.concat(t)
+  end
+
+  local function rawName(x, key)
+    return type(x) == "table" and type(x[key]) == "table" and string.char(unpack(x[key])) or nil
+  end
+
+  local function eggOf(mon)
+    if mon.isEgg == true or mon.isEggFlag == true then return true end
+    local flags = type(mon.cartExtra) == "table" and tonumber(mon.cartExtra.flagsRaw) or nil
+    return flags ~= nil and band(flags, lshift(1, L.BOX_MON_FLAGS.isEgg)) ~= 0
+  end
+
+  function Gen3Save.repairJapaneseNames(mon)
+    if type(mon) ~= "table" or tonumber(mon.language) ~= L.LANGUAGE_JAPANESE then return false end
+    local B, changed = L.BOX_MON, false
+    if eggOf(mon) then
+      local current = mon.otName
+      if type(current) ~= "string" or not current:find("[\128-\255]") then return false end
+      local len = B.otNameLength
+      local bytes = rawName(mon.cartExtra, "otNameRaw")
+      if not bytes or Gen3Save.decodeString(bytes, 0, len, L.LANGUAGE_JAPANESE, true) ~= current then
+        bytes = Gen3Save.encodeString(current, len, 0xFF, L.LANGUAGE_JAPANESE)
+        if Gen3Save.decodeString(bytes, 0, len, L.LANGUAGE_JAPANESE, true) ~= current then return false end
+      end
+      local fixed = Gen3Save.decodeString(bytes, 0, len)
+      if fixed == current or fixed:find("{%x%x}") then return false end
+      for _, k in ipairs({ "otName", "ot" }) do
+        if mon[k] == current then mon[k] = fixed end
+      end
+      return true
+    end
+    local function fix(keys, rawKey, len)
+      local current = mon[keys[1]]
+      if type(current) ~= "string" or current == "" then return end
+      local bytes = rawName(mon.cartExtra, rawKey)
+      if not bytes or Gen3Save.decodeString(bytes, 0, len) ~= current then
+        if not current:find("{%x%x}") then return end
+        bytes = Gen3Save.encodeString(current, len, 0xFF)
+        if Gen3Save.decodeString(bytes, 0, len) ~= current then return end
+      end
+      local fixed = Gen3Save.decodeString(bytes, 0, len, L.LANGUAGE_JAPANESE)
+      if fixed == current then return end
+      for _, k in ipairs(keys) do
+        if mon[k] == current then mon[k] = fixed end
+      end
+      changed = true
+    end
+    if not mon.isEgg then fix({ "nickname", "name" }, "nicknameRaw", B.nicknameLength) end
+    fix({ "otName", "ot" }, "otNameRaw", B.otNameLength)
+    return changed
   end
 
   -- src/save.c:614
@@ -282,6 +362,7 @@ local function build(L)
     local B = L.BOX_MON
     local personality, otId = u32(raw, B.personality), u32(raw, B.otId)
     local flags = u8(raw, B.flags)
+    local language = u8(raw, B.language)
     local sec = decryptSecure(raw, personality, otId)
     local pos = L.SUBSTRUCT_ORDER[personality % 24]
     local g, a, e, m = pos[1] * L.SUBSTRUCT_SIZE, pos[2] * L.SUBSTRUCT_SIZE, pos[3] * L.SUBSTRUCT_SIZE, pos[4] * L.SUBSTRUCT_SIZE
@@ -290,13 +371,12 @@ local function build(L)
       otIdRaw = otId,
       otId = otId % 65536,
       otSecretId = math.floor(otId / 65536),
-      nickname = Gen3Save.decodeString(raw, B.nickname, B.nicknameLength),
-      language = u8(raw, B.language),
+      nickname = Gen3Save.decodeString(raw, B.nickname, B.nicknameLength, language),
+      language = language,
       flagsRaw = flags,
       isBadEgg = band(flags, lshift(1, L.BOX_MON_FLAGS.isBadEgg)) ~= 0,
       hasSpecies = band(flags, lshift(1, L.BOX_MON_FLAGS.hasSpecies)) ~= 0,
       isEggFlag = band(flags, lshift(1, L.BOX_MON_FLAGS.isEgg)) ~= 0,
-      otName = Gen3Save.decodeString(raw, B.otName, B.otNameLength),
       markings = u8(raw, B.markings),
       checksum = u16(raw, B.checksum),
       unknown = u16(raw, B.unknown),
@@ -325,6 +405,9 @@ local function build(L)
     mon.ivs = {}
     for i, k in ipairs(L.IV_KEYS) do mon.ivs[k] = bits(ivw, (i - 1) * 5, 5) end
     mon.isEgg = bits(ivw, L.IV_EGG_BIT, 1) == 1
+    -- pokeemerald/src/daycare.c:866
+    mon.otName = Gen3Save.decodeString(raw, B.otName, B.otNameLength,
+      not (mon.isEgg or mon.isEggFlag) and language or nil)
     mon.abilityNum = bits(ivw, L.IV_ABILITY_BIT, 1)
     local rib = u32(sec, m + S3.ribbons)
     mon.ribbons = rib
@@ -437,10 +520,10 @@ local function build(L)
     if mon.nicknameBytes then
       out:fill(B.nickname, B.nicknameLength, 0xFF)
       out:bytes(B.nickname, mon.nicknameBytes:sub(1, B.nicknameLength))
-    elseif mon.nicknameRaw and Gen3Save.decodeString(mon.nicknameRaw, 0, B.nicknameLength) == mon.nickname then
+    elseif mon.nicknameRaw and Gen3Save.decodeString(mon.nicknameRaw, 0, B.nicknameLength, mon.language) == mon.nickname then
       out:bytes(B.nickname, mon.nicknameRaw)
     else
-      out:bytes(B.nickname, Gen3Save.encodeString(mon.nickname, B.nicknameLength, 0xFF))
+      out:bytes(B.nickname, Gen3Save.encodeString(mon.nickname, B.nicknameLength, 0xFF, mon.language))
     end
     out:w8(B.language, mon.language or 2)
     local F = L.BOX_MON_FLAGS
@@ -448,10 +531,16 @@ local function build(L)
       + (mon.isBadEgg and 2 ^ F.isBadEgg or 0) + 2 ^ F.hasSpecies
       + ((mon.isEggFlag or mon.isEgg) and 2 ^ F.isEgg or 0)
     out:w8(B.flags, flags)
-    if mon.otNameRaw and Gen3Save.decodeString(mon.otNameRaw, 0, B.otNameLength) == mon.otName then
+    local otLanguage = not (mon.isEggFlag or mon.isEgg) and mon.language or nil
+    if mon.otNameRaw and Gen3Save.decodeString(mon.otNameRaw, 0, B.otNameLength, otLanguage) == mon.otName then
       out:bytes(B.otName, mon.otNameRaw)
     else
-      out:bytes(B.otName, Gen3Save.encodeString(mon.otName, B.otNameLength, 0xFF))
+      local bytes = Gen3Save.encodeString(mon.otName, B.otNameLength, 0xFF, otLanguage)
+      if not otLanguage and Gen3Save.decodeString(bytes, 0, B.otNameLength) ~= mon.otName then
+        local jp = Gen3Save.encodeString(mon.otName, B.otNameLength, 0xFF, L.LANGUAGE_JAPANESE)
+        if Gen3Save.decodeString(jp, 0, B.otNameLength, L.LANGUAGE_JAPANESE, true) == mon.otName then bytes = jp end
+      end
+      out:bytes(B.otName, bytes)
     end
     out:w8(B.markings, mon.markings or 0)
     out:w16(B.checksum, secureChecksum(plain))
@@ -694,6 +783,7 @@ local function build(L)
     for _, f in ipairs(L.OPTIONS_BITS) do out.options[f[1]] = bits(out.optionsWord, f[2], f[3]) end
     out.options.buttonMode = out.buttonMode
     Gen3Save.readFields(sb1, L.SB1, out, key)
+    out.boxFlags = u8(sb1, BOX_FLAGS_OFFSET)
     out.party = {}
     for i = 0, math.min(out.partyCount, L.PARTY_SIZE) - 1 do
       local o = L.PARTY_OFFSET + i * L.PARTY_MON_SIZE
@@ -848,6 +938,7 @@ local function build(L)
     end
     fields.partyCount = #(t.party or {})
     Gen3Save.writeFields(sb1, L.SB1, fields, key)
+    if t.boxFlags ~= nil then sb1:w8(BOX_FLAGS_OFFSET, t.boxFlags) end
     sb1:fill(L.PARTY_OFFSET, L.PARTY_SIZE * L.PARTY_MON_SIZE, 0)
     for i = 0, L.PARTY_SIZE - 1 do
       -- src/pokemon.c:1737
@@ -1355,6 +1446,7 @@ local function build(L)
         fameChecker = #fame > 0 and fame or nil,
         trainerTower = tower,
         cartImport = {
+          boxFlags = c.boxFlags,
           dexSeen = nationalList(seenList),
           dexOwned = nationalList(ownedList),
           lastHealLocation = portWarp(c.lastHealLocation),
@@ -2103,6 +2195,8 @@ local function build(L)
       c.trainerTowerBest = tplTower
     end
     c.encryptionKey = key
+    local boxFlags = Gen3Save.boxFlagsOf(save)
+    if boxFlags ~= nil then c.boxFlags = boxFlags end
     return c, blocks
   end
 
@@ -2271,6 +2365,20 @@ function M.sniff(bytes)
   -- pokeruby/src/save.c:110
   if zero(em.sb2, 0x890, #em.sb2) and zero(em.sb1, 0x3AC0, #em.sb1) then return "rs" end
   return "emerald"
+end
+
+function M.repairJapaneseNames(root)
+  local codec, seen, changed = M.forVersion("emerald"), {}, false
+  local function walk(t)
+    if seen[t] then return end
+    seen[t] = true
+    if type(t.personality) == "number" and codec.repairJapaneseNames(t) then changed = true end
+    for _, v in pairs(t) do
+      if type(v) == "table" then walk(v) end
+    end
+  end
+  if type(root) == "table" then walk(root) end
+  return changed
 end
 
 M.FAMILY_NAMES = { frlg = "FireRed/LeafGreen", emerald = "Emerald", rs = "Ruby/Sapphire" }

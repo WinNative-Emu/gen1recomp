@@ -221,19 +221,19 @@ session.party = { charizard() }
 Link.reset()
 freshCtx()
 setVar(Link.VAR_0x8004, Link.USING.SINGLE_BATTLE)
+local connects = 0
+local Connect = { start = function() connects = connects + 1; return false, "offline" end,
+  state = function() return "offline" end }
+package.loaded["src.online.Connect"] = Connect
+package.loaded["src.online.ArenaData"] = {
+  liveProfile3 = function(_, rulesetId) return { engine = 3, version = "firered", rulesetId = rulesetId } end,
+}
+Link._live = nil
 local waited = Natives.special(ctx, NativesLink.SPECIAL.TryBattleLinkup, adapters)
--- pokefirered/src/cable_club.c:208-222
-check(waited, "with no cable yet the counter parks the script instead of answering")
-eq(getVar(Link.VAR_RESULT), Link.LINKUP.ONGOING, "and reports LINKUP_ONGOING while it waits")
-local spun = 0
-for _ = 1, LB.LINKUP_TICKS + 1 do
-  if ctx.nativePoll() then break end
-  spun = spun + 1
-end
--- pokefirered/src/cable_club.c:482 TryLinkTimeout
-eq(spun, LB.LINKUP_TICKS, "it waits the full TryLinkTimeout window before giving up")
+check(not waited, "with no cable and no relay the counter answers at once")
+eq(connects, 1, "after trying the relay once")
 eq(getVar(Link.VAR_RESULT), Link.LINKUP.CONNECTION_ERROR,
-  "and a partner that never arrives is LINKUP_CONNECTION_ERROR")
+  "and a relay that cannot be reached is LINKUP_CONNECTION_ERROR")
 
 local host, guest = FakeRelay.pair({ game = game })
 pumpLink(host, guest)
@@ -243,51 +243,67 @@ setVar(Link.VAR_0x8004, Link.USING.SINGLE_BATTLE)
 local yielded = Natives.special(ctx, NativesLink.SPECIAL.TryBattleLinkup, adapters)
 check(yielded, "the script yields while the linkup runs")
 eq(getVar(Link.VAR_RESULT), Link.LINKUP.ONGOING, "VAR_RESULT is LINKUP_ONGOING while it waits")
-check(ctx.nativePoll() == false, "nothing is decided before the peer says what it picked")
 guest:update(0)
-local peerPick = guest:take(LB.MSG.LINKUP)
-eq(peerPick and peerPick.linkType, LB.LINKTYPE.SINGLE_BATTLE,
-  "the peer was told this machine picked LINKTYPE_SINGLE_BATTLE")
-guest:send({ type = LB.MSG.LINKUP, linkType = LB.LINKTYPE.SINGLE_BATTLE, players = 2 })
-host:update(0)
-check(ctx.nativePoll() == true, "the poll settles once both picks are in")
-eq(getVar(Link.VAR_RESULT), Link.LINKUP.SUCCESS, "matching picks report LINKUP_SUCCESS")
+eq(guest:take(LB.MSG.LINKUP), nil, "a relay link sends no linkup message: the hellos already carry the picks")
+check(ctx.nativePoll() == true, "the poll settles from the hellos")
+eq(getVar(Link.VAR_RESULT), Link.LINKUP.SUCCESS, "a peer on the generic wireless link type is LINKUP_SUCCESS")
 eq(LB.state, "seat", "and the session is waiting for a colosseum seat")
+Link.closeLink("test")
 
+local Game3Link = require("src.link.Game3Link")
+local function relayPair(hostType, guestType, seats)
+  local room = FakeRelay.room({ seats = seats or 2 })
+  local a = Game3Link.attach(FakeRelay.transport(room, 0), { game = game, linkType = hostType, seat = 0, seats = room.seats })
+  local b = Game3Link.attach(FakeRelay.transport(room, 1), { game = game, linkType = guestType, seat = 1, seats = room.seats })
+  pumpLink(a, b)
+  return a, b
+end
+host, guest = relayPair(LB.LINKTYPE.SINGLE_BATTLE, LB.LINKTYPE.DOUBLE_BATTLE)
+Link.attach(host)
 freshCtx()
 setVar(Link.VAR_0x8004, Link.USING.SINGLE_BATTLE)
 Natives.special(ctx, NativesLink.SPECIAL.TryBattleLinkup, adapters)
-guest:update(0)
-guest:take(LB.MSG.LINKUP)
-guest:send({ type = LB.MSG.LINKUP, linkType = LB.LINKTYPE.MULTI_BATTLE, players = 4 })
-host:update(0)
 ctx.nativePoll()
 eq(getVar(Link.VAR_RESULT), Link.LINKUP.DIFF_SELECTIONS,
-  "a peer that picked another mode reports LINKUP_DIFF_SELECTIONS")
+  "a cable peer that picked another mode reports LINKUP_DIFF_SELECTIONS")
+Link.closeLink("test")
 
+host, guest = relayPair(LB.LINKTYPE.MULTI_BATTLE, LB.LINKTYPE.MULTI_BATTLE)
+Link.attach(host)
 freshCtx()
 setVar(Link.VAR_0x8004, Link.USING.MULTI_BATTLE)
 Natives.special(ctx, NativesLink.SPECIAL.TryBattleLinkup, adapters)
-guest:update(0)
-local multiPick = guest:take(LB.MSG.LINKUP)
-eq(multiPick and multiPick.linkType, LB.LINKTYPE.MULTI_BATTLE, "MULTI BATTLE picks LINKTYPE_MULTI_BATTLE")
-guest:send({ type = LB.MSG.LINKUP, linkType = LB.LINKTYPE.MULTI_BATTLE, players = 4 })
-host:update(0)
 ctx.nativePoll()
 eq(getVar(Link.VAR_RESULT), Link.LINKUP.WRONG_NUM_PLAYERS,
-  "a four player mode on a two machine cable reports LINKUP_WRONG_NUM_PLAYERS")
+  "a four player mode on a two machine link reports LINKUP_WRONG_NUM_PLAYERS")
+Link.closeLink("test")
+
+local lhost, lguest = Game3Link.loopback({ game = game })
+pumpLink(lhost, lguest)
+Link.attach(lhost)
+freshCtx()
+setVar(Link.VAR_0x8004, Link.USING.SINGLE_BATTLE)
+Natives.special(ctx, NativesLink.SPECIAL.TryBattleLinkup, adapters)
+check(ctx.nativePoll() == false, "a direct cable waits for the peer's pick")
+lguest:update(0)
+local peerPick = lguest:take(LB.MSG.LINKUP)
+eq(peerPick and peerPick.linkType, LB.LINKTYPE.SINGLE_BATTLE,
+  "and tells the peer this machine picked LINKTYPE_SINGLE_BATTLE")
+lguest:send({ type = LB.MSG.LINKUP, linkType = LB.LINKTYPE.MULTI_BATTLE, players = 4 })
+lhost:update(0)
+ctx.nativePoll()
+eq(getVar(Link.VAR_RESULT), Link.LINKUP.DIFF_SELECTIONS, "a different pick over the cable is LINKUP_DIFF_SELECTIONS")
 
 Link.closeLink("test")
 freshCtx()
 setVar(Link.VAR_0x8004, Link.USING.SINGLE_BATTLE)
+connects = 0
 Natives.special(ctx, NativesLink.SPECIAL.TryBattleLinkup, adapters)
-eq(getVar(Link.VAR_RESULT), Link.LINKUP.ONGOING,
-  "a torn down link puts the counter back to waiting for a machine")
-for _ = 1, LB.LINKUP_TICKS + 1 do
-  if ctx.nativePoll() then break end
-end
-eq(getVar(Link.VAR_RESULT), Link.LINKUP.CONNECTION_ERROR,
-  "and times out to LINKUP_CONNECTION_ERROR")
+eq(connects, 1, "a torn down link sends the counter back to the relay")
+eq(getVar(Link.VAR_RESULT), Link.LINKUP.CONNECTION_ERROR, "which answers LINKUP_CONNECTION_ERROR when unreachable")
+package.loaded["src.online.Connect"] = nil
+package.loaded["src.online.ArenaData"] = nil
+Link._live = nil
 Link.reset()
 
 print("[test] 4. the shared seed drives one RNG stream on both machines")

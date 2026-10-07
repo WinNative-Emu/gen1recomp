@@ -12,7 +12,7 @@ local SE = require("src.core.game3.se_ids") -- pokefirered/include/constants/son
 local VAR_OBJ_GFX_ID_0 = 0x4010 -- pokefirered/include/constants/vars.h:28
 local OBJ_EVENT_GFX_YOUNGSTER = 18 -- pokefirered/include/constants/event_objects.h:24
 local PARTY_SIZE = 6 -- pokefirered/include/constants/pokemon.h
-local MAX_BERRY_POWDER = 99999 -- pokefirered/src/berry_powder.c:12
+local MAX_BERRY_POWDER = 99999 -- pokefirered/src/berry_powder.c:13
 
 local function flagsMod()
   return require("src.core.game3.scripting.flags")

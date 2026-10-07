@@ -60,10 +60,24 @@ local STICK_OFF = 0.3
 
 Input.PAD_ACTIONS = { speedUp = true, speedDown = true }
 
+local STICK_DEFAULT_BINDINGS = {
+  leftstick_up = "up", leftstick_down = "down",
+  leftstick_left = "left", leftstick_right = "right",
+  rightstick_up = "up", rightstick_down = "down",
+  rightstick_left = "left", rightstick_right = "right",
+  lsup = "up", lsdown = "down", lsleft = "left", lsright = "right",
+  rsup = "up", rsdown = "down", rsleft = "left", rsright = "right",
+}
+
 local POLLABLE_PAD_BUTTONS = {
   a = true, b = true, x = true, y = true, back = true, guide = true, start = true,
   leftstick = true, rightstick = true, leftshoulder = true, rightshoulder = true,
   dpup = true, dpdown = true, dpleft = true, dpright = true,
+  triggerleft = true, triggerright = true,
+  leftstick_up = true, leftstick_down = true, leftstick_left = true, leftstick_right = true,
+  rightstick_up = true, rightstick_down = true, rightstick_left = true, rightstick_right = true,
+  misc1 = true, paddle1 = true, paddle2 = true, paddle3 = true, paddle4 = true,
+  touchpad = true,
 }
 
 local HAT_DIRECTIONS = {
@@ -101,7 +115,7 @@ function Input:applyBindings(overlay)
       if type(binding) == "table" then
         if binding.key then keys[binding.key] = id end
         if binding.pad then
-          local button = GamepadMap.TRIGGER_AXES[binding.pad] or binding.pad
+          local button = GamepadMap.normalizePad and GamepadMap.normalizePad(binding.pad) or GamepadMap.TRIGGER_AXES[binding.pad] or binding.pad
           pads[button], acts[button] = id, nil
         end
       elseif type(binding) == "string" then keys[binding] = id end
@@ -117,7 +131,7 @@ function Input:applyBindings(overlay)
   for _, id in ipairs(ids) do
     local binding = overlay[id]
     if Input.PAD_ACTIONS[id] and type(binding) == "table" and binding.pad then
-      local button = GamepadMap.TRIGGER_AXES[binding.pad] or binding.pad
+      local button = GamepadMap.normalizePad and GamepadMap.normalizePad(binding.pad) or GamepadMap.TRIGGER_AXES[binding.pad] or binding.pad
       acts[button], explicit[button], pads[button] = id, true, nil
     end
   end
@@ -161,7 +175,7 @@ function Input.hotkeyKey(key)
 end
 
 function Input:padAction(button, shoulderGameplay)
-  button = GamepadMap.TRIGGER_AXES[button] or button
+  button = GamepadMap.normalizePad and GamepadMap.normalizePad(button) or GamepadMap.TRIGGER_AXES[button] or button
   if shoulderGameplay and (button == "leftshoulder" or button == "rightshoulder")
       and not (self.explicitPadActions and self.explicitPadActions[button]) then return nil end
   return self.padActions and self.padActions[button] or nil
@@ -183,6 +197,8 @@ function Input:reset()
   self.sources = {}
   self.stickAxis = { x = 0, y = 0 }
   self.stickDir = nil
+  self.rightStickAxis = { x = 0, y = 0 }
+  self.rightStickDir = nil
   self.hatDirs = {}
   self.triggerHeld = {}
   self.captureArmed = false
@@ -322,8 +338,32 @@ end
 local function anyPadDown(pads, button)
   for k = 1, #pads do
     local j = pads[k]
-    local ok, down = pcall(j.isGamepadDown, j, button)
-    if ok and down then return true end
+    if button == "triggerleft" or button == "triggerright" then
+      if j.getGamepadAxis then
+        local ok, v = pcall(j.getGamepadAxis, j, button)
+        if ok and type(v) == "number" and v >= GamepadMap.TRIGGER_ON then return true end
+      end
+    elseif button == "leftstick_up" or button == "leftstick_down"
+        or button == "leftstick_left" or button == "leftstick_right"
+        or button == "rightstick_up" or button == "rightstick_down"
+        or button == "rightstick_left" or button == "rightstick_right" then
+      if j.getGamepadAxis then
+        local axisPrefix = button:sub(1, 9) == "leftstick" and "left" or "right"
+        local isY = (button:sub(-2) == "up" or button:sub(-4) == "down")
+        local axis = axisPrefix .. (isY and "y" or "x")
+        local ok, v = pcall(j.getGamepadAxis, j, axis)
+        if ok and type(v) == "number" then
+          if button:sub(-2) == "up" and v <= -STICK_ON then return true
+          elseif button:sub(-4) == "down" and v >= STICK_ON then return true
+          elseif button:sub(-4) == "left" and v <= -STICK_ON then return true
+          elseif button:sub(-5) == "right" and v >= STICK_ON then return true
+          end
+        end
+      end
+    else
+      local ok, down = pcall(j.isGamepadDown, j, button)
+      if ok and down then return true end
+    end
   end
   return false
 end
@@ -488,17 +528,17 @@ function Input:sourceRelease(btn, source)
 end
 
 function Input:gamepadpressed(joystick, button)
-  button = GamepadMap.TRIGGER_AXES[button] or button
+  button = GamepadMap.normalizePad and GamepadMap.normalizePad(button) or GamepadMap.TRIGGER_AXES[button] or button
   if self.padSuppress then self.padSuppress[button] = nil end
   noteCapture(self, "pad", "pressed", button)
-  local btn = self.padBindings[button]
+  local btn = self.padBindings[button] or STICK_DEFAULT_BINDINGS[button]
   if btn and not self:padAction(button, self.shoulderGameplay) then
     press(self, btn, "pad:" .. button)
   end
 end
 
 function Input:gamepadreleased(joystick, button)
-  button = GamepadMap.TRIGGER_AXES[button] or button
+  button = GamepadMap.normalizePad and GamepadMap.normalizePad(button) or GamepadMap.TRIGGER_AXES[button] or button
   noteCapture(self, "pad", "released", button)
   local source = "pad:" .. button
   for btn, sources in pairs(self.sources) do
@@ -550,29 +590,27 @@ function Input:triggerAxis(axis, value)
   return name
 end
 
--- left stick treated as a continuous held direction, same 4-way rule as
--- the touch swipe d-pad: whichever axis has the larger magnitude wins.
-function Input:gamepadaxis(joystick, axis, value)
-  local trigger, phase = self:triggerAxis(axis, value)
-  if trigger then
-    if phase == "pressed" then
-      self:gamepadpressed(joystick, trigger)
-    elseif phase == "released" then
-      self:gamepadreleased(joystick, trigger)
-    end
-    return
-  end
-  if axis == "leftx" then
-    self.stickAxis.x = value
-  elseif axis == "lefty" then
-    self.stickAxis.y = value
+function Input:stickAxisEvents(axis, value)
+  local isLeft = (axis == "leftx" or axis == "lefty")
+  local isRight = (axis == "rightx" or axis == "righty")
+  if not isLeft and not isRight then return nil end
+
+  local prefix = isLeft and "leftstick" or "rightstick"
+  local stateKey = isLeft and "stickAxis" or "rightStickAxis"
+  local dirKey = isLeft and "stickDir" or "rightStickDir"
+
+  self[stateKey] = self[stateKey] or { x = 0, y = 0 }
+  if axis:sub(-1) == "x" then
+    self[stateKey].x = value
   else
-    return
+    self[stateKey].y = value
   end
 
-  local x, y = self.stickAxis.x, self.stickAxis.y
+  local x, y = self[stateKey].x, self[stateKey].y
   local ax, ay = math.abs(x), math.abs(y)
-  local newDir = self.stickDir
+  local currentDir = self[dirKey]
+  local newDir = currentDir
+
   if ax > STICK_ON or ay > STICK_ON then
     if ax >= ay then
       newDir = x > 0 and "right" or "left"
@@ -583,14 +621,40 @@ function Input:gamepadaxis(joystick, axis, value)
     newDir = nil
   end
 
-  if newDir ~= self.stickDir then
-    if self.stickDir then
-      release(self, self.stickDir, "stick")
+  if newDir == currentDir then return nil end
+
+  self[dirKey] = newDir
+  local events = {}
+  if currentDir then
+    events[#events + 1] = { phase = "released", button = prefix .. "_" .. currentDir }
+  end
+  if newDir then
+    events[#events + 1] = { phase = "pressed", button = prefix .. "_" .. newDir }
+  end
+  return events
+end
+
+function Input:gamepadaxis(joystick, axis, value)
+  local trigger, phase = self:triggerAxis(axis, value)
+  if trigger then
+    if phase == "pressed" then
+      self:gamepadpressed(joystick, trigger)
+    elseif phase == "released" then
+      self:gamepadreleased(joystick, trigger)
     end
-    if newDir then
-      press(self, newDir, "stick")
+    return
+  end
+  local events = self:stickAxisEvents(axis, value)
+  if events then
+    for i = 1, #events do
+      local ev = events[i]
+      if ev.phase == "pressed" then
+        self:gamepadpressed(joystick, ev.button)
+      elseif ev.phase == "released" then
+        self:gamepadreleased(joystick, ev.button)
+      end
     end
-    self.stickDir = newDir
+    return
   end
 end
 
@@ -662,7 +726,7 @@ function Input:reconcile()
         end
       end
       if j.getGamepadAxis then
-        local axes = { "leftx", "lefty", "triggerleft", "triggerright" }
+        local axes = { "leftx", "lefty", "rightx", "righty", "triggerleft", "triggerright" }
         for _, axis in ipairs(axes) do
           local ok2, v = pcall(j.getGamepadAxis, j, axis)
           if ok2 and type(v) == "number" then self:gamepadaxis(j, axis, v) end

@@ -3783,9 +3783,6 @@ function BattleState:answerNickname(yes)
   if not (yes and mon and stack) then return self:advanceQueue() end
   self.phase = "submenu"
   local data = (self.game and self.game.data) or {}
-  local icons = data.gen2Icons
-  local iconId = icons and icons.species and icons.species[mon.species]
-  local entry = iconId and icons.icons and icons.icons[iconId]
   local done = function(name)
     stack:pop()
     -- InitName: an empty entry keeps whatever was already in the buffer, which
@@ -3796,8 +3793,8 @@ function BattleState:answerNickname(yes)
   end
   Screens.push(self.game, "Gen2NamingScreen", {
     type = "nickname",
+    mon = mon,
     monName = mon.name or mon.species,
-    iconPath = entry and entry.image or nil,
     menuGfx = data.gen2MenuGfx,
     onDone = done,
     onCancel = function() done(nil) end,

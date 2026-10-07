@@ -218,28 +218,22 @@ function HostShell.pumpHostEvents()
   pcall(love.event.pump)
 end
 
+local function winApi()
+  local ok, mod = pcall(require, "src.core.WinApi")
+  if ok and type(mod) == "table" then return mod end
+  local fs = love and love.filesystem
+  if not (fs and fs.load) then return nil end
+  local okLoad, chunk = pcall(fs.load, "src/core/WinApi.lua")
+  if not okLoad or type(chunk) ~= "function" then return nil end
+  local okRun, loaded = pcall(chunk)
+  if not okRun or type(loaded) ~= "table" then return nil end
+  package.loaded["src.core.WinApi"] = loaded
+  return loaded
+end
+
 local function windowsModulePath()
-  local ok, ffi = pcall(require, "ffi")
-  if not ok then return nil end
-  pcall(ffi.cdef, [[
-    unsigned long GetModuleFileNameW(void *hModule, wchar_t *lpFilename, unsigned long nSize);
-    int WideCharToMultiByte(unsigned int CodePage, unsigned long dwFlags,
-      const wchar_t *lpWideCharStr, int cchWideChar,
-      char *lpMultiByteStr, int cbMultiByte,
-      const char *lpDefaultChar, int *lpUsedDefaultChar);
-  ]])
-  local okk, k32 = pcall(ffi.load, "kernel32")
-  if not okk or not k32 then return nil end
-  local buf = ffi.new("wchar_t[32768]")
-  local n = k32.GetModuleFileNameW(nil, buf, 32768)
-  if n == 0 then return nil end
-  local bytes = k32.WideCharToMultiByte(65001, 0, buf, n, nil, 0, nil, nil)
-  if not bytes or bytes <= 0 then return nil end
-  local out = ffi.new("char[?]", bytes)
-  if k32.WideCharToMultiByte(65001, 0, buf, n, out, bytes, nil, nil) <= 0 then
-    return nil
-  end
-  return ffi.string(out, bytes)
+  local api = winApi()
+  return api and api.modulePath() or nil
 end
 
 -- Restart the whole app. The obvious love.event.quit("restart") re-runs LÖVE's
@@ -248,42 +242,18 @@ end
 -- ("Failed to initialize filesystem: already initialized") and the relaunch
 -- crashes. So on an AppImage we relaunch the executable; the fresh process's
 -- Boot step mounts any downloaded update exactly as a manual relaunch would.
--- Android hits the same wall (#575): the vendored love.cpp loops runlove()
--- in-process on "restart", and PHYSFS_deinit in the old Filesystem module's
--- destructor fails ("files still open") whenever any physfs handle survives
--- lua_close, so the second PHYSFS_init throws the same "already initialized"
--- and the app dies. There we relaunch through the GameActivity.restartApp
--- JNI bridge (love.system.restartApp), which schedules our launch intent
--- and kills the process so no native state can leak into the fresh run.
--- iOS is the same class of problem with a sharper edge: love.cpp under
--- LOVE_IOS forces DONE_RESTART for *every* quit (Apple forbids programmatic
--- exit) and comments that leftover threads make that restart unreliable --
--- which our ChipAudio / Fetch / Check workers are.  There is no
--- restartApp bridge on iOS, so callers that want "back to launcher" must
--- use main.lua's in-process returnToLauncher (love.quit aborts the quit);
--- HostShell.restart itself refuses quit("restart") and falls back to a
--- bare quit() so a mod that still calls restart does not pick the worst
--- path on purpose.
+-- Android (#575) and iOS restart in-process: love.quit joins every worker
+-- first, so no physfs handle outlives lua_close.  iOS turns every quit into
+-- DONE_RESTART in love.cpp, so a bare quit() is the restart there.
 function HostShell.restart()
   if not (love and love.event and love.event.quit) then return end
 
   local osName = love.system and love.system.getOS and love.system.getOS()
   if osName == "Android" then
-    -- restartApp kills the process on success, so a true return is never
-    -- observed; false means the bridge could not schedule the relaunch.
-    -- An older APK whose liblove predates the bridge (love.system.restartApp
-    -- is nil) has no crash-free in-process restart, so quit to the OS
-    -- cleanly and let the player relaunch by hand -- worse than restarting,
-    -- but better than the guaranteed crash of quit("restart") (#575).
-    if love.system.restartApp and love.system.restartApp() then return end
-    love.event.quit()
+    love.event.quit("restart")
     return
   end
   if osName == "iOS" then
-    -- No process-kill bridge.  A bare quit still becomes DONE_RESTART in
-    -- love.cpp, but quit("restart") is the path that also runs our
-    -- endProcess worker joins first and then re-enters runlove -- the
-    -- combination that crashes EXIT GAME.  Prefer the softer quit.
     love.event.quit()
     return
   end
@@ -324,9 +294,10 @@ function HostShell.restart()
     if type(exe) ~= "string" or exe == "" then
       exe = windowsModulePath()
     end
-    if exe and exe ~= "" then
-      local cmd = 'start "" "' .. exe:gsub("/", "\\") .. '"'
-      if os.execute(cmd) then
+    local api = winApi()
+    if api and exe and exe ~= "" then
+      exe = exe:gsub("/", "\\")
+      if api.spawn(exe, {}, { cwd = api.dirOf(exe) }) then
         love.event.quit()
         return
       end
@@ -438,10 +409,6 @@ function HostShell.quote(s)
   return "'" .. s:gsub("'", "'\\''") .. "'"
 end
 
--- Launch another instance of this packaged app without waiting for it.  The
--- same path works on all process-capable desktop hosts; only the shell's
--- background spelling differs.  Source checkouts include their game folder,
--- while fused releases and AppImages already carry it in the executable.
 function HostShell.spawnSelfDetached(args)
   if not require("src.core.Platform").canSpawnProcess() then return false end
   local fs = love and love.filesystem
@@ -456,16 +423,19 @@ function HostShell.spawnSelfDetached(args)
   end
   for _, value in ipairs(args or {}) do argv[#argv + 1] = tostring(value) end
 
+  local osName = love.system and love.system.getOS and love.system.getOS()
+  if osName == "Windows" then
+    local api = winApi()
+    if not api then return false end
+    executable = executable:gsub("/", "\\")
+    return api.spawn(executable, argv, { cwd = api.dirOf(executable) })
+  end
+
   local command = HostShell.quote(executable)
   for _, value in ipairs(argv) do
     command = command .. " " .. HostShell.quote(value)
   end
-  local osName = love.system and love.system.getOS and love.system.getOS()
-  if osName == "Windows" then
-    command = 'start "" /b ' .. command .. " >NUL 2>&1"
-  else
-    command = HostShell.envPrefix() .. command .. " >/dev/null 2>&1 &"
-  end
+  command = HostShell.envPrefix() .. command .. " >/dev/null 2>&1 &"
   local ok, _, code = os.execute(command)
   return ok == true or ok == 0 or code == 0
 end
@@ -490,10 +460,122 @@ function HostShell.haveCurl()
   return curlAvailable
 end
 
-local function curlCmd(flags)
+function HostShell.winRelative(paths)
+  local split = {}
+  for i, p in ipairs(paths) do
+    local parts = {}
+    for c in tostring(p):gmatch("[^/\\]+") do parts[#parts + 1] = c end
+    split[i] = parts
+  end
+  if #split == 0 then return nil end
+  local limit = math.huge
+  for _, parts in ipairs(split) do limit = math.min(limit, #parts - 1) end
+  local common = 0
+  while common < limit do
+    local c = split[1][common + 1]
+    local same = true
+    for i = 2, #split do
+      if split[i][common + 1] ~= c then same = false break end
+    end
+    if not same then break end
+    common = common + 1
+  end
+  if common == 0 then return nil end
+  local cwd = table.concat(split[1], "\\", 1, common)
+  if tostring(paths[1]):match("^[/\\][/\\]") then cwd = "\\\\" .. cwd end
+  if cwd:match("^%a:$") then cwd = cwd .. "\\" end
+  local rels = {}
+  for i, parts in ipairs(split) do
+    local rel = table.concat(parts, "\\", common + 1)
+    if not rel:find("[\128-\255]") then rels[i] = rel end
+  end
+  return cwd, rels
+end
+
+local function shellArgs(argv)
+  local parts = {}
+  for i, a in ipairs(argv) do
+    parts[i] = a:match("^[%w%-=,%.]+$") and a or HostShell.quote(a)
+  end
+  return table.concat(parts, " ")
+end
+
+local function resolveArgs(argv, relative)
+  local out = {}
+  for i, a in ipairs(argv) do
+    if type(a) == "table" then
+      out[i] = (a.prefix or "") .. ((relative and a.rel) or a.abs)
+    else
+      out[i] = a
+    end
+  end
+  return out
+end
+
+local function pathArgs(argv)
+  local list = {}
+  for _, a in ipairs(argv) do
+    if type(a) == "table" then list[#list + 1] = a end
+  end
+  return list
+end
+
+local function runCurlWindows(argv)
+  local api = winApi()
+  if not (api and api.run) then return nil end
+  local specs = pathArgs(argv)
+  local cwd = nil
+  if #specs > 0 then
+    local abs = {}
+    for i, s in ipairs(specs) do abs[i] = s.abs end
+    local rels
+    cwd, rels = HostShell.winRelative(abs)
+    for i, s in ipairs(specs) do s.rel = cwd and rels[i] or nil end
+  end
+  HostShell.releasePointerGrab()
+  local path = HostShell.resolveCurl()
+  return api.run(path, resolveArgs(argv, cwd ~= nil), {
+    cwd = cwd, useApplicationName = false, flags = api.CREATE_NO_WINDOW,
+    lock = withPopenLock,
+  })
+end
+
+local function runCurl(argv)
+  if HostShell.isWindows() then
+    local out = runCurlWindows(argv)
+    if out ~= nil then return true, true, out end
+  end
   local path, kind = HostShell.resolveCurl()
-  return HostShell.quote(path) .. " " .. flags,
-    { envPrefix = HostShell.curlEnvPrefix(kind) }
+  local cmd = HostShell.quote(path) .. " " .. shellArgs(resolveArgs(argv, false)) .. " 2>&1"
+  local pipe = HostShell.popen(cmd, "r", { envPrefix = HostShell.curlEnvPrefix(kind) })
+  if not pipe then return false end
+  local readOk, out = pcall(function() return pipe:read("*a") end)
+  HostShell.pclose(pipe)
+  return true, readOk, out
+end
+
+local function curlBase(fail, connectTimeout, maxTime)
+  return { fail and "-fsSL" or "-sSL", "--proto", "=http,https",
+    "--proto-redir", "=http,https", "--connect-timeout", tostring(connectTimeout),
+    "--max-time", tostring(maxTime) }
+end
+
+local function push(list, ...)
+  for i = 1, select("#", ...) do list[#list + 1] = select(i, ...) end
+end
+
+local function winStage(kind, text)
+  local fs = love and love.filesystem
+  if not (HostShell.isWindows() and fs and fs.write and fs.getSaveDirectory) then
+    return nil
+  end
+  local okDir, saveDir = pcall(fs.getSaveDirectory)
+  if not okDir or type(saveDir) ~= "string" or saveDir == "" then return nil end
+  local name = ("gen1recomp-%s-%d-%d.tmp"):format(kind, os.time() % 1000000,
+    math.random(0, 999999))
+  local okWrite, wrote = pcall(fs.write, name, text)
+  if not okWrite or not wrote then return nil end
+  return saveDir .. "/" .. name, function() pcall(fs.remove, name) end
 end
 
 -- An older mobile build reports nil here and falls back to the "no transport"
@@ -556,26 +638,18 @@ function HostShell.httpDownload(url, absPath, userAgent, accept, maxTime, etagPa
   if type(absPath) ~= "string" or absPath == "" then return nil, "missing path" end
   userAgent = userAgent or "gen1recomp"
   if HostShell.haveCurl() then
-    local head, popts = curlCmd(
-      ("-fsSL --proto =http,https --proto-redir =http,https "
-        .. "--connect-timeout 15 --max-time %d ")
-        :format(tonumber(maxTime) or 300))
-    local cmd = head
-      .. "-H " .. HostShell.quote("User-Agent: " .. userAgent) .. " "
+    local argv = curlBase(true, 15, tonumber(maxTime) or 300)
+    push(argv, "-H", "User-Agent: " .. userAgent)
     if accept then
-      cmd = cmd .. "-H " .. HostShell.quote("Accept: " .. accept) .. " "
+      push(argv, "-H", "Accept: " .. accept)
     end
     if type(etagPath) == "string" and etagPath ~= "" then
-      cmd = cmd .. "--etag-compare " .. HostShell.quote(etagPath) .. " "
-        .. "--etag-save " .. HostShell.quote(etagPath) .. " "
+      local etag = { abs = etagPath }
+      push(argv, "--etag-compare", etag, "--etag-save", etag)
     end
-    cmd = cmd .. "-o " .. HostShell.quote(absPath) .. " "
-      .. "-w " .. HostShell.quote(HTTP_MARK_FMT) .. " "
-      .. HostShell.quote(url) .. " 2>&1"
-    local pipe = HostShell.popen(cmd, "r", popts)
-    if not pipe then return nil, "could not start download" end
-    local readOk, out = pcall(function() return pipe:read("*a") end)
-    HostShell.pclose(pipe)
+    push(argv, "-o", { abs = absPath }, "-w", HTTP_MARK_FMT, url)
+    local started, readOk, out = runCurl(argv)
+    if not started then return nil, "could not start download" end
     -- The file is still what the caller judges success by (-f writes nothing
     -- on an HTTP error, and the callers all check the file anyway).  The
     -- status is here purely so the failure can NAME itself: "download failed"
@@ -615,21 +689,14 @@ function HostShell.httpGet(url, userAgent, accept, maxTime)
     -- BODY, and on the two services this talks to that body is the whole
     -- diagnosis: GitHub's 403 says "API rate limit exceeded for <ip>", which
     -- tells a user to wait rather than to go hunting for a broken index.
-    local head, popts = curlCmd(
-      ("-sSL --proto =http,https --proto-redir =http,https "
-        .. "--connect-timeout 10 --max-time %d ")
-        :format(tonumber(maxTime) or 40))
-    local cmd = head
-      .. "-H " .. HostShell.quote("User-Agent: " .. userAgent) .. " "
+    local argv = curlBase(false, 10, tonumber(maxTime) or 40)
+    push(argv, "-H", "User-Agent: " .. userAgent)
     if accept then
-      cmd = cmd .. "-H " .. HostShell.quote("Accept: " .. accept) .. " "
+      push(argv, "-H", "Accept: " .. accept)
     end
-    cmd = cmd .. "-w " .. HostShell.quote(HTTP_MARK_FMT) .. " "
-      .. HostShell.quote(url) .. " 2>&1"
-    local pipe = HostShell.popen(cmd, "r", popts)
-    if not pipe then return nil, "could not run curl" end
-    local readOk, out = pcall(function() return pipe:read("*a") end)
-    HostShell.pclose(pipe)
+    push(argv, "-w", HTTP_MARK_FMT, url)
+    local started, readOk, out = runCurl(argv)
+    if not started then return nil, "could not run curl" end
     if not readOk then
       return nil, fetchError(url, nil, tostring(out))
     end
@@ -683,8 +750,7 @@ function HostShell.httpPost(url, body, contentType, userAgent, maxTime)
     -- working directory, and a game installed under Program Files has no
     -- writable CWD -- io.open would fail before curl ever runs and postLog
     -- would silently drop the send.  TEMP/TMP are per-user writable on
-    -- Windows; TMPDIR (with /tmp fallback) covers POSIX.  No love.filesystem:
-    -- the sandbox-era transport stays on plain io/os.
+    -- Windows; TMPDIR (with /tmp fallback) covers POSIX.
     local function stagingPath()
       local dir = os.getenv("TEMP") or os.getenv("TMP")
       if not dir or dir == "" then dir = os.getenv("TMPDIR") or "/tmp" end
@@ -692,20 +758,24 @@ function HostShell.httpPost(url, body, contentType, userAgent, maxTime)
       return dir .. sep .. ("gen1recomp-post-%d.tmp"):format(
         (os.time() % 1000000) * 100 + math.random(0, 99))
     end
-    local bodyPath = stagingPath()
-    local bodyFile, bodyOpenErr = io.open(bodyPath, "wb")
-    if not bodyFile then
-      pcall(os.remove, bodyPath)
-      return nil, "could not create request body: " .. tostring(bodyOpenErr)
-    end
-    local bodyOk, bodyErr = pcall(function()
-      assert(bodyFile:write(body))
-      assert(bodyFile:close())
-    end)
-    if not bodyOk then
-      pcall(function() bodyFile:close() end)
-      pcall(os.remove, bodyPath)
-      return nil, "could not write body: " .. tostring(bodyErr)
+    local bodyPath, removeBody = winStage("post", body)
+    if not bodyPath then
+      bodyPath = stagingPath()
+      removeBody = function() pcall(os.remove, bodyPath) end
+      local bodyFile, bodyOpenErr = io.open(bodyPath, "wb")
+      if not bodyFile then
+        removeBody()
+        return nil, "could not create request body: " .. tostring(bodyOpenErr)
+      end
+      local bodyOk, bodyErr = pcall(function()
+        assert(bodyFile:write(body))
+        assert(bodyFile:close())
+      end)
+      if not bodyOk then
+        pcall(function() bodyFile:close() end)
+        removeBody()
+        return nil, "could not write body: " .. tostring(bodyErr)
+      end
     end
 
     -- --data-binary @<file> keeps the payload out of argv (command-line length
@@ -713,28 +783,19 @@ function HostShell.httpPost(url, body, contentType, userAgent, maxTime)
     -- newlines.  The body is staged above because io.popen cannot be opened
     -- for both writing and reading.  No -f, matching httpGet: the response
     -- body is discarded anyway, and curl's stderr carries the diagnosis.
-    local head, popts = curlCmd(
-      ("-sSL --proto =http,https --proto-redir =http,https "
-        .. "--connect-timeout 10 --max-time %d ")
-        :format(tonumber(maxTime) or 40))
-    local cmd = head
-      .. "-X POST "
-      .. "-H " .. HostShell.quote("User-Agent: " .. userAgent) .. " "
+    local argv = curlBase(false, 10, tonumber(maxTime) or 40)
+    push(argv, "-X", "POST", "-H", "User-Agent: " .. userAgent)
     if contentType then
-      cmd = cmd .. "-H " .. HostShell.quote("Content-Type: " .. contentType) .. " "
+      push(argv, "-H", "Content-Type: " .. contentType)
     end
-    cmd = cmd .. "-H " .. HostShell.quote("Content-Length: " .. tostring(#body)) .. " "
-      .. "--data-binary " .. HostShell.quote("@" .. bodyPath) .. " "
-      .. "-w " .. HostShell.quote(HTTP_MARK_FMT) .. " "
-      .. HostShell.quote(url) .. " 2>&1"
-    local pipe = HostShell.popen(cmd, "r", popts)
-    if not pipe then
-      pcall(os.remove, bodyPath)
+    push(argv, "-H", "Content-Length: " .. tostring(#body),
+      "--data-binary", { abs = bodyPath, prefix = "@" },
+      "-w", HTTP_MARK_FMT, url)
+    local started, readOk, out = runCurl(argv)
+    removeBody()
+    if not started then
       return nil, "could not run curl"
     end
-    local readOk, out = pcall(function() return pipe:read("*a") end)
-    HostShell.pclose(pipe)
-    pcall(os.remove, bodyPath)
     if not readOk then
       return nil, fetchError(url, nil, tostring(out))
     end
@@ -836,6 +897,8 @@ local function requestStagingPath(kind)
 end
 
 local function writeStagingFile(kind, text)
+  local staged, removeStaged = winStage("req-" .. kind, text)
+  if staged then return staged, removeStaged end
   local path = requestStagingPath(kind)
   local file, openErr = io.open(path, "wb")
   if not file then
@@ -850,7 +913,7 @@ local function writeStagingFile(kind, text)
     pcall(os.remove, path)
     return nil, "could not write the request " .. kind .. ": " .. tostring(writeErr)
   end
-  return path
+  return path, function() pcall(os.remove, path) end
 end
 
 function HostShell.httpRequest(url, opts)
@@ -880,10 +943,10 @@ function HostShell.httpRequest(url, opts)
     return nil, "no request transport on this platform"
   end
 
-  local bodyPath, stageErr
+  local bodyPath, removeBody, stageErr
   if body then
-    bodyPath, stageErr = writeStagingFile("body", body)
-    if not bodyPath then return nil, stageErr end
+    bodyPath, removeBody = writeStagingFile("body", body)
+    if not bodyPath then return nil, removeBody end
   end
 
   local lines = { "User-Agent: " .. userAgent }
@@ -891,39 +954,31 @@ function HostShell.httpRequest(url, opts)
   if body then
     lines[#lines + 1] = "Content-Length: " .. tostring(#body)
   end
-  local headerPath
-  headerPath, stageErr = writeStagingFile("head",
+  local headerPath, removeHeader = writeStagingFile("head",
     table.concat(lines, "\n") .. "\n")
   if not headerPath then
-    if bodyPath then pcall(os.remove, bodyPath) end
+    stageErr = removeHeader
+    if removeBody then removeBody() end
     return nil, stageErr
   end
 
   local function cleanup()
-    if bodyPath then pcall(os.remove, bodyPath) end
-    pcall(os.remove, headerPath)
+    if removeBody then removeBody() end
+    removeHeader()
   end
 
-  local head, popts = curlCmd(
-    ("-sSL --proto =http,https --proto-redir =http,https "
-      .. "--connect-timeout 10 --max-time %d "):format(maxTime))
-  local cmd = head
-    .. "-X " .. HostShell.quote(method) .. " "
-    .. "-H " .. HostShell.quote("@" .. headerPath) .. " "
+  local argv = curlBase(false, 10, maxTime)
+  push(argv, "-X", method, "-H", { abs = headerPath, prefix = "@" })
   if body then
-    cmd = cmd .. "--data-binary " .. HostShell.quote("@" .. bodyPath) .. " "
+    push(argv, "--data-binary", { abs = bodyPath, prefix = "@" })
   end
-  cmd = cmd .. "-w " .. HostShell.quote(HTTP_MARK_FMT) .. " "
-    .. HostShell.quote(url) .. " 2>&1"
+  push(argv, "-w", HTTP_MARK_FMT, url)
 
-  local pipe = HostShell.popen(cmd, "r", popts)
-  if not pipe then
-    cleanup()
+  local started, readOk, out = runCurl(argv)
+  cleanup()
+  if not started then
     return nil, "could not run curl"
   end
-  local readOk, out = pcall(function() return pipe:read("*a") end)
-  HostShell.pclose(pipe)
-  cleanup()
   if not readOk then
     return nil, fetchError(url, nil, tostring(out))
   end

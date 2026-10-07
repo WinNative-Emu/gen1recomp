@@ -30,6 +30,7 @@ package.loaded["src.core.SaveData"] = {
   activeSlot = function() return "slot1" end,
   buildMeta = function(_, m) return m or {} end,
   createSlot = function() return "slot1" end,
+  claimImportPlaythroughId = function() return nil end,
   writeSlot = function(_, _, save) written[#written + 1] = save return true end,
   setActiveSlot = function() return true end,
 }

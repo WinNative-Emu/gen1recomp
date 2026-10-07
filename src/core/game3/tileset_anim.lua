@@ -383,6 +383,11 @@ function TilesetAnim.bindPair(pair, atlas, prepared)
   return true
 end
 
+function TilesetAnim.unbindPair(pair)
+  TilesetAnim._pairs[pair] = nil
+  TilesetAnim._visible[pair] = nil
+end
+
 function TilesetAnim.setVisiblePairs(visible)
   local set = TilesetAnim._visible
   for pair in pairs(set) do

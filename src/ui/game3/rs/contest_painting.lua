@@ -1,5 +1,6 @@
 local Base = require("src.ui.game3.rse.contest_painting")
 local IR = require("src.core.game3.scripting.text_ir")
+local RomText = require("src.core.game3.rom_text")
 local Kit = require("src.ui.game3.rse.scene_kit")
 local Font = require("src.ui.game3.frlg_font")
 local Painting = {ID = Base.ID, SUB = Base.SUB}
@@ -11,9 +12,9 @@ local function manifest()
   return man
 end
 
-local function render(bytes)
+local function render(ir)
   local out = {}
-  for _, seg in ipairs(IR.decode(bytes, {dialect = "rs"})) do
+  for _, seg in ipairs(ir) do
     if seg.t == "ext" then
       out[#out + 1] = string.char(252, seg.cmd)
       for _, arg in ipairs(seg.args or {}) do out[#out + 1] = string.char(arg) end
@@ -21,7 +22,10 @@ local function render(bytes)
   end
   return table.concat(out)
 end
-local function text(man, key) return render(assert(man.textBytes[key], "native painting caption missing: " .. key)) end
+local function text(man, key)
+  local bytes = assert(man.textBytes[key], "native painting caption missing: " .. key)
+  return render(RomText.irOr(key, IR.decode(bytes, {dialect = "rs"})))
+end
 local function name(value, limit)
   if type(value) == "table" then
     local bytes = {}
@@ -30,7 +34,7 @@ local function name(value, limit)
       bytes[#bytes + 1] = value[i]
     end
     bytes[#bytes + 1] = 255
-    return render(bytes)
+    return render(IR.decode(bytes, {dialect = "rs"}))
   end
   if type(value) ~= "string" then return "" end
   if not limit then return value end
@@ -48,9 +52,11 @@ function Painting.caption(saveIdx, winner, artist, man)
   local nickname = name(winner.monName or winner.nickname, man.captionLayout.nicknameBytes)
   local category = tonumber(winner.contestCategory) or 0
   if saveIdx < man.captionLayout.museumStart then
+    -- pokeruby/src/contest_painting.c:234
+    local possessive, first, second = text(man, man.hallPossessive), name(winner.trainerName), nickname
+    if possessive:find("^[ ,]") then first, second = nickname, name(winner.trainerName) end
     return text(man, assert(man.rankNames[category], "native painting category")) .. text(man, man.hallCaption)
-      .. name(winner.trainerName) .. string.char(unpack(man.captionLayout.hallLatinControl))
-      .. text(man, man.hallPossessive) .. nickname
+      .. first .. string.char(unpack(man.captionLayout.hallLatinControl)) .. possessive .. second
   end
   local pair = assert(man.captionParts[category], "native museum caption pair")
   return text(man, pair.prefix) .. nickname .. text(man, pair.suffix)

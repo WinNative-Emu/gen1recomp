@@ -109,7 +109,7 @@ function NamingScreen:wantsFillScale() return true end
 function NamingScreen:drawsWidescreen() return true end
 
 -- opts: type ("player"/"rival"/"mom"/"box"/"nickname"), prompt, maxLength,
--- initial, monName (nickname header), icon/sprite image path, gender,
+-- initial, mon (nickname header), monName, icon/sprite image path, gender,
 -- onDone(name), onCancel().
 function NamingScreen.new(game, opts)
   opts = opts or {}
@@ -139,12 +139,17 @@ function NamingScreen.new(game, opts)
   -- one it would draw in raw DMG shades next to a colored world.
   self.iconColors = opts.iconColors
   local data = game and game.data or {}
+  self.clock = 0
+  self.mon = opts.mon
+  if self.mon then
+    self:loadMonHeader(data, self.mon)
+  end
   self.gfx = opts.menuGfx or data.gen2MenuGfx
   if self.gfx and self.gfx.naming then self.gfx = self.gfx.naming end
   -- engine/menus/naming_screen.asm:47
-  -- engine/gfx/cgb_layouts.asm:488
+  -- engine/gfx/cgb_layouts.asm:495
   local diploma = data.gen2Diploma
-  self.palette = diploma and diploma.palettes and diploma.palettes[1]
+  self.palette = diploma and diploma.bgPalette
   self.tiles = {}
   if self.gfx then
     for _, key in ipairs({ "border", "middleLine", "underLine", "cursor" }) do
@@ -155,6 +160,53 @@ function NamingScreen.new(game, opts)
     end
   end
   return self
+end
+
+-- engine/menus/naming_screen.asm:88
+function NamingScreen:loadMonHeader(data, mon)
+  self.monName = self.monName or mon.name or mon.species
+  -- engine/gfx/mon_icons.asm:137
+  local icons = data.gen2Icons
+  local PartyMenu = require("src.ui.gen2.PartyMenu")
+  local iconId = PartyMenu.iconIdFor({ icons = icons }, mon)
+  local entry = iconId and icons and icons.icons and icons.icons[iconId]
+  local path, trueColor = require("src.pokemon.Sprites").iconPath(
+    data, mon, entry and entry.image,
+    { name = iconId, trueColor = entry and entry.trueColor })
+  self.iconTrueColor = trueColor
+  self.iconImage = nil
+  if path then
+    local ok, img = pcall(Assets.image, path)
+    if ok then self.iconImage = img end
+  end
+  self.monIcon = true
+  -- engine/gfx/cgb_layouts.asm:491
+  local pals = data.gen2Palettes and data.gen2Palettes.partyMenu
+  self.iconColors = pals and pals[1] or nil
+  self.monGender = mon.gender
+end
+
+-- engine/menus/naming_screen.asm:107-114
+function NamingScreen:genderGlyph()
+  if self.monGender == "male" then return "\xe2\x99\x82" end
+  if self.monGender == "female" then return "\xe2\x99\x80" end
+  return nil
+end
+
+-- data/sprite_anims/framesets.asm:66
+-- engine/sprite_anims/core.asm:400
+-- engine/menus/naming_screen.asm:308-310
+NamingScreen.ICON_FRAME_STEPS = 18
+
+function NamingScreen:iconFrame()
+  if not self.monIcon then return 0 end
+  return math.floor(self.clock / NamingScreen.ICON_FRAME_STEPS) % 2
+end
+
+-- engine/gfx/mon_icons.asm:143
+function NamingScreen:iconOrigin()
+  if self.monIcon then return 16, 12 end
+  return 16, 16
 end
 
 -- ui.naming.grid identity: unhooked, the board is the one the cart ships.
@@ -282,6 +334,8 @@ function NamingScreen:moveVertical(delta)
 end
 
 function NamingScreen:update(_dt)
+  -- engine/menus/naming_screen.asm:308
+  self.clock = (self.clock or 0) + 1
   local input = self.game and self.game.input
   if not input then return end
 
@@ -495,28 +549,34 @@ function NamingScreen:drawPanel()
   -- letters and the case/DEL/END strip.
   self:clearPanel(1, 16, 18, 1)
 
-  -- Header: the standing-down frame of a 16x96 OW sheet (or the first 16x16 of
-  -- a mon icon) on the left, and the prompt at (5,2).  Quad it: blitting the
-  -- whole sheet paints every walk frame down the screen.
   if self.iconImage then
     G.setColor(1, 1, 1, 1)
     local w, h = self.iconImage:getDimensions()
-    -- Cut once per icon image rather than every frame.
+    local frameY = self:iconFrame() * 16
+    if frameY + 16 > h then frameY = 0 end
     local quad = self.iconQuad
     if not quad or self.iconQuadImage ~= self.iconImage then
-      quad = love.graphics.newQuad(0, 0, math.min(16, w), math.min(16, h),
+      quad = love.graphics.newQuad(0, frameY, math.min(16, w), math.min(16, h),
         w, h)
       self.iconQuad, self.iconQuadImage = quad, self.iconImage
+    else
+      quad:setViewport(0, frameY, math.min(16, w), math.min(16, h), w, h)
     end
-    if self.iconColors and GbcPalette.available() then
-      -- GbcPalette.with without the closure: set, draw, restore.
+    local ix, iy = self:iconOrigin()
+    if self.iconColors and GbcPalette.available()
+        and not (self.iconTrueColor and GbcPalette.mode == "gbc") then
       local previous = G.getShader and G.getShader() or nil
       GbcPalette.use(self.iconColors)
-      G.draw(self.iconImage, quad, 16, 16)
+      G.draw(self.iconImage, quad, ix, iy)
       G.setShader(previous)
     else
-      G.draw(self.iconImage, quad, 16, 16)
+      G.draw(self.iconImage, quad, ix, iy)
     end
+  end
+  local glyph = self:genderGlyph()
+  if glyph then
+    -- engine/menus/naming_screen.asm:113
+    Chrome.printThrough(glyph, 1, 2, self.palette)
   end
   local pal = self.palette
   if self.monName then

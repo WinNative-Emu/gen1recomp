@@ -1375,6 +1375,7 @@ function Game2:logicSpeed()
 end
 
 function Game2:update(dt)
+  require("src.core.DeferredWrite").tick()
   -- _UpdateSound is a VBlank job, so it runs at 60Hz off real time whatever the
   -- logic multiplier is (audio/engine.asm:84, home/vblank.asm:141-143).
   local step = FixedStep.STEP
@@ -2133,7 +2134,7 @@ end
 -- path binds them in (src/core/Game.lua keypressed), driving the same shared
 -- modules so a player's muscle memory carries between the two games:
 --
---   F1/F2  write / reload the save        1  GAME SPEED
+--   F1/F2  write / reload the save        1  GAME SPEED (0 steps down)
 --   -  =   zoom one step out / in         2  COLOR
 --   4      cycle ZOOM                     3  TILT (mnemonic: 3D)
 --
@@ -2161,6 +2162,12 @@ function Game2:hotkey(key)
     if self:speedLocked() then return true end
     local GameSpeed = require("src.core.GameSpeed")
     options.speed = GameSpeed.cycle(options.speed, 1)
+    persist()
+    return true
+  elseif hk == "0" then
+    if self:speedLocked() then return true end
+    local GameSpeed = require("src.core.GameSpeed")
+    options.speed = GameSpeed.cycle(options.speed, -1)
     persist()
     return true
   elseif hk == "2" then
@@ -2198,7 +2205,7 @@ function Game2:storeZoom()
   self.options = options
   options.zoom = require("src.render.Zoom").offset
   if self.save then self.save.options = options end
-  self:persistOptions()
+  require("src.core.DeferredWrite").schedule("options", function() self:persistOptions() end)
 end
 
 function Game2:zoomStep(delta)
@@ -2411,7 +2418,7 @@ end
 function Game2:focus(f)
   Input:reset()
   TouchControls:reset()
-  if f then Input:reconcile() end
+  if f then Input:reconcile() else require("src.core.DeferredWrite").flush("options") end
   self:cancelPointers()
 end
 
@@ -2419,6 +2426,7 @@ function Game2:visible(v)
   if v then
     self:onResume()
   else
+    require("src.core.DeferredWrite").flush("options")
     Input:reset()
     TouchControls:reset()
     self:cancelPointers()
@@ -2587,6 +2595,18 @@ function Game2:gamepadaxis(joystick, axis, value)
       end
       return
     end
+    local stickEvents = Input.stickAxisEvents and Input:stickAxisEvents(axis, value)
+    if stickEvents then
+      for i = 1, #stickEvents do
+        local ev = stickEvents[i]
+        if ev.phase == "pressed" then
+          padPressedBody(self, joystick, ev.button)
+        elseif ev.phase == "released" then
+          padReleasedBody(self, joystick, ev.button)
+        end
+      end
+      return
+    end
     Input:gamepadaxis(joystick, axis, value)
   end
   if not ModRuntime.wantsHook("input.gamepad") then return vanilla() end
@@ -2668,6 +2688,7 @@ end
 -- Same rule as Gen1: only release known GPU owners -- never fan out
 -- arbitrary field:release() (shared modules use :release as a handle API).
 function Game2:reset()
+  require("src.core.DeferredWrite").flush("options")
   if self.stack and self.stack.clear then
     pcall(function() self.stack:clear() end)
   end

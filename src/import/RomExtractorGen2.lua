@@ -2598,16 +2598,11 @@ end
 --                         Game Boy Printer's second sheet and is not read
 --                         here, the same way PrintDiploma stays stubbed.
 --   DiplomaPalettes       gfx/diploma/diploma.pal, eight four-colour sets.
---                         _CGB_Diploma (engine/gfx/cgb_layouts.asm) loads all
---                         eight and then WipeAttrmap zeroes the attrmap, so
---                         set 0 is the one the whole screen actually draws
---                         through; the rest are written out because the block
---                         is one table.
---
--- Tolerated rather than required, like credits: a manifest built before these
--- three symbols were listed still imports, it just leaves src/ui/gen2/
--- Diploma.lua on its placeholder frame.
+--   bgPalette             gfx/sgb/predef.pal:28 PREDEFPAL_DIPLOMA
+--                         engine/gfx/cgb_layouts.asm:495
 local DIPLOMA_TILES = 112
+-- constants/scgb_constants.asm:71
+local PREDEFPAL_DIPLOMA = 27
 local DIPLOMA_SHEET_TILES = 16 -- tiles per row of the sheet
 local DIPLOMA_SCREEN_W, DIPLOMA_SCREEN_H = 20, 18
 local DIPLOMA_PALETTE_SETS = 8
@@ -2652,6 +2647,7 @@ function RomExtractorGen2:extractDiploma()
     end
     data.palettes = palettes
   end
+  data.bgPalette = self:predefPal(PREDEFPAL_DIPLOMA)
   self:tick("Diploma", 3, 3)
 
   self:write("diploma", data)

@@ -5,6 +5,7 @@ local Chrome = require("src.ui.game3.chrome")
 local Cursor = require("src.ui.game3.rs.menu_cursor")
 local Window = require("src.ui.game3.window")
 local TextIR = require("src.core.game3.scripting.text_ir")
+local RomText = require("src.core.game3.rom_text")
 local Items = require("src.core.game3.items_data")
 local UI = {CAMERA_OFFSET = {x = -3, y = -3}}
 UI.WIN = {money = Window.template(1, 1, 12, 2), qty = Window.template(1, 11, 12, 2),
@@ -15,10 +16,14 @@ local function manifest()
   assert(man.assetLayout == "rs" and man.shopVersion == 2, "native RS shop schema required")
   return man
 end
+local resolved = {}
 function UI.ir(key)
+  if resolved[key] then return resolved[key] end
   local man = manifest()
   local native = assert(man.textAliases[key] or (man.textBytes[key] and key), "native RS shop text policy missing: " .. key)
-  return TextIR.decode(assert(man.textBytes[native], "native RS shop text bytes missing: " .. native), {dialect = "rs"})
+  resolved[key] = RomText.irOr(native,
+    TextIR.decode(assert(man.textBytes[native], "native RS shop text bytes missing: " .. native), {dialect = "rs"}))
+  return resolved[key]
 end
 function UI.plain(key, ctx) return TextIR.toPlain(UI.ir(key), ctx or {}) end
 function UI.box(key, ctx) return UI.plain(key, ctx) end
@@ -176,6 +181,7 @@ function UI.drawSell(sale)
 end
 function UI.show(shop, opts)
   opts = opts or {}; opts.nativePolicy = UI
+  resolved = {}
   manifest()
   shop._rsShopFrame = 0
   return Base.show(shop, opts)

@@ -37,19 +37,58 @@ T.eq(Timing.WARP_FADE_IN, 0, "there is no fade in: LoadGBPal restores in one wri
 
 -- ---------------------------------------------------------------- HP bar
 
--- UpdateHPBar walks one HP point per iteration.  On the player's HUD each
--- point costs a frame (PrintHPNumber's DelayFrame, gated on wHPBarType) and
--- each pixel of bar movement costs two more; on the enemy HUD only the
--- pixels cost anything.
+-- engine/gfx/hp_bar.asm:81-135
 T.eq(Timing.hpBarPixels(150, 150), 48, "a full bar is 48 px")
 T.eq(Timing.hpBarPixels(75, 150), 24, "half HP is half the bar")
 T.eq(Timing.hpBarPixels(0, 150), 0, "an empty bar is 0 px")
 T.eq(Timing.hpBarPixels(1, 150), 1, "GetHPBarLength clamps a sliver to 1 px")
+-- engine/gfx/hp_bar.asm:19-34
+T.eq(Timing.hpBarPixels(199, 399), 24, "max HP >= 256 divides both sides by 4 first")
+T.eq(Timing.hpBarPixels(349, 399), 42, "so 349/399 is 42 px, not 41")
+-- engine/gfx/hp_bar.asm:42-45
+T.eq(Timing.hpBarLength(0, 150), 1, "GetHPBarLength also clamps 0 HP to 1 px")
 
-T.eq(Timing.hpDrainFrames(150, 0, 150, true), 150 + 96 + 6,
-  "a 150 HP player mon drains in D + 2P + 6 = 252 frames")
-T.eq(Timing.hpDrainFrames(150, 0, 150, false), 96 + 5,
-  "the same drain on the enemy HUD costs only 2P + 5 = 101 frames")
+T.eq(Timing.hpDrainFrames(150, 0, 150, true), 150 + 94 + 6,
+  "a 150 HP player mon drains in D + 2P + 6 = 250 frames, 1 -> 0 moves no pixel")
+T.eq(Timing.hpDrainFrames(150, 0, 150, false), 147,
+  "the same drain on the enemy HUD lags a frame per pixel: 147")
+T.eq(Timing.hpDrainFrames(40, 0, 40, false), 2 * 47 + 5,
+  "a sub-48 HP enemy crosses a pixel every step, so no lag")
+
+-- engine/gfx/hp_bar.asm:81-135
+local measured = {
+  { 100, 1, 100, false, 103 }, { 100, 0, 100, false, 103 },
+  { 150, 1, 150, false, 147 }, { 150, 0, 150, false, 147 },
+  { 193, 1, 193, false, 148 }, { 193, 0, 193, false, 148 },
+  { 200, 1, 200, false, 152 }, { 200, 0, 200, false, 152 },
+  { 255, 1, 255, false, 179 }, { 255, 0, 255, false, 179 },
+  { 300, 1, 300, false, 195 }, { 300, 0, 300, false, 195 },
+  { 400, 1, 400, false, 243 }, { 400, 0, 400, false, 243 },
+  { 150, 90, 200, false, 50 }, { 300, 180, 400, false, 78 },
+  { 300, 263, 300, false, 29 }, { 90, 1, 150, false, 88 },
+  { 150, 0, 150, true, 250 }, { 150, 50, 150, true, 170 },
+  { 200, 120, 200, true, 126 }, { 255, 1, 255, true, 354 },
+  { 256, 0, 256, true, 356 }, { 399, 0, 399, true, 499 },
+  { 399, 199, 399, true, 254 }, { 703, 303, 703, true, 462 },
+  { 1, 415, 415, true, 514 }, { 1, 150, 150, true, 249 },
+  { 37, 200, 200, true, 249 }, { 100, 255, 255, true, 221 },
+}
+for _, m in ipairs(measured) do
+  T.eq(Timing.hpDrainFrames(m[1], m[2], m[3], m[4]), m[5],
+    string.format("%s %d -> %d of %d matches the cart's %d frames",
+      m[4] and "player" or "enemy", m[1], m[2], m[3], m[5]))
+end
+local knifeEdge = {
+  { 240, 1, 240, 172 }, { 240, 0, 240, 172 }, { 256, 1, 256, 186 },
+  { 256, 0, 256, 186 }, { 500, 1, 500, 283 }, { 500, 0, 500, 283 },
+  { 703, 1, 703, 362 }, { 703, 0, 703, 362 },
+}
+for _, m in ipairs(knifeEdge) do
+  local got = Timing.hpDrainFrames(m[1], m[2], m[3], false)
+  T.check(math.abs(got - m[4]) <= 10,
+    string.format("enemy %d -> %d of %d is within 10 of the cart's %d (got %d)",
+      m[1], m[2], m[3], m[4], got))
+end
 
 -- The engine's per-frame stepper has to agree with that closed form, or the
 -- bar is animating at a rate nothing else measures.

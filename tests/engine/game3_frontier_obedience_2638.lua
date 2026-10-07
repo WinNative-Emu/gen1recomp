@@ -24,7 +24,20 @@ end
 local function run(o)
   GameVersion.set(o.version or "emerald")
   local user, foe = mon(o.species or 1, o.own and 1 or 2, o.fateful), mon(1, 3)
-  local session = { version = o.version or "emerald", name = "PLAYER", trainerId = 1, party = { user } }
+  user.otSecretId, user.level = o.monSid or 0, o.level or 30
+  user.otName = o.monName or user.otName
+  local session = { version = o.version or "emerald", name = "PLAYER", trainerId = 1,
+    secretId = o.playerSid or 0, party = { user } }
+  if o.legacy then user.otSecretId, session.secretId = nil, nil end
+  if o.sync then
+    user.personality = 12345
+    local Sync = require("src.core.TrainerIdSync")
+    local owners = {}
+    Sync.addOwner(owners, { id = 1, sid = 7, name = "MAY" }, 3)
+    T.check(Sync.rewriteSave(session, 3, { id = 1, sid = 42, name = "PLAYER" }, owners),
+      o.label .. " syncs original OT identity")
+  end
+  Space.store = Flags.newStore()
   Battle.start({ headless = false, autoFight = false, session = session, playerParty = session.party,
     foe = { species = 1, level = 30, mon = foe }, wild = o.wild == true, frontier = o.frontier,
     rng = function(lo, hi) if lo == 1 and hi == 100 then return 1 end return hi end })
@@ -62,4 +75,12 @@ run({ own = true, obey = true, label = "Emerald own OT" })
 run({ link = true, obey = true, label = "Emerald link" })
 run({ badge = 2, obey = true, label = "Emerald badge two level 30" })
 run({ badge = 8, obey = true, label = "Emerald badge eight" })
+run({ own = true, level = 100, playerSid = 42, monSid = 42, obey = true,
+  label = "Level 100 full own identity with no badges" })
+run({ own = true, level = 100, playerSid = 42, monSid = 7, obey = false,
+  label = "Level 100 same TID and name but foreign SID" })
+run({ own = true, level = 100, playerSid = 42, monSid = 7, monName = "MAY", sync = true, obey = true,
+  label = "Level 100 synced name TID SID with no badges" })
+run({ own = true, level = 100, legacy = true, wild = true, obey = true,
+  label = "Level 100 own mon on a save with no secret id in a wild battle" })
 T.finish("game3_frontier_obedience_2638")

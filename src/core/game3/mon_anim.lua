@@ -3052,8 +3052,8 @@ function F.Anim_ShakeGlowBlue_Fast(sprite) shakeGlow(sprite, 10, 2, 2) end
 function F.Anim_ShakeGlowBlue(sprite) shakeGlow(sprite, 20, 1, 2) end
 function F.Anim_ShakeGlowBlue_Slow(sprite) shakeGlow(sprite, 80, 1, 2) end
 
-function MonAnim.animFunction(id)
-  local name = Data.functionName(id)
+function MonAnim.animFunction(id, animationData)
+  local name = (animationData or Data).functionName(id)
   local fn = name and F[name]
   if not fn then error("mon_anim: no port for anim function " .. tostring(id) .. " (" .. tostring(name) .. ")") end
   return fn, name
@@ -3150,6 +3150,7 @@ end
 
 function MonAnim.newSprite(species, opts)
   opts = opts or {}
+  local animationData = opts.animationData or Data
   local sprite = {
     species = tonumber(species) or 0,
     data = { [0] = 0, 0, 0, 0, 0, 0, 0, 0 },
@@ -3163,7 +3164,8 @@ function MonAnim.newSprite(species, opts)
     centerToCornerVecX = -32,
     paletteNum = opts.paletteNum or 0,
     blendCoeff = 0, blendColor = 0,
-    anims = Data.anims(species) or { [0] = { { frame = 0, duration = 0 }, { op = "end" } } },
+    anims = animationData.anims(species) or { [0] = { { frame = 0, duration = 0 }, { op = "end" } } },
+    animationData = opts.animationData,
     animNum = 0, animCmdIndex = 0, animDelayCounter = 0, animLoopCounter = 0,
     animBeginning = true, animEnded = false, animPaused = false,
     frame = 0,
@@ -3217,7 +3219,7 @@ local function Task_HandleMonAnimation(sprite, task)
     sprite.data[1] = 1
     sprite.data[0] = 0
     for i = 2, 7 do sprite.data[i] = 0 end
-    sprite.callback = MonAnim.animFunction(task.animId)
+    sprite.callback = MonAnim.animFunction(task.animId, sprite.animationData)
     sIsSummaryAnim = false
     task.state = task.state + 1
   end
@@ -3242,7 +3244,7 @@ function MonAnim.startSummary(sprite, frontAnimId)
   sIsSummaryAnim = true
   sprite.summary = true
   sprite.animId = frontAnimId
-  sprite.callback = MonAnim.animFunction(frontAnimId)
+  sprite.callback = MonAnim.animFunction(frontAnimId, sprite.animationData)
 end
 
 -- pokeemerald/src/pokemon_animation.c:956
@@ -3253,18 +3255,18 @@ function MonAnim.launchBack(sprite, backAnimSet, nature)
   sprite.animId = t.animId
 end
 
-local function speciesConst(name)
+local function speciesConst(name, version)
   local GameVersion = require("src.core.GameVersion")
-  return require("src.core.game3.constants").of(GameVersion.get()):id("species", name)
+  return require("src.core.game3.constants").of(version or GameVersion.get()):id("species", name)
 end
 
 -- pokeemerald/src/pokemon.c:6988
-function MonAnim.hasTwoFramesAnimation(species)
+function MonAnim.hasTwoFramesAnimation(species, version)
   species = tonumber(species)
-  return species ~= speciesConst("SPECIES_CASTFORM")
-    and species ~= speciesConst("SPECIES_DEOXYS")
-    and species ~= speciesConst("SPECIES_SPINDA")
-    and species ~= speciesConst("SPECIES_UNOWN")
+  return species ~= speciesConst("SPECIES_CASTFORM", version)
+    and species ~= speciesConst("SPECIES_DEOXYS", version)
+    and species ~= speciesConst("SPECIES_SPINDA", version)
+    and species ~= speciesConst("SPECIES_UNOWN", version)
 end
 
 local function playCry(opts, species, pan)
@@ -3339,9 +3341,10 @@ end
 
 -- pokeemerald/src/pokemon.c:6858
 function MonAnim.summary(sprite, species, oneFrame)
-  if not oneFrame and MonAnim.hasTwoFramesAnimation(species) then MonAnim.startSpriteAnim(sprite, 1) end
-  local delay = Data.delay(species)
-  local animId = Data.frontAnimId(species)
+  local animationData = sprite.animationData or Data
+  if not oneFrame and MonAnim.hasTwoFramesAnimation(species, animationData.version) then MonAnim.startSpriteAnim(sprite, 1) end
+  local delay = animationData.delay(species)
+  local animId = animationData.frontAnimId(species)
   sprite.summary = true
   if delay ~= 0 then
     local t = createTask(sprite, Task_PokemonSummaryAnimateAfterDelay, 0)
@@ -3472,9 +3475,10 @@ function MonAnim.draw(sprite, image, cx, cy, opts)
   opts = opts or {}
   local t = MonAnim.transform(sprite)
   if t.invisible then return end
-  local x, y = cx + t.x2, cy + t.y2
+  local scale = opts.scale or 1
+  local x, y = cx + t.x2 * scale, cy + t.y2 * scale
   local r, g, b, a = love.graphics.getColor()
-  love.graphics.draw(image, x, y, t.rotation, t.sx, t.sy, 32, 32)
+  love.graphics.draw(image, x, y, t.rotation, t.sx * scale, t.sy * scale, 32, 32)
   if (sprite.blendCoeff or 0) > 0 then
     if silhouette == nil then
       local okS, sh = pcall(love.graphics.newShader, [[
@@ -3488,7 +3492,7 @@ vec4 effect(vec4 color, Image tex, vec2 tc, vec2 sc) {
       local br, bg, bb, k = MonAnim.blendRgb(sprite)
       love.graphics.setShader(silhouette)
       love.graphics.setColor(br, bg, bb, math.min(1, k) * a)
-      love.graphics.draw(image, x, y, t.rotation, t.sx, t.sy, 32, 32)
+      love.graphics.draw(image, x, y, t.rotation, t.sx * scale, t.sy * scale, 32, 32)
       love.graphics.setShader()
     end
   end

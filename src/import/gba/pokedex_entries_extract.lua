@@ -23,6 +23,11 @@ function PokedexEntriesExtract.ready(cache, cacheRoot)
   for _, f in ipairs(PokedexEntriesExtract.files()) do
     if not cache:exists(root .. f) then return false end
   end
+  local okL, L = pcall(function() return require("src.import.gba.layouts.registry").active() end)
+  if okL and type(L) == "table" and L.id == "rs" then
+    local body = cache.read and cache:read(root .. "entries.lua")
+    return body ~= nil and body:find("descriptionLabel", 1, true) ~= nil
+  end
   return true
 end
 

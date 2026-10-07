@@ -1,6 +1,6 @@
 local K = require("src.import.gba.rse.boot_gfx")
 local A = require("src.import.gba.rs.assets")
-local M = {SUB = "rse/pokedex"}
+local M = {SUB = "rse/pokedex", packVersion = 1}
 local N = "pokedex.o:"
 local maps = {{"list", "gUnknown_08E96738"}, {"list_underlay", "gUnknown_08E9C6DC"},
   {"start_menu_main", "gPokedexStartMenuMain_Tilemap"}, {"start_menu_search", "gPokedexStartMenuSearchResults_Tilemap"},
@@ -18,19 +18,26 @@ local function bytes(c, name, stride)
   for i = 0, c.S.count(name, stride or 1) - 1 do out[i + 1] = stride == 2 and c:u16(off + i * 2) or c:u8(off + i) end
   return out
 end
+-- pokeruby/src/pokedex.c:1116
+local function ownLabel(c, off)
+  local label = A.label(c, off)
+  return label and label:match("^DexText_") and label or nil
+end
 local function options(c, name)
   local out, off = {}, c:off(N .. name)
   for i = 0, c.S.count(N .. name, 8) - 1 do
     local a, b = c:ptr(off + i * 8), c:ptr(off + i * 8 + 4)
     if not b then break end
-    out[#out + 1] = {description = a and A.text(c, a) or "", title = A.text(c, b)}
+    out[#out + 1] = {description = a and A.text(c, a) or "", title = A.text(c, b),
+      descriptionKey = ownLabel(c, a), titleKey = ownLabel(c, b)}
   end
   return out
 end
 function M.run(rom, cache, opts)
   local c = A.context(rom, cache, opts, M.SUB)
-  local man = {screen = "pokedex", coverage = "native_list_detail_search_backgrounds_and_search_tables", gfx = {}, maps = {}, layers = {}, palettes = {}}
-  local pals = {hoenn = c:pal("gPokedexMenu_Pal", 96), national = c:pal(N .. "sNationalPokedexPalette", 96),
+  local man = {screen = "pokedex", packVersion = M.packVersion, coverage = "native_list_detail_search_backgrounds_and_search_tables", gfx = {}, maps = {}, layers = {}, palettes = {}}
+  -- pokeruby/src/pokedex.c:1967
+  local pals = {hoenn = c:palAt(c:off("gPokedexMenu_Pal"), 96), national = c:pal(N .. "sNationalPokedexPalette", 96),
     searchResults = c:pal(N .. "sPokedexSearchPalette", 96), search = c:pal("gPokedexMenuSearch_Pal", 64)}
   for k, p in pairs(pals) do man.palettes[k] = K.palList(p, 0, k == "search" and 64 or 96) end
   local gs = {}
@@ -53,12 +60,14 @@ function M.run(rom, cache, opts)
   local top = c:off(N .. "sSearchMenuTopBarItems")
   for i = 0, c.S.count(N .. "sSearchMenuTopBarItems", 8) - 1 do
     local o = top + i * 8
-    search.topBar[i + 1] = {description = A.text(c, assert(c:ptr(o))), x = c:u8(o + 4), y = c:u8(o + 5), width = c:u8(o + 6)}
+    search.topBar[i + 1] = {description = A.text(c, assert(c:ptr(o))), descriptionKey = A.label(c, c:ptr(o)),
+      x = c:u8(o + 4), y = c:u8(o + 5), width = c:u8(o + 6)}
   end
   local io = c:off(N .. "sSearchMenuItems")
   for i = 0, c.S.count(N .. "sSearchMenuItems", 12) - 1 do
     local o = io + i * 12
-    search.items[i + 1] = {description = A.text(c, assert(c:ptr(o))), titleX = c:u8(o + 4), titleY = c:u8(o + 5), titleWidth = c:u8(o + 6),
+    search.items[i + 1] = {description = A.text(c, assert(c:ptr(o))), descriptionKey = A.label(c, c:ptr(o)),
+      titleX = c:u8(o + 4), titleY = c:u8(o + 5), titleWidth = c:u8(o + 6),
       selX = c:u8(o + 7), selY = c:u8(o + 8), selWidth = c:u8(o + 9)}
   end
   for _, k in ipairs({"SearchNatDex", "ShiftNatDex", "SearchHoennDex", "ShiftHoennDex"}) do
@@ -73,5 +82,9 @@ function M.run(rom, cache, opts)
   c.files[#c.files + 1] = "orders.lua"
   return A.finish(c, man)
 end
-function M.ready(cache, root) return A.ready(M.SUB, cache, root) end
+function M.ready(cache, root)
+  if not A.ready(M.SUB, cache, root) then return false end
+  local body = cache:read((root or "data/generated/gba") .. "/" .. M.SUB .. "/manifest.lua")
+  return body:find("packVersion = " .. M.packVersion, 1, true) ~= nil
+end
 return M

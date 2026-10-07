@@ -92,6 +92,10 @@ end
 
 local function helloFor(game, linkType, player)
   local hello = Handshake.hello(handshakeView(game), nil)
+  local okA, ArenaData = pcall(require, "src.online.ArenaData")
+  if okA and type(ArenaData) == "table" and ArenaData.stripCosmeticMods then
+    ArenaData.stripCosmeticMods(hello, game)
+  end
   hello.generation = Game3Link.GENERATION
   hello.type = Game3Link.HELLO
   hello.ruleset = Handshake.DEFAULT_RULESET

@@ -9,6 +9,7 @@ local ShinySeq = require("src.core.game3.battle.shiny_seq")
 local BattleText = require("src.core.game3.battle.battle_text")
 local Adapter = require("src.core.game3.battle.adapter")
 local MonAnimBattle = require("src.core.game3.battle.mon_anim_battle")
+local TrainerPic = require("src.core.game3.trainer_pic")
 
 local SwitchSeq = {}
 
@@ -886,7 +887,7 @@ local function run_step(step)
     local tp = s.trainer.player
     if d.backPic ~= nil then tp.gender = d.backPic end
     tp.visible = true
-    tp.frame = 0
+    tp.frame = TrainerPic.backIdleFrame(tp.gender)
     tp.ox = -96
     wait_busy()
     Anim.tweenStage(48, function(u)

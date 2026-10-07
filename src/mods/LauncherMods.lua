@@ -589,15 +589,7 @@ local function readStringsCatalog(path)
   local fs = love and love.filesystem
   if not (fs and fs.read) then return nil end
   local rel = path .. "/" .. STRINGS_CATALOG
-  local raw = fs.read(rel)
-  if type(raw) ~= "string" or raw == "" then return nil end
-  local chunk = loadstring(raw, "@" .. rel)
-  if not chunk then return nil end
-  -- Lua 5.1/LuaJIT: no _ENV, so setfenv is the sandbox.
-  if setfenv then setfenv(chunk, {}) end
-  local ok, result = pcall(chunk)
-  if not ok or type(result) ~= "table" then return nil end
-  return result
+  return require("src.mods.Sandbox").evalData(fs.read(rel), "@" .. rel)
 end
 
 -- deriveStrings(rows, byId, read) -> the merged catalog, pure.

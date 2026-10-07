@@ -1409,6 +1409,7 @@ return {
   [0x2380CC] = 0x2380A8, -- :gMonShinyPaletteTable + 0
   [0x23957C] = 0x239558, -- :gTrainerFrontPicTable + 0
   [0x239A1C] = 0x2399F8, -- :gTrainerFrontPicPaletteTable + 0
+  [0x239F74] = 0x239F50, -- :gTrainerBackAnimsPtrTable + 0
   [0x239FA4] = 0x239F80, -- :gTrainerBackPicTable + 0
   [0x239FD4] = 0x239FB0, -- :gTrainerBackPicPaletteTable + 0
   [0x23E558] = 0x23E534, -- :gTrainerClassNames + 0

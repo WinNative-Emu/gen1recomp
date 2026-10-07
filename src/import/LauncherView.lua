@@ -28,6 +28,7 @@
 --   * Layout is explicit pixels off Layout.metrics.  No percentages.
 
 local Kit = require("src.ui.kit.Kit")
+local Icons = require("src.ui.kit.Icons")
 local CartShape = require("src.import.CartShape")
 local Theme = require("src.ui.kit.Theme")
 local Layout = require("src.ui.kit.Layout")
@@ -48,6 +49,7 @@ local COMMUNITY_URL = "https://bois.icu"
 -- synthesizes for the same tap.
 local ACT_DEDUP = 0.35
 local LONG_PRESS_SECONDS = 0.60
+local CONSUMED_TOUCH_MAX = 30
 -- Finger travel past this (px) is a drag, not a tap.
 local TAP_SLOP2 = 16 * 16
 local MIN_SKIN_ROWS = 4
@@ -123,6 +125,9 @@ function LauncherView.detach(imp)
   end
   Transition.reset()
   Kit.occlude(nil)
+  if imp then
+    imp._consumedTouch, imp._consumedTouchUntil = nil, nil
+  end
   if imp and imp._themeVideo then
     imp._themeVideo:release()
     imp._themeVideo = nil
@@ -216,6 +221,7 @@ function LauncherView.update(imp, dt)
     -- synthesized echo.
     local now = love.timer.getTime()
     local touching = imp._touchAt ~= nil and next(imp._touchAt) ~= nil
+      or LauncherView.consumedTouchLive(imp)
     if not touching and now >= (imp._suppressMouseUntil or 0)
         and now >= (imp._suppressClickUntil or 0) then
       local mx, my = love.mouse.getPosition()
@@ -270,6 +276,71 @@ end
 function LauncherView.wheelmoved(imp, dx, dy)
   if not imp._flex then return end
   imp._wheelY = (imp._wheelY or 0) + (dy or 0)
+end
+
+function LauncherView.consumePress(imp)
+  imp._prevMouseDown = true
+end
+
+function LauncherView.consumeTouch(imp, id)
+  imp._consumedTouch = imp._consumedTouch or {}
+  imp._consumedTouch[tostring(id)] = love.timer.getTime()
+  LauncherView.consumePress(imp)
+end
+
+function LauncherView.forgetConsumedTouch(imp, id)
+  local held = imp._consumedTouch
+  if not held then return end
+  if id == nil then
+    imp._consumedTouch = nil
+  else
+    held[tostring(id)] = nil
+  end
+end
+
+local liveTouchIds = {}
+local function pruneConsumedTouch(imp)
+  local held = imp._consumedTouch
+  if not held or next(held) == nil then return end
+  local now = love.timer.getTime()
+  local getTouches = love.touch and love.touch.getTouches
+  local ids = getTouches and getTouches() or nil
+  if ids then
+    for k in pairs(liveTouchIds) do liveTouchIds[k] = nil end
+    for i = 1, #ids do liveTouchIds[tostring(ids[i])] = true end
+  end
+  local dropped = false
+  for tid, at in pairs(held) do
+    local age = now - (type(at) == "number" and at or 0)
+    if age > CONSUMED_TOUCH_MAX
+        or (ids and not liveTouchIds[tid] and age > ACT_DEDUP) then
+      held[tid] = nil
+      dropped = true
+    end
+  end
+  if dropped and next(held) == nil then
+    imp._consumedTouchUntil = now + ACT_DEDUP
+  end
+end
+
+function LauncherView.releaseConsumedTouch(imp, id)
+  local held = imp._consumedTouch
+  local tid = tostring(id)
+  if not (held and held[tid]) then return false end
+  held[tid] = nil
+  local untilT = love.timer.getTime() + ACT_DEDUP
+  imp._suppressMouseUntil = untilT
+  imp._consumedTouchUntil = untilT
+  return true
+end
+
+function LauncherView.consumedTouchLive(imp)
+  pruneConsumedTouch(imp)
+  if imp._consumedTouch ~= nil and next(imp._consumedTouch) ~= nil then
+    return true
+  end
+  local untilT = imp._consumedTouchUntil
+  return untilT ~= nil and love.timer.getTime() < untilT
 end
 
 function LauncherView.touchpressed(imp, id, x, y)
@@ -390,6 +461,7 @@ function LauncherView.mousepressed(imp, x, y)
   if not imp._flex then return end
   local now = love.timer.getTime()
   local touching = imp._touchAt ~= nil and next(imp._touchAt) ~= nil
+    or LauncherView.consumedTouchLive(imp)
   if touching or now < (imp._suppressMouseUntil or 0)
       or now < (imp._suppressClickUntil or 0) then
     return
@@ -1502,11 +1574,10 @@ local GAME_TABS = {
 }
 
 local HEADER_TABS = {
+  { id = "box", key = "tab-box", glyph = true, beta = true },
   { id = "mods",   key = "tab-mods" },
-  { id = "find",   key = "tab-find" },
   { id = "online", key = "tab-online", glyph = true, beta = true },
   { id = "skins",  key = "tab-skins", glyph = true, beta = true },
-  { id = "importers", key = "tab-importers", glyph = true },
 }
 
 LauncherView.HEADER_TABS = HEADER_TABS
@@ -1523,12 +1594,12 @@ local function overlayBeta(tx, ty, w, tabH, m)
   drawBetaTag(tx + (w - bw) / 2, ty + tabH - bh - math.floor(2 * m.s), bw, bh)
 end
 
-local TAB_ICONS = { mods = "puzzle", find = "search", online = "globe",
-  skins = "paintbrush", importers = "download" }
-local TAB_LABELS = { mods = "MODS", find = "FIND", online = "ONLINE",
-  skins = "SKINS", importers = "EXTRA" }
+local TAB_ICONS = { box = "package", mods = "puzzle", online = "globe",
+  skins = "paintbrush" }
+local TAB_LABELS = { box = "BOX", mods = "MODS", online = "ONLINE",
+  skins = "SKINS" }
 for _, t in ipairs(HEADER_TABS) do
-  t.opts = { face = "tab", font = "tab", icon = TAB_ICONS[t.id] }
+  t.opts = { face = "tab", font = "tab", icon = TAB_ICONS[t.id], iconScale = t.id == "box" and 1.15 or nil }
 end
 
 local function headerTabMetrics(m)
@@ -1611,7 +1682,10 @@ local function headerChrome(imp)
   }
   for _, t in ipairs(HEADER_TABS) do
     local id = t.id
-    c.tab[id] = function() imp:_switchTab(id) end
+    c.tab[id] = function()
+      local target = id == "mods" and (imp.tab == "find" and "find" or imp._modsInnerTab or "mods") or id
+      imp:_switchTab(target)
+    end
   end
   for _, g in ipairs(GAME_TABS) do
     local id = g.id
@@ -1739,15 +1813,12 @@ local function buildHeader(imp, m)
   chrome0.game.ring = nil
   btn(imp, tx, ty, dropW, tabH, "tab-game", "", chrome0.game)
   do
-    local cw = math.floor(7 * m.s)
+    local size = math.floor(18 * m.s)
     local ccx = tx + dropW - math.floor(14 * m.s)
     local ccy = ty + tabH / 2 + (gameDown and math.floor(1 * m.s) or 0)
-    if love.graphics.polygon then
-      Theme.col(gameInvert and PAL.inverse or PAL.ink, gameDown and 1 or 0.9)
-      love.graphics.polygon("fill",
-        ccx - cw, ccy - cw * 0.5, ccx + cw, ccy - cw * 0.5, ccx, ccy + cw * 0.8)
-      love.graphics.setColor(1, 1, 1, 1)
-    end
+    Icons.draw("chevron-down", ccx - size / 2, ccy - size / 2, size,
+      gameInvert and PAL.inverse or PAL.ink, gameDown and 1 or 0.9)
+    love.graphics.setColor(1, 1, 1, 1)
   end
   Kit.textCenter("micro", Strings("GAMES"), tx, ty + tabH + 3 * m.s, dropW, PAL.muted)
   tx = tx + dropW + tabGap
@@ -1759,7 +1830,7 @@ local function buildHeader(imp, m)
       ty = ty + tabH + labelH + tabRowGap
     end
     local o = t.opts
-    o.active = imp.tab == t.id
+    o.active = imp.tab == t.id or t.id == "mods" and imp.tab == "find"
     o.image = t.icon
     o.action = chrome.tab[t.id]
     btn(imp, tx, ty, w, tabH, t.key, "", o)
@@ -1963,6 +2034,8 @@ local function saveActions(imp, scope, version, slot)
         imp._saveExport = { scope = scope, version = version, slotId = slot.id,
           label = slot.label or slot.name or Strings("NEW GAME") }
       end }
+    actions[#actions + 1] = { label = Strings("Duplicate"), icon = "copy", key = key .. "-dup",
+      action = function() imp:_duplicateSlot(scope, slot.id) end }
   end
   if not imp.android then
     actions[#actions + 1] = { label = Strings("Rename"), icon = "pencil", key = key .. "-rename",
@@ -2375,7 +2448,7 @@ end
 -- A row's control key is a pure function of its id, but concatenating it per
 -- visible row per frame is ~1200 strings a second.  Memoised on the launcher,
 -- NOT on the entry: index entries are the same tables ModIndex.writeCache
--- persists into options.modIndexCache, and view state must not ride along.
+-- persists into mod_index_cache.lua, and view state must not ride along.
 local function rowKeyFor(imp, prefix, id)
   local keys = imp._rowKeys
   if not keys then keys = {}; imp._rowKeys = keys end
@@ -3827,14 +3900,14 @@ local function modalAmount()
   return p
 end
 
-local function modalPanel(m, w, h)
+local function modalPanel(m, w, h, opts)
   -- A near-opaque scrim, not a tint.  At 0.82 the header and the wordmark
   -- still read through the settings panel and the screen looked like two
   -- layouts fighting rather than one panel on top ("the settings is covering
   -- the logo"); at this weight the page behind is present but plainly out of
   -- play, which is what a modal is supposed to say.
   local amt = modalAmount()
-  Theme.fill(0, 0, m.W, m.H, PAL.bg, 0.93 * amt)
+  Theme.fill(0, 0, m.W, m.H, PAL.bg, (opts and opts.scrim or 0.93) * amt)
   Kit.blockClicks = true
   local pw = math.floor(math.min(w, m.W - 2 * m.pad))
   local ph = math.floor(math.min(h, m.H - 2 * m.pad))
@@ -3842,11 +3915,14 @@ local function modalPanel(m, w, h)
   local py = math.floor((m.H - ph) / 2)
   modalRect.x, modalRect.y, modalRect.w, modalRect.h = px, py, pw, ph
   if amt < 1 and not modalTransform and love.graphics and love.graphics.push then
-    local s = 0.96 + 0.04 * amt
     love.graphics.push()
-    love.graphics.translate(m.W / 2, m.H / 2)
-    love.graphics.scale(s, s)
-    love.graphics.translate(-m.W / 2, -m.H / 2)
+    if opts and opts.slide then love.graphics.translate(0, (1 - amt) * 32 * m.s)
+    else
+      local s = 0.96 + 0.04 * amt
+      love.graphics.translate(m.W / 2, m.H / 2)
+      love.graphics.scale(s, s)
+      love.graphics.translate(-m.W / 2, -m.H / 2)
+    end
     modalTransform = true
   end
   Kit.card(px, py, pw, ph, true)
@@ -3940,7 +4016,7 @@ local function modalFrame(imp, m, key, w, pad, headH, contentH, footH, gap, view
     return modalBody(imp, key, x, bodyY, pw - 2 * pad,
       footY - (footH > 0 and gap or 0) - bodyY, contentH)
   end
-  return px, py, pw, footY, open
+  return px, py, pw, footY, open, ph
 end
 
 function LauncherView.modalTextW(m, w, pad)
@@ -4089,8 +4165,12 @@ local function buildPrompt(imp, m, spec)
   local footH = spec.footnote and (Kit.textHeight("micro")
     + math.floor(8 * m.s)) or 0
   local headH = Kit.textHeight("button") + math.floor(10 * m.s)
-  local px, py, pw, footY, open = modalFrame(imp, m, spec.modal, w, pad,
+  local px, py, pw, footY, open, ph = modalFrame(imp, m, spec.modal, w, pad,
     headH, hintH + fieldH, m.btnH + footH, math.floor(12 * m.s))
+  if not imp._modalHeld and Kit.press(0, 0, m.W, m.H)
+      and not Kit.hit(px, py, pw, ph) then
+    spec.cancel(); return
+  end
   Kit.text("button", Kit.ellipsize("button", spec.title, pw - 2 * pad),
     px + pad, py + pad, PAL.heading)
   local top, _, mark, done = open()
@@ -5772,9 +5852,9 @@ local function buildSettingsModal(imp, m)
             rx - bandW + stepW + gap / 2, ctlY + (m.btnH - Kit.textHeight("small")) / 2,
             vw, rowEnabled and PAL.heading or PAL.muted)
         end
-        control(rx - bandW, stepW, key .. "-prev", "‹", {
+        control(rx - bandW, stepW, key .. "-prev", "", { icon = "chevron-left",
           action=function() if row.step and row.step(-1) then model.save() end end})
-        control(rx - stepW, stepW, key .. "-next", "›", {
+        control(rx - stepW, stepW, key .. "-next", "", { icon = "chevron-right",
           action=function() if row.step and row.step(1) then model.save() end end})
       end
     end
@@ -6023,7 +6103,7 @@ end
 
 local Sync = {}
 
-Sync.HINT = "Save sync keeps your saves and your mod list on our server so another device can pick them up. Keep your own backups too."
+Sync.HINT = "Cloud sync keeps your game saves, Box collection and mod list on our server so another device can pick them up. Keep your own backups too."
 
 function Sync.title(imp, m, w, pad, fit)
   local headH = Kit.textHeight("button") + math.floor(12 * m.s)
@@ -6124,6 +6204,7 @@ function LauncherView.syncSideText(meta)
     bits[#bits + 1] = tostring(math.floor(summary.dexCount)) .. " "
       .. Strings("seen")
   end
+  if tonumber(summary.boxCount) then bits[#bits + 1] = tostring(summary.boxCount) .. " " .. Strings("Pokémon") end
   local when = tonumber(meta.savedAt)
   if when then
     bits[#bits + 1] = Strings("saved") .. " " .. os.date("%Y-%m-%d %H:%M", when)
@@ -6137,7 +6218,7 @@ function Sync.conflict(imp, m, eng)
   local pad = math.floor(18 * m.s)
   local w = Sync.width(m, math.floor(520 * m.s))
   local innerW = w - 2 * pad - Kit.scrollGutter()
-  local lead = row.overlap
+  local lead = row.box and Strings(row.reviewMessage or "Choose one Box collection and its linked saves. The other collection is kept in a recovery backup.") or row.overlap
     and Strings("These saves were played at the same time.")
     or Strings("This save also changed on another device.")
   local mine = LauncherView.syncSideText(row.localMeta)
@@ -6145,8 +6226,8 @@ function Sync.conflict(imp, m, eng)
   local fit = Sync.fit(m,
     2 * pad + Kit.textHeight("button") + math.floor(22 * m.s)
       + 2 * (Kit.textHeight("small") + math.floor(12 * m.s)),
-    4, 4, {
-      { font = "small", str = lead, w = innerW, max = 2 },
+    row.box and 3 or 4, row.box and 3 or 4, {
+      { font = "small", str = lead, w = innerW, max = row.box and 4 or 2 },
       { font = "micro", str = mine, w = innerW, max = 2 },
       { font = "micro", str = theirs, w = innerW, max = 2 },
     })
@@ -6171,9 +6252,10 @@ function Sync.conflict(imp, m, eng)
   cy = Sync.row(imp, m, px + pad, cy, innerW, "sync-keep-other",
     Strings("Keep the other device"), { kind = "accent",
       action = function() imp:_syncResolve(key, "remote") end }, fit)
-  cy = Sync.row(imp, m, px + pad, cy, innerW, "sync-keep-both",
-    Strings("Keep both"), {
-      action = function() imp:_syncResolve(key, "both") end }, fit)
+  if not row.box then
+    cy = Sync.row(imp, m, px + pad, cy, innerW, "sync-keep-both",
+      Strings("Keep both"), { action = function() imp:_syncResolve(key, "both") end }, fit)
+  end
   done()
   Sync.row(imp, m, px + pad, footY, pw - 2 * pad, "sync-conflict-close",
     Strings("Close"), { action = function() imp:_closeSync() end }, fit)
@@ -6312,7 +6394,7 @@ function Sync.home(imp, m, eng)
   local linked = eng:linked()
   local codes = linked and eng.codes or nil
   local body = linked
-    and Strings("This device is linked. Saves sync when the launcher opens, a few seconds after each save, and every few minutes while the app is running.")
+    and Strings("This device is linked. Game saves and Box sync when the launcher opens, a few seconds after each save or Box transfer, and every few minutes while the app is running.")
     or Strings(Sync.HINT)
   local innerW = w - 2 * pad - Kit.scrollGutter()
   local codesH = codes
@@ -6479,6 +6561,7 @@ end
 -- a click on the scrim lands on whatever button happens to be behind it.
 -- Keep this list in sync with buildModals below.
 local MODAL_KEYS = {
+  "_boxPrompt", "_boxPopup",
   "_profileRenamePrompt", "_profileSavePrompt", "_settingsText",
   "_cartSave", "_bugModal", "_settings", "_rename", "_indexPrompt",
   "_modConfirm", "_appPatchNotes", "_modReleaseNotes", "_findDetails",
@@ -6495,7 +6578,7 @@ LauncherView.MODAL_KEYS = MODAL_KEYS
 local function modalUp(imp)
   if Kit.FileBrowser and Kit.FileBrowser.active then return true end
   if Kit.VirtualKeyboard and Kit.VirtualKeyboard.active then return true end
-  return (imp._settingsText or imp._settings or imp._rename
+  return (imp._boxPopup or imp._boxPrompt or imp._settingsText or imp._settings or imp._rename
     or imp._indexPrompt or imp._modConfirm or imp._modReleaseNotes
     or imp._appPatchNotes
     or imp._findDetails or imp._modVersions or imp._modDepResolver or imp._sortPopup
@@ -6531,6 +6614,18 @@ local function buildModals(imp, m)
     Kit.FileBrowser.draw(m)
     return true
   end
+  if imp._boxPrompt then
+    local prompt = imp._boxPrompt
+    buildPrompt(imp, m, {
+      key = "boxprompt", modal = "_boxPrompt", title = prompt.title, text = prompt.text,
+      okLabel = Strings("Save"),
+      commit = function() require("src.import.BoxPrompt").close(imp, true) end,
+      cancel = function() require("src.import.BoxPrompt").close(imp, false) end,
+      footnote = Strings("Enter to save - Esc to cancel"),
+    })
+    return true
+  end
+  if imp._boxPopup then require("src.import.BoxUI").drawPopup(imp, m); return true end
   if imp._secretPopup then buildSecretModal(imp, m) return true end
   if imp._profileRenamePrompt then
     buildPrompt(imp, m, {
@@ -6786,10 +6881,25 @@ local function minPanelHeight(m)
 end
 
 local function buildTabPanel(imp, x, y, w, availH, budgetH, m)
-  if imp.tab == "mods" then
-    return buildModsPanel(imp, x, y, w, budgetH, m)
-  elseif imp.tab == "find" then
-    return buildFindPanel(imp, x, y, w, budgetH, m)
+  if imp.tab == "box" then
+    return require("src.import.BoxPanel").draw(imp, x, y, w, budgetH, m)
+  elseif imp.tab == "mods" or imp.tab == "find" then
+    local search = imp.tab == "find"
+    local gap, h = math.floor(8 * m.s), m.btnH
+    local bw = math.min((w - gap) / 2, math.floor(180 * m.s))
+    btn(imp, x, y, bw, h, "mods-inner-installed", Strings("Installed"), {
+      face = "tab", font = "small", icon = "puzzle", active = not search,
+      action = function() imp:_switchTab("mods") end,
+    })
+    btn(imp, x + bw + gap, y, bw, h, "mods-inner-search", Strings("Search"), {
+      face = "tab", font = "small", icon = "search", active = search,
+      action = function() imp:_switchTab("find") end,
+    })
+    local offset = h + gap
+    if search then
+      return offset + buildFindPanel(imp, x, y + offset, w, budgetH - offset, m)
+    end
+    return offset + buildModsPanel(imp, x, y + offset, w, budgetH - offset, m)
   elseif imp.tab == "skins" then
     return buildSkinsPanel(imp, x, y, w, budgetH, m)
   elseif imp.tab == "importers" then
@@ -6955,10 +7065,12 @@ function LauncherView.draw(imp)
     drawTabLayer(imp, tabKeyOf(imp), x, contentY, w, viewH, availH, m, 0)
   end
 
+  if imp.tab == "box" then require("src.import.BoxOrganizer").drawSticky(imp, m) end
   buildFooter(imp, m, footY)
   Kit.blockClicks = Transition.active()
   local held = imp._modalHeld
   if held then imp[held.key] = held.value end
+  Toast.occlude(imp)
   buildModals(imp, m)
   endModalDraw(m)
   if held then imp[held.key] = nil end

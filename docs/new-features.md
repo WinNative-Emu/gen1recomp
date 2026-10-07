@@ -16,7 +16,13 @@ Features intentionally added to the games themselves, beyond what the original c
 * **Pokédex diploma and printer image exports**
 * **Fast-forward locks to 1X in link play**, every link or online battle, link session and the FireRed/LeafGreen Union Room on every game
 * **40-player Union Room** on FireRed and LeafGreen online, a larger square room where every trainer keeps a fixed spot and anyone can be talked to
+* **Name badges over trainers** in Gen 3 link rooms (Union Room, Trade Center, Colosseum, Record Corner, Berry Blender), your own included
+* **Chat, trade and battle icons** on those badges, so a busy trainer is visible at a glance
+* **Idle Union Room trainers wander**, a few steps around their spot and back
+* **Translation mods stay online** on Gen 3: mods that only change text, fonts, names or visuals can still link, trade and battle
 * **Button remapping** on every game: OPTION -> CONTROLS (keys, pads, L/R on FireRed/LeafGreen/Emerald, fast-forward buttons)
+* **Full controller support**: both thumbsticks move and navigate menus, and stick directions, triggers, stick clicks and extra SDL buttons can be bound in CONTROLS
+* **Duplicate a save slot** from the launcher, a one-tap independent copy for backups or trimming a save before export
 
 ## Gen 2 Specifics
 
@@ -24,4 +30,6 @@ Features intentionally added to the games themselves, beyond what the original c
 * **Battle screen options** on Gold, Silver and Crystal: BATTLE SIZE (fixed or window-filling) and BATTLE BG (white, black or the dimmed map as the surround)
 * **Widescreen battle layout** on Gold, Silver and Crystal: BATTLE LAYOUT -> WIDE spreads the HUDs and bottom windows across a 304-wide screen
 * **Extended battle HUD** on Gold, Silver and Crystal: BATTLE HUD -> EXTENDED docks the WIDE layout's foe panel to the top of the window and the text area and player panel to the bottom
-* **Event tickets** on Emerald: OPTION -> EXTRAS -> EVENT TICKETS lets the Lilycove Mystery Gift man hand out the Eon, Aurora and Mystic tickets and the Old Sea Map
+* **Event tickets** on Emerald: OPTION -> EXTRAS -> EVENT TICKETS lets the Lilycove Mystery Gift man hand out whichever of the Eon, Aurora and Mystic tickets and the Old Sea Map the relay is currently distributing
+* **Relay Mystery Events** on Ruby/Sapphire: MYSTERY EVENTS loads signed e-Reader events (Eon Ticket, gift ribbon) from the relay instead of a link partner
+* **Wonder News on Ruby/Sapphire**: relay Wonder News is listed and saved under MYSTERY EVENTS, so every Gen 3 game reads the same news

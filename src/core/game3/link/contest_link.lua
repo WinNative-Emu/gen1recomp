@@ -38,6 +38,18 @@ local function linkSeat(link)
   return tonumber(link.seat) or 0
 end
 
+-- pokeemerald/src/contest_link.c:88
+function ContestLink.flagsFor(link, wireless)
+  local flags = ContestLink.FLAG.IS_LINK + (wireless and ContestLink.FLAG.IS_WIRELESS or 0)
+  local ok, players = false, nil
+  if type(link) == "table" and type(link.players) == "function" then ok, players = pcall(link.players, link) end
+  local Rs = require("src.core.game3.link.rs")
+  for _, p in ipairs(ok and type(players) == "table" and players or {}) do
+    if type(p) == "table" and Rs.is(p.version) then return flags + ContestLink.FLAG.HAS_RS_PLAYER end
+  end
+  return flags
+end
+
 local function linkCount(link)
   if type(link.players) == "function" then
     local ok, list = pcall(link.players, link)
@@ -153,8 +165,14 @@ function Session:fromLeader(key, data)
   return self:waiting(key)
 end
 
+function Session:hasRsPlayer()
+  return math.floor(self.flags / ContestLink.FLAG.HAS_RS_PLAYER) % 2 == 1
+end
+
 -- pokeemerald/src/contest_util.c:2718
 function Session:standby()
+  -- pokeemerald/src/contest_link.c:100
+  if self:hasRsPlayer() then return true end
   if not self.standbyKey then
     self.standbyN = self.standbyN + 1
     self.standbyKey = "standby:" .. self.standbyN

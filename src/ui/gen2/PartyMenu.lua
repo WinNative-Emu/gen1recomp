@@ -6,8 +6,8 @@
 -- prompt text is a parameter (.Strings: "Choose a #MON.", "Use on which
 -- <PK><MN>?", "Teach which <PK><MN>?", ...).
 --
--- Icons come from icons.lua: one 16x32 sheet per ICON_*, two 16x16 frames that
--- alternate roughly twice a second, and MonMenuIcons maps species -> icon.
+-- Icons come from icons.lua: one 16x32 sheet per ICON_*, two 16x16 frames, and
+-- MonMenuIcons maps species -> icon.
 --
 -- Choosing a mon from the FIELD list opens the action submenu (MonSubmenu,
 -- engine/pokemon/mon_submenu.asm) rather than answering straight away; every
@@ -55,9 +55,10 @@ local EGG_LABEL = Strings.source("EGG")
 local ABLE_LABEL = Strings.source("ABLE")
 local NOT_ABLE_LABEL = Strings.source("NOT ABLE")
 
--- The icon's two frames swap every 16 logic steps, close to the cart's
--- SPRITE_ANIM cadence.
-local ICON_FRAME_STEPS = 16
+-- data/sprite_anims/framesets.asm:66
+PartyMenu.ICON_FRAME_DURATION = 8
+-- engine/gfx/mon_icons.asm:132
+PartyMenu.ICON_DURATION_OFFSET = { green = 0x00, yellow = 0x40, red = 0x80 }
 
 -- engine/items/item_effects.asm:1748
 PartyMenu.ACTION_TEXT_DELAY = 50
@@ -791,23 +792,30 @@ function PartyMenu:iconIdFor(mon)
     and self.icons.species[mon.species] or nil
 end
 
--- The icon image for a mon, plus which 16x16 frame to show.
---
--- The path goes out through pokemon.icon before it is loaded -- the SAME hook
--- name, the same (data, mon, vanillaPath, { name = iconId }) call and the same
--- ctx the Gen 1 party list makes (src/ui/PartyMenu.lua:186 through
--- src/pokemon/Sprites.lua iconPath), so one skin mod repaints the party icons
--- in both games.  Sprites.iconPath does its own Runtime.wantsHook check and
--- hands the vanilla path straight back on an unhooked boot, so this costs a
--- table lookup per row; the cache is keyed on the RESOLVED path so a mod's
--- image does not ride the built-in's entry.
+-- engine/gfx/mon_icons.asm:122
+function PartyMenu.iconHpBand(mon)
+  if type(mon) ~= "table" then return "green" end
+  local maxHp = mon.maxHp or (mon.stats and mon.stats.hp)
+  return HpBar.paletteFor(mon.hp, maxHp)
+end
+
+-- engine/sprite_anims/core.asm:400-433
+function PartyMenu.iconFrameSteps(mon)
+  local offset = PartyMenu.ICON_DURATION_OFFSET[PartyMenu.iconHpBand(mon)]
+  return PartyMenu.ICON_FRAME_DURATION + offset + 1
+end
+
+function PartyMenu:iconFrame(mon)
+  return math.floor(self.clock / PartyMenu.iconFrameSteps(mon)) % 2
+end
+
 function PartyMenu:iconFor(mon)
   local iconId = self:iconIdFor(mon)
   local entry = iconId and self.icons and self.icons.icons
     and self.icons.icons[iconId]
-  local path = entry and entry.image
-  path = require("src.pokemon.Sprites").iconPath(
-    self.game and self.game.data, mon, path, { name = iconId })
+  local path, trueColor = require("src.pokemon.Sprites").iconPath(
+    self.game and self.game.data, mon, entry and entry.image,
+    { name = iconId, trueColor = entry and entry.trueColor })
   if not path then return nil end
   local cached = self.iconCache[path]
   if cached == nil then
@@ -816,8 +824,7 @@ function PartyMenu:iconFor(mon)
     self.iconCache[path] = cached
   end
   if not cached then return nil end
-  local frame = math.floor(self.clock / ICON_FRAME_STEPS) % 2
-  return cached, frame
+  return cached, self:iconFrame(mon), trueColor
 end
 
 -- .SpawnItemIcon (engine/gfx/mon_icons.asm): a mon carrying something does not
@@ -861,12 +868,14 @@ function PartyMenu:iconX(index)
   return index == self.index and 8 or 0
 end
 
--- ...and AnimSeq_PartyMonSwitch bobs that one: VAR1 counts frames and, every
--- sixteenth, bit 4 decides whether YOFFSET is 0 or negative.  So the selected
--- icon rides two pixels high for half of each 32-frame cycle.
-function PartyMenu:iconBob(index)
+-- engine/sprite_anims/functions.asm:81-121
+-- engine/gfx/mon_icons.asm:115-119
+PartyMenu.ICON_BOB = { green = -2, yellow = -1, red = 0 }
+
+function PartyMenu:iconBob(index, mon)
   if index ~= self.index then return 0 end
-  return (math.floor(self.clock / 16) % 2 == 1) and -2 or 0
+  if math.floor(self.clock / 16) % 2 ~= 1 then return 0 end
+  return PartyMenu.ICON_BOB[PartyMenu.iconHpBand(mon)]
 end
 
 -- One reusable quad per role, re-aimed per draw: an icon draws every frame
@@ -888,25 +897,21 @@ local function reusedQuad(self, slot, x, y, w, h, sw, sh)
 end
 
 function PartyMenu:drawIcon(mon, px, py)
-  local image, frame = self:iconFor(mon)
+  local image, frame, trueColor = self:iconFor(mon)
   if not image then return end
   local G = love.graphics
   local iw, ih = image:getDimensions()
   local markerRow = PartyMenu.heldMarkerRow(mon)
   local marker = markerRow and self:heldMarkerImage() or nil
   G.setColor(1, 1, 1, 1)
-  -- Every party icon OAM entry is PAL_OW_RED (data/sprite_anims/oam.asm:315-355)
-  -- and InitPartyMenuOBPals loads PartyMenuOBPals into OBJ 0 for the whole list,
-  -- species and EGG alike (engine/gfx/color.asm:593-598, :1228-1229).
+  -- data/sprite_anims/oam.asm:315-355
+  -- engine/gfx/color.asm:593-598
   local pals = self.palettes and self.palettes.partyMenu
   local colors = pals and pals[1] or nil
   local shaded = colors and GbcPalette.available()
-  local previous
-  if shaded then
-    -- GbcPalette.with without the closure: set, draw, restore.
-    previous = G.getShader and G.getShader() or nil
-    GbcPalette.use(colors)
-  end
+  local iconShaded = shaded and not (trueColor and GbcPalette.mode == "gbc")
+  local previous = G.getShader and G.getShader() or nil
+  if iconShaded then GbcPalette.use(colors) end
   if marker then
     -- The _WITH_ITEM / _WITH_MAIL OAM sets (data/sprite_anims/oam.asm) are the
     -- ordinary four quadrants with the `dbsprite -1, 0` entry -- the bottom
@@ -922,6 +927,7 @@ function PartyMenu:drawIcon(mon, px, py)
       px + 8, py)
     G.draw(image, reusedQuad(self, "bottomRight", 8, frame * 16 + 8, 8, 8,
       iw, ih), px + 8, py + 8)
+    if shaded and not iconShaded then GbcPalette.use(colors) end
     G.draw(marker, reusedQuad(self, "held", 0, markerRow * 8, 8, 8, mw, mh),
       px, py + 8)
   else
@@ -1041,7 +1047,7 @@ function PartyMenu:drawPanel()
       -- cursor overwrites it whenever it sits there.
       Chrome.cursor(0, nameY, true)
     end
-    self:drawIcon(mon, self:iconX(i), 4 + (i - 1) * 16 + self:iconBob(i))
+    self:drawIcon(mon, self:iconX(i), 4 + (i - 1) * 16 + self:iconBob(i, mon))
     local hp = self:shownHpFor(i, mon)
     local row = PartyMenu.rowFor(mon, hp,
       self.game and self.game.data and self.game.data.gen2Statuses)

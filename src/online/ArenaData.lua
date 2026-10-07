@@ -326,17 +326,95 @@ local function liveVersion(game)
   return GameVersion.get()
 end
 
+ArenaData.COSMETIC_REGISTRIES = {
+  text = true, rom_text = true, strings = true, font = true,
+  sprites = true, palettes = true, icons = true, battle_anims = true,
+  render_pipelines = true, battle_sprite_scales = true, transitions = true,
+  music = true, sfx = true, cries = true, audio = true, map_songs = true,
+}
+
+ArenaData.NAME_FIELDS = {
+  pokemon = { id = true, name = true, description = true, dexEntry = true, category = true },
+  moves = { id = true, name = true, description = true },
+  items = { id = true, name = true, description = true },
+}
+
+local function cosmeticOp(registry, entry)
+  if ArenaData.COSMETIC_REGISTRIES[registry] then return true end
+  local fields = ArenaData.NAME_FIELDS[registry]
+  if not fields or entry.op ~= "patch" or type(entry.value) ~= "table" then return false end
+  for key in pairs(entry.value) do
+    if not fields[key] then return false end
+  end
+  return true
+end
+
+local function owns(list, id)
+  for _, entry in ipairs(list or {}) do
+    if entry.owner == id then return true end
+  end
+  return false
+end
+
+function ArenaData.modTouchesGameplay(loader, id)
+  if type(loader) ~= "table" then return false end
+  local record = loader.mods and loader.mods[id]
+  local manifest = record and record.manifest
+  if manifest and #(manifest.permissions or {}) > 0 then return true end
+  for name, registry in pairs(loader.content or {}) do
+    for _, list in pairs(registry.ops or {}) do
+      for _, entry in ipairs(list) do
+        if entry.owner == id and not cosmeticOp(name, entry) then return true end
+      end
+    end
+  end
+  for _, chain in pairs((loader.hooks and loader.hooks.chains) or {}) do
+    if owns(chain, id) then return true end
+  end
+  for _, list in pairs((loader.events and loader.events.listeners) or {}) do
+    if owns(list, id) then return true end
+  end
+  local migrations = loader.migrations and loader.migrations[id]
+  if type(migrations) == "table" and next(migrations) ~= nil then return true end
+  local input = loader.modInput and loader.modInput[id]
+  if type(input) == "table" and (tonumber(input.seq) or 0) > 0 then return true end
+  if loader.stepsQueues and loader.stepsQueues[id] ~= nil then return true end
+  return false
+end
+
+function ArenaData.onlineBlockers3(game)
+  local out = {}
+  local loader = type(game) == "table" and game.mods or nil
+  if not loader then return out end
+  for _, entry in ipairs(Handshake.mods(game)) do
+    if entry.affectsLink or ArenaData.modTouchesGameplay(loader, entry.id) then out[#out + 1] = entry end
+  end
+  return out
+end
+
+local NO_MODS = {}
+
+function ArenaData.stripCosmeticMods(hello, game)
+  if type(hello) ~= "table" or type(game) ~= "table" or not game.mods then return hello end
+  local blockers = ArenaData.onlineBlockers3(game)
+  if #blockers == #(hello.mods or NO_MODS) then return hello end
+  hello.mods = blockers
+  if #blockers == 0 then hello.linkModified = false end
+  local ok, fingerprint = pcall(Fingerprint.compute, game.data, blockers, 3)
+  if ok then hello.fingerprint = fingerprint end
+  return hello
+end
+
 function ArenaData.liveProfile3(game, rulesetId)
   if type(game) ~= "table" then return nil, "no game" end
-  if Handshake.linkModified(game) then return nil, "mods" end
+  if #ArenaData.onlineBlockers3(game) > 0 then return nil, "mods" end
   local version = liveVersion(game)
   if not GameVersion.VERSIONS[version] or GameVersion.generation(version) ~= 3 then
     return nil, "unknown game"
   end
   rulesetId = rulesetId or G3_DEFAULT_RULESET
   if not isG3Ruleset(rulesetId) then return nil, "unknown ruleset" end
-  local ok, fingerprint = pcall(Fingerprint.compute, game.data,
-    Handshake.mods(game), 3)
+  local ok, fingerprint = pcall(Fingerprint.compute, game.data, NO_MODS, 3)
   if not ok then return nil, tostring(fingerprint) end
   return copyProfile({
     engine = 3,

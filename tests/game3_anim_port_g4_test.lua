@@ -120,6 +120,7 @@ if not pack then
   rawPrint(string.format("G4 anim port: %d passed, %d failed", passed, failed))
   os.exit(failed == 0 and 0 or 1)
 end
+require("tests.game3_cache").mount("pokemon/battle_anims/pack.lua")
 
 rawPrint("[test] 3. createsoundtask spawns SoundTask_*")
 do

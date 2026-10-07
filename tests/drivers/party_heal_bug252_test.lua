@@ -6,12 +6,14 @@
 --     POKEPORT_IDENTITY=bug252 POKEPORT_TOUCH=0 POKEPORT_VERSION=red love .
 return function(game)
   local U = dofile("tests/drivers/util.lua")
-  local DIR = os.getenv("SHOT_DIR") or "/tmp/shots"
+  local DIR = os.getenv("POKEPORT_SHOT_DIR") or os.getenv("SHOT_DIR")
+    or "/tmp/shots"
   local Pokemon = require("src.pokemon.Pokemon")
   local Bag = require("src.inventory.Bag")
   local ItemEffects = require("src.inventory.ItemEffects")
   local PartyMenu = require("src.ui.PartyMenu")
   local TextBox = require("src.render.TextBox")
+  local Timing = require("src.core.Timing")
 
   local pass, fail = 0, 0
   local function check(label, ok)
@@ -56,6 +58,11 @@ return function(game)
       check(id .. " does NOT animate the bar (status cure / PP)",
             ItemEffects.healsHP(id) ~= true)
     end
+    for _, id in ipairs({ "ANTIDOTE", "PARLYZ_HEAL", "AWAKENING", "BURN_HEAL",
+                          "ICE_HEAL", "FULL_HEAL", "FULL_RESTORE" }) do
+      check(id .. " keeps the party menu up for its message",
+            ItemEffects.keepsPartyMenuOpen(id) == true)
+    end
   end
   for _, id in ipairs({ "POTION", "MAX_POTION", "REVIVE", "ANTIDOTE" }) do
     check(id .. " resolves in the item table", game.data.items[id] ~= nil)
@@ -82,8 +89,6 @@ return function(game)
   end
 
   -- ---- the fixture --------------------------------------------------------
-  -- CHARIZARD L50 sits near 150 max HP, so a MAX_POTION from 1 HP is the full
-  -- 96-frame fill across the whole 48-pixel bar.
   local lead = Pokemon.new(game.data, "CHARIZARD", 50)
   local fainted = Pokemon.new(game.data, "PIKACHU", 30)
   local poisoned = Pokemon.new(game.data, "SNORLAX", 40)
@@ -160,6 +165,18 @@ return function(game)
     return top() == game.overworld
   end
 
+  local function dismissMessage()
+    for _ = 1, 30 do
+      if not inStack(isPicker) then return true end
+      U.tap(game, "a")
+      for _ = 1, 8 do
+        if not inStack(isPicker) then return true end
+        U.wait(1)
+      end
+    end
+    return not inStack(isPicker)
+  end
+
   -- ======== scripted run: MAX_POTION on the 1 HP lead ======================
   U.log("======== #252 scripted run: MAX POTION on a 1 HP CHARIZARD ========")
   local picker, why = openPickerFor("MAX_POTION")
@@ -190,18 +207,23 @@ return function(game)
     -- (UpdateHPBar2 blocks).  U.frame() is the real yield count: the taps below
     -- each burn a frame, so an iteration counter would under-report.
     local startFrame, samples, blocked = U.frame(), {}, true
-    local iter, shot1, shot2 = 0, false, false
-    for _ = 1, 400 do
-      if not picker.heal then break end
+    local iter, shot1, shot2, paused = 0, false, false, 0
+    local expect = Timing.hpDrainFrames(hpBefore, lead.stats.hp, lead.stats.hp, true)
+    local function stillShot(path)
+      local before = U.frame()
+      U.still(game, path)
+      paused = paused + (U.frame() - before)
+    end
+    while picker.heal and U.frame() - startFrame - paused < 2000 do
       local shown = picker.heal.shown
       samples[#samples + 1] = shown
       local frac = shown / math.max(1, lead.stats.hp)
       if not shot1 and frac > 0.33 then
         shot1 = true
-        U.shot(game, DIR .. "/bug252_fill_third.png")
+        stillShot(DIR .. "/bug252_fill_third.png")
       elseif not shot2 and frac > 0.66 then
         shot2 = true
-        U.shot(game, DIR .. "/bug252_fill_two_thirds.png")
+        stillShot(DIR .. "/bug252_fill_two_thirds.png")
       else
         -- mash B and A: neither may do anything while the bar is filling
         U.tap(game, (iter % 2 == 0) and "b" or "a")
@@ -210,11 +232,14 @@ return function(game)
       iter = iter + 1
       U.wait(1)
     end
-    local frames = U.frame() - startFrame
-    U.log(("fill ran ~%d frames (%.2f s at 60 Hz)"):format(frames, frames / 60))
+    local frames = U.frame() - startFrame - paused
+    U.log(("fill ran ~%d frames (%.2f s at 60 Hz), UpdateHPBar2 budget %d")
+            :format(frames, frames / 60, expect))
     check("the fill took more than half a second (it animates, not snaps)",
           frames > 30)
-    check("the fill is not absurdly long (< 3 s)", frames < 180)
+    -- engine/gfx/hp_bar.asm:81-135
+    check(("the fill runs the D + 2P + 6 budget (%d ~ %d)"):format(frames, expect),
+          math.abs(frames - expect) <= 2)
     check("A and B did nothing while the bar filled", blocked)
     local rose = #samples >= 2 and samples[#samples] > samples[1]
     check("the drawn HP climbed over those frames", rose)
@@ -236,17 +261,10 @@ return function(game)
     U.wait(60) -- let the line type out, so the shot shows the text not an empty box
     U.shot(game, DIR .. "/bug252_message_over_party.png")
 
-    -- TextBox pops BEFORE it fires onDone, which is what makes
-    -- PartyMenu:close's identity check land on the picker
-    for _ = 1, 30 do
-      if not inStack(isPicker) then break end
-      U.tap(game, "a")
-      U.wait(8)
-    end
-    check("the picker is gone once the message is dismissed", not inStack(isPicker))
+    check("the picker is gone once the message is dismissed", dismissMessage())
     local flashed = isFlash(top())
     check("the return to the bag whites out (#2125)", flashed)
-    if flashed then U.shot(game, DIR .. "/bug2125_white.png") end
+    if flashed then U.still(game, DIR .. "/bug2125_white.png") end
     for _ = 1, 40 do
       if not isFlash(top()) then break end
       U.wait(1)
@@ -257,38 +275,51 @@ return function(game)
   end
   backToOverworld()
 
-  -- ======== contrast: ANTIDOTE must NOT animate ===========================
-  U.log("======== #252 contrast: ANTIDOTE (no bar fill at all) ========")
+  -- engine/items/item_effects.asm:1223-1237
+  U.log("======== #252 ANTIDOTE: cure message over the party menu ========")
   local cure = openPickerFor("ANTIDOTE")
   if check("party picker opened for ANTIDOTE", cure ~= nil) then
-    check("keepOpen is off for a status cure", cure.keepOpen ~= true)
-    cursorTo(cure, 3) -- the poisoned SNORLAX
+    check("keepOpen is on for a status cure", cure.keepOpen == true)
+    cursorTo(cure, 3)
     U.tap(game, "a")
     U.wait(6)
     check("no fill was started for a status cure", cure.heal == nil)
-    check("the picker popped itself, like every non-medicine item",
-          not inStack(isPicker))
-    U.shot(game, DIR .. "/bug252_antidote_message.png")
     check("PSN was cured", poisoned.status == nil)
+    for _ = 1, 60 do
+      if isBox(top()) then break end
+      U.wait(1)
+    end
+    local box = top()
+    check("the cure message opened", isBox(box))
+    check("...over the still-drawn party menu", inStack(isPicker))
+    check("...with the menu cursor erased", cure.cursorsErased == true)
+    if isBox(box) then
+      local out = {}
+      for _, page in ipairs(box.pages or {}) do
+        for _, line in ipairs(page) do out[#out + 1] = line end
+      end
+      local said = table.concat(out, " ")
+      U.log("box reads:", said)
+      check("...and it is the poison-cured line",
+            said:find("poison", 1, true) ~= nil)
+    end
+    U.wait(60)
+    U.shot(game, DIR .. "/bug252_antidote_message.png")
+    check("the picker is gone once the cure message is dismissed",
+          dismissMessage())
+    local flashed = isFlash(top())
+    check("the return to the bag whites out after the cure", flashed)
+    if flashed then U.still(game, DIR .. "/bug252_antidote_white.png") end
+    for _ = 1, 40 do
+      if not isFlash(top()) then break end
+      U.wait(1)
+    end
+    local back = top()
+    check("and the cure returns to the ITEM list",
+          back ~= nil and back.screenId == "BagMenu")
   end
   backToOverworld()
 
-  -- ---- verdict, then re-arm and hand off ----------------------------------
   U.log(("======== machine checks: %d passed, %d failed ========"):format(pass, fail))
-
-  lead.hp = 1
-  fainted.hp = 0
-  poisoned.status = "PSN"
-  local rearmed = openPickerFor("MAX_POTION")
-  if rearmed then cursorTo(rearmed, 1) end
-
-  U.log("The bag, USE and the party picker are re-opened with the cursor on a")
-  U.log("1 HP CHARIZARD and a MAX POTION chosen. Press A, watch slot 1's bar:")
-  U.log("the list stays up, the bar lengthens over ~1.5s with the number, and")
-  U.log("buttons do nothing until it lands. #252 was the list snapping shut.")
-  U.log("Spare items are in the bag if you want to run it again.")
-
-  while true do
-    coroutine.yield()
-  end
+  love.event.quit(fail == 0 and 0 or 1)
 end

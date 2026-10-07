@@ -25,6 +25,9 @@ function M.text(c, off)
   end
   error("RS text is unterminated")
 end
+function M.label(c, off)
+  return off and c.S.namesAt(off)[1] or nil
+end
 function M.pairs(c, name, signed)
   local off, out = c:off(name), {}
   for i = 0, c.S.size(name) / 2 - 1 do

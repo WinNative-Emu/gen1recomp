@@ -50,6 +50,7 @@ local function detailRows(open) S._detailRowsOpen = open end
 function S.openMenu(party, index, opts)
   opts = opts or {}
   S._man, S._party, S._opts = S.manifest(), party or {}, opts
+  S._contestDescriptions = {}
   S._cursor = index or 1
   S._playerState = opts.playerState or opts.session
     or require("src.core.game3.runtime").getSession()
@@ -393,15 +394,20 @@ local function portrait()
   local img, q = Ui.ballQuad(Balls.ballIdForItem(m.pokeball), 0)
   if img and S._ballReady then love.graphics.setColor(1, 1, 1, 1); love.graphics.draw(img, q, -2, 128) end
 end
+-- pokeruby/src/region_map.c:1143
+function S.locationName(sec)
+  local C = require("src.core.game3.constants").active(S._playerState)
+  if sec == C:require("region_map_sections", "MAPSEC_EVIL_TEAM_HIDEOUT") then return RomText.plain("gOtherText_Hideout") end
+  -- pokeruby/src/region_map.c:1130
+  if sec == C:require("region_map_sections", "MAPSEC_DYNAMIC") then return RomText.plain("gOtherText_Ferry") end
+  if sec == C:require("region_map_sections", "MAPSEC_SECRET_BASE") then return RomText.plain("gOtherText_SecretBase") end
+  return require("src.ui.game3.rse.mapsec").name(sec)
+end
 local function memo()
   local m, owner = mon(), S._opts.owner or S._playerState
-  local location = m.metLocationName
-  if not location then
-    local entry = require("src.import.gba.map_sections_extract").getInfo(tonumber(m.metLocation) or 0, nil, 0)
-    location = entry and (entry.rawName or entry.name)
-  end
   local x, y = 88, 112
-  for _, run in ipairs(Policy.memo(m, owner, location)) do
+  -- pokeruby/src/pokemon_summary_screen.c:2543
+  for _, run in ipairs(Policy.memo(m, owner, S.locationName(tonumber(m.metLocation) or 0))) do
     local first = true
     for value in (run.text .. "\n"):gmatch("(.-)\n") do
       if not first then x, y = 88, y + 16 end
@@ -495,7 +501,10 @@ local function moves()
         local amount = value == 255 and 0 or math.floor(value / 10)
         for i = 0, 7 do frame(S._man.hearts, row == 1 and (i < amount and 1 or 0) or (i < amount and 3 or 4), 48 + i % 4 * 8, 120 + (row - 1) * 16 + math.floor(i / 4) * 8) end
       end
-      print(effect.description, 88, 120, 255)
+      local descriptions = S._contestDescriptions or {}
+      S._contestDescriptions = descriptions
+      descriptions[effect] = descriptions[effect] or SummaryData.contestEffectDescription(effect)
+      print(descriptions[effect], 88, 120, 255)
     else
       local def = Pokemon.battleMove(id)
       text("gOtherText_Power2", 8, 120); text("gOtherText_Accuracy2", 8, 136)

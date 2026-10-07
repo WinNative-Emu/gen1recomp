@@ -1251,21 +1251,19 @@ function BattleState:waitNext(frames)
   table.insert(self.queue, self.nextInsert, { wait = frames })
 end
 
--- One frame of the HP-bar drain (engine/gfx/hp_bar.asm UpdateHPBar).
---
--- The original walks the bar ONE HP POINT per loop iteration (:81-120), and
--- what each iteration costs depends on the side:
---   * UpdateHPBar_PrintHPNumber spends a DelayFrame (:234) reprinting the
---     number, but only when wHPBarType is nonzero (:207-209) -- the player's
---     own HUD and the party menu, never the enemy's;
---   * UpdateHPBar_AnimateHPBar spends 2 frames for each pixel the bar
---     actually moved (:147-148), and most single-HP steps move none.
--- So the player's bar drains at 1 HP per frame plus 2 frames per pixel,
--- while the enemy's costs nothing until it crosses a pixel boundary.  The
--- old flat maxHP/96 rate was the enemy-side formula applied to both, which
--- ran a 150 HP mon's full drain in 96 frames against hardware's 249.
---
--- Returns true while animating.
+-- engine/gfx/hp_bar.asm:121-135
+function BattleState:hpDrainClose(b, goal)
+  local cycles = b.drainCycles or 0
+  local roundUp = b.drainRoundUp
+  b.drainCycles = nil
+  b.drainRoundUp = nil
+  if goal ~= 0 then cycles = cycles + Timing.HP_BAR_STEP_CYCLES end
+  -- engine/gfx/hp_bar.asm:133-134
+  b.shownPx = Timing.hpBarPixels(goal, math.max(1, b.mon.stats.hp))
+  return Timing.hpDrainClosingFrames(b == self.player, cycles, roundUp)
+end
+
+-- engine/gfx/hp_bar.asm:81-120
 function BattleState:stepHPDrain()
   local busy = false
   local only = self.drainOnly
@@ -1279,7 +1277,8 @@ function BattleState:stepHPDrain()
       end
       local maxHP = math.max(1, b.mon.stats.hp)
       local playerSide = (b == self.player)
-      local targetPx = Timing.hpBarPixels(b.shownHP, maxHP)
+      local barPx = b.draining and Timing.hpBarLength or Timing.hpBarPixels
+      local targetPx = barPx(b.shownHP, maxHP)
       if not b.shownPx then b.shownPx = targetPx end
       if (b.drainHold or 0) > 0 then
         b.drainHold = b.drainHold - 1
@@ -1306,26 +1305,33 @@ function BattleState:stepHPDrain()
         -- enemy HUD several free steps can land in the same frame
         repeat
           b.shownHP = b.shownHP + ((b.shownHP > goal) and -1 or 1)
-          spent = spent + (playerSide and Timing.HP_BAR_HP_STEP or 0)
-          targetPx = Timing.hpBarPixels(b.shownHP, maxHP)
+          if playerSide then
+            spent = spent + Timing.HP_BAR_HP_STEP
+          else
+            -- engine/gfx/hp_bar.asm:96
+            b.drainCycles = (b.drainCycles or 0) + Timing.HP_BAR_STEP_CYCLES
+          end
+          targetPx = Timing.hpBarLength(b.shownHP, maxHP)
         until b.shownHP == goal or targetPx ~= b.shownPx or spent >= 1
+        b.draining = true
         if spent > 0 then
           b.drainHold = spent - 1
         elseif targetPx ~= b.shownPx then
-          -- the enemy HUD printed no number, so this frame is already the
-          -- first of the pixel step the crossing just asked for
+          -- engine/gfx/hp_bar.asm:140-148
           b.shownPx = b.shownPx + ((b.shownPx > targetPx) and -1 or 1)
-          b.drainHold = Timing.HP_BAR_PIXEL_STEP - 1
+          local lag, tie = Timing.hpBarCpuLag(b.drainCycles, b.drainRoundUp)
+          if tie then b.drainRoundUp = (b.drainRoundUp == false) end
+          b.drainHold = Timing.HP_BAR_PIXEL_STEP - 1 + lag
+          b.drainCycles = 0
         else
-          b.drainHold = 0
+          b.draining = nil
+          b.drainHold = self:hpDrainClose(b, goal) - 1
         end
-        b.draining = true
         busy = true
       elseif b.draining then
-        -- .animateHPBarDone's final number print, one more pixel step and
-        -- Delay3 (hp_bar.asm:132-135); this frame is the first of them
+        -- engine/gfx/hp_bar.asm:121-135
         b.draining = nil
-        b.drainHold = Timing.hpDrainClosingFrames(b == self.player) - 1
+        b.drainHold = self:hpDrainClose(b, goal) - 1
         busy = true
       end
     end
@@ -7029,10 +7035,12 @@ function BattleState:drawTextArea()
       and self:arrowOwnsCell()
     for li, line in ipairs(self.shown or {}) do
       local y = (ys[li] or 128) + off
+      local pen = 8
       for i = 1, #line do
         if not (arrowCell and li == 2 and i == 18) then
-          drawGlyph(line[i], 8 + (i - 1) * 8, y)
+          drawGlyph(line[i], pen, y)
         end
+        pen = pen + Font.advanceOf(line[i])
       end
     end
     -- the blinking down arrow ('▼', glyph $EE) while a \v CONT wait

@@ -11,6 +11,7 @@ local BattleText = require("src.core.game3.battle.battle_text")
 local Adapter = require("src.core.game3.battle.adapter")
 local ShinySeq = require("src.core.game3.battle.shiny_seq")
 local MonAnimBattle = require("src.core.game3.battle.mon_anim_battle")
+local TrainerPic = require("src.core.game3.trainer_pic")
 
 local IntroSeq = {}
 
@@ -414,7 +415,7 @@ function IntroSeq.begin(st, opts)
   s.trainer.player.visible = true
   s.trainer.player.gender = playerGender
   s.trainer.player.ox = 240
-  s.trainer.player.frame = 0
+  s.trainer.player.frame = TrainerPic.backIdleFrame(playerGender)
 
   if st.wild then
     local p = Anim.present("enemy")
@@ -528,7 +529,7 @@ local function run_step(step)
       s.trainer.player.visible = true
       s.trainer.player.gender = d.gender or 0
       s.trainer.player.ox = d.playerFrom or 240
-      s.trainer.player.frame = 0
+      s.trainer.player.frame = TrainerPic.backIdleFrame(s.trainer.player.gender)
       s.bgSlide.playerOx = d.playerFrom or 240
     end
     if d.slideEnemy then
@@ -642,7 +643,7 @@ local function run_step(step)
       s.trainer.player.visible = true
       s.trainer.player.gender = d.gender or 0
       s.trainer.player.ox = d.playerFrom or 240
-      s.trainer.player.frame = 0
+      s.trainer.player.frame = TrainerPic.backIdleFrame(s.trainer.player.gender)
       wait_busy()
       local function start_move()
         Anim.tweenStage(d.frames or 120, function(u)
@@ -829,12 +830,12 @@ local function run_step(step)
     if not tr.visible then
       tr.visible = true
       tr.ox = 0
-      tr.frame = 0
       tr.gender = (IntroSeq._opts and IntroSeq._opts.playerGender) or 0
+      tr.frame = TrainerPic.backIdleFrame(tr.gender)
     end
     s.partyBar.player.visible = false
-    -- pret sAnimCmd_Red_1: 1(20) 2(6) 3(6) 4(24) 0(1) = 57f; exit linear ox 0→-120 over 50f.
-    local pose = { { 1, 20 }, { 2, 6 }, { 3, 6 }, { 4, 24 }, { 0, 1 } }
+    -- pokeemerald/src/battle_controller_player.c:2931
+    local pose = TrainerPic.backAnims(tr.gender).throw
     local poseFrame, poseLeft, poseI = 0, 0, 0
     local exitTo = -120
     local mons = {}

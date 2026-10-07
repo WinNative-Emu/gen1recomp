@@ -12,6 +12,15 @@ NativeTileset._pairs = {} -- [pair] = { image, overImage?, quads, overQuads, ...
 NativeTileset._cache = nil
 NativeTileset._logged = {}
 NativeTileset._ready = {}
+NativeTileset._use = {}
+NativeTileset._tick = 0
+NativeTileset._gen = 0
+NativeTileset.RESIDENT_MAX = 4
+
+local function touch(pair)
+  NativeTileset._tick = NativeTileset._tick + 1
+  NativeTileset._use[pair] = NativeTileset._tick
+end
 
 local makeStream
 local function nativeRoot() return Extract.NATIVE_ROOT or (Extract.CACHE_ROOT .. "/native") end
@@ -27,6 +36,7 @@ end
 function NativeTileset.install(cache, _bundle)
   NativeTileset._cache = cache
   NativeTileset._pairs = {}
+  NativeTileset._use = {}
   NativeTileset._logged = {}
   NativeTileset._ready = {}
   resetStream()
@@ -38,6 +48,7 @@ end
 
 function NativeTileset.invalidate()
   NativeTileset._pairs = {}
+  NativeTileset._use = {}
   NativeTileset._logged = {}
   NativeTileset._ready = {}
   resetStream()
@@ -90,6 +101,8 @@ end
 makeStream = function()
   return Stream.new("pair", NativeTileset._cache, nativeRoot(), uploadPair, function(pair, ts)
     NativeTileset._pairs[pair] = ts
+    NativeTileset._gen = NativeTileset._gen + 1
+    touch(pair)
     bind_anim(pair, ts, ts.preparedAnim)
     ts.preparedAnim = nil
     if not NativeTileset._logged[pair] then
@@ -109,7 +122,7 @@ end
 function NativeTileset.get(pair)
   if not pair then return nil end
   local cached = NativeTileset._pairs[pair]
-  if cached then bind_anim(pair, cached); return cached end
+  if cached then touch(pair); bind_anim(pair, cached); return cached end
   local stream = NativeTileset._stream
   if not stream then return nil end
   local ts, err = stream:get(pair)
@@ -333,6 +346,51 @@ function NativeTileset.resetSlotPalette(pairOrTs, slot)
   NativeTileset.setSlotPalette(ts, slot, list)
   ts.patchedSlots[slot] = nil
   return true
+end
+
+local IMAGE_KEYS = { "image", "overImage", "imageAlt", "overImageAlt" }
+local DATA_KEYS = { "imageData", "overImageData" }
+
+local function releaseObj(o)
+  if o and o.release then pcall(o.release, o) end
+end
+
+function NativeTileset.resident()
+  local n = 0
+  for _ in pairs(NativeTileset._pairs) do n = n + 1 end
+  return n
+end
+
+function NativeTileset.trim(keep, max, busy)
+  keep, busy = keep or {}, busy or {}
+  max = max or NativeTileset.RESIDENT_MAX
+  local total = NativeTileset.resident()
+  local evicted = {}
+  if total <= max then return evicted end
+  local use = NativeTileset._use
+  local order = {}
+  for pair, ts in pairs(NativeTileset._pairs) do
+    local held = keep[pair]
+    for _, k in ipairs(IMAGE_KEYS) do
+      if ts[k] and busy[ts[k]] then held = true end
+    end
+    if not held then order[#order + 1] = pair end
+  end
+  table.sort(order, function(a, b) return (use[a] or 0) < (use[b] or 0) end)
+  local anim = tilesetAnim()
+  for _, pair in ipairs(order) do
+    if total <= max then break end
+    local ts = NativeTileset._pairs[pair]
+    NativeTileset._pairs[pair], use[pair] = nil, nil
+    if anim and anim.unbindPair then anim.unbindPair(pair) end
+    for _, k in ipairs(IMAGE_KEYS) do releaseObj(ts[k]); ts[k] = nil end
+    for _, k in ipairs(DATA_KEYS) do releaseObj(ts[k]); ts[k] = nil end
+    ts.quads, ts.overQuads, ts.slotPix, ts._pend = {}, {}, {}, nil
+    ts.idxBlob, ts.overBlob = nil, nil
+    evicted[#evicted + 1] = pair
+    total = total - 1
+  end
+  return evicted
 end
 
 return NativeTileset

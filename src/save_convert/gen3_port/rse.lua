@@ -653,6 +653,8 @@ function Rse.writeSections(codec, encoded, template, save, sections)
       end
     end
   end
+  local boxFlags = codec.boxFlagsOf and codec.boxFlagsOf(save)
+  if boxFlags ~= nil and codec.BOX_FLAGS_OFFSET then w1:w8(codec.BOX_FLAGS_OFFSET, boxFlags) end
   return { sb2 = w2:str(), sb1 = w1:str(), storage = encoded.storage, notes = notes,
     nativeRecordMixMail = codec.L.FAMILY == "emerald" and hasNativeMixBytes(save.mail) }
 end

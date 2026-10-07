@@ -72,6 +72,7 @@ Player.surfing = false
 Player.fishing = false
 Player.prevCellX = 0
 Player.prevCellY = 0
+Player.stepSerial = 0
 -- pokefirered/src/field_player_avatar.c:325
 Player.animDisabled = false
 -- pokefirered/src/event_object_movement.c:7741
@@ -373,6 +374,7 @@ local function beginStep(tx, ty, run, ledge)
   Player.updateElevation(tx, ty, Player.cellX, Player.cellY)
   Player.prevCellX = Player.cellX
   Player.prevCellY = Player.cellY
+  Player.stepSerial = (Player.stepSerial or 0) + 1
   Player.moving = true
   Player.progress = 0
   Player.targetX = tx

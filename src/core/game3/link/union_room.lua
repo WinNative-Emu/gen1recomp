@@ -30,8 +30,6 @@ Union.LINK_GROUP = {
   POKEMON_JUMP = 4,
   BERRY_CRUSH = 5,
   BERRY_PICKING = 6,
-  WONDER_CARD = 7,
-  WONDER_NEWS = 8,
   UNION_ROOM_RESUME = 9,
   UNION_ROOM_INIT = 10,
   -- pokeemerald/include/constants/union_room.h:70
@@ -77,15 +75,20 @@ Union.INVITE_ITEMS = {
   { key = "EXIT", activity = Union.ACTIVITY.NONE, union = true },
 }
 
--- pokefirered/src/data/union_room.h:1 sLinkGroupActivityNameTexts
-Union.ACTIVITY_NAMES = RomText.lazy({
-  [1] = "sLinkGroupActivityNameTexts[1]",
-  [2] = "sLinkGroupActivityNameTexts[2]",
-  [3] = "sLinkGroupActivityNameTexts[3]",
-  [4] = "sLinkGroupActivityNameTexts[4]",
-  [5] = "sLinkGroupActivityNameTexts[5]",
-  [8] = "sLinkGroupActivityNameTexts[8]",
-  [12] = "sLinkGroupActivityNameTexts[12]",
+Union.ACTIVITY_NAME_IDS = {
+  -- pokefirered/src/data/union_room.h:1
+  frlg = { 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 21, 22 },
+  -- pokeemerald/src/data/union_room.h:592
+  rse = { 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 14, 15, 16, 21, 22, 23, 24, 25, 26, 27, 28 },
+}
+Union.ACTIVITY_NAMES = setmetatable({}, {
+  __index = function(_, raw)
+    raw = tonumber(raw)
+    for _, id in ipairs(Union.ACTIVITY_NAME_IDS[Family.of()] or {}) do
+      if id == raw then return RomText.plain(RomText.key("sLinkGroupActivityNameTexts", id)) end
+    end
+    return nil
+  end,
 })
 
 Union.AVATARS_FILE = "data/generated/gba/union_room/avatars.lua"
@@ -395,10 +398,113 @@ function Union.retryWaitingAvatars()
   Union._avatarWaiting = waiting
 end
 
+Union.WANDER = true
+Union.WANDER_NEAR_PLAYER = 2
+
+local function wanderMod()
+  return require("src.core.game3.link.plaza_wander")
+end
+
+local STATUS_KIND = { chatting = "chat", trading = "trade", battling = "battle" }
+
+function Union.memberStatusKind(p)
+  if type(p) ~= "table" then return nil end
+  local kind = STATUS_KIND[p.status]
+  if kind or p.status ~= nil then return kind end
+  local raw = math.floor(tonumber(p.activity) or 0) % Union.IN_UNION_ROOM
+  local A = Union.ACTIVITY
+  if raw == A.CHAT or raw == A.CARD then return "chat" end
+  if raw == A.TRADE or raw == A.SPIN_TRADE then return "trade" end
+  if raw == A.BATTLE_SINGLE or raw == A.BATTLE_DOUBLE or raw == A.BATTLE_MULTI then return "battle" end
+  return nil
+end
+
+function Union.memberIdle(p)
+  if type(p) ~= "table" or p.gone then return false end
+  if p.status ~= nil and p.status ~= "idle" then return false end
+  return idleActivity(p.activity)
+end
+
+local ENTER_OPTS = { surfing = false, elevation = 3 }
+
+function Union.wanderWalkable(x, y, fromX, fromY, dir)
+  local Coll = package.loaded["src.core.game3.collision"]
+  if not (Coll and Coll._mapId == plazaMap().MAP_ID and Coll.canEnter) then return false end
+  if Coll.inBounds and not Coll.inBounds(x, y) then return false end
+  if Coll.isWater and Coll.isWater(x, y) then return false end
+  ENTER_OPTS.fromX, ENTER_OPTS.fromY, ENTER_OPTS.dir = fromX, fromY, dir
+  local ok = Coll.canEnter(link().game(), x, y, ENTER_OPTS)
+  return ok == true
+end
+
+local function wanderCellFree(x, y, fromX, fromY, dir)
+  if playerOn(x, y) then return false end
+  local Obj = objects()
+  if Obj and Obj.blocks and Obj.blocks(x, y) then return false end
+  return Union.wanderWalkable(x, y, fromX or x, fromY or y, dir)
+end
+
+local function playerNear(x, y)
+  local P = playerMod()
+  if not P then return false end
+  local near = Union.WANDER_NEAR_PLAYER
+  local px, py = tonumber(P.cellX), tonumber(P.cellY)
+  if px and py and math.abs(px - x) <= near and math.abs(py - y) <= near then return true end
+  if not P.moving then return false end
+  px, py = tonumber(P.targetX), tonumber(P.targetY)
+  return px ~= nil and py ~= nil and math.abs(px - x) <= near and math.abs(py - y) <= near
+end
+
+local WANDER_ENV = { free = wanderCellFree }
+
+function Union.tickWander()
+  local dirty = false
+  local onPlaza = Union.WANDER and link().currentMap() == plazaMap().MAP_ID
+  for slot = 1, Union.capacity() do
+    local v = Union.vobj(slot)
+    local p = Union.players[slot]
+    if v and v.visible then
+      local w = v.wander
+      if not w or w.homeX ~= v.x or w.homeY ~= v.y then
+        w = wanderMod().new(slot * 7919 + (tonumber(p and p.trainerId) or 0) + 1, v.x, v.y)
+        v.wander = w
+      end
+      if v.anim == nil then
+        WANDER_ENV.frozen = Union._talkSlot == slot or Union.partnerId == slot
+        WANDER_ENV.canWander = onPlaza and Union.memberIdle(p) and not playerNear(v.x, v.y)
+        if wanderMod().tick(w, WANDER_ENV) then dirty = true end
+      end
+    elseif v then
+      v.wander = nil
+    end
+  end
+  return dirty
+end
+
+function Union.avatarCell(slot)
+  local v = Union.vobj(slot)
+  if not v then return nil end
+  local w = v.wander
+  if w then return w.x, w.y, w.moving end
+  return v.x, v.y, false
+end
+
+function Union.slotAtCell(x, y)
+  for slot = 1, Union.capacity() do
+    local v = Union.vobj(slot)
+    if v and v.visible then
+      local cx, cy, moving = Union.avatarCell(slot)
+      if cx == x and cy == y and not moving then return slot end
+    end
+  end
+  return nil
+end
+
 -- pokefirered/src/event_object_movement.c:9354
 function Union.animateVobjs()
   local dirty = Union._vobjDirty
   local vobjs = Union._vobjs
+  if Union.tickWander() then dirty = true end
   for _, v in pairs(vobjs) do
     if v.anim == "in" then
       v.y2 = math.min(0, v.y2 + Union.FLY_STEP)
@@ -431,9 +537,22 @@ function Union.animateVobjs()
     if v.visible then
       local rec = VirtualObjects.get(id) or VirtualObjects.spawn(id, v.gfx, v.x, v.y, 3, v.dir)
       if rec then
+        local w = v.wander
         rec.graphicsId = v.gfx
         rec.x, rec.y = v.x, v.y
         rec.direction = v.dir
+        rec.prevX, rec.prevY, rec.px, rec.py, rec.moving = nil, nil, nil, nil, nil
+        if w then
+          rec.x, rec.y = w.x, w.y
+          if w.facing and Union._talkSlot ~= v.slot then rec.direction = Union.FACE_DIR[w.facing] or v.dir end
+          if w.moving then
+            rec.prevX, rec.prevY, rec.px, rec.py, rec.moving = w.prevX, w.prevY, w.px, w.py, true
+            rec.targetX, rec.targetY = w.x, w.y
+          else
+            rec.targetX, rec.targetY = nil, nil
+          end
+          rec.animClock, rec.stepFrames, rec.stepFlip = w.animClock, wanderMod().STEP_FRAMES, w.stepFlip
+        end
         rec.y2 = v.y2
         rec.solid = v.anim ~= "out"
       end
@@ -469,7 +588,7 @@ function Union.tryInteractWithMember()
   local d = P and FACING_DELTA[P.facing or "down"]
   if not d then return nil end
   local fx, fy = (tonumber(P.cellX) or 0) + d[1], (tonumber(P.cellY) or 0) + d[2]
-  local slot = plazaMap().slotAt(fx, fy)
+  local slot = Union.slotAtCell(fx, fy)
   if not slot then return nil end
   local p = Union.players[slot]
   local v = Union.vobj(slot)
@@ -1603,6 +1722,7 @@ end
 
 function Union.relayTick(_dt)
   local L = link()
+  if not package.loaded["src.ui.game3.link_tags"] then pcall(require, "src.ui.game3.link_tags") end
   if not L.online() then
     Union.plazaOffline()
     Union.animateAll()
@@ -2583,6 +2703,8 @@ function Union.roomPartnerAvatar(room)
   return nil
 end
 
+Union.GROUP_JOIN_TICKS = 600
+
 function Union.directRows(wire)
   local out = {}
   for _, e in ipairs(link().clientCall("directEntries", wire) or {}) do
@@ -2596,6 +2718,11 @@ function Union.directRows(wire)
         out[#out + 1] = { key = "p:" .. tostring(e.id), kind = "player", id = e.id,
           name = av.name or e.name, trainerId = av.trainerId, gender = av.gender, version = av.version,
           canLinkNationally = av.canLinkNationally == true }
+      elseif e.kind == "group" and e.leader ~= nil
+          and (tonumber(e.joined) or 0) < (tonumber(e.max) or 2) then
+        out[#out + 1] = { key = "g:" .. tostring(e.leader), kind = "group", id = e.leader, leader = e.leader,
+          name = av.name or e.name, trainerId = av.trainerId, gender = av.gender,
+          version = av.version or e.version, canLinkNationally = av.canLinkNationally == true }
       end
     end
   end
@@ -2698,6 +2825,11 @@ function Union.chooseDirect(ctx, adapters, group, _direct)
       if D then D.setFrozen(true) end
       st.handle = L.clientCall("invite", row.id, wire, { ruleset = ruleset }, profile)
       if M then M.show(Union.askedToJoinText(wire, row.name), { stay = true }) end
+    elseif row.kind == "group" then
+      st.phase, st.row, st.sawGroup, st.waited = "grouping", row, false, 0
+      if D then D.setFrozen(true) end
+      L.clientCall("joinGroup", row.leader, profile, L.avatar())
+      if M then M.show(Union.askedToJoinText(wire, row.name), { stay = true }) end
     elseif row.locked then
       askPin(row)
     else
@@ -2722,6 +2854,15 @@ function Union.chooseDirect(ctx, adapters, group, _direct)
       elseif h.state == "closed" and h.why ~= "accepted" and h.why ~= "crossed" then
         local row = st.row or {}
         notice(h.why == "declined" and Union.rejectText(Union.GROUP_ACTIVITY[group].activity, row.gender) or busy)
+      end
+    elseif st.phase == "grouping" then
+      local g = L.clientCall("group")
+      st.waited = st.waited + 1
+      if type(g) == "table" and g.leader == st.row.leader then
+        st.sawGroup = true
+      elseif st.sawGroup or st.waited > Union.GROUP_JOIN_TICKS then
+        L.clientCall("leaveGroup")
+        notice(st.sawGroup and Union.rejectText(Union.GROUP_ACTIVITY[group].activity, st.row.gender) or busy)
       end
     elseif st.phase == "joining" then
       local p = st.pending
@@ -2806,7 +2947,10 @@ function Union.directFlow(ctx, adapters, group, role)
   L.setStatus("idle")
   local _, _, linkType = Union.directDest(group)
   return Union.waitForMatch(ctx, adapters, {
-    cancel = function() L.clientCall("leaveDirect") end,
+    cancel = function()
+      L.clientCall("leaveDirect")
+      if type(L.clientCall("group")) == "table" then L.clientCall("leaveGroup") end
+    end,
     refuse = function(room)
       if wire ~= "trade" then return nil end
       local ready = Union.tradeReadyWith(Union.roomPartnerAvatar(room))

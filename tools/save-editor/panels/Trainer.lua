@@ -24,6 +24,9 @@ function M.draw(S, Kit, x, y, w, h)
   if Gen.hasBuenaPoints(S.save, S.version) then
     fields[#fields + 1] = { "buenaPoints", "Buena points", Gen.buenaPoints(S.save, S.version) }
   end
+  if Gen.hasBerryPowder(S.save, S.version) then
+    fields[#fields + 1] = { "berryPowder", "Berry Powder", Gen.berryPowder(S.save, S.version) }
+  end
   local contentH = S._trainerHeight or 0
   S.trainerScroll = Kit.scrollPixels(x, y, w, h, S.trainerScroll or 0, contentH)
   Kit.pushClip(x, y, w, h)
@@ -31,7 +34,8 @@ function M.draw(S, Kit, x, y, w, h)
   S.trainerDrafts = S.trainerDrafts or {}
   for _, f in ipairs(fields) do
     if f[1] ~= "name" then
-      local hi = ({ id = 65535, secretId = 65535, money = 999999, coins = 9999, buenaPoints = 30 })[f[1]]
+      local hi = ({ id = 65535, secretId = 65535, money = 999999, coins = 9999, buenaPoints = 30,
+        berryPowder = Gen.BERRY_POWDER_MAX })[f[1]]
       cy = cy
         + Touch.value(
           S,
@@ -45,6 +49,7 @@ function M.draw(S, Kit, x, y, w, h)
             help = f[1] == "money" and "Your wallet. Max fills it."
               or f[1] == "coins" and "Game Corner coins. Max fills the coin case."
               or f[1] == "buenaPoints" and "Blue Card points for Buena's prizes. Choose 0 to 30."
+              or f[1] == "berryPowder" and "Powder from Berry Crush, spent at the Berry Powder shop. Choose 0 to 99999."
               or "Part of your trainer identity. Changing it can affect who owns a Pokémon.",
           },
           cx,

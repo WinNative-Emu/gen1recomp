@@ -179,6 +179,10 @@ function StepEvents.onStepTaken(session, game)
     -- pokeemerald/src/field_control_avatar.c:543
     require("src.core.game3.rse.match_call").incrementRematchStepCounter(session)
   end
+  if isRse then
+    -- pokeemerald/src/field_control_avatar.c:545
+    require("src.core.game3.faraway_island").updateStepCounter()
+  end
 
   -- pokefirered/src/field_control_avatar.c:217
   local MysteryGift = require("src.core.game3.mystery_gift")

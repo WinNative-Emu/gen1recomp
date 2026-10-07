@@ -686,6 +686,7 @@ mod.content.map_songs:override("PALLET_TOWN", "Music_Routes1")
 | `index` | integer >= 0 | no |
 | `label` | string | no |
 | `objects` | list of {pokemon?, ...} | no |
+| `outdoor` | boolean | no |
 | `palette` | string | no |
 | `signs` | list of any value | no |
 | `tileset` | tilesets id | yes |

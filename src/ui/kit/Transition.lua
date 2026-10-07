@@ -12,10 +12,12 @@ Transition.DURATIONS = {
 }
 
 Transition.LAYERS = { "tabs", "online", "modal" }
+Transition.LOCAL = { "box" }
 Transition.PASSIVE = { "toast" }
 
 local ALL = {}
 for i = 1, #Transition.LAYERS do ALL[#ALL + 1] = Transition.LAYERS[i] end
+for i = 1, #Transition.LOCAL do ALL[#ALL + 1] = Transition.LOCAL[i] end
 for i = 1, #Transition.PASSIVE do ALL[#ALL + 1] = Transition.PASSIVE[i] end
 
 local layers = {}

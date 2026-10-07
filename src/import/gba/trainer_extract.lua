@@ -11,8 +11,9 @@ local TrainerExtract = {}
 
 TrainerExtract.FORMAT_VERSION = 5
 TrainerExtract.CACHE_SUB = "trainers"
-TrainerExtract.REQUIRED = { "trainers.lua", "trainers/manifest.lua" }
+TrainerExtract.REQUIRED = { "trainers.lua", "trainers/manifest.lua", "trainers/back_anims.lua" }
 TrainerExtract.DIALOGS_FILE = "dialogs.lua"
+TrainerExtract.BACK_ANIMS_FILE = "back_anims.lua"
 
 -- Party mon strides (ARM EABI sizes used by FRLG gTrainers parties).
 local PARTY_STRIDE = {
@@ -363,6 +364,47 @@ local function bake_back_pic(rom, gender)
   return decode_sheet_rgba(tiles, palBytes, frames)
 end
 
+-- pokeemerald/include/sprite.h:74
+local function read_anim(rom, off)
+  local cmds = {}
+  for i = 0, 63 do
+    local lo, hi = rom:u16(off + i * 4), rom:u16(off + i * 4 + 2)
+    if lo >= 0xFFFD then break end
+    cmds[#cmds + 1] = { lo, hi % 64 }
+  end
+  assert(#cmds > 0, "trainer_extract: empty back pic anim")
+  return cmds
+end
+
+-- pokeemerald/src/pokemon.c:3513
+local function bake_back_anims(rom, count)
+  local base = assert(Versions.TRAINER_BACK_ANIMS_TABLE, "trainer_extract: no TRAINER_BACK_ANIMS_TABLE key")
+  local out = {}
+  for pic = 0, count - 1 do
+    local anims = assert(Versions.gbaToFile(rom:u32(base + pic * 4)), "trainer_extract: bad back pic anim table")
+    local idle = assert(Versions.gbaToFile(rom:u32(anims)), "trainer_extract: bad back pic idle anim")
+    local throw = assert(Versions.gbaToFile(rom:u32(anims + 4)), "trainer_extract: bad back pic throw anim")
+    out[pic] = { idle = read_anim(rom, idle), throw = read_anim(rom, throw) }
+  end
+  return out
+end
+
+local function back_anims_to_lua(anims, count)
+  local function list(cmds)
+    local parts = {}
+    for i, c in ipairs(cmds) do parts[i] = string.format("{%d,%d}", c[1], c[2]) end
+    return "{" .. table.concat(parts, ",") .. "}"
+  end
+  local lines = { "return {" }
+  for pic = 0, count - 1 do
+    lines[#lines + 1] = string.format("  [%d] = { idle = %s, throw = %s },", pic,
+      list(anims[pic].idle), list(anims[pic].throw))
+  end
+  lines[#lines + 1] = "}"
+  lines[#lines + 1] = ""
+  return table.concat(lines, "\n")
+end
+
 local function bake_front_pic(rom, picId)
   picId = tonumber(picId)
   if not picId or picId < 0 then return nil end
@@ -652,6 +694,9 @@ function TrainerExtract.run(rom, cache, opts)
       cache:write(root .. "/back_" .. gender .. ".rgba", rgba)
     end
   end
+  local backCount = TrainerExtract.backPicCount()
+  cache:write(root .. "/" .. TrainerExtract.BACK_ANIMS_FILE,
+    back_anims_to_lua(bake_back_anims(rom, backCount), backCount))
 
   local picCount = assert(Versions.TRAINER_PIC_COUNT, "trainer_extract: no TRAINER_PIC_COUNT key")
   local baked = 0

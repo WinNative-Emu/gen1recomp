@@ -18,6 +18,8 @@ DaycareMenu.ROW_PITCH = 14
 DaycareMenu.TEXT_X = 8
 -- pokefirered/src/daycare.c:1482
 DaycareMenu.LEVEL_RIGHT = 132
+-- pokefirered/src/daycare.c:115 .upText_Y
+DaycareMenu.TEXT_Y = 0
 DaycareMenu.ROW_COUNT = 3
 DaycareMenu.DAYCARE_LEVEL_MENU_EXIT = DAYCARE_LEVEL_MENU_EXIT
 
@@ -65,6 +67,28 @@ end
 
 local function se(id)
   pcall(function() require("src.core.game3.audio").playSe(id) end)
+end
+
+function DaycareMenu.layout()
+  local ok, Profile = pcall(require, "src.core.game3.profile")
+  local row = ok and Profile.forSession and Profile.forSession() or nil
+  local custom = row and type(row.ui) == "table" and row.ui.daycareLevelMenu or nil
+  local W = DaycareMenu.WINDOW
+  if type(custom) ~= "table" then
+    return {
+      left = W.left, top = W.top, width = W.width, height = W.height,
+      rowPitch = DaycareMenu.ROW_PITCH, textX = DaycareMenu.TEXT_X,
+      textY = DaycareMenu.TEXT_Y, levelRight = DaycareMenu.LEVEL_RIGHT,
+    }
+  end
+  return {
+    left = custom.left or W.left, top = custom.top or W.top,
+    width = custom.width or W.width, height = custom.height or W.height,
+    rowPitch = custom.rowPitch or DaycareMenu.ROW_PITCH,
+    textX = custom.textX or DaycareMenu.TEXT_X,
+    textY = custom.textY or DaycareMenu.TEXT_Y,
+    levelRight = custom.levelRight or DaycareMenu.LEVEL_RIGHT,
+  }
 end
 
 function DaycareMenu.textWidth(text)
@@ -134,10 +158,11 @@ function DaycareMenu.label(row)
 end
 
 -- pokefirered/src/daycare.c:1482
-function DaycareMenu.levelX(row)
+function DaycareMenu.levelX(row, layout)
   local text = row and row.level or ""
   if text == "" then return nil end
-  return DaycareMenu.LEVEL_RIGHT - DaycareMenu.textWidth(text)
+  local right = (layout or DaycareMenu._layout or DaycareMenu.layout()).levelRight
+  return right - DaycareMenu.textWidth(text)
 end
 
 function DaycareMenu.isOpen()
@@ -147,10 +172,11 @@ end
 function DaycareMenu.show(dc, onPick)
   local Stack = stackMod()
   if not Stack then return false end
+  DaycareMenu._layout = DaycareMenu.layout()
   DaycareMenu.rowList = DaycareMenu.rows(dc)
   for _, row in ipairs(DaycareMenu.rowList) do
     row.labelText = DaycareMenu.label(row)
-    row.levelXPx = DaycareMenu.levelX(row) or false
+    row.levelXPx = DaycareMenu.levelX(row, DaycareMenu._layout) or false
   end
   DaycareMenu.cursor = 1
   DaycareMenu._onPick = onPick
@@ -204,27 +230,30 @@ function DaycareMenu.handleInput(input)
 end
 
 local _template = nil
+local _templateKey = nil
 
 function DaycareMenu.draw()
   if not (DaycareMenu.open and DaycareMenu.rowList) then return end
   local Window = windowMod()
   if not Window then return end
-  local W = DaycareMenu.WINDOW
-  if not _template then
-    _template = Window.template(W.left, W.top, W.width, W.height)
+  local L = DaycareMenu._layout or DaycareMenu.layout()
+  local key = L.left .. ":" .. L.top .. ":" .. L.width .. ":" .. L.height
+  if not _template or _templateKey ~= key then
+    _template = Window.template(L.left, L.top, L.width, L.height)
+    _templateKey = key
   end
   -- pokefirered/src/daycare.c:1539 DrawStdWindowFrame
   Window.stdFrame(_template)
-  local leftPx, topPx = W.left * 8, W.top * 8
+  local leftPx, topPx = L.left * 8, L.top * 8 + L.textY
   for i = 1, DaycareMenu.ROW_COUNT do
     local row = DaycareMenu.rowList[i]
     if row then
-      local yPx = topPx + (i - 1) * DaycareMenu.ROW_PITCH
+      local yPx = topPx + (i - 1) * L.rowPitch
       -- pokefirered/src/daycare.c:114 .cursor_X
       if i == DaycareMenu.cursor then Window.cursorPx(leftPx, yPx) end
-      Window.printPx(row.labelText or DaycareMenu.label(row), leftPx + DaycareMenu.TEXT_X, yPx)
+      Window.printPx(row.labelText or DaycareMenu.label(row), leftPx + L.textX, yPx)
       local levelX = row.levelXPx
-      if levelX == nil then levelX = DaycareMenu.levelX(row) end
+      if levelX == nil then levelX = DaycareMenu.levelX(row, L) end
       if levelX then Window.printPx(row.level, leftPx + levelX, yPx) end
     end
   end

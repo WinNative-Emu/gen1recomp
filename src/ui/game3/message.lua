@@ -42,17 +42,18 @@ end
 local placeholderCache = {}
 
 -- pokeemerald/src/strings.c:6
-local function cartPlaceholders(extracted)
+local function cartPlaceholders(extracted, game)
   local Extract = require("src.import.gba.text_placeholders_extract")
   local RomText = require("src.core.game3.rom_text")
+  local symbols = Extract.symbolsFor(game)
   local function value(name)
-    local label = Extract.SYMBOLS[name]
+    local label = symbols[name]
     if label and RomText.has(label) then return RomText.plain(label) end
     return extracted[name]
   end
   local out, byGender = {}, {}
   for name, v in pairs(extracted) do out[name] = v end
-  for name in pairs(Extract.SYMBOLS) do out[name] = value(name) end
+  for name in pairs(symbols) do out[name] = value(name) end
   for name, pair in pairs(extracted.byGender or {}) do byGender[name] = pair end
   for name, pair in pairs(Extract.BY_GENDER) do
     byGender[name] = { male = out[pair.male], female = out[pair.female] }
@@ -94,7 +95,7 @@ TextIR.setContextProvider(function(kind, dialect, ctx)
   local okC, CacheFs = pcall(require, "src.import.CacheFs")
   local t = okC and CacheFs.loadActive(dialect.placeholders) or nil
   if type(t) == "table" then
-    placeholderCache[id] = { bundle = bundle, values = cartPlaceholders(t) }
+    placeholderCache[id] = { bundle = bundle, values = cartPlaceholders(t, id) }
     return placeholderCache[id].values
   end
   return nil

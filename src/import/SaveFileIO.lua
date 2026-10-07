@@ -18,6 +18,7 @@ local SaveConvert = require("src.save_convert.SaveConvert")
 local SaveData = require("src.core.SaveData")
 local GameVersion = require("src.core.GameVersion")
 local SaveSerializer = require("src.core.SaveSerializer")
+local SrmDecompress = require("src.import.SrmDecompress")
 
 local SaveFileIO = {}
 
@@ -102,8 +103,18 @@ local SAVE_SIZE = SaveConvert.SAVE_SIZE
 --   * a raw 32768-byte string (the tests and the in-memory path) used as-is;
 --   * any other string treated as an absolute picker path opened with io.open.
 -- A picker path is never 32768 bytes long, so the length test disambiguates it
--- from a raw image cleanly.  Returns bytes, or nil + an error string.
+-- from a raw image cleanly.  RetroArch RZIP-compressed images are unwrapped
+-- here; size policy stays in importToSlot.  Returns bytes, or nil + an error.
 local function readSource(source)
+  local function handleBytes(data)
+    if type(data) ~= "string" then return nil, "the save file was empty" end
+    if SrmDecompress.isCompressed(data) then
+      local d, derr = SrmDecompress.decompress(data)
+      if not d then return nil, "could not decompress the save file: " .. tostring(derr) end
+      return d
+    end
+    return data
+  end
   local t = type(source)
   if t == "table" or t == "userdata" then
     if type(source.read) ~= "function" then
@@ -114,26 +125,25 @@ local function readSource(source)
     local data, readErr = source:read(source:getSize())
     source:close()
     if not data then return nil, "could not read the dropped file: " .. tostring(readErr) end
-    return data
+    return handleBytes(data)
   end
   if t ~= "string" then
     return nil, "no save file was provided"
   end
-  if #source == SAVE_SIZE then
+  if #source == SAVE_SIZE and not SrmDecompress.isCompressed(source) then
     return source
   end
   local f, openErr = io.open(source, "rb")
   if f then
     local data = f:read("*a")
     f:close()
-    if type(data) ~= "string" then return nil, "the save file was empty" end
-    return data
+    return handleBytes(data)
   end
   -- Android SAF drops (picked_save.sav) and USB copies land in the LOVE save
   -- directory; io.open cannot see them, so fall back to love.filesystem.
   if love and love.filesystem and love.filesystem.read then
     local data = love.filesystem.read(source)
-    if type(data) == "string" then return data end
+    if type(data) == "string" then return handleBytes(data) end
   end
   return nil, "could not read the save file: " .. tostring(openErr)
 end
@@ -174,6 +184,7 @@ local function importLuaSlot(bytes, version)
   end
   local slotId = SaveData.createSlot(version)
   if not slotId then return false, "this game has no save slots to import into" end
+  SaveData.claimImportPlaythroughId(version, slotId, save)
   local ok, writeErr = SaveData.writeSlot(version, slotId, save)
   if not ok then
     SaveData.deleteSlot(version, slotId)
@@ -194,6 +205,7 @@ local function importGen3Cart(bytes, version)
   save.meta = SaveData.buildMeta(nil, save.meta)
   local slotId = SaveData.createSlot(version)
   if not slotId then return false, "this game has no save slots to import into" end
+  SaveData.claimImportPlaythroughId(version, slotId, save)
   local ok, writeErr = SaveData.writeSlot(version, slotId, save)
   if not ok then
     SaveData.deleteSlot(version, slotId)
@@ -265,8 +277,10 @@ function SaveFileIO.importToSlot(source, version, force)
   save.meta = SaveData.buildMeta(nil, save.meta)
   local slotId = SaveData.createSlot(version)
   if not slotId then return false, "this game has no save slots to import into" end
+  SaveData.claimImportPlaythroughId(version, slotId, save)
   local ok, writeErr = SaveData.writeSlot(version, slotId, save)
   if not ok then
+    SaveData.deleteSlot(version, slotId)
     return false, "could not write the imported save: " .. tostring(writeErr)
   end
   SaveData.setActiveSlot(version, slotId)

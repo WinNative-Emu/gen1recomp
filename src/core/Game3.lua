@@ -736,11 +736,12 @@ function Game3:zoomStep(delta)
   local offset = Zoom.step(delta, Renderer:fitScale())
   if type(self.options) == "table" then
     self.options.zoom = offset
-    self:writeOptions()
+    lazyReq("src.core.DeferredWrite").schedule("options", function() self:writeOptions() end)
   end
 end
 
 function Game3:update(dt)
+  lazyReq("src.core.DeferredWrite").tick()
   local speed = self:logicSpeed()
   self._frameSpeed = speed
   FixedStep.maxAccum = FixedStep.catchupLimit(speed, dt)
@@ -767,7 +768,8 @@ end
 
 Game3.GC_BUDGET_SEC = 0.0003
 Game3.GC_MAX_STEPS = 64
-Game3.GC_CEILING_KB = 1024 * 1024
+Game3.GC_CEILING_KB = 256 * 1024
+Game3._gcNextKB = nil
 
 function Game3.stepGC()
   if not collectgarbage then return end
@@ -782,7 +784,10 @@ function Game3.stepGC()
   else
     collectgarbage("step", 1)
   end
-  if collectgarbage("count") > Game3.GC_CEILING_KB then collectgarbage("collect") end
+  if collectgarbage("count") > (Game3._gcNextKB or Game3.GC_CEILING_KB) then
+    collectgarbage("collect")
+    Game3._gcNextKB = math.max(Game3.GC_CEILING_KB, collectgarbage("count") * 2)
+  end
 end
 
 function Game3:_drawHud(w, h)
@@ -868,7 +873,8 @@ function Game3:_hotkey(key)
     if self:quickSaveAllowed() then self:saveGame() end
     return true
   elseif key == "f2" then
-    if self.phase == "field" then
+    local okLoad, saved = pcall(SaveData.load)
+    if self.phase == "field" and okLoad and saved and saved.engine == "game3" then
       pcall(function() lazyReq("src.ui.game3.stack").clear() end)
       pcall(function()
         local R = lazyReq("src.core.game3.runtime")
@@ -880,6 +886,9 @@ function Game3:_hotkey(key)
     return true
   elseif hk == "1" then
     self:_cycleSpeed(1)
+    return true
+  elseif hk == "0" then
+    self:_cycleSpeed(-1)
     return true
   elseif hk == "3" then
     if self:zoomGateOK() then
@@ -1115,6 +1124,18 @@ function Game3:gamepadaxis(joystick, axis, value)
         return
       end
     end
+    local stickEvents = self.input and self.input.stickAxisEvents and self.input:stickAxisEvents(axis, value)
+    if stickEvents then
+      for i = 1, #stickEvents do
+        local ev = stickEvents[i]
+        if ev.phase == "pressed" then
+          self:_padPressedBody(joystick, ev.button)
+        elseif ev.phase == "released" then
+          self:_padReleasedBody(joystick, ev.button)
+        end
+      end
+      return
+    end
     if self.input and self.input.gamepadaxis then self.input:gamepadaxis(joystick, axis, value) end
   end
   if not ModRuntime.wantsHook("input.gamepad") then return vanilla() end
@@ -1179,6 +1200,8 @@ function Game3:focus(f)
   if f then
     if self.input then self.input:reconcile() end
     Audio.onFocusGained()
+  else
+    lazyReq("src.core.DeferredWrite").flush("options")
   end
 end
 
@@ -1186,6 +1209,7 @@ function Game3:visible(v)
   if v then
     self:onResume()
   else
+    lazyReq("src.core.DeferredWrite").flush("options")
     if self.input then self.input:reset() end
     if self.touchControls then self.touchControls:reset() end
   end
@@ -1305,6 +1329,7 @@ local SOFT_RESET = {
   { "src.ui.game3.teachy_tv", closeFlag("open") },
   { "src.ui.game3.slot_machine", closeFlag("open") },
   { "src.ui.game3.mod_manager", closeFlag("open") },
+  { "src.ui.game3.controls_menu", "close" },
   { "src.ui.game3.shaderfx_menu", "close" },
   { "src.ui.game3.prize_corner", "reset" },
   { "src.ui.game3.stat_growth", closeFlag("_open") },
@@ -1436,6 +1461,7 @@ function Game3:returnToTitle(opts)
 end
 
 function Game3:reset()
+  lazyReq("src.core.DeferredWrite").flush("options")
   self.questPlayback = nil
   Help.reset()
   Audio.endSession()
@@ -1474,6 +1500,7 @@ function Game3:reset()
 end
 
 function Game3:quit()
+  lazyReq("src.core.DeferredWrite").flush("options")
   if self:quickSaveAllowed() then self:saveGame() end
 end
 

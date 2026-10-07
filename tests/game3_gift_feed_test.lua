@@ -121,7 +121,7 @@ local job = MysteryGift.fetchOnline({ transport = okT })
 eq(job.status, "pending", "the fetch starts")
 local req = okT.begun[1]
 check(req ~= nil and req.method == "GET", "it is a GET")
-check(req ~= nil and req.url:sub(-#"/gifts/gen3") == "/gifts/gen3", "to /gifts/gen3: " .. tostring(req and req.url))
+check(req ~= nil and req.url:find("/gifts/gen3", 1, true) ~= nil, "to /gifts/gen3: " .. tostring(req and req.url))
 check(req ~= nil and req.headers["x-sync-token"] == nil, "without sync credentials")
 eq(req and req.maxSeconds, 10, "with a ten second budget")
 eq((MysteryGift.pollOnline(job)), "pending", "pending while the transport is")

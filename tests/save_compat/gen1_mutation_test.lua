@@ -5,7 +5,7 @@ local check, eq = T.check, T.eq
 love = love or require("tests.love_stub")
 local K = require("tests.save_compat._codec")
 
-if not K.gen1Available() then
+if not K.gen1Available({ "red" }) then
   print("gen1_mutation skipped (needs data/generated/ for the Gen 1 save codec)")
   os.exit(0)
 end

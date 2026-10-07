@@ -325,6 +325,7 @@ function Kit.beginFrame(mx, my, clicked, wheel)
   Kit.mouseX, Kit.mouseY = mx or 0, my or 0
   Kit.mouseClicked = clicked and true or false
   Kit.wheelY = wheel or 0
+  Kit._fieldHit, Kit._focusDrawn = false, false
   local down = false
   if love and love.mouse and love.mouse.isDown then
     down = love.mouse.isDown(1) and true or false
@@ -333,6 +334,7 @@ function Kit.beginFrame(mx, my, clicked, wheel)
   if not down then Kit._drag = nil end
   Kit.resetClip()
   Kit.blockClicks = false
+  Kit.occlude(nil)
   if love and love.timer and love.timer.getTime then
     Kit.time = love.timer.getTime()
   end
@@ -376,6 +378,7 @@ end
 -- Anything typed while no field had focus is dropped here rather than
 -- replayed into the next field that gets clicked.
 function Kit.endFrame()
+  if Kit.focus and ((Kit.mouseClicked and not Kit._fieldHit) or not Kit._focusDrawn) then Kit.blur() end
   for i = #edits, 1, -1 do edits[i] = nil end
   Kit.wheelY = 0
   Kit._activateId = nil
@@ -567,6 +570,10 @@ function Kit.keypressed(key)
     if key == "backspace" then edits[#edits + 1] = "\b" return true
     elseif key == "return" or key == "kpenter" or key == "escape" then
       edits[#edits + 1] = "\r" return true
+    elseif key == "tab" or key == "up" or key == "down" then
+      Kit.blur()
+      Kit.navigate(key == "up" and "up" or "down")
+      return true
     end
     -- printable keys arrive through textinput; everything else falls through
     return false
@@ -591,6 +598,7 @@ function Kit.gamepadpressed(button)
   if FileBrowser.active then
     return FileBrowser.gamepadpressed(action)
   end
+  if Kit.focus and action == "b" then Kit.blur() return true end
   if action == "dpup" then Kit.navigate("up") return true
   elseif action == "dpdown" then Kit.navigate("down") return true
   elseif action == "dpleft" then Kit.navigate("left") return true
@@ -605,24 +613,38 @@ function Kit.blur()
 end
 
 -- -------------------------------------------------------------- hit testing
-local occluderBox = { x = 0, y = 0, w = 0, h = 0 }
+local occluderBoxes = {}
+Kit._occluders = 0
 Kit._occluder = nil
 Kit._overlay = false
 
 function Kit.occlude(x, y, w, h)
   if x == nil then
+    Kit._occluders = 0
     Kit._occluder = nil
     return
   end
-  occluderBox.x, occluderBox.y, occluderBox.w, occluderBox.h = x, y, w, h
-  Kit._occluder = occluderBox
+  local n = Kit._occluders + 1
+  local o = occluderBoxes[n]
+  if not o then
+    o = {}
+    occluderBoxes[n] = o
+  end
+  o.x, o.y, o.w, o.h = x, y, w, h
+  Kit._occluders = n
+  Kit._occluder = occluderBoxes[1]
 end
 
 function Kit.occluded()
-  local o = Kit._occluder
-  if not o or Kit._overlay then return false end
-  return Kit.mouseX >= o.x and Kit.mouseX <= o.x + o.w
-    and Kit.mouseY >= o.y and Kit.mouseY <= o.y + o.h
+  if Kit._occluders == 0 or Kit._overlay then return false end
+  local mx, my = Kit.mouseX, Kit.mouseY
+  for i = 1, Kit._occluders do
+    local o = occluderBoxes[i]
+    if mx >= o.x and mx <= o.x + o.w and my >= o.y and my <= o.y + o.h then
+      return true
+    end
+  end
+  return false
 end
 
 -- A widget inside a clip region can sit at coordinates outside the visible
@@ -634,7 +656,7 @@ function Kit.hit(x, y, w, h)
       and Kit.mouseY >= c.y and Kit.mouseY <= c.y + c.h) then
     return false
   end
-  if Kit._occluder and Kit.occluded() then return false end
+  if Kit._occluders > 0 and Kit.occluded() then return false end
   return Kit.mouseX >= x and Kit.mouseX <= x + w
      and Kit.mouseY >= y and Kit.mouseY <= y + h
 end
@@ -914,6 +936,7 @@ function Kit.textfield(id, x, y, w, h, value, placeholder)
     value = VirtualKeyboard.text
   end
 
+  if Kit.press(x, y, w, h) then Kit._fieldHit = true end
   if Kit.press(x, y, w, h) or (Kit._activateId == id) then Kit.focus = id end
   local focused = (Kit.focus == id)
   if focused then
@@ -928,6 +951,7 @@ function Kit.textfield(id, x, y, w, h, value, placeholder)
         value = value .. e
       end
     end
+    if focused then Kit._focusDrawn = true end
   end
   if G then
     Theme.fillRounded(x, y, w, h, PAL.bg, 1)
@@ -965,11 +989,11 @@ function Kit.pager(x, y, w, page, total, perPage, idPrefix, compact)
   local gap = 8 * Kit.scale
   idPrefix = idPrefix or "pager"
 
-  if Kit.button(x, y, bw, h, "< Prev", { kind = "ghost", font = "small",
+  if Kit.button(x, y, bw, h, "Prev", { kind = "ghost", font = "small", icon = "chevron-left",
       enabled = page > 1, id = idPrefix .. ":prev" }) then
     page = math.max(1, page - 1)
   end
-  if Kit.button(x + bw + gap, y, bw, h, "Next >", { kind = "ghost",
+  if Kit.button(x + bw + gap, y, bw, h, "Next", { kind = "ghost", icon = "chevron-right",
       font = "small", enabled = page < pages, id = idPrefix .. ":next" }) then
     page = math.min(pages, page + 1)
   end

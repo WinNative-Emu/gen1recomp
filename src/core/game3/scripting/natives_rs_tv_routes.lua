@@ -79,7 +79,12 @@ M.BY_NAME.GabbyAndTyGetLastQuote = function(ctx, adapters)
   local session, g = R.session(), gabby()
   local quote = n(g.quote[0]) % 65536
   if quote == 65535 then return false, 0 end
-  stringVar(ctx, adapters, 1, session, Q.encode(session, Playback.word(quote)))
+  local word = Playback.word(quote)
+  local bytes = Q.encode(session, word)
+  if Playback.displayBytes(session, bytes) ~= word then
+    bytes = Q.encode(session, require("src.core.game3.easy_chat_text").rawWord(quote))
+  end
+  stringVar(ctx, adapters, 1, session, bytes)
   g.quote[0] = 65535
   return false, 1
 end

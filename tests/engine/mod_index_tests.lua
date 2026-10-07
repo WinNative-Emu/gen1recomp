@@ -8,7 +8,7 @@
 package.path = "./?.lua;./?/init.lua;" .. package.path
 
 local T = require("tests.harness")
-local check, eq = T.check, T.eq
+local check, eq, same = T.check, T.eq, T.same
 local ModIndex = require("src.mods.ModIndex")
 local Json = require("src.link.Json")
 
@@ -53,10 +53,26 @@ end
 do
   local oldSaveData = package.loaded["src.core.SaveData"]
   local opts, writes = {}, 0
+  local files = {}
+  local cachefs = {
+    getInfo = function(p) return files[p] and { type = "file" } or nil end,
+    read = function(p) return files[p] end,
+    write = function(p, c) files[p] = c return true end,
+  }
   package.loaded["src.core.SaveData"] = {
+    OPTIONS_FILENAME = "options.lua",
     loadOptions = function() return opts end,
     saveOptions = function(saved) opts = saved; writes = writes + 1; return saved end,
+    persistenceFs = function() return cachefs end,
   }
+  local Ser = require("src.core.SaveSerializer")
+  local function seedCache(tree)
+    files[ModIndex.CACHE_FILE] = Ser.encode(tree)
+    ModIndex._resetCacheForTests()
+  end
+  local function cacheFile()
+    return Ser.decode(files[ModIndex.CACHE_FILE])
+  end
   local main = ModIndex.resolveSource("bryanthaboi/gen1recomp-mod-index")
   local custom = ModIndex.resolveSource("other/community-index")
   local cached = { checkedAt = 123, mods = { { id = "existing" } } }
@@ -74,23 +90,24 @@ do
       main.base, main.base:sub(1, -2), main.feed }) do
     local savedMain = ModIndex.resolveSource(url)
     savedMain.url = url
-    opts = { modIndexes = { custom, savedMain, main },
-      modIndexCache = { [main.feed] = cached } }
+    opts = { modIndexes = { custom, savedMain, main } }
+    seedCache({ [main.feed] = cached })
     sources = ModIndex.sources()
     eq(#sources, 2, "an already-added main index is listed once: " .. url)
     eq(sources[1], custom, "the existing source precedence is preserved")
     eq(sources[2], savedMain, "the first saved main-index row is reused")
     eq(sources[2].url, url, "the player's original URL is preserved")
-    eq(ModIndex.readCache(main.feed), cached, "the existing main-index cache survives")
+    same(ModIndex.readCache(main.feed), cached, "the existing main-index cache survives")
     local added, addErr = ModIndex.addSource(url)
     check(added == nil and addErr ~= nil, "the built-in source cannot be added again")
     local removed, removeErr = ModIndex.removeSource(main.feed)
     check(removed == nil and removeErr ~= nil, "an older main-index row cannot be removed")
-    eq(opts.modIndexCache[main.feed], cached, "blocked removal keeps its cache")
+    same(cacheFile()[main.feed], cached, "blocked removal keeps its cache")
   end
   eq(writes, 0, "duplicate additions and blocked removals do not write options")
 
-  opts = { modIndexes = { custom }, modIndexCache = { [custom.feed] = cached } }
+  opts = { modIndexes = { custom } }
+  seedCache({ [custom.feed] = cached })
   sources = ModIndex.sources()
   eq(#sources, 2, "existing custom-only options gain the default")
   eq(sources[1], custom, "adding the default preserves custom-source precedence")
@@ -98,10 +115,26 @@ do
   check(ModIndex.isBuiltIn(main.feed), "the main index is protected")
   check(not ModIndex.isBuiltIn(custom.feed), "a custom index remains removable")
   check(ModIndex.removeSource(custom.feed), "a custom source can still be removed")
-  eq(opts.modIndexCache[custom.feed], nil, "custom-source removal clears its cache")
+  eq(cacheFile()[custom.feed], nil, "custom-source removal clears its cache")
+  eq(opts.modIndexCache, nil, "custom-source removal leaves options without a listing")
+
   eq(#ModIndex.sources(), 1, "removing the last custom source leaves the main index")
   check(ModIndex.addSource("other/community-index") ~= nil, "custom sources can still be added")
   eq(#ModIndex.sources(), 2, "the added custom source appears beside the main index")
+
+  files["options.lua"] = Ser.encode({ modIndexes = { custom },
+    modIndexCache = { [custom.feed] = cached } })
+  opts = { modIndexes = { custom } }
+  seedCache({})
+  writes = 0
+  same(ModIndex.readCache(custom.feed), cached, "a legacy options listing still reads")
+  same(cacheFile()[custom.feed], cached, "the legacy listing moves into the cache file")
+  eq(opts.modIndexCache, nil, "the legacy listing leaves options")
+  eq(writes, 1, "the move rewrites options once")
+  files["options.lua"] = nil
+  ModIndex.readCache(custom.feed)
+  check(ModIndex.writeCache(custom.feed, { mods = {} }), "writeCache lands in the cache file")
+  eq(writes, 1, "cache reads and writes never rewrite options")
 
   package.loaded["src.core.SaveData"].loadOptions = function() error("unavailable options") end
   eq(ModIndex.sources()[1].feed, main.feed, "the main index remains available if options cannot load")

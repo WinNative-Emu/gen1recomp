@@ -197,6 +197,14 @@ have; on Ruby, Sapphire and Emerald those requires are reported like any other n
 adapter. `python3 tools/modkit.py gen3check` reads `"frlg"` and `"rse"` as a
 Gen 3 claim.
 
+On every Gen 3 game, `pokemon.sprite` and `pokemon.icon` fire for battle pics
+and for menu icons (party, summary, PC, trade, naming). The icon hook gets the
+Gen 1 `ctx` (`species`, `mon`, `kind = "icon"`, `data`) plus `gen3Species`,
+and the vanilla path is the cache `.rgba`. Return a PNG path to swap the icon:
+a 32x64 sheet gives both animation frames, a 32x32 image is one frame shown on
+both. Returning `nil` or `false` draws a blank icon. `ctx.mon` is `nil` where a
+screen asks by species alone (Pokedex, trainer card, a remote online party).
+
 `docs/mod-api-gen2-compat.md` is the compatibility matrix: what works on Gold,
 Silver and Crystal today (40 of the 46 registries, 40 event and 44 hook names
 shared with Gen 1, and 24 Gen 2-only ones), which registries have no Gen 2 home
@@ -348,6 +356,30 @@ is refused the same way an undeclared import id is.
 Legal posture is unchanged and non-negotiable: no pack, and nothing derived
 from one, is ever redistributed. An importer reads a dump the player already
 owns, on their machine, into their own save directory.
+
+### 4c. Authored maps (`mod.content.maps:register`)
+
+Pick an `index` of 1000 or above for a new Gen 1 map, so it never collides
+with a vanilla map number. The cart treats every map from `FIRST_INDOOR_MAP`
+(37) up as indoor for wild encounters: unless the tileset is `FOREST`, every
+step rolls, not just steps in grass. A mod map is held to that rule unless
+it says otherwise:
+
+| Map record | Wild encounters off grass and water |
+| --- | --- |
+| `outdoor = true` | never, like a vanilla route |
+| tileset `OVERWORLD`, no `outdoor` field | never |
+| `outdoor = false`, or any other tileset with no `outdoor` field | on every step (caves, towers) |
+| tileset `FOREST` | never |
+
+The same `outdoor` field also lets Fly and Teleport be used on the map, so
+an outdoor route on a custom tileset sets `outdoor = true` once.
+
+```lua
+mod.content.maps:register("MY_ROUTE", {
+  index = 1000, tileset = "MY_TILES", outdoor = true, ...
+})
+```
 
 ### 5. What a mod's code can reach
 

@@ -64,7 +64,7 @@ do
   local b1, b2, b3, b4 = head:byte(17, 20)
   local width = ((b1 or 0) * 16777216) + ((b2 or 0) * 65536)
     + ((b3 or 0) * 256) + (b4 or 0)
-  T.eq(width, #Icons.NAMES * 96, "and the atlas has one 96px cell per name")
+  T.eq(width, #Icons.ATLASES[1].names * 96, "and the atlas has one 96px cell per name")
 end
 
 T.eq(OnlinePanel.sanitizePin("12a3 4567"), "1234", "a PIN keeps four digits")

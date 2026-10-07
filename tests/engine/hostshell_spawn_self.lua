@@ -10,14 +10,22 @@ love = {
   },
 }
 package.loaded["src.core.Platform"] = { canSpawnProcess = function() return true end }
+local realWinApi = require("src.core.WinApi")
+local spawned = nil
+package.loaded["src.core.WinApi"] = {
+  dirOf = realWinApi.dirOf,
+  spawn = function(exe, args, opts) spawned = { exe = exe, args = args, opts = opts } return true end,
+}
 local execute = os.execute
 os.execute = function(value) command = value return 0 end
 
 local HostShell = require("src.core.HostShell")
 assert(HostShell.spawnSelfDetached({ "--display-companion=50000,token" }))
-assert(command:find('start "" /b ', 1, true)
-  and command:find('"C:\\Game\\gen1recomp.exe"', 1, true),
-  "Windows launches the fused app detached")
+assert(command == nil, "Windows never goes through cmd.exe")
+assert(spawned and spawned.exe == "C:\\Game\\gen1recomp.exe"
+  and #spawned.args == 1 and spawned.args[1] == "--display-companion=50000,token"
+  and spawned.opts.cwd == "C:\\Game",
+  "Windows launches the fused app through the wide spawner")
 
 osName, fused = "Linux", false
 assert(HostShell.spawnSelfDetached({ "--display-companion=50000,token" }))

@@ -649,14 +649,6 @@ function BoxMenu:update(_dt)
     self:stepBox(1)
   elseif input:wasPressed("a") then
     self:act()
-  -- RELEASE and the nickname keyboard are BillsPC_WithdrawMenu's and the
-  -- CHANGE BOX menu's rows; .MoveMonWOMailSubmenu has neither, and a stray
-  -- SELECT on the move screen must not put "Release <PK><MN>?" in front of a
-  -- player who only meant to reorder a box.
-  elseif input:wasPressed("select") and self.mode == "withdraw" then
-    self:askRelease()
-  elseif input:wasPressed("start") and self.mode == "withdraw" then
-    self:askNickname()
   elseif input:wasPressed("b") then
     if self.onClose then self.onClose() end
   end
@@ -684,9 +676,6 @@ function BoxMenu:playMonCry(mon)
   end
 end
 
--- BillsPC's RELEASE, which the model has always supported and nothing on
--- screen reached.  The cart asks first and starts the prompt on NO, the way
--- every irreversible choice in the game does.
 function BoxMenu:askRelease()
   if self:isCancel() then return end
   local mon = self:selected()
@@ -734,31 +723,6 @@ function BoxMenu:askRelease()
     self.phase = nil
     self:clampIndex()
   end, { defaultNo = true }))
-end
-
--- The naming screen the cart opens from BillsPC's own nickname option.
-function BoxMenu:askNickname()
-  if self:isCancel() then return end
-  local mon = self:selected()
-  if not mon then return end
-  local game = self.game
-  if not (game and game.stack) then return end
-  -- The resolve is guarded rather than the construction: a keyboard that will
-  -- not even load is a nickname the player cannot type, not a crash.  Same
-  -- shape as the openscreen script command (src/script/Commands.lua).
-  if not pcall(Screens.get, game, "Gen2NamingScreen") then return end
-  Screens.push(game, "Gen2NamingScreen", {
-    -- The "nickname" kind is MON_NAME_LENGTH - 1 wide and takes its header
-    -- from the mon rather than from a fixed prompt.
-    type = "nickname",
-    monName = mon.name or mon.species,
-    initial = mon.nickname or "",
-    onDone = function(name)
-      game.stack:pop()
-      if name and #name > 0 then mon.nickname = name end
-    end,
-    onCancel = function() game.stack:pop() end,
-  })
 end
 
 function BoxMenu:image(path)

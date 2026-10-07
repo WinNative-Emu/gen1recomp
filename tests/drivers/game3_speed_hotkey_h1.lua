@@ -67,6 +67,13 @@ return function(game)
   package.loaded["src.core.game3.link"].link = nil
   expect(game:logicSpeed() == 3, "h1_link_unlocked")
 
+  key("0")
+  expect(game.options.speedOverworld == 2 and game.options.speedBattle == 2
+    and game.options.speedMenu == 2, "h1_0_lowers_all_categories")
+  key("kp0")
+  expect(game.options.speedOverworld == 1, "h1_numpad_0_lowers")
+  expect(game:logicSpeed() == 1 and steps(game, 10) == 10, "h1_0_back_to_walk_1x")
+
   game.speedOverride = 1
   love.event.quit(failed and 1 or 0)
 end

@@ -167,39 +167,59 @@ function Daycare.teachMove(mon, moveId)
   mon.pp = mon.pp or {}
   mon.maxPp = mon.maxPp or {}
 
+  local Pokemon = pokemonMod()
   local moves = {}
+  local entries = {}
   local pps = {}
   local maxPps = {}
+  local tableShaped = false
   for i = 1, MAX_MON_MOVES do
-    local m = tonumber(mon.moves[i]) or 0
+    local entry = mon.moves[i]
+    if type(entry) == "table" then tableShaped = true end
+    local m = tonumber(Pokemon.moveIdAt(mon, i)) or 0
     if m > 0 then
       if m == moveId then return false end
       moves[#moves + 1] = m
-      pps[#pps + 1] = tonumber(mon.pp[i]) or 0
-      maxPps[#maxPps + 1] = tonumber(mon.maxPp[i]) or 0
+      entries[#entries + 1] = entry
+      local pp = mon.pp[i]
+      local maxPp = mon.maxPp[i]
+      if type(entry) == "table" then
+        pp = entry.pp or pp
+        maxPp = entry.maxPp or maxPp
+      end
+      pps[#pps + 1] = tonumber(pp) or 0
+      maxPps[#maxPps + 1] = tonumber(maxPp) or 0
     end
   end
 
-  local Pokemon = pokemonMod()
   local maxPp = 0
   if Pokemon.movePp then maxPp = tonumber(Pokemon.movePp(moveId)) or 0 end
+  local newEntry = moveId
+  if tableShaped then newEntry = { id = moveId, moveId = moveId, pp = maxPp, maxPp = maxPp } end
 
   if #moves < MAX_MON_MOVES then
     moves[#moves + 1] = moveId
+    entries[#entries + 1] = newEntry
     pps[#pps + 1] = maxPp
     maxPps[#maxPps + 1] = maxPp
   else
     -- pokefirered/src/daycare.c:495 DeleteFirstMoveAndGiveMoveToMon
     table.remove(moves, 1)
+    table.remove(entries, 1)
     table.remove(pps, 1)
     table.remove(maxPps, 1)
     moves[MAX_MON_MOVES] = moveId
+    entries[MAX_MON_MOVES] = newEntry
     pps[MAX_MON_MOVES] = maxPp
     maxPps[MAX_MON_MOVES] = maxPp
   end
 
   for i = 1, MAX_MON_MOVES do
-    mon.moves[i] = moves[i] or 0
+    if tableShaped then
+      mon.moves[i] = entries[i]
+    else
+      mon.moves[i] = moves[i] or 0
+    end
     mon.pp[i] = pps[i] or 0
     mon.maxPp[i] = maxPps[i] or 0
   end

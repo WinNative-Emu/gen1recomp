@@ -82,7 +82,7 @@ PikachuFollower.moodAfterBattle(s)
 eq(s.pikachuMood, 108, "Red/Blue never touch Pikachu's mood")
 GameVersion.set("yellow")
 
-if not loadfile("data/generated/pokemon.lua") then
+if not require("tests.save_compat._codec").gen1Available({ "red", "yellow" }) then
   print("pikachu_mood_save_2344 codec half skipped (needs data/generated/)")
   GameVersion.set("red")
   T.finish("pikachu_mood_save_2344")

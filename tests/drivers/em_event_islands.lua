@@ -70,6 +70,13 @@ return function(game)
   local row = EI.optionRow()
   row.step({ options = game.options, session = session })
   check(EI.enabled(session), "the EVENT TICKETS option row turns the distribution on")
+  check(EI.pendingGift(session) == nil, "no ticket is handed out until the relay publishes one")
+  local feedCards = {}
+  for _, b in ipairs(require("src.core.game3.mystery_gift").builtins("rse")) do
+    feedCards[#feedCards + 1] = { key = b.key, card = b.card }
+  end
+  EI.applyFeed(session, { cards = feedCards })
+  EI.sync(session, { offline = true })
   check(S.var("VAR_DISTRIBUTE_EON_TICKET") == 1, "VAR_DISTRIBUTE_EON_TICKET raised for the Mystery Gift man")
 
   if not check(teleport("EM_LILYCOVE_CITY_POKEMON_CENTER_2F", 1, 6, "up"), "Lilycove Pokemon Center 2F loads") then

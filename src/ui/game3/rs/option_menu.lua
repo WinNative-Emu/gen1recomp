@@ -68,6 +68,10 @@ function Menu.isOpen() return Menu.open end
 function Menu.close()
   if not Menu.open then return end
   ShaderFXMenu.close()
+  for _, name in ipairs({ "src.ui.game3.controls_menu", "src.ui.game3.mod_manager" }) do
+    local child = package.loaded[name]
+    if type(child) == "table" and child.open and child.close then child.close() end
+  end
   Menu.open = false
   Menu._pages = nil
   Stack.pop("option")

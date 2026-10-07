@@ -56,15 +56,16 @@ check(view:find('skins = "paintbrush"', 1, true) ~= nil,
       "the skins tab uses the shared Lucide paintbrush icon")
 check(read("assets/launcher/lucide/icons.png"):sub(1, 4) == "\137PNG",
       "the shared icon atlas is packaged with the launcher")
--- the tab has to be next to Find, which is what the request was
 local order = view:match("local HEADER_TABS = %{(.-)%}\n")
 check(order ~= nil, "HEADER_TABS found")
 if order then
-  local findAt = order:find('id = "find"', 1, true)
+  local modsAt = order:find('id = "mods"', 1, true)
   local skinsAt = order:find('id = "skins"', 1, true)
   local onlineAt = order:find('id = "online"', 1, true)
-  check(findAt and skinsAt and skinsAt > findAt,
-        "the skins tab sits immediately after Find")
+  check(modsAt and skinsAt and skinsAt > modsAt,
+        "the skins tab follows Mods")
+  check(order:find('id = "find"', 1, true) == nil,
+        "Find lives inside Mods instead of the launcher header")
   check(onlineAt ~= nil, "the online tab is in the header")
   local onlineRow = order:match('{ id = "online".-}')
   check(onlineRow and onlineRow:find("beta = true", 1, true) ~= nil,
@@ -101,12 +102,16 @@ local GameVersion = require("src.core.GameVersion")
 local cycled, probe = {}, nil
 probe = setmetatable({ tab = GameVersion.ORDER[1] }, { __index = RomImporter })
 probe._switchTab = function(self, id) self.tab = id; cycled[#cycled + 1] = id end
-for _ = 1, #GameVersion.ORDER + 3 do RomImporter._cycleTab(probe, 1) end
+for _ = 1, #GameVersion.ORDER + #require("src.import.LauncherView").HEADER_TABS do
+  RomImporter._cycleTab(probe, 1)
+end
 local reached = " " .. table.concat(cycled, " ") .. " "
 check(reached:find(" skins ", 1, true) ~= nil,
       "shoulder-button tab cycling reaches the skins tab")
 check(reached:find(" bug ", 1, true) == nil,
       "shoulder-button tab cycling no longer stops on the bug panel")
+check(reached:find(" importers ", 1, true) == nil,
+      "shoulder-button tab cycling leaves Extras in settings")
 for _, id in ipairs(GameVersion.ORDER) do
   if id ~= GameVersion.ORDER[1] then
     check(reached:find(" " .. id .. " ", 1, true) ~= nil,

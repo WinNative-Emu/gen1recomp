@@ -1,36 +1,30 @@
 local P = require("src.core.game3.battle.anim_port.g4_pret")
 local T = require("src.core.game3.battle.anim_port.g4_templates")
+local TrainerPic = require("src.core.game3.trainer_pic")
 
 return function(host)
   local C = { P = P, T = T, host = host }
 
   -- pokefirered/src/battle_main.c:304
   local PLAYER_THROW_X = { [0] = -32, -16, -16, -32, -32, 0, 0, 0 }
-  -- pokefirered/src/data/trainer_graphics/back_pic_anims.h:1
-  local BACK_THROW = {
-    red = { [1] = { { f = 1, d = 20 }, { f = 2, d = 6 }, { f = 3, d = 6 }, { f = 4, d = 24 }, { f = 0, d = 1 }, { e = true } } },
-    oldman = { [1] = { { f = 1, d = 24 }, { f = 2, d = 9 }, { f = 3, d = 24 }, { f = 0, d = 9 }, { e = true } } },
-    -- pokeemerald/src/data/trainer_graphics/back_pic_anims.h:1
-    rse = { [1] = { { f = 0, d = 24 }, { f = 1, d = 9 }, { f = 2, d = 24 }, { f = 0, d = 9 }, { f = 3, d = 50 }, { e = true } } },
-  }
-
-  local function family_throw()
-    local ok, BattleProfile = pcall(require, "src.core.game3.battle.profile")
-    if ok and BattleProfile.get().family == "rse" then return BACK_THROW.rse end
-    return BACK_THROW.red
+  -- pokeemerald/src/data/trainer_graphics/back_pic_anims.h:119
+  local function back_throw(gender)
+    local cmds = {}
+    for i, c in ipairs(TrainerPic.backAnims(gender).throw) do cmds[i] = { f = c[1], d = c[2] } end
+    cmds[#cmds + 1] = { e = true }
+    return { [1] = cmds }
   end
 
   -- pokefirered/src/battle_main.c:2172
   function C.startPlayerThrow(vm)
-    local ctx = vm.ctx or {}
+    local stage = P.stage()
+    local tp = stage and stage.trainer and stage.trainer.player
     local pseudo = {
-      _g4a = (ctx.oldManThrow and BACK_THROW.oldman) or family_throw(),
+      _g4a = back_throw(tp and tp.gender or 0),
       data = {},
     }
     P.startAnim(pseudo, 1)
     vm._playerThrow = pseudo
-    local stage = P.stage()
-    local tp = stage and stage.trainer and stage.trainer.player
     vm:addSpriteHook(function(v)
       if v._playerThrow ~= pseudo then return false end
       if pseudo.done then return true end
@@ -65,7 +59,8 @@ return function(host)
     local stage = P.stage()
     local tp = stage and stage.trainer and stage.trainer.player
     if tp then
-      tp.frame = 0
+      -- pokeemerald/src/battle_anim_throw.c:2463
+      tp.frame = TrainerPic.backIdleFrame(tp.gender)
       tp.ox = 0
     end
     vm._playerThrow = nil

@@ -21,6 +21,8 @@ for _, s in ipairs(sheets) do M.FILES[#M.FILES + 1] = s[1] .. ".png" end
 for _, p in ipairs({"upper", "lower", "others"}) do M.FILES[#M.FILES + 1] = "page_swap_button_" .. p .. ".png" end
 for _, g in ipairs({"page_swap_button", "back_button", "ok_button"}) do M.FILES[#M.FILES + 1] = g .. "_glow.png" end
 M.REQUIRED = K.required(M.SUB, M.FILES)
+-- pokeruby/src/naming_screen.c:1677
+local KB = {x = 16, y = 64, w = 176, h = 80}
 local function character(b)
   return IR.toAscii(IR.decode({b, 255}, {dialect = "rs"}))
 end
@@ -41,7 +43,7 @@ function M.run(rom, cache, opts)
     if map[1] == "bg" then
       manifest.bg = c:png("bg.png", 240, 160, idx, pal, false)
     else
-      manifest[map[1]] = c:png(map[1] .. ".png", 176, 80, K.crop(idx, w, 16, 72, 176, 80), pal, true)
+      manifest[map[1]] = c:png(map[1] .. ".png", KB.w, KB.h, K.crop(idx, w, KB.x, KB.y, KB.w, KB.h), pal, true)
     end
   end
   for _, s in ipairs(sheets) do
@@ -110,7 +112,7 @@ function M.run(rom, cache, opts)
       addGenderIcon = c:u8(t + 3), initialPage = c:u8(t + 4), title = A.text(c, assert(c:ptr(t + 8)))}
   end
   manifest.keyboard, manifest.templates = kb, templates
-  manifest.kb_x, manifest.kb_y, manifest.kb_w, manifest.kb_h = 16, 72, 176, 80
+  manifest.kb_x, manifest.kb_y, manifest.kb_w, manifest.kb_h = KB.x, KB.y, KB.w, KB.h
   manifest.geometry = {pageFrameX = 184, pageFrameY = 64, pageButtonX = 188, pageButtonY = 67,
     pageTextX = 192, pageTextY = 72, backX = 184, backY = 96, okX = 184, okY = 120,
     titleX = 72, titleY = 16, inputY = 32, inputArrowY = 40, underscoreY = 44}

@@ -38,6 +38,7 @@ local OPTIONS_FILENAME = "options.lua"
 -- "reset" at once.  Same .bak/.tmp witness names the save files use.
 local OPTIONS_BACKUP_FILENAME = OPTIONS_FILENAME .. ".bak"
 local OPTIONS_TMP_FILENAME = OPTIONS_FILENAME .. ".tmp"
+SaveData.OPTIONS_FILENAME = OPTIONS_FILENAME
 
 -- Main / backup / staged-witness names for a version (defaults to the active
 -- one).  The backup is a rolling copy and .tmp is the staged-write witness;
@@ -669,17 +670,11 @@ function SaveData.defaultOptions()
     modProfiles = {},
     modProfilesSeeded = false,
     modOrder = {},
-    -- GitHub release checks for mods with a manifest "github" field
-    -- (src/mods/ModUpdate.lua). Keyed by owner/repo; TTL is six hours.
-    modUpdateCache = {},
     -- Player-added mod indexes, in their chosen order.  ModIndex.sources()
     -- includes the permanent main index alongside these and reuses any
     -- main-index row saved by an older launcher.  Rows are
     -- { url, feed, base, fallback, label }.
     modIndexes = {},
-    -- Parsed index listings keyed by feed URL; TTL is 24 hours, matching how
-    -- often the feeds themselves rebuild.
-    modIndexCache = {},
     -- On-screen touch overlay (Android/iOS; see src/core/TouchControls.lua).
     -- enabled=false hides it permanently (distinct from auto-hide-on-gamepad).
     -- layouts.portrait / layouts.landscape each hold optional normalized
@@ -743,6 +738,8 @@ function SaveData.mergeOptions(loaded)
       opts.speedMenu = loaded.speed
     end
     opts.speed = nil
+    opts.modIndexCache = nil
+    opts.modUpdateCache = nil
   end
   return opts
 end
@@ -1855,6 +1852,156 @@ function SaveData.deleteSlot(version, slotId)
   return deleteSlotIn(version, slotId)
 end
 
+local function copyTree(fs, from, to)
+  if not (fs.getDirectoryItems and fs.getInfo(from)) then return end
+  for _, name in ipairs(fs.getDirectoryItems(from)) do
+    local src, dst = from .. "/" .. name, to .. "/" .. name
+    local info = fs.getInfo(src)
+    if info and info.type == "directory" then
+      if fs.createDirectory then fs.createDirectory(dst) end
+      copyTree(fs, src, dst)
+    elseif info then
+      local body = fs.read(src)
+      if type(body) == "string" then
+        ensureParentDir(fs, dst)
+        fs.write(dst, body)
+      end
+    end
+  end
+end
+
+local function pendingTradeSent(fs, main)
+  local journal = main:gsub("%.lua$", "") .. "_trade.lua"
+  if not fs.getInfo(journal) then return false end
+  local data = SaveSerializer.decode(fs.read(journal) or "")
+  if type(data) ~= "table" or type(data.entries) ~= "table" then return false end
+  for _, e in ipairs(data.entries) do
+    if type(e) == "table" and type(e.sent) == "table" then return true end
+  end
+  return false
+end
+
+local function duplicateSlotIn(key, srcId, label)
+  local fs = persistFs(nil)
+  ensureSlots(key, fs)
+  local opts = SaveData.loadOptions(fs)
+  local reg = registryOf(opts, key)
+  local found = false
+  for _, id in ipairs(reg and type(reg.list) == "table" and reg.list or {}) do
+    if id == srcId then found = true break end
+  end
+  if not found then return nil, "slot not registered" end
+  local main = slotNames(key, srcId)
+  if not main then return nil, "invalid slot id" end
+  local body = readSlotSourceIn(key, srcId, fs)
+  local save = body and SaveSerializer.decode(body)
+  if type(save) ~= "table" then return nil, "that save could not be read" end
+  if pendingTradeSent(fs, main) then
+    return nil, "finish this save's pending trade first"
+  end
+  save.meta = type(save.meta) == "table" and save.meta or {}
+  local oldId = save.meta.playthroughId
+  if type(oldId) ~= "string" or oldId == "" then
+    local mapped = type(opts.playthroughIds) == "table" and opts.playthroughIds[key]
+    oldId = type(mapped) == "table" and mapped[srcId] or nil
+  end
+  local newId = SaveData.newPlaythroughId()
+  save.meta.playthroughId = newId
+  local id = createSlotIn(key)
+  local ok, err = writeSlotIn(key, id, save)
+  if not ok or not readSlotSourceIn(key, id, fs) then
+    deleteSlotIn(key, id)
+    return nil, err or "the copy did not read back"
+  end
+  local cart = slotDir(key) .. "/" .. srcId .. ".cart"
+  if fs.getInfo(cart) then
+    local bytes = fs.read(cart)
+    if type(bytes) == "string" then fs.write(slotDir(key) .. "/" .. id .. ".cart", bytes) end
+  end
+  opts = SaveData.loadOptions(fs)
+  reg = registryOf(opts, key)
+  local name = type(label) == "string" and label:match("^%s*(.-)%s*$") or ""
+  if name ~= "" then
+    reg.names = type(reg.names) == "table" and reg.names or {}
+    reg.names[id] = name
+  end
+  if type(reg.hashes) == "table" and reg.hashes[srcId] then reg.hashes[id] = reg.hashes[srcId] end
+  if type(reg.broken) == "table" and reg.broken[srcId] then reg.broken[id] = true end
+  putRegistry(opts, key, reg)
+  opts.playthroughIds = type(opts.playthroughIds) == "table" and opts.playthroughIds or {}
+  opts.playthroughIds[key] = opts.playthroughIds[key] or {}
+  opts.playthroughIds[key][id] = newId
+  SaveData.saveOptions(opts, fs)
+  local version = save.version == nil and not isCartKey(key) and key or save.version
+  if type(oldId) == "string" and oldId:match("^[%w_-]+$")
+      and type(version) == "string" and version:match("^[%w_-]+$") then
+    copyTree(fs, "mod_storage/" .. version .. "/" .. oldId,
+      "mod_storage/" .. version .. "/" .. newId)
+  end
+  return id
+end
+
+function SaveData.duplicateSlot(version, slotId, label)
+  version = version or GameVersion.get()
+  if not knownVersion(version) then return nil, "unknown version" end
+  return duplicateSlotIn(version, slotId, label)
+end
+
+function SaveData.duplicateCartSlot(cartId, slotId, label)
+  local key = cartKey(cartId or activeCart)
+  if not key then return nil, "unknown cart" end
+  return duplicateSlotIn(key, slotId, label)
+end
+
+local function playthroughIdTaken(fs, opts, key, slotId, id)
+  if type(opts.playthroughIds) == "table" then
+    for scope, ids in pairs(opts.playthroughIds) do
+      if type(ids) == "table" then
+        for sid, pid in pairs(ids) do
+          if pid == id and not (scope == key and sid == slotId) then return true end
+        end
+      end
+    end
+  end
+  local reg = registryOf(opts, key)
+  for _, other in ipairs(reg and type(reg.list) == "table" and reg.list or {}) do
+    if other ~= slotId then
+      local body = readSlotSourceIn(key, other, fs)
+      local save = body and SaveSerializer.decode(body)
+      local meta = type(save) == "table" and save.meta
+      if type(meta) == "table" and meta.playthroughId == id then return true end
+    end
+  end
+  return false
+end
+
+function SaveData.claimImportPlaythroughId(version, slotId, save)
+  version = version or GameVersion.get()
+  if not knownVersion(version) or type(slotId) ~= "string" then return nil end
+  local meta = type(save) == "table" and save.meta
+  local id = type(meta) == "table" and meta.playthroughId
+  if type(id) ~= "string" or id == "" then return nil end
+  local fs = persistFs(nil)
+  ensureSlots(version, fs)
+  local opts = SaveData.loadOptions(fs)
+  if playthroughIdTaken(fs, opts, version, slotId, id) then
+    local newId = SaveData.newPlaythroughId()
+    if id:match("^[%w_-]+$") and version:match("^[%w_-]+$") then
+      copyTree(fs, "mod_storage/" .. version .. "/" .. id,
+        "mod_storage/" .. version .. "/" .. newId)
+    end
+    id = newId
+    meta.playthroughId = id
+  end
+  opts.playthroughIds = type(opts.playthroughIds) == "table" and opts.playthroughIds or {}
+  opts.playthroughIds[version] = opts.playthroughIds[version] or {}
+  if opts.playthroughIds[version][slotId] ~= id then
+    opts.playthroughIds[version][slotId] = id
+    SaveData.saveOptions(opts, fs)
+  end
+  return id
+end
+
 -- Drop the process-global "have we resolved slots for this scope" cache so
 -- the next listSlots/saveNames re-reads disk (and can migrate a flat legacy
 -- SAVE into slot1).  Pass a version id or cart scope key to invalidate just
@@ -2672,6 +2819,9 @@ function SaveData.load(version)
   SaveData.runMigrations(data)
   data.options = SaveData.loadOptions()
   local loadInfo = type(data.version) == "string" and GameVersion.info(data.version)
+  if loadInfo and loadInfo.generation == 3 then
+    pcall(function() require("src.save_convert.Gen3Save").repairJapaneseNames(data) end)
+  end
   if loadInfo and loadInfo.generation == 2 then
     data.options = require("src.core.gen2.Save").loadOptions()
   end

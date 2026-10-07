@@ -29,6 +29,9 @@ LB.LINKTYPE = {
   SINGLE_BATTLE = 0x2233,
   DOUBLE_BATTLE = 0x2244,
   MULTI_BATTLE = 0x2255,
+  -- pokeemerald/include/link.h:95
+  BATTLE_TOWER_50 = 0x2266,
+  BATTLE_TOWER_OPEN = 0x2277,
   RECORD_MIX_BEFORE = 0x3311,
   BERRY_BLENDER_SETUP = 0x4411,
 }
@@ -1619,9 +1622,59 @@ function LB.playerCount()
   return 2
 end
 
--- pokefirered/src/cable_club.c:222 CreateLinkupTask
+local function relayPeers(live)
+  local out = {}
+  for seat, hello in pairs(type(live.peerHellos) == "table" and live.peerHellos or {}) do
+    local g3 = type(hello) == "table" and type(hello.game3) == "table" and hello.game3 or {}
+    out[#out + 1] = { seat = seat, linkType = tonumber(g3.linkType), version = tonumber(g3.gameVersion),
+      progressFlags = tonumber(g3.progressFlags) or 0 }
+  end
+  table.sort(out, function(a, b) return a.seat < b.seat end)
+  return out
+end
+
+-- pokeemerald/src/link.c:817 GetLinkPlayerDataExchangeStatusTimed
+function LB.linkupStatus(ctx, spec, peers, relay)
+  local L = link()
+  local Family = require("src.core.game3.link.family")
+  local CableEntry = require("src.core.game3.link.cable_entry")
+  local players = LB.playerCount()
+  -- pokeemerald/src/link.c:830
+  if players < spec.min or players > spec.max then return L.LINKUP.WRONG_NUM_PLAYERS end
+  local want = spec.linkType
+  if relay then want = CableEntry.classOf(spec.linkType) end
+  for _, peer in ipairs(peers) do
+    local got = tonumber(peer.linkType)
+    if relay then got = CableEntry.classOf(peer.linkType) end
+    if (relay and want ~= nil and got ~= nil and got ~= want) or (not relay and got ~= want) then
+      -- pokeemerald/src/link.c:876
+      local towers = { battle_tower = true, battle_tower_open = true }
+      if towers[CableEntry.classOf(spec.linkType)] and towers[CableEntry.classOf(peer.linkType)] then
+        L.setVar(ctx, LB.VAR_0x8005, 3)
+      end
+      return L.LINKUP.DIFF_SELECTIONS
+    end
+  end
+  local peer = peers[1]
+  if spec.linkType == require("src.link.Game3Link").LINKTYPE.TRADE_SETUP and peer and peer.version ~= nil then
+    local mine = Family.localLinkPlayer(L.session())
+    -- pokeemerald/src/link.c:853
+    local code = Family.gameProgressForLinkTrade(mine.family, mine, peer)
+    if code == Family.TRADE.PLAYER_NOT_READY then return L.LINKUP.PLAYER_NOT_READY end
+    if code == Family.TRADE.PARTNER_NOT_READY then return L.LINKUP.PARTNER_NOT_READY end
+  end
+  return L.LINKUP.SUCCESS
+end
+
+-- pokefirered/src/cable_club.c:76
 function LB.createLinkupTask(ctx, adapters, spec)
   local L = link()
+  local lk = L.link
+  if not (lk and lk.isOpen and lk:isOpen()) then
+    return require("src.core.game3.link.cable_entry").run(ctx, adapters, spec, function(c, a)
+      return LB.createLinkupTask(c, a, spec)
+    end)
+  end
   local function report(code)
     LB.linkup = code
     L.setResult(ctx, code)
@@ -1630,22 +1683,13 @@ function LB.createLinkupTask(ctx, adapters, spec)
   report(L.LINKUP.ONGOING)
   LB.state = "linkup"
   LB.seed = nil
-  local announced = false
-  local lk = L.link
-  local Family = require("src.core.game3.link.family")
-  local mine = Family.localLinkPlayer(L.session())
-  local function linkupMsg()
-    return { type = LB.MSG.LINKUP, linkType = spec.linkType, players = spec.min,
-             version = mine.version, progressFlags = mine.progressFlags }
-  end
-  if lk then
-    lk.linkType = spec.linkType
-    -- pokefirered/src/cable_club.c:318 Task_LinkupExchangeDataWithLeader
-    lk:send(linkupMsg())
-    announced = true
-  else
-    -- pokefirered/src/cable_club.c:222 CreateLinkupTask waits for the other machine
-    L.beginConnect({ linkType = spec.linkType })
+  local relay = LB.onRelay()
+  lk.linkType = spec.linkType
+  if not relay then
+    local mine = require("src.core.game3.link.family").localLinkPlayer(L.session())
+    -- pokefirered/src/cable_club.c:318
+    lk:send({ type = LB.MSG.LINKUP, linkType = spec.linkType, players = spec.min,
+              version = mine.version, progressFlags = mine.progressFlags })
   end
   local ticks = 0
   local Natives = natives()
@@ -1658,41 +1702,20 @@ function LB.createLinkupTask(ctx, adapters, spec)
   ctx.nativePoll = function()
     ticks = ticks + 1
     local live = L.link
-    if live and not announced then
-      live.linkType = spec.linkType
-      live:send(linkupMsg())
-      announced = true
-    end
-    if not announced then
-      -- pokefirered/src/cable_club.c:482 TryLinkTimeout
-      if ticks > LB.LINKUP_TICKS then
-        report(L.LINKUP.CONNECTION_ERROR)
-        LB.state = "off"
-        return true
-      end
-      return false
-    end
-    local peer = live and live:isReady() and live:take(LB.MSG.LINKUP) or nil
-    if peer then
-      local players = LB.playerCount()
-      if tonumber(peer.linkType) ~= spec.linkType then
-        -- pokefirered/src/cable_club.c:122 EXCHANGE_DIFF_SELECTIONS
-        report(L.LINKUP.DIFF_SELECTIONS)
-        LB.state = "off"
-      elseif players < spec.min or players > spec.max then
-        -- pokefirered/src/cable_club.c:127 EXCHANGE_WRONG_NUM_PLAYERS
-        report(L.LINKUP.WRONG_NUM_PLAYERS)
-        LB.state = "off"
-      elseif spec.linkType == require("src.link.Game3Link").LINKTYPE.TRADE_SETUP and peer.version ~= nil
-          and Family.gameProgressForLinkTrade(mine.family, mine, peer) ~= Family.TRADE.BOTH_PLAYERS_READY then
-        -- pokeemerald/src/link.c:853
-        local code = Family.gameProgressForLinkTrade(mine.family, mine, peer)
-        report(code == Family.TRADE.PLAYER_NOT_READY and L.LINKUP.PLAYER_NOT_READY or L.LINKUP.PARTNER_NOT_READY)
-        LB.state = "off"
+    local peers
+    if live and live:isOpen() and live:isReady() then
+      if relay then
+        peers = relayPeers(live)
       else
-        report(L.LINKUP.SUCCESS)
-        LB.state = "seat"
+        local peer = live:take(LB.MSG.LINKUP)
+        if peer then
+          peers = { { linkType = tonumber(peer.linkType), version = peer.version, progressFlags = peer.progressFlags } }
+        end
       end
+    end
+    if peers then
+      local code = report(LB.linkupStatus(ctx, spec, peers, relay))
+      LB.state = code == L.LINKUP.SUCCESS and "seat" or "off"
       return true
     end
     if not (live and live:isOpen()) then
@@ -1718,7 +1741,17 @@ function LB.tryBattleLinkup(ctx, adapters)
   local mode = L.getVar(ctx, L.VAR_0x8004)
   LB.mode = mode
   LB.unionRoom = false
+  if mode == L.USING.BATTLE_TOWER then return LB.createLinkupTask(ctx, adapters, LB.towerSpec()) end
   return LB.createLinkupTask(ctx, adapters, LB.PLAYERS[mode] or LB.PLAYERS[1])
+end
+
+-- pokeemerald/src/cable_club.c:591
+function LB.towerSpec()
+  local okU, Util = pcall(require, "src.core.game3.rse.frontier.util")
+  local okD, D = pcall(require, "src.core.game3.rse.frontier.trainers")
+  local f = okU and Util.frontier and Util.frontier(session()) or nil
+  local open = okD and type(f) == "table" and D.LVL and f.lvlMode == D.LVL.OPEN
+  return { min = 2, max = 2, linkType = open and LB.LINKTYPE.BATTLE_TOWER_OPEN or LB.LINKTYPE.BATTLE_TOWER_50 }
 end
 
 -- pokefirered/src/script_pokemon_util.c:90 HasEnoughMonsForDoubleBattle

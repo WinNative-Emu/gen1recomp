@@ -50,16 +50,82 @@ eq(imp.installed, "picked_cart.g1rcart", "focus installs the staged cart")
 check(love.filesystem.getInfo("picked_cart.g1rcart") == nil,
   "and retires the staged file")
 
-love.system.pickFileKinds = function() return "rom,mod,sav" end
+local function legacyCartPick(kinds, label)
+  love.system.pickFileKinds = kinds
+  Platform._resetForTests()
+  local legacy = RomImporter.new(function() end, { launcher = true })
+  legacy._installCartFile = imp._installCartFile
+  local modInstalls = 0
+  legacy._installMod = function() modInstalls = modInstalls + 1 end
+  picks = {}
+  eq(legacy:importCartFile("red"), true, label .. ": Import .g1rcart opens the picker")
+  eq(picks[1], "mod", label .. ": through the mod kind the old bridge has")
+  eq(#picks, 1, label .. ": with one pick and never a ROM pick")
+  eq(legacy.pickerPendingKind, "cart", label .. ": focus knows the pick is a cart")
+  love.filesystem.write("picked_mod.zip", "cart-bytes")
+  legacy:focus(true)
+  eq(legacy.installed, "picked_mod.zip", label .. ": focus installs the pick as a cart")
+  eq(modInstalls, 0, label .. ": and never as a mod")
+  check(love.filesystem.getInfo("picked_mod.zip") == nil,
+    label .. ": and retires the staged file")
+  eq(legacy.pickerPendingKind, nil, label .. ": and clears the pending kind")
+  eq(legacy.cartLegacyModPick, nil, label .. ": and the legacy flag")
+
+  picks = {}
+  eq(legacy:importCartFile("red"), true, label .. ": a second import reopens the picker")
+  love.filesystem.write("pick_error.flag", "cancelled:picked_mod.zip")
+  legacy:focus(true)
+  check(type(legacy._cartNotice) == "string"
+      and legacy._cartNotice:find("did not return a file", 1, true),
+    label .. ": a cancelled pick lands on the cart notice")
+  check(legacy.modNotice == nil or legacy.modNotice.text == nil,
+    label .. ": and not on the mod notice")
+
+  picks = {}
+  legacy.installed = nil
+  eq(legacy:importCartFile("red"), true, label .. ": a third import reopens the picker")
+  legacy:focus(true)
+  eq(legacy.pickerPendingKind, "cart",
+    label .. ": a silent cancel (old APK, no flag) leaves the cart pick armed")
+  legacy:chooseMod()
+  eq(picks[#picks], "mod", label .. ": the Mods tab import opens the mod picker")
+  eq(legacy.pickerPendingKind, "mod", label .. ": and claims the pending kind")
+  eq(legacy.cartLegacyModPick, nil, label .. ": and disarms the legacy cart flag")
+  love.filesystem.write("picked_mod.zip", "real-mod-bytes")
+  legacy:focus(true)
+  eq(modInstalls, 1, label .. ": a real mod picked after the silent cancel installs as a mod")
+  eq(legacy.installed, nil, label .. ": and never reaches the cart installer")
+  eq(legacy.pickerPendingKind, nil, label .. ": and clears the pending kind after install")
+
+  picks = {}
+  eq(legacy:importCartFile("red"), true, label .. ": a fourth import reopens the picker")
+  legacy:focus(true)
+  legacy:chooseMod()
+  love.filesystem.write("pick_error.flag", "cancelled:picked_mod.zip")
+  legacy._cartNotice = nil
+  legacy:focus(true)
+  check(legacy.modNotice and legacy.modNotice.ok == false,
+    label .. ": a cancelled Mods-tab pick after a silent cart cancel lands on the mod notice")
+  eq(legacy._cartNotice, nil, label .. ": and not on the cart notice")
+  eq(legacy.pickerPendingKind, nil, label .. ": and leaves nothing armed")
+end
+
+legacyCartPick(function() return "rom,mod,sav" end, "pre-cart bridge")
+legacyCartPick(nil, "pre-kinds bridge")
+
+love.system.pickFileKinds = nil
+love.system.pickFile = nil
 Platform._resetForTests()
-local legacy = RomImporter.new(function() end, { launcher = true })
-legacy._installCartFile = imp._installCartFile
-picks = {}
-eq(legacy:importCartFile("red"), false,
-  "an Android build that predates the cart kind does not open a ROM picker")
-eq(#picks, 0, "and never calls pickFile")
-check(type(legacy._cartNotice) == "string" and legacy._cartNotice:find(".g1rcart", 1, true),
-  "it tells the player to copy a .g1rcart instead")
+local bare = RomImporter.new(function() end, { launcher = true })
+eq(bare:importCartFile("red"), false, "an APK with no picker bridge cannot open one")
+check(type(bare._cartNotice) == "string"
+    and bare._cartNotice:find("Update the app", 1, true) ~= nil,
+  "and the notice tells the player to update the app")
+eq(bare.pickerPendingKind, nil, "and leaves no pending cart pick")
+love.system.pickFile = function(kind)
+  picks[#picks + 1] = kind
+  return true
+end
 
 love.system.getOS = function() return "NX" end
 love.system.pickFile = nil
@@ -86,4 +152,4 @@ love.system.pickFileKinds = saved.pickFileKinds
 love.system.getPickedFile = saved.getPickedFile
 Platform._resetForTests()
 
-print("ok   cart import picker")
+S.finish()

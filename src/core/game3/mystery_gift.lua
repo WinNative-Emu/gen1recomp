@@ -238,6 +238,27 @@ local function copyFlagList(list, version, bad)
   return out
 end
 
+MysteryGift.VERSIONS = { "firered", "leafgreen", "ruby", "sapphire", "emerald" }
+MysteryGift.FAMILY_VERSIONS = { frlg = { "firered", "leafgreen" }, rse = { "emerald" }, rs = { "ruby", "sapphire" } }
+
+local function copyVersions(list)
+  if type(list) ~= "table" then return nil end
+  local known, out = {}, {}
+  for _, v in ipairs(MysteryGift.VERSIONS) do known[v] = true end
+  for _, v in ipairs(list) do
+    if known[v] then out[#out + 1] = v end
+  end
+  return out
+end
+
+function MysteryGift.offeredIn(list, version)
+  if type(list) ~= "table" or version == nil then return true end
+  for _, v in ipairs(list) do
+    if v == version then return true end
+  end
+  return false
+end
+
 local function resolved(version, kind, value, bad)
   if value == nil then return nil end
   local n = MysteryGift.resolveId(version, kind, value)
@@ -289,8 +310,22 @@ function MysteryGift.normalizeCard(card, version)
       requireStat = tonumber(gift.requireStat),
       requireValue = tonumber(gift.requireValue),
       script = type(gift.script) == "string" and gift.script:match("^[%w_]+$") and gift.script or nil,
+      metLocation = tonumber(gift.metLocation),
+      metLevel = tonumber(gift.metLevel),
+      metGame = tonumber(gift.metGame),
+      ball = tonumber(gift.ball),
+      language = tonumber(gift.language),
+      otNames = type(gift.otNames) == "table" and copyList(gift.otNames, math.min(#gift.otNames, 6), 7) or nil,
+      otIdMax = tonumber(gift.otIdMax),
+      secretIdRandom = gift.secretIdRandom == true or nil,
+      otGender = tonumber(gift.otGender),
+      shiny = (gift.shiny == "never" or gift.shiny == "always" or gift.shiny == "random") and gift.shiny or nil,
+      nationalRibbon = gift.nationalRibbon == true or nil,
+      movesOnly = gift.movesOnly == true or nil,
     },
+    versions = copyVersions(card.versions),
   }
+  if gift.fateful == false then out.gift.fateful = false end
   if bad.any then return nil, "unresolved" end
   return out
 end
@@ -331,12 +366,19 @@ local function cardBytes(card)
     tostring(gift.requireStat or 0), tostring(gift.requireValue or 0),
   }
   if gift.script then parts[#parts + 1] = "R" .. tostring(gift.script) end
+  for _, k in ipairs({ "metLocation", "metLevel", "metGame", "ball", "language", "otIdMax", "secretIdRandom",
+    "otGender", "shiny", "nationalRibbon", "movesOnly" }) do
+    if gift[k] ~= nil then parts[#parts + 1] = k .. "=" .. tostring(gift[k]) end
+  end
+  if gift.fateful == false then parts[#parts + 1] = "fateful=false" end
+  for _, n in ipairs(type(gift.otNames) == "table" and gift.otNames or {}) do parts[#parts + 1] = "O" .. n end
   for _, slot in ipairs(moveKeys) do
     parts[#parts + 1] = tostring(slot) .. "=" .. tostring(gift.moves[slot])
   end
   for _, id in ipairs(gift.setFlags or {}) do parts[#parts + 1] = "S" .. tostring(id) end
   for _, id in ipairs(gift.haveFlags or {}) do parts[#parts + 1] = "H" .. tostring(id) end
   if gift.heldItem then parts[#parts + 1] = "I" .. tostring(gift.heldItem) end
+  for _, v in ipairs(type(card.versions) == "table" and card.versions or {}) do parts[#parts + 1] = "V" .. tostring(v) end
   return table.concat(parts, "\2")
 end
 
@@ -651,20 +693,6 @@ function MysteryGift.isNewsSameAsSaved(session, news)
   return newsBytes(MysteryGift.ensure(session).news) == newsBytes(other)
 end
 
--- pokefirered/src/mystery_gift.c:120 IsSendingSavedWonderNewsAllowed
-function MysteryGift.isSendingNewsAllowed(session)
-  local news = MysteryGift.ensure(session).news
-  if not news then return false end
-  return num(news.sendType) ~= MysteryGift.SEND_TYPE_DISALLOWED
-end
-
--- pokefirered/src/mystery_gift.c:208 IsSendingSavedWonderCardAllowed
-function MysteryGift.isSendingCardAllowed(session)
-  local card = MysteryGift.ensure(session).card
-  if not card then return false end
-  return num(card.sendType) ~= MysteryGift.SEND_TYPE_DISALLOWED
-end
-
 -- pokefirered/src/mystery_gift.c:235 DisableWonderCardSending
 function MysteryGift.disableCardSending(card)
   if type(card) == "table" and num(card.sendType) == MysteryGift.SEND_TYPE_ALLOWED then
@@ -694,8 +722,30 @@ function MysteryGift.receivedGiftFlag(flagId, session)
   return first + (flagId - MysteryGift.WONDER_CARD_FLAG_OFFSET)
 end
 
+local function tracksById(card)
+  local gift = type(card) == "table" and type(card.gift) == "table" and card.gift or {}
+  return (gift.kind == "mon" or gift.kind == "egg") and not gift.doneFlag
+end
+
+local function deliveredIds(session)
+  local rec = MysteryGift.ensure(session)
+  rec.deliveredIds = type(rec.deliveredIds) == "table" and rec.deliveredIds or {}
+  return rec.deliveredIds
+end
+
+function MysteryGift.wasDelivered(session, card)
+  local id = num(type(card) == "table" and card.idNumber)
+  for _, v in ipairs(deliveredIds(session)) do
+    if num(v) == id then return true end
+  end
+  return false
+end
+
 -- pokefirered/src/mystery_gift.c:248 IsSavedWonderCardGiftNotReceived
 function MysteryGift.isGiftNotReceived(session)
+  if MysteryGift.validateSavedCard(session) and tracksById(MysteryGift.ensure(session).card) then
+    return not MysteryGift.wasDelivered(session, MysteryGift.ensure(session).card)
+  end
   local flagId = MysteryGift.getCardFlagId(session)
   local giftFlag = MysteryGift.receivedGiftFlag(flagId, session)
   if not giftFlag then return false end
@@ -954,12 +1004,21 @@ function MysteryGift.getNewsRewardInfo(session)
   return rewardType, item
 end
 
+-- pokefirered/src/mystery_gift_client.c:210 CLI_SAVE_NEWS
+function MysteryGift.saveNewsIfNew(session, news)
+  if MysteryGift.isNewsSameAsSaved(session, news) then return false, "had" end
+  if not MysteryGift.saveNews(session, news) then return false, "invalid" end
+  return true
+end
+
 -- pokefirered/src/mystery_gift_client.c:213
 function MysteryGift.receiveNews(session, news, newsType)
-  if not MysteryGift.saveNews(session, news) then return false end
+  local ok, why = MysteryGift.saveNewsIfNew(session, news)
+  if not ok then return false, why end
   MysteryGift.setNewsReward(session, newsType or MysteryGift.WONDER_NEWS_RECV_WIRELESS)
   return true
 end
+
 
 -- pokefirered/data/mystery_event_msg.s:69 SurfPichu_GiveEgg
 local function createEventMon(session, gift)
@@ -980,8 +1039,43 @@ local function createEventMon(session, gift)
     ok, code, mon = Party.giveMon(session, species, level, gift.nickname)
   end
   if not (ok and mon) then return nil, code end
-  if gift.personality then
-    mon.personality = num(gift.personality)
+  local Rng = require("src.core.game3.rng")
+  local otName = gift.otName
+  if type(gift.otNames) == "table" and #gift.otNames > 0 then
+    otName = gift.otNames[(Rng.Random() % #gift.otNames) + 1]
+  end
+  if otName then
+    mon.ot = otName
+    mon.otName = otName
+  end
+  if gift.otIdMax then
+    mon.otId = (Rng.Random() % num(gift.otIdMax)) + 1
+    mon.otSecretId = 0
+  elseif gift.otId then
+    mon.otId = num(gift.otId) % 65536
+    mon.otSecretId = math.floor(num(gift.otId) / 65536) % 65536
+  end
+  if gift.secretIdRandom then mon.otSecretId = Rng.Random() end
+  if gift.otGender == 2 then mon.otGender = Rng.Random() % 2
+  elseif gift.otGender then mon.otGender = gift.otGender end
+  local personality = gift.personality and num(gift.personality) or mon.personality
+  -- pokefirered/src/pokemon.c:6062 IsShinyOtIdPersonality
+  local function shiny(p)
+    local bit = require("bit")
+    local tid, sid = num(mon.otId) % 65536, num(mon.otSecretId) % 65536
+    return bit.bxor(bit.bxor(tid, sid), bit.bxor(math.floor(p / 65536), p % 65536)) < 8
+  end
+  if not gift.personality and gift.shiny == "never" then
+    while shiny(personality) do personality = Rng.Random32() % 0x100000000 end
+  elseif not gift.personality and gift.shiny == "always" and not shiny(personality) then
+    local bit = require("bit")
+    local hi = math.floor(personality / 65536)
+    local lo = bit.band(bit.bxor(bit.bxor(num(mon.otId) % 65536, num(mon.otSecretId) % 65536), hi), 0xFFF8)
+      + personality % 8
+    personality = hi * 65536 + lo
+  end
+  if personality ~= mon.personality then
+    mon.personality = personality
     if Pokemon.natureId then mon.nature = Pokemon.natureId(mon.personality) end
     if Pokemon.abilityId then
       mon.ability = Pokemon.abilityId(species, mon.personality)
@@ -990,25 +1084,24 @@ local function createEventMon(session, gift)
     if Pokemon.gender then mon.gender = Pokemon.gender(species, mon.personality) end
     if Pokemon.applyStats then Pokemon.applyStats(mon) end
   end
-  if gift.otName then
-    mon.ot = gift.otName
-    mon.otName = gift.otName
-  end
-  if gift.otId then
-    -- pokefirered/src/pokemon.c:6062 IsShinyOtIdPersonality
-    mon.otId = num(gift.otId) % 65536
-    mon.otSecretId = math.floor(num(gift.otId) / 65536) % 65536
-  end
   if gift.heldItem and num(gift.heldItem) > 0 then
     mon.item, mon.heldItem = num(gift.heldItem), num(gift.heldItem)
   end
   -- pokefirered/src/scrcmd.c:2244 ScrCmd_setmonmodernfatefulencounter
-  mon.modernFatefulEncounter = true
+  mon.modernFatefulEncounter = gift.fateful ~= false
+  if gift.nationalRibbon then
+    require("src.core.game3.rse.ribbons").set(mon, "national", 1)
+  end
   -- pokefirered/data/mystery_event_msg.s:72 setmonmetlocation METLOC_FATEFUL_ENCOUNTER
-  mon.metLocation = METLOC_FATEFUL_ENCOUNTER
+  mon.metLocation = gift.metLocation or METLOC_FATEFUL_ENCOUNTER
+  if gift.metLevel then mon.metLevel = gift.metLevel end
+  if gift.metGame then mon.metGame = gift.metGame end
+  if gift.ball then mon.pokeball = gift.ball end
+  if gift.language then mon.language = gift.language end
   mon.moves = mon.moves or {}
   mon.pp = mon.pp or {}
   mon.maxPp = mon.maxPp or {}
+  if gift.movesOnly then mon.moves, mon.pp, mon.maxPp = {}, {}, {} end
   for slot, move in pairs(gift.moves or {}) do
     mon.moves[slot] = move
     local pp = Pokemon.movePp and Pokemon.movePp(move) or nil
@@ -1034,12 +1127,14 @@ function MysteryGift.deliverGift(session, card)
   card = card or MysteryGift.getSavedCard(session)
   if type(card) ~= "table" then return MysteryGift.DELIVER_NOTHING end
   local gift = type(card.gift) == "table" and card.gift or {}
-  local receivedFlag = MysteryGift.receivedGiftFlag(card.flagId, session)
+  local byId = tracksById(card)
+  local receivedFlag = not byId and MysteryGift.receivedGiftFlag(card.flagId, session) or nil
 
   -- pokefirered/src/mystery_gift.c:248 IsSavedWonderCardGiftNotReceived
   if receivedFlag and getFlag(session, receivedFlag) then
     return MysteryGift.DELIVER_ALREADY
   end
+  if byId and MysteryGift.wasDelivered(session, card) then return MysteryGift.DELIVER_ALREADY end
   if gift.doneFlag and getFlag(session, gift.doneFlag) then
     return MysteryGift.DELIVER_ALREADY
   end
@@ -1085,6 +1180,7 @@ function MysteryGift.deliverGift(session, card)
   end
   if gift.doneFlag then setFlag(session, gift.doneFlag, true) end
   if receivedFlag then setFlag(session, receivedFlag, true) end
+  if byId then table.insert(deliveredIds(session), num(card.idNumber)) end
   return MysteryGift.DELIVER_GIVEN
 end
 
@@ -1229,6 +1325,7 @@ function MysteryGift.builtins(family)
           Strings("It is for use at VERMILION CITY port.")),
         footerLine1Text = Strings("Speak to the deliveryman"),
         footerLine2Text = Strings("at a POKéMON CENTER."),
+        versions = { "firered", "leafgreen" },
         gift = {
           kind = "item",
           item = MysteryGift.ITEM_MYSTIC_TICKET,
@@ -1261,6 +1358,7 @@ function MysteryGift.builtins(family)
           Strings("It is for use at VERMILION CITY port.")),
         footerLine1Text = Strings("Speak to the deliveryman"),
         footerLine2Text = Strings("at a POKéMON CENTER."),
+        versions = { "firered", "leafgreen" },
         gift = {
           kind = "item",
           item = MysteryGift.ITEM_AURORA_TICKET,
@@ -1294,6 +1392,7 @@ function MysteryGift.builtins(family)
           Strings("kindness.")),
         footerLine1Text = Strings("Speak to the deliveryman"),
         footerLine2Text = Strings("at a POKéMON CENTER."),
+        versions = { "firered", "leafgreen" },
         gift = {
           kind = "egg",
           species = 172,
@@ -1326,6 +1425,7 @@ function MysteryGift.builtins(family)
           Strings("your STAMP CARD.")),
         footerLine1Text = Strings("Speak to the deliveryman"),
         footerLine2Text = Strings("at a POKéMON CENTER."),
+        versions = { "firered", "leafgreen" },
         gift = { kind = "none" },
       },
     },
@@ -1350,6 +1450,7 @@ function MysteryGift.builtins(family)
           Strings("Look for them and battle!")),
         footerLine1Text = Strings("Speak to the deliveryman"),
         footerLine2Text = Strings("at a POKéMON CENTER."),
+        versions = { "firered", "leafgreen" },
         -- pokefirered/data/mystery_event_msg.s:173 giveitem ITEM_POTION
         gift = {
           kind = "item",
@@ -1382,6 +1483,7 @@ function MysteryGift.builtins(family)
           Strings("on SIX ISLAND.")),
         footerLine1Text = Strings("Speak to the deliveryman"),
         footerLine2Text = Strings("at a POKéMON CENTER."),
+        versions = { "firered", "leafgreen" },
         -- pokefirered/data/mystery_event_msg.s:325
         gift = {
           kind = "var",
@@ -1403,6 +1505,7 @@ local function rseCard(key, label, t)
   t.subtitleText = t.subtitleText or Strings("MYSTERY GIFT")
   t.footerLine1Text = t.footerLine1Text or Strings("Speak to the deliveryman")
   t.footerLine2Text = t.footerLine2Text or Strings("at a POKéMON CENTER.")
+  t.versions = t.versions or { "emerald" }
   return { key = key, family = "rse", label = label, card = t }
 end
 
@@ -1579,10 +1682,60 @@ end
 
 local function familyVersion(family)
   if family == MysteryGift.familyOf(nil) then return versionOf(nil) end
-  return family == "rse" and "emerald" or "firered"
+  return MysteryGift.FAMILY_VERSIONS[family] and MysteryGift.FAMILY_VERSIONS[family][1] or "firered"
 end
 
-function MysteryGift.parseFeed(payload, family)
+-- pokeruby/src/mystery_event_script.c:46 CheckCompatibility
+function MysteryGift.eventHeaderOk(bytes, version)
+  local Event = require("src.core.game3.rs.mystery_event")
+  if type(bytes) ~= "string" or #bytes < 17 or #bytes > Event.MAX_BYTES or bytes:byte(1) ~= 1 then return false end
+  local bit = require("bit")
+  local function u16(at) return bytes:byte(at) + bytes:byte(at + 1) * 256 end
+  local function u32(at) return u16(at) + u16(at + 2) * 65536 end
+  local mask = ({ ruby = 0x80, sapphire = 0x100 })[version] or 0x180
+  return bit.band(u16(6), 2) ~= 0 and bit.band(u32(8), 2) ~= 0 and bit.band(u16(12), 4) ~= 0
+    and bit.band(u32(14), mask) ~= 0
+end
+
+local EVENT_OP_SIZE = { [0] = 1, 17, 1, 6, 2, 5, 12, 5, 3, 1, 2, 5, 5, 5, 1, 13, 13 }
+
+-- pokeruby/src/mystery_event_script.c:356 MEScrCmd_setrecordmixinggift
+function MysteryGift.eventRecordMixingItem(bytes)
+  if type(bytes) ~= "string" then return nil end
+  local pos = 1
+  while pos <= #bytes do
+    local op = bytes:byte(pos)
+    local size = EVENT_OP_SIZE[op]
+    if not size or op == 2 then return nil end
+    if op == 11 and pos + 4 <= #bytes then
+      local unk, qty = bytes:byte(pos + 1), bytes:byte(pos + 2)
+      local item = bytes:byte(pos + 3) + bytes:byte(pos + 4) * 256
+      if unk ~= 0 and qty ~= 0 and item ~= 0 then return item end
+    end
+    pos = pos + size
+  end
+  return nil
+end
+
+local function parseEvents(data, version)
+  local out = {}
+  if type(data.events) ~= "table" then return out end
+  local Base64 = require("src.core.Base64")
+  for _, raw in ipairs(data.events) do
+    local ok, bytes = pcall(Base64.decode, type(raw) == "table" and raw.payload or nil)
+    if ok and rowFamily(raw) == "rs" and MysteryGift.offeredIn(copyVersions(raw.versions), version)
+      and MysteryGift.eventHeaderOk(bytes, version) then
+      out[#out + 1] = {
+        key = type(raw.key) == "string" and raw.key or tostring(#out + 1),
+        label = clampText(raw.title, WONDER_CARD_TEXT_LENGTH),
+        bytes = bytes,
+      }
+    end
+  end
+  return out
+end
+
+function MysteryGift.parseFeed(payload, family, gameVersion)
   family = family or MysteryGift.familyOf(nil)
   local version = familyVersion(family)
   local Json = require("src.link.Json")
@@ -1590,9 +1743,11 @@ function MysteryGift.parseFeed(payload, family)
   if type(data) ~= "table" or data.v ~= MysteryGift.FEED_VERSION then return nil, "bad_feed" end
   if type(data.cards) ~= "table" or type(data.news) ~= "table" then return nil, "bad_feed" end
   local out = { issued = num(data.issued), cards = {}, news = {} }
+  if family == "rs" then out.events = parseEvents(data, gameVersion) end
   for _, raw in ipairs(data.cards) do
-    local card = rowFamily(raw) == family and MysteryGift.normalizeCard(raw, version) or nil
-    if card and validateCard(card) and isFlagIdInValidRange(card.flagId) and card.idNumber ~= 0 then
+    local card = rowFamily(raw) == family and MysteryGift.normalizeCard(raw, gameVersion or version) or nil
+    if card and validateCard(card) and isFlagIdInValidRange(card.flagId) and card.idNumber ~= 0
+      and MysteryGift.offeredIn(card.versions, gameVersion) then
       out.cards[#out.cards + 1] = {
         key = type(raw.key) == "string" and raw.key or tostring(card.idNumber),
         label = card.titleText,
@@ -1601,7 +1756,7 @@ function MysteryGift.parseFeed(payload, family)
     end
   end
   for _, raw in ipairs(data.news) do
-    local news = rowFamily(raw) == family and MysteryGift.normalizeNews(raw) or nil
+    local news = MysteryGift.normalizeNews(raw)
     if news and validateNews(news) then
       out.news[#out.news + 1] = {
         key = type(raw.key) == "string" and raw.key or tostring(news.id),
@@ -1613,7 +1768,7 @@ function MysteryGift.parseFeed(payload, family)
   return out
 end
 
-function MysteryGift.verifyFeed(feed, family)
+function MysteryGift.verifyFeed(feed, family, gameVersion)
   if type(feed) ~= "table" or type(feed.payload) ~= "string" or type(feed.sig) ~= "string" then
     return nil, "bad_feed"
   end
@@ -1621,17 +1776,25 @@ function MysteryGift.verifyFeed(feed, family)
   if not Ed25519.verify(MysteryGift.GIFT_PUBKEY, feed.payload, feed.sig) then
     return nil, "bad_signature"
   end
-  return MysteryGift.parseFeed(feed.payload, family)
+  return MysteryGift.parseFeed(feed.payload, family, gameVersion)
 end
 
-function MysteryGift.feedPath(family)
-  if family == "frlg" then return MysteryGift.FEED_PATH end
-  return MysteryGift.FEED_PATH .. "?family=" .. tostring(family)
+function MysteryGift.feedPath(family, gameVersion)
+  local q = {}
+  if family ~= "frlg" then q[#q + 1] = "family=" .. tostring(family) end
+  if gameVersion then q[#q + 1] = "version=" .. tostring(gameVersion) end
+  if #q == 0 then return MysteryGift.FEED_PATH end
+  return MysteryGift.FEED_PATH .. "?" .. table.concat(q, "&")
 end
 
 function MysteryGift.fetchOnline(opts)
   opts = opts or {}
   local family = opts.family or MysteryGift.familyOf(opts.session)
+  local gameVersion = opts.version
+  if gameVersion == nil then
+    gameVersion = versionOf(opts.session)
+    if not MysteryGift.offeredIn(MysteryGift.FAMILY_VERSIONS[family], gameVersion) then gameVersion = nil end
+  end
   local client = opts.client
   if not client then
     local okS, SyncClient = pcall(require, "src.sync.SyncClient")
@@ -1640,12 +1803,12 @@ function MysteryGift.fetchOnline(opts)
     if not okN then return { status = "error", reason = "offline" } end
     client = made
   end
-  local okR, handle = pcall(client.send, client, "GET", MysteryGift.feedPath(family), nil,
+  local okR, handle = pcall(client.send, client, "GET", MysteryGift.feedPath(family, gameVersion), nil,
     { noAuth = true, maxSeconds = MysteryGift.FETCH_SECONDS })
   if not okR or handle == nil then
-    return { status = "error", reason = "offline", client = client, family = family }
+    return { status = "error", reason = "offline", client = client, family = family, version = gameVersion }
   end
-  return { status = "pending", client = client, handle = handle, family = family }
+  return { status = "pending", client = client, handle = handle, family = family, version = gameVersion }
 end
 
 function MysteryGift.pollOnline(job)
@@ -1662,7 +1825,7 @@ function MysteryGift.pollOnline(job)
     job.reason = (num(res.code) >= 400) and "server" or "offline"
     return "error", job.reason
   end
-  local list, why = MysteryGift.verifyFeed(res.data, job.family)
+  local list, why = MysteryGift.verifyFeed(res.data, job.family, job.version)
   if not list then
     job.status, job.reason = "error", why
     return "error", why

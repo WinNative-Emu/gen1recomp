@@ -93,14 +93,11 @@ function ItemEffects.healsHP(id)
       or id == "REVIVE" or id == "MAX_REVIVE"
 end
 
--- .useRareCandy prints over the still-drawn party menu
--- (engine/items/item_effects.asm:1392-1418); .useVitamin ends at
--- RemoveUsedItem the same way (engine/items/item_effects.asm:1315-1322);
--- stones keep the menu on screen (engine/items/item_effects.asm:772-793,
+-- engine/items/item_effects.asm:1223-1237, :1392-1418, :1315-1322, :772-793
 -- engine/pokemon/evos_moves.asm:120-128
--- (engine/items/item_effects.asm:2022-2039)
+-- engine/items/item_effects.asm:2022-2039
 function ItemEffects.keepsPartyMenuOpen(id)
-  return ItemEffects.healsHP(id) or id == "RARE_CANDY"
+  return ItemEffects.isBattleMedicine(id) or id == "RARE_CANDY"
       or VITAMINS[id] ~= nil or ItemEffects.isStone(id)
       or id == "ELIXER" or id == "MAX_ELIXER"
       or id == "ETHER" or id == "MAX_ETHER" or id == "PP_UP"

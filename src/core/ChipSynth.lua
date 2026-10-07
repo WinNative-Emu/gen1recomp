@@ -179,11 +179,13 @@ local cachedBanks
 local function loadBanks(data)
   local audio = data.audio
   local WorkerFs = require("src.core.WorkerFs")
-  local key = (WorkerFs.normalize(audio.programPrefix) or "") .. tostring(audio.programFile)
+  local key = audio.programBytes and audio
+    or (WorkerFs.normalize(audio.programPrefix) or "") .. tostring(audio.programFile)
   if cachedProgramFile == key and cachedBanks then
     return cachedBanks
   end
-  local raw, readError = WorkerFs.read(audio.programPrefix, audio.programFile)
+  local raw, readError = audio.programBytes
+  if not raw then raw, readError = WorkerFs.read(audio.programPrefix, audio.programFile) end
   if not raw then error("could not read sound programs: " .. tostring(readError)) end
   local banks = {}
   for index, bank in ipairs(audio.bankOrder) do

@@ -79,7 +79,10 @@ function Button.draw(Kit, x, y, w, h, label, opts, hot, focused)
   local active = opts.active or opts.on
   local invert = false
   local fill, ink, stroke, strokeA, strokeWidth, doEmboss, doRing, glowA
-  if face == "selection" then
+  if face == "bare" then
+    ink = opts.ink or PAL.heading
+    doRing = focused
+  elseif face == "selection" then
     -- A selected control keeps its geometry, dark face and label layout.
     -- Selection is an inset accent outline, never a filled keycap.
     fill = PAL.surface
@@ -139,7 +142,9 @@ function Button.draw(Kit, x, y, w, h, label, opts, hot, focused)
     doRing = opts.ring
   end
   if G then
-    Theme.fillRounded(x, y, w, h, fill, enabled and 1 or B.disabledA, radius, segments)
+    if face ~= "bare" then
+      Theme.fillRounded(x, y, w, h, fill, enabled and 1 or B.disabledA, radius, segments)
+    end
     if doEmboss then
       local es = enabled and ((hot or focused) and B.embossHot or B.embossRest) or B.embossDisabled
       Theme.emboss(x, y, w, h, es)
@@ -245,7 +250,7 @@ function Button.draw(Kit, x, y, w, h, label, opts, hot, focused)
       Kit.textCenter(fname, shown, x, top + size + gap, w, ink)
     elseif opts.icon then
       local box = math.min(w, h)
-      local size = math.floor(box * (hasLabel and 0.42 or 0.5))
+      local size = math.floor(box * (hasLabel and 0.42 or 0.5) * (opts.iconScale or 1))
       local gap = math.floor(7 * Kit.scale)
       local shown = hasLabel
           and Kit.ellipsize(

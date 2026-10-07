@@ -51,12 +51,41 @@ GamepadMap.NX_RAW_BUTTON_BINDINGS = {
   [9] = "select", [10] = "start",
 }
 
+GamepadMap.PAD_ALIASES = {
+  lefttrigger = "triggerleft",
+  righttrigger = "triggerright",
+  lsup = "leftstick_up", lsdown = "leftstick_down",
+  lsleft = "leftstick_left", lsright = "leftstick_right",
+  rsup = "rightstick_up", rsdown = "rightstick_down",
+  rsleft = "rightstick_left", rsright = "rightstick_right",
+}
+
+function GamepadMap.normalizePad(button)
+  if not button then return nil end
+  return GamepadMap.TRIGGER_AXES[button] or GamepadMap.PAD_ALIASES[button] or button
+end
+
+function GamepadMap.initGamepadMappings()
+  local js = love and love.joystick
+  if not (js and js.loadGamepadMappings) then return end
+  local envConfig = os.getenv and (os.getenv("SDL_GAMECONTROLLERCONFIG") or os.getenv("SDL_GAMECONTROLLERCONFIG_FILE"))
+  if envConfig and envConfig ~= "" then
+    pcall(js.loadGamepadMappings, envConfig)
+  end
+  local fs = love.filesystem
+  if fs and fs.getInfo and fs.getInfo("gamecontrollerdb.txt") then
+    pcall(js.loadGamepadMappings, "gamecontrollerdb.txt")
+  end
+end
+
 -- Raw index -> gamepad button *name* for RomImporter (then NX face swap applies).
 GamepadMap.RAW_TO_GAMEPAD_BUTTON = {
   [1] = "a", [2] = "b", [3] = "x", [4] = "y",
   [5] = "leftshoulder", [6] = "rightshoulder",
   [7] = "back", [8] = "start", [9] = "back", [10] = "start",
   [11] = "triggerleft", [12] = "triggerright",
+  [13] = "leftstick", [14] = "rightstick",
+  [15] = "guide",
 }
 
 GamepadMap.NX_RAW_TO_GAMEPAD_BUTTON = {

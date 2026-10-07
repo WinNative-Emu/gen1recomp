@@ -56,6 +56,18 @@ The Launcher consists of the following files, and any later version of them:
 Distributing the Launcher together with this program is permitted only in
 unmodified official releases from BOIS CLUB GAMES, LLC.
 
+### PortMaster distribution permission
+
+As an exception to the Launcher distribution restriction above, BOIS CLUB
+GAMES, LLC grants permission to distribute the Launcher with this program
+through PortMaster, including the PortMaster-MV repository and its release
+packages. This permission covers PortMaster packaging and launch scripts;
+it does not grant a general right to reuse or modify the proprietary Launcher
+in other projects. Retain this license and the attribution required above.
+
+This exception records the explicit PortMaster permission granted by project
+owner bryanthaboi on 6 October 2026. All other terms remain unchanged.
+
 ### 3. Names and marks (Section 7(e))
 
 This license grants no rights to use the names, logos, or trademarks of BOIS

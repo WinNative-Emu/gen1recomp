@@ -6,7 +6,7 @@ local Rs = {}
 local function tables(game, revision)
   local V = VersionsRse.new(game, revision.build)
   local sym, count = V.sym, V.count
-  V.CACHE_VERSION = 3
+  V.CACHE_VERSION = 4
   V.NATIVE_VERSION = 2
   V.OW_VERSION = 1
   V.ANIM_VERSION = 1
@@ -98,6 +98,8 @@ local function tables(game, revision)
   V.TRAINER_BACK_PIC_COUNT = count("gTrainerBackPicTable", 8)
   -- pokeruby/src/data/graphics/trainers.h:72
   V.TRAINER_BACK_PIC_COMPRESSED = true
+  -- pokeruby/src/pokemon_2.c:169
+  V.TRAINER_BACK_ANIMS_TABLE = sym("gUnknown_081ECACC")
   V.WILD_MON_HEADERS = sym("gWildMonHeaders")
   V.WILD_MON_HEADER_SIZE = 20
   V.WILD_MON_HEADER_COUNT = count("gWildMonHeaders", 20)

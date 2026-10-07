@@ -4,6 +4,8 @@ local Font = require("src.ui.game3.frlg_font")
 local Text = require("src.core.game3.rom_text")
 local Strings = require("src.core.Strings")
 local M = {ID = "rs_cable_lobby", open = false}
+-- pokeemerald/src/strings.c:1242
+M.HEADERS = {"gOtherText_LinkStandby", "gText_CommunicationStandby"}
 function M.isOpen() return M.open end
 function M.show(opts)
   M.opts, M.cursor, M.open = opts, 1, true
@@ -38,8 +40,11 @@ end
 function M.draw()
   if not M.open then return end
   Window.stdFrame(Window.template(1, 1, 28, 18))
-  local rows, opts = M.rows(), {font = "native_3"}
-  Font.draw(Text.plain("gOtherText_LinkStandby"), 16, 16, opts)
+  local Family = require("src.core.game3.link.family")
+  local rows, opts = M.rows(), Family.isRubySapphire(Family.activeVersion()) and {font = "native_3"} or {}
+  for _, key in ipairs(M.HEADERS) do
+    if Text.has(key) then Font.draw(Text.plain(key), 16, 16, opts); break end
+  end
   local title = M.opts.title and M.opts.title() or ""
   Font.draw(title, 16, 40, opts)
   for i, row in ipairs(rows) do

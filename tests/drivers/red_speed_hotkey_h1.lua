@@ -27,6 +27,11 @@ return function(game)
   game:gamepadaxis(nil, "triggerleft", 0)
   expect(o.speedOverworld == 3, "red_lt_lowers")
   expect(game:logicSpeed() == 3, "red_logic_follows_overworld")
+  key("0")
+  expect(o.speedOverworld == 2, "red_0_lowers_overworld")
+  key("kp0")
+  expect(o.speedOverworld == 1, "red_numpad_0_lowers")
+  expect(o.speedBattle == 1 and o.speedMenu == 1, "red_0_syncs_categories")
   game.speedOverride = 1
   love.event.quit(failed and 1 or 0)
 end

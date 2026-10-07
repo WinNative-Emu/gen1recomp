@@ -16,6 +16,11 @@ love = love or require("tests.love_stub")
 local FileBrowser = require("src.ui.kit.FileBrowser")
 local HostShell = require("src.core.HostShell")
 
+local realRomArchive = package.loaded["src.import.RomArchive"]
+package.loaded["src.import.RomArchive"] = {
+  capabilities = function() return { zip = true, z7 = false } end,
+}
+
 -- 1. Injection: a directory named with a command substitution must not run.
 -- The marker must not pre-exist (os.tmpname creates its file, so name it here).
 local marker = "/tmp/gen1recomp-inject-" .. tostring(os.time())
@@ -50,7 +55,8 @@ end
 local realItems = love.filesystem.getDirectoryItems
 local realInfo = love.filesystem.getInfo
 local listing = { "images", "videos", "Red.gb", "Crystal.GBC", "FireRed.gba",
-  "Emerald.GBA", "roms.zip", "save.sav", "save.lua", "demo.g1rcart", "notes.txt" }
+  "Emerald.GBA", "roms.zip", "pack.7z", "save.sav", "save.lua",
+  "demo.g1rcart", "notes.txt" }
 local function listingText()
   local out = {}
   for _, name in ipairs(listing) do
@@ -84,6 +90,8 @@ for _, backend in ipairs({ "shell", "love" }) do
     end
     check(found["notes.txt"] == nil and found["save.sav"] == nil,
       backend .. " excludes unrelated files from ROM mode")
+    check(found["pack.7z"] == nil,
+      backend .. " hides .7z when the platform caps disallow it")
     if found["FireRed.gba"] then
       FileBrowser.selectedIdx = found["FireRed.gba"]
       check(FileBrowser.gamepadpressed(button), backend .. " consumes " .. button)
@@ -108,5 +116,6 @@ end
 io.popen = realPopen
 love.filesystem.getDirectoryItems = realItems
 love.filesystem.getInfo = realInfo
+package.loaded["src.import.RomArchive"] = realRomArchive
 
 T.finish("game3_file_browser_quote_test")

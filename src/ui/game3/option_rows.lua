@@ -359,9 +359,8 @@ function Rows.build(ctx, skip)
       return true
     end,
   })
-  if require("src.core.game3.profile").family(ctx and ctx.session) == "rse" then
-    add(require("src.core.game3.rse.event_islands").optionRow())
-  end
+  local EventIslands = require("src.core.game3.rse.event_islands")
+  if EventIslands.available() then add(EventIslands.optionRow()) end
 
   add({
     id = "touchControls", label = Strings("TOUCH PAD"),

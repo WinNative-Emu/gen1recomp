@@ -58,8 +58,28 @@ local function deep(v)
   return out
 end
 
+RecordMix.BYTES_KEY = "$b"
+RecordMix.BYTES_MIN, RecordMix.BYTES_MAX = 16, 256
+
+local function byteRun(v)
+  local n = #v
+  if n < RecordMix.BYTES_MIN or n > RecordMix.BYTES_MAX then return nil end
+  local count = 0
+  for _ in pairs(v) do count = count + 1 end
+  if count ~= n then return nil end
+  local hex = {}
+  for i = 1, n do
+    local b = v[i]
+    if type(b) ~= "number" or b < 0 or b > 255 or b % 1 ~= 0 then return nil end
+    hex[i] = string.format("%02x", b)
+  end
+  return table.concat(hex)
+end
+
 function RecordMix.toWire(v)
   if type(v) ~= "table" then return v end
+  local hex = byteRun(v)
+  if hex then return { [RecordMix.BYTES_KEY] = hex } end
   local out = {}
   for k, x in pairs(v) do
     if type(k) == "number" then out["#" .. tostring(k)] = RecordMix.toWire(x)
@@ -70,6 +90,12 @@ end
 
 function RecordMix.fromWire(v)
   if type(v) ~= "table" then return v end
+  local hex = v[RecordMix.BYTES_KEY]
+  if type(hex) == "string" and next(v, next(v)) == nil and #hex % 2 == 0 and not hex:find("[^%x]") then
+    local out = {}
+    for i = 1, #hex / 2 do out[i] = tonumber(hex:sub(i * 2 - 1, i * 2), 16) end
+    return out
+  end
   local out = {}
   for k, x in pairs(v) do
     local n = type(k) == "string" and tonumber(k:match("^#(%-?%d+)$")) or nil

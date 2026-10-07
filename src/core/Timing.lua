@@ -138,66 +138,78 @@ Timing.FAINT_SLIDE_STEP   = 8 / Timing.FAINT_SLIDE_ROW -- 4px per frame at 1x
 Timing.TRAINER_SLIDE_COL  = 2  -- core.asm:1267-1268, per column
 
 -- HP bar (engine/gfx/hp_bar.asm) ---------------------------------------------
---
--- UpdateHPBar steps ONE HP point per loop iteration (:81-120).  Each
--- iteration pays:
---   * 1 frame in UpdateHPBar_PrintHPNumber's DelayFrame (:234) -- but only
---     when wHPBarType is nonzero (:207-209), i.e. the player's own HUD and
---     the party menu, never the enemy HUD; and
---   * 2 frames per pixel the bar actually moved, from
---     UpdateHPBar_AnimateHPBar's `ld c, 2 / call DelayFrames` (:147-148).
--- The drain closes with one more pixel step and a Delay3 (:133-135).
---
--- So a player-side drain of D HP across P pixels costs D + 2P + 6 frames,
--- while the same drain on the enemy HUD costs only 2P + 5.  A 150 HP mon
--- losing everything takes 150 + 96 + 6 = 252 frames on hardware.
 
 Timing.HP_BAR_PIXELS      = 48 -- the bar is 48 px wide (GetHPBarLength)
-Timing.HP_BAR_PIXEL_STEP  = 2  -- frames per pixel of bar movement
-Timing.HP_BAR_HP_STEP     = 1  -- frames per HP point, player-side HUD only
+Timing.HP_BAR_PIXEL_STEP  = 2  -- engine/gfx/hp_bar.asm:147-148
+Timing.HP_BAR_HP_STEP     = 1  -- engine/gfx/hp_bar.asm:207-209, 234
+Timing.HP_BAR_STEP_CYCLES = 6144  -- engine/gfx/hp_bar.asm:81-120, 244-269
+Timing.VBLANK_CYCLES      = 2196  -- home/vblank.asm:1
+Timing.FRAME_CYCLES       = 17556
 
--- Pixels the bar shows for `hp` out of `maxHP`.  GetHPBarLength floors the
--- 48ths and clamps the result to at least 1 for any nonzero HP
--- (engine/gfx/hp_bar.asm:42-45); an empty bar is 0.
-function Timing.hpBarPixels(hp, maxHP)
+-- engine/gfx/hp_bar.asm:6-45
+function Timing.hpBarLength(hp, maxHP)
   if not maxHP or maxHP <= 0 then return 0 end
-  if hp <= 0 then return 0 end
-  local px = math.floor(hp * Timing.HP_BAR_PIXELS / maxHP)
+  local px
+  if maxHP >= 256 then
+    -- engine/gfx/hp_bar.asm:19-34
+    px = math.floor(math.floor(hp * Timing.HP_BAR_PIXELS / 4)
+                    / math.floor(maxHP / 4))
+  else
+    px = math.floor(hp * Timing.HP_BAR_PIXELS / maxHP)
+  end
   if px < 1 then px = 1 end
   return px
 end
 
--- Frames one single-HP step of the drain costs: the per-HP number print
--- (player side only) plus two frames for every pixel that step moved.
-function Timing.hpDrainStepFrames(fromHP, toHP, maxHP, playerSide)
-  local pixels = math.abs(Timing.hpBarPixels(toHP, maxHP)
-                          - Timing.hpBarPixels(fromHP, maxHP))
-  local frames = pixels * Timing.HP_BAR_PIXEL_STEP
-  if playerSide then frames = frames + Timing.HP_BAR_HP_STEP end
-  return frames
+function Timing.hpBarPixels(hp, maxHP)
+  if not maxHP or maxHP <= 0 then return 0 end
+  if hp <= 0 then return 0 end
+  return Timing.hpBarLength(hp, maxHP)
 end
 
--- After the loop, .animateHPBarDone prints the number one last time, runs
--- AnimateHPBar for a single pixel and falls into Delay3 (hp_bar.asm:132-135)
--- -- so the tail costs 6 frames on the player's HUD and 5 on the enemy's.
-function Timing.hpDrainClosingFrames(playerSide)
+function Timing.hpBarCpuLag(cycles, roundUp)
+  if not cycles or cycles <= 0 then return 0, false end
+  local budget = Timing.FRAME_CYCLES - Timing.VBLANK_CYCLES
+  local whole = math.floor(cycles / budget)
+  if cycles % budget ~= 0 then return whole, false end
+  if roundUp == false then return whole - 1, true end
+  return whole, true
+end
+
+-- engine/gfx/hp_bar.asm:121-135
+function Timing.hpDrainClosingFrames(playerSide, cycles, roundUp)
   local frames = Timing.HP_BAR_PIXEL_STEP + Timing.DELAY3
-  if playerSide then frames = frames + Timing.HP_BAR_HP_STEP end
-  return frames
+  if playerSide then return frames + Timing.HP_BAR_HP_STEP end
+  return frames + Timing.hpBarCpuLag(cycles, roundUp)
 end
 
--- Total cost of draining `fromHP` to `toHP`, for tests and for anything that
--- needs to budget the whole animation up front.
+-- engine/gfx/hp_bar.asm:81-120
 function Timing.hpDrainFrames(fromHP, toHP, maxHP, playerSide)
-  local total = 0
+  local total, cycles, roundUp = 0, 0, true
   local hp = fromHP
   local dir = (toHP < fromHP) and -1 or 1
   while hp ~= toHP do
     local nextHP = hp + dir
-    total = total + Timing.hpDrainStepFrames(hp, nextHP, maxHP, playerSide)
+    local pixels = math.abs(Timing.hpBarLength(nextHP, maxHP)
+                            - Timing.hpBarLength(hp, maxHP))
+    if playerSide then
+      total = total + Timing.HP_BAR_HP_STEP + pixels * Timing.HP_BAR_PIXEL_STEP
+    else
+      cycles = cycles + Timing.HP_BAR_STEP_CYCLES
+      if pixels > 0 then
+        local lag, tie = Timing.hpBarCpuLag(cycles, roundUp)
+        if tie then roundUp = not roundUp end
+        total = total + pixels * Timing.HP_BAR_PIXEL_STEP + lag
+        cycles = 0
+      end
+    end
     hp = nextHP
   end
-  return total + Timing.hpDrainClosingFrames(playerSide)
+  -- engine/gfx/hp_bar.asm:127-129
+  if not playerSide and toHP ~= 0 then
+    cycles = cycles + Timing.HP_BAR_STEP_CYCLES
+  end
+  return total + Timing.hpDrainClosingFrames(playerSide, cycles, roundUp)
 end
 
 return Timing

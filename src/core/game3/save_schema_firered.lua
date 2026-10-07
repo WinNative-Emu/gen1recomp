@@ -70,6 +70,9 @@ local function is_own_mon(session, mon)
   if type(otName) == "string" and type(name) == "string" and otName ~= name then return false end
   local otId, tid = tonumber(mon.otId), tonumber(session.trainerId)
   if otId and tid and (otId % 0x10000) ~= (tid % 0x10000) then return false end
+  local Identity = require("src.core.TrainerIdentity")
+  local sid = Identity.u16(session.secretId)
+  if mon.otSecretId ~= nil and sid and Identity.u16(mon.otSecretId) ~= sid then return false end
   return true
 end
 
@@ -83,21 +86,80 @@ local function repair_own_mon(session, mon)
     mon.metLocation = met
   end
   local secret = tonumber(session.secretId)
-  if secret and tonumber(mon.otSecretId) ~= secret then
-    mon.otSecretId = secret
+  if secret and mon.otSecretId == nil then
+    local otId = tonumber(mon.otId)
+    mon.otSecretId = otId and otId >= 0x10000 and math.floor(otId / 0x10000) % 0x10000 or secret
   end
 end
 
-function Schema.repairOwnMons(session)
-  for _, mon in ipairs(session.party or {}) do
-    repair_own_mon(session, mon)
+local function each_held_mon(session, fn)
+  local seen = {}
+  local function visit(mon)
+    if type(mon) ~= "table" or seen[mon] then return end
+    seen[mon] = true
+    fn(mon)
   end
+  local function visit_list(list)
+    if type(list) ~= "table" then return end
+    for _, mon in pairs(list) do visit(mon) end
+  end
+  visit_list(session.party)
   local storage = session.storage
   for _, box in pairs(storage and storage.boxes or {}) do
-    for _, mon in pairs(type(box) == "table" and box.mons or {}) do
-      repair_own_mon(session, mon)
+    visit_list(type(box) == "table" and box.mons or nil)
+  end
+  local function visit_held(mon)
+    if type(mon) == "table" and (tonumber(mon.species or mon.speciesId) or 0) ~= 0 then visit(mon) end
+  end
+  local function visit_held_list(list)
+    if type(list) ~= "table" then return end
+    for _, mon in pairs(list) do visit_held(mon) end
+  end
+  local md = type(session.modData) == "table" and session.modData or {}
+  local okD, Daycare = pcall(require, "src.core.game3.daycare")
+  local root = okD and md[Daycare.saveKey(session)] or nil
+  -- pokefirered/include/global.h:549
+  local dcs = { type(root) == "table" and root.daycare or false, rawget(session, "daycare") or false }
+  for _, dc in ipairs(dcs) do
+    if type(dc) == "table" then
+      for i = 1, Daycare.DAYCARE_MON_COUNT do visit_held(dc[i]) end
+      visit_held_list(dc.mons)
     end
   end
+  -- pokefirered/src/daycare.c:1563
+  local r5s = { type(root) == "table" and root.route5Daycare or false, rawget(session, "route5Daycare") or false }
+  for _, r5 in ipairs(r5s) do
+    if type(r5) == "table" then visit_held(r5.mon) end
+  end
+  -- pokefirered/src/load_save.c:160
+  visit_held_list(session.savedPlayerParty)
+  visit_held_list(md.savedPlayerParty)
+end
+
+function Schema.repairOwnMons(session)
+  require("src.core.game3.pokemon").playerSecretId(session)
+  each_held_mon(session, function(mon) repair_own_mon(session, mon) end)
+end
+
+function Schema.reseatLegacySecretIds(session)
+  local Identity = require("src.core.TrainerIdentity")
+  local sid = Identity.u16(session.secretId)
+  local tid = Identity.u16(session.trainerId)
+  local name = session.name or session.playerName
+  if not sid or not tid or type(name) ~= "string" then return 0 end
+  local moved = 0
+  local function reseat(mon)
+    if type(mon) ~= "table" or mon.otSecretId == nil then return end
+    local otName = mon.otName or mon.ot or mon.originalTrainer
+    if otName ~= name or Identity.u16(mon.otId) ~= tid then return end
+    if Identity.u16(mon.otSecretId) == sid then return end
+    local pid = Identity.personality(mon, { id = tid, sid = sid })
+    if not pid then return end
+    mon.personality, mon.otSecretId, mon.otId = pid, sid, tid
+    moved = moved + 1
+  end
+  each_held_mon(session, reseat)
+  return moved
 end
 
 -- pokefirered/src/union_room_chat.c:1430
@@ -308,7 +370,6 @@ function Schema.toSaveTable(session)
     move_overlay = session.move_overlay or {},
     trainerId = session.trainerId,
     secretId = session.secretId,
-    secretId = session.secretId,
     rng = session.rng,
     vsSeeker = session.vsSeeker,
     roamer = session.roamer,
@@ -456,7 +517,9 @@ function Schema.fromSaveTable(save)
   rules.resetStateOnContinue(session)
   rules.useContinueGameWarp(session)
   Schema.ensureMonBalls(session)
+  local legacySecret = save.secretId == nil and session.secretId == nil
   Schema.repairOwnMons(session)
+  if legacySecret then Schema.reseatLegacySecretIds(session) end
   if rules.repairSaveState then rules.repairSaveState(session) end
   Schema.repairRoamer(session)
   if type(save.options) == "table" then

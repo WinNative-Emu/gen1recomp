@@ -53,6 +53,19 @@ function M.grid(Bag, row)
   return {cells = cells, rows = #cells / 2, cols = 2}
 end
 
+function M.cursorWidth(Bag, g, i)
+  -- pokeruby/src/item_menu.c:2799
+  if Bag._battle then return 40 end
+  -- pokeruby/src/item_menu.c:1968
+  if g.cols == 1 then return 48 end
+  -- pokeruby/src/item_menu.c:1929
+  if i == 1 and g.rows == 3 then return 96 end
+  -- pokeruby/src/item_menu.c:1849
+  if i == 1 and Bag._location == "blender" then return 96 end
+  -- pokeruby/src/item_menu.c:1858
+  return i <= g.rows and 47 or 48
+end
+
 function M.actionsForPocket(_, row, Bag)
   local out = {}
   for _, a in ipairs(M.grid(Bag, row).cells) do if a then out[#out + 1] = a end end
@@ -471,7 +484,7 @@ function M.draw(Bag)
           if kind == "bike" and Player and Player.biking then label = "WALK" elseif mail(selected) then label = "CHECK" end
         end
         drawText(text(Data.ACTION_TEXT[label]), x, y, Font.COLOR.NORMAL, 48)
-        if i == st.gridPos then Cursor.draw(x, y, 8) end
+        if i == st.gridPos then Cursor.draw(x, y, M.cursorWidth(Bag, g, i)) end
       end
     end
   elseif Bag.mode == "toss" or Bag.mode == "deposit" then

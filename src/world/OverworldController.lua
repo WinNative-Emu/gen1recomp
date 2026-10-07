@@ -4673,6 +4673,14 @@ function OverworldState:rollEncounter(encDef, terrain)
   return enc
 end
 
+function OverworldState.rollsIndoorEncounters(def, indoor)
+  if not indoor or Map.isOutdoor(def) then return false end
+  -- engine/battle/wild_encounters.asm:41
+  if def.index ~= nil and def.index < indoor.firstIndoorMap then return false end
+  -- engine/battle/wild_encounters.asm:44
+  return def.tileset ~= indoor.excludedTileset
+end
+
 function OverworldState:onStepComplete()
   local p = self.player
   -- Defaulted: a state built without the constructor (a mod harness, a test
@@ -4808,13 +4816,12 @@ function OverworldState:onStepComplete()
   if suppressWildEncounter then return end
   local encDef = Game.data.encounters[self.map.id]
   local enc
-  local indoor = Game.data.field.indoorEncounters
   if self.map:isGrassCell(p.cellX, p.cellY) then
     enc = self:rollEncounter(encDef, "grass")
   elseif p.surfing and self.map:isWaterCell(p.cellX, p.cellY) then
     enc = self:rollEncounter({ grass = encDef and encDef.water }, "water")
-  elseif indoor and self.map.def.index >= indoor.firstIndoorMap
-         and self.map.def.tileset ~= indoor.excludedTileset then
+  elseif OverworldState.rollsIndoorEncounters(self.map.def,
+                                              Game.data.field.indoorEncounters) then
     enc = self:rollEncounter(encDef, "indoor")
   end
   if enc then

@@ -266,7 +266,7 @@ local function restore(saved)
   end
 end
 
-function OnlineSprites.drawIcon(entry, x, y, size)
+function OnlineSprites.drawIcon(entry, x, y, size, frame)
   if type(entry) ~= "table" or not entry.icon then return false end
   local img = entry.icon
   if type(img.getDimensions) ~= "function" then return false end
@@ -277,8 +277,13 @@ function OnlineSprites.drawIcon(entry, x, y, size)
   local quad = entry.iconQuadFor == img and entry.iconQuad or nil
   if entry.iconW and entry.iconH then
     local fw, fh = math.min(entry.iconW, iw), math.min(entry.iconH, ih)
-    quad = quad or love.graphics.newQuad(0, 0, fw, fh, iw, ih)
-    entry.iconQuad, entry.iconQuadFor = quad, img
+    local frames = math.max(1, math.floor(ih / fh))
+    local index = math.floor(tonumber(frame) or 0) % frames
+    if entry.iconQuadFor ~= img then entry.iconQuads = {} end
+    entry.iconQuads = entry.iconQuads or {}
+    quad = entry.iconQuads[index] or love.graphics.newQuad(0, index * fh, fw, fh, iw, ih)
+    entry.iconQuads[index] = quad
+    entry.iconQuadFor = img
     local s = (size or fw) / math.max(fw, fh)
     love.graphics.draw(img, quad, x, y, 0, s, s)
   elseif ih > 16 and entry.mirror then

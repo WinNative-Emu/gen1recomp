@@ -20,6 +20,7 @@ local FieldDefaults = require("src.world.FieldDefaults")
 local Map = require("src.world.Map")
 local Strings = require("src.core.Strings")
 local Status = require("src.battle.Status")
+local Timing = require("src.core.Timing")
 
 local PartyMenu = { isMenu = true }
 PartyMenu.__index = PartyMenu
@@ -411,12 +412,7 @@ function PartyMenu.new(game, opts)
   return self
 end
 
--- UpdateHPBar2 (engine/gfx/hp_bar.asm, predef'd from item_effects.asm's
--- .doneHealing): UpdateHPBar_AnimateHPBar is documented "for (a) ticks (two
--- waiting frames each)" over a 48-pixel bar, so the shown HP walks
--- maxHP/96 per frame -- the same rate the battle HUD drains at
--- (BattleState:stepHPDrain).  onDone fires on the frame it lands, which is
--- when the caller prints its message. #252
+-- engine/items/item_effects.asm:1208, engine/gfx/hp_bar.asm:81-135
 function PartyMenu:animateTo(mon, fromHP, onDone)
   if not (mon and mon.stats) then
     if onDone then onDone() end
@@ -425,7 +421,44 @@ function PartyMenu:animateTo(mon, fromHP, onDone)
   local from = math.max(0, fromHP or mon.hp)
   -- `from` outlives `shown`: sgbPalettes above needs the pre-heal HP for the
   -- whole fill, because the SGB bar color does not move until the redraw.
-  self.heal = { mon = mon, from = from, shown = from, onDone = onDone }
+  self.heal = { mon = mon, from = from, shown = from, hold = 0,
+                px = Timing.hpBarPixels(from, math.max(1, mon.stats.hp)),
+                onDone = onDone }
+end
+
+function PartyMenu:finishHeal()
+  local heal = self.heal
+  self.heal = nil
+  if heal.onDone then heal.onDone() end
+end
+
+function PartyMenu:stepHeal()
+  local heal = self.heal
+  local maxHP = math.max(1, heal.mon.stats.hp)
+  local goal = heal.mon.hp
+  if heal.hold > 0 then
+    heal.hold = heal.hold - 1
+    if heal.hold == 0 and heal.closing then self:finishHeal() end
+    return
+  end
+  local targetPx = Timing.hpBarPixels(heal.shown, maxHP)
+  if heal.px ~= targetPx then
+    -- engine/gfx/hp_bar.asm:140-148
+    heal.px = heal.px + ((heal.px > targetPx) and -1 or 1)
+    heal.hold = Timing.HP_BAR_PIXEL_STEP - 1
+  elseif heal.shown ~= goal then
+    -- engine/gfx/hp_bar.asm:100-110
+    heal.shown = heal.shown + ((heal.shown > goal) and -1 or 1)
+    heal.started = true
+    heal.hold = Timing.HP_BAR_HP_STEP - 1
+  elseif heal.started then
+    -- engine/gfx/hp_bar.asm:121-135
+    heal.closing = true
+    heal.hold = Timing.hpDrainClosingFrames(true) - 1
+  else
+    -- engine/gfx/hp_bar.asm:69-70
+    self:finishHeal()
+  end
 end
 
 -- Close a picker the caller kept open (see self.keepOpen).  A TextBox pops
@@ -469,14 +502,8 @@ function PartyMenu:update(dt)
   end
   -- The bar fill owns the menu while it runs: UpdateHPBar2 is a blocking
   -- predef in item_effects.asm, so no button is read until it lands (#252).
-  local heal = self.heal
-  if heal then
-    heal.shown = math.min(heal.mon.hp,
-                          heal.shown + math.max(1, heal.mon.stats.hp) / 96)
-    if heal.shown >= heal.mon.hp then
-      self.heal = nil
-      if heal.onDone then heal.onDone() end
-    end
+  if self.heal then
+    self:stepHeal()
     return
   end
   -- SwitchPartyMon_ClearGfx (engine/menus/start_sub_menus.asm:690), then
@@ -1011,13 +1038,15 @@ function PartyMenu:draw()
       -- animation has reached rather than the final value; drawHPBar reads
       -- only .hp and .stats, so a shim table is enough and the real mon is
       -- never mutated for display (#252).
-      local shown = mon
+      local shown, shownPx = mon, nil
       if self.heal and self.heal.mon == mon then
         shown = { hp = math.floor(self.heal.shown), stats = mon.stats }
+        shownPx = self.heal.px
       end
       love.graphics.setColor(1, 1, 1, 1)
       -- engine/menus/party_menu.asm:71
-      HudTiles.drawHPBar(self.game.data, 4, (y + 8) / 8, shown, nil, barZoned)
+      HudTiles.drawHPBar(self.game.data, 4, (y + 8) / 8, shown, nil, barZoned,
+                         nil, shownPx)
       love.graphics.setColor(0, 0, 0, 1)
       Font.draw(("%3d/%3d"):format(shown.hp, mon.stats.hp), 104, y + 8)
     end

@@ -237,8 +237,26 @@ for _, version in ipairs(GameVersion.ORDER) do
   check(slotId ~= nil and slotId ~= src, version .. " the import is a new slot")
   eq(SaveData.activeSlot(version), slotId, version .. " the imported slot is made active")
   local back = SaveSerializer.decode(SaveData.readSlotSource(version, slotId) or "")
+  local newId = back and back.meta and back.meta.playthroughId
+  check(type(newId) == "string" and newId ~= "" and newId ~= original.meta.playthroughId,
+    version .. " an import beside its source gets its own playthroughId")
+  eq(SaveData.loadOptions().playthroughIds[version][slotId], newId,
+    version .. " and the new slot is mapped to it")
+  if back then back.meta.playthroughId = original.meta.playthroughId end
   eq(back and SaveSerializer.encode(back), SaveSerializer.encode(original),
-    version .. " the imported slot matches the exported save")
+    version .. " the imported slot matches the exported save apart from its id")
+  local srcBack = SaveSerializer.decode(SaveData.readSlotSource(version, src) or "")
+  eq(srcBack and SaveSerializer.encode(srcBack), SaveSerializer.encode(original),
+    version .. " the source slot is untouched")
+
+  local body = files[rel]
+  local files2 = fresh()
+  local path = writeTmp(files2, "picked_save.sav", body)
+  local again, slot2 = SaveFileIO.importToSlot(path, version)
+  eq(again, true, version .. " the export imports on a fresh install")
+  local restored = SaveSerializer.decode(SaveData.readSlotSource(version, slot2) or "")
+  eq(restored and SaveSerializer.encode(restored), SaveSerializer.encode(original),
+    version .. " a fresh-install restore keeps the save byte-identical, id included")
 end
 
 local mismatches = {

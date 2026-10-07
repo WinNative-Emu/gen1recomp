@@ -9,63 +9,45 @@ local CacheBlob = require("src.import.CacheBlob")
 
 local Dataset = {}
 
-local function diskFallbackRaw(rel)
-  local override = Dataset.cacheRootOverride
-  if override then
-    local f = io.open(override .. "/" .. rel:gsub("^data/generated/gba/", ""), "rb")
-    if f then
-      local data = f:read("*a")
-      f:close()
-      if type(data) == "string" and #data > 0 then return data end
-    end
-  end
-  local f = io.open(rel, "rb") or io.open("data/generated/gba/" .. rel, "rb")
-  if f then
-    local data = f:read("*a")
-    f:close()
-    if type(data) == "string" and #data > 0 then return data end
-  end
-
-  local okG, GameVersion = pcall(require, "src.core.GameVersion")
-  local prefix = (okG and GameVersion.cachePrefix and GameVersion.cachePrefix()) or "firered/"
-  local prefixes = { prefix }
-  local roots = {}
-  local identity = os.getenv("POKEPORT_IDENTITY") or ""
-  local sandboxed = identity ~= ""
-  local home = os.getenv("HOME")
-  if home then
-    if sandboxed then
-      roots[#roots + 1] = home .. "/Library/Application Support/LOVE/" .. identity
-      roots[#roots + 1] = home .. "/.local/share/love/" .. identity
-    else
-      roots[#roots + 1] = home .. "/Library/Application Support/LOVE/pokemon-love2d"
-      roots[#roots + 1] = home .. "/.local/share/love/pokemon-love2d"
-      roots[#roots + 1] = home .. "/.local/share/love/Gen2Recomp"
-    end
-  end
-  if love and love.filesystem and love.filesystem.getSaveDirectory then
-    local sd = love.filesystem.getSaveDirectory()
-    if type(sd) == "string" and sd ~= "" then
-      roots[#roots + 1] = sd
-    end
-  end
-  for _, root in ipairs(roots) do
-    for _, pfx in ipairs(prefixes) do
-      for _, path in ipairs({ root .. "/" .. pfx .. rel, root .. "/" .. rel }) do
-        local f = io.open(path, "rb")
-        if f then
-          local data = f:read("*a")
-          f:close()
-          if type(data) == "string" and #data > 0 then return data end
-        end
-      end
-    end
-  end
+local function readFile(path)
+  local f = io.open(path, "rb")
+  if not f then return nil end
+  local data = f:read("*a")
+  f:close()
+  if type(data) == "string" and #data > 0 then return data end
   return nil
 end
 
-local function diskFallback(rel)
-  return CacheBlob.decode(rel, diskFallbackRaw(rel))
+local function explicitRoot()
+  return Dataset.cacheRootOverride or os.getenv("POKEPORT_GBA_CACHE")
+end
+
+local function absolute(rel)
+  return rel:sub(1, 1) == "/" or rel:match("^%a:[/\\]") ~= nil
+end
+
+local function headless()
+  return not (love and love.filesystem and love.filesystem.read)
+end
+
+local function fileBytes(rel)
+  if absolute(rel) then return readFile(rel) end
+  local root = explicitRoot()
+  if root then return readFile(root .. "/" .. (rel:gsub("^data/generated/gba/", ""))) end
+  local identity, home = os.getenv("POKEPORT_IDENTITY") or "", os.getenv("HOME")
+  if not headless() or identity == "" or not home then return nil end
+  local prefix = require("src.core.GameVersion").cachePrefix()
+  return readFile(home .. "/Library/Application Support/LOVE/" .. identity .. "/" .. prefix .. rel)
+    or readFile(home .. "/.local/share/love/" .. identity .. "/" .. prefix .. rel)
+end
+
+local function versioned(rel)
+  return not absolute(rel) and not explicitRoot()
+end
+
+local function outsideCache(rel)
+  return versioned(rel) and not headless()
+    and not rel:find("^data/generated/") and not rel:find("^assets/generated/")
 end
 
 local function loveCache()
@@ -74,46 +56,37 @@ local function loveCache()
       local rel = root .. "/" .. tostring(key) .. (kind == "pair" and "/mids.idx" or ".meta")
       local CacheFs = require("src.import.CacheFs")
       local prefix = require("src.core.GameVersion").cachePrefix()
-      -- Only a version-qualified cache can be read independently of mounted
-      -- overlays. Overrides/custom readers retain the synchronous fallback.
-      if Dataset.cacheRootOverride or os.getenv("POKEPORT_GBA_CACHE") then return nil end
+      if not versioned(rel) then return nil end
       if not CacheFs.existsAt(prefix .. rel) then return nil end
       return { prefix = prefix, directory = CacheFs.root() }
     end,
     read = function(_, rel)
-      local ok, CacheFs = pcall(require, "src.import.CacheFs")
-      if ok and CacheFs and CacheFs.readActive then
-        local bytes = CacheFs.readActive(rel)
+      if versioned(rel) then
+        local prefix = require("src.core.GameVersion").cachePrefix()
+        local bytes = require("src.import.CacheFs").readAt(prefix .. rel)
         if type(bytes) == "string" then return bytes end
       end
-      if love and love.filesystem then
-        local bytes = CacheBlob.readFs(rel)
-        if type(bytes) == "string" then return bytes end
-      end
-      return diskFallback(rel)
+      if outsideCache(rel) then return CacheBlob.readFs(rel) end
+      local data = fileBytes(rel)
+      return data and CacheBlob.decode(rel, data) or nil
     end,
     write = function(_, rel, bytes)
-      local ok, CacheFs = pcall(require, "src.import.CacheFs")
-      if ok and CacheFs and CacheFs.write then
-        return CacheFs.write(rel, bytes)
-      end
-      if not love or not love.filesystem then return false end
-      return love.filesystem.write(rel, CacheBlob.encode(rel, bytes))
+      if not versioned(rel) then return false end
+      local CacheFs = require("src.import.CacheFs")
+      local saved = CacheFs.prefix
+      CacheFs.prefix = require("src.core.GameVersion").cachePrefix()
+      local ok, okWrite, err = pcall(CacheFs.write, rel, bytes)
+      CacheFs.prefix = saved
+      if not ok then error(okWrite, 0) end
+      return okWrite, err
     end,
     exists = function(_, rel)
-      local ok, CacheFs = pcall(require, "src.import.CacheFs")
-      if ok and CacheFs and CacheFs.existsAt then
-        local okG, GameVersion = pcall(require, "src.core.GameVersion")
-        if okG and GameVersion.cachePrefix and CacheFs.existsAt(GameVersion.cachePrefix() .. rel) then
-          return true
-        end
-        if CacheFs.exists(rel) then return true end
-      end
-      if love and love.filesystem and love.filesystem.getInfo
-          and love.filesystem.getInfo(rel, "file") then
+      if versioned(rel) and require("src.import.CacheFs").existsAt(
+          require("src.core.GameVersion").cachePrefix() .. rel) then
         return true
       end
-      return diskFallbackRaw(rel) ~= nil
+      if outsideCache(rel) then return love.filesystem.getInfo(rel, "file") ~= nil end
+      return fileBytes(rel) ~= nil
     end,
   }
 end

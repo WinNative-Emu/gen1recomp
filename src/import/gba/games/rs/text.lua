@@ -17,19 +17,7 @@ return function(V)
     }
   end
 
-  local stems = {
-    UNKNOWN = "Empty", KUN_MALE = "Kun", KUN_FEMALE = "Chan",
-    RIVAL_MALE = "May", RIVAL_FEMALE = "Brendan",
-    VERSION = V.GAME == "sapphire" and "Sapphire" or "Ruby",
-    AQUA = "Aqua", MAGMA = "Magma", ARCHIE = "Archie", MAXIE = "Maxie",
-    KYOGRE = "Kyogre", GROUDON = "Groudon",
-  }
-  -- pokeruby/src/string_util.c:476
-  local evil, good = { "Magma", "Maxie", "Groudon" }, { "Aqua", "Archie", "Kyogre" }
-  if V.GAME == "sapphire" then evil, good = good, evil end
-  for i, name in ipairs({ "TEAM", "LEADER", "LEGENDARY" }) do
-    stems["EVIL_" .. name], stems["GOOD_" .. name] = evil[i], good[i]
-  end
   V.TEXT_PLACEHOLDERS = {}
-  for name, stem in pairs(stems) do V.TEXT_PLACEHOLDERS[name] = V.sym("gExpandedPlaceholder_" .. stem) end
+  local Placeholders = require("src.import.gba.text_placeholders_extract")
+  for name, label in pairs(Placeholders.rsSymbols(V.GAME)) do V.TEXT_PLACEHOLDERS[name] = V.sym(label) end
 end

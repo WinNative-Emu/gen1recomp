@@ -6,6 +6,15 @@ local Cursor = require("src.ui.game3.rs.menu_cursor")
 local Pal = require("src.core.game3.pal_fade")
 local Fx = require("src.core.game3.gba_fx")
 local Easy = require("src.core.game3.easy_chat_text")
+local words, groups = {}, {}
+local function wordText(id)
+  if words[id] == nil then words[id] = Easy.word(id) end
+  return words[id]
+end
+local function groupText(group)
+  if groups[group] == nil then groups[group] = Easy.groupName(group) end
+  return groups[group]
+end
 local Policy = require("src.ui.game3.rs.mail_composer_policy")
 local Frames = require("src.ui.game3.rs.mail_composer_frames")
 local C = {isMenu = true, open = false}
@@ -23,6 +32,7 @@ function C.manifest()
 end
 function C.write(record, opts)
   opts = opts or {}
+  words, groups = {}, {}
   C._man, C._record, C._session, C._opts = C.manifest(), assert(record), assert(opts.session), opts
   C._before, C.words = copyWords(record.words), copyWords(record.words)
   C.groups = Policy.groups(C._session, opts.gates)
@@ -259,7 +269,7 @@ local function phraseWords()
       local parts = {}
       for col = 0, 1 do
         local i = row * 2 + col + 1
-        if i <= 9 and C.words[i] ~= Policy.EMPTY then parts[#parts + 1] = Easy.rawWord(C.words[i]) .. " " end
+        if i <= 9 and C.words[i] ~= Policy.EMPTY then parts[#parts + 1] = wordText(C.words[i]) .. " " end
       end
       text(table.concat(parts), 40, row * 16, "phrase")
     end
@@ -271,7 +281,7 @@ local function phraseWords()
       local image = assert(Kit.image(C._man.blankWord))
       love.graphics.setColor(1, 1, 1, 1)
       Fx.draw(function() love.graphics.draw(image, x, y) end, C._pal:fx(0))
-    else text(Easy.rawWord(C.words[i]), x, y, "phrase") end
+    else text(wordText(C.words[i]), x, y, "phrase") end
   end
 end
 local function pickerText()
@@ -293,7 +303,7 @@ local function pickerText()
         local word = (view == "groups" and C.groups or C._list)[row * 2 + col + 1]
         if word then
           local x = (view == "groups" and 16 or 48) + col * 88
-          text(view == "groups" and word.name or word.text, x, 88 + (row - state.top) * 16 + offset, "picker")
+          text(view == "groups" and groupText(word) or wordText(word.id), x, 88 + (row - state.top) * 16 + offset, "picker")
         end
       end
     end

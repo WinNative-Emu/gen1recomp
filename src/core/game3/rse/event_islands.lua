@@ -26,6 +26,11 @@ EventIslands.GIFT_FLAGS = {
 
 local cache = {}
 
+function EventIslands.available()
+  local ok, man = pcall(EventIslands.manifest)
+  return ok and type(man) == "table" and type(man.gifts) == "table"
+end
+
 function EventIslands.manifest()
   local GameVersion = require("src.core.GameVersion")
   local key = tostring(GameVersion.get())
@@ -70,28 +75,75 @@ local function hasItem(sess, name)
   return Bag.has(sess.bag, C(sess):require("items", name), 1)
 end
 
+local TICKET_IDS = { eon = true, aurora = true, mystic = true, oldSeaMap = true }
+EventIslands.REFRESH_SECONDS = 600
+
+function EventIslands.relayTickets(sess)
+  local MysteryGift = require("src.core.game3.mystery_gift")
+  local rec = MysteryGift.ensure(sess)
+  local out = {}
+  for _, id in ipairs(type(rec.relayTickets) == "table" and rec.relayTickets or {}) do out[id] = true end
+  return out
+end
+
+function EventIslands.applyFeed(sess, list)
+  local MysteryGift = require("src.core.game3.mystery_gift")
+  local ids, seen = {}, {}
+  for _, entry in ipairs(type(list) == "table" and list.cards or {}) do
+    local id = MysteryGift.ramScriptId(sess, entry.card)
+    if TICKET_IDS[id] and not seen[id] then
+      seen[id] = true
+      ids[#ids + 1] = id
+    end
+  end
+  MysteryGift.ensure(sess).relayTickets = ids
+  return ids
+end
+
+function EventIslands.refresh(sess, opts)
+  local MysteryGift = require("src.core.game3.mystery_gift")
+  opts = opts or {}
+  if not EventIslands.job then
+    local now = os.time()
+    if EventIslands.fetchedAt and not opts.force and now - EventIslands.fetchedAt < EventIslands.REFRESH_SECONDS then
+      return "cached"
+    end
+    EventIslands.fetchedAt = now
+    EventIslands.job = MysteryGift.fetchOnline({ family = "rse", session = sess, transport = opts.transport,
+      client = opts.client })
+  end
+  local status, result = MysteryGift.pollOnline(EventIslands.job)
+  if status == "pending" then return "pending" end
+  EventIslands.job = nil
+  if status == "ok" then EventIslands.applyFeed(sess, result) end
+  return status, result
+end
+
 function EventIslands.eonPending(sess)
-  return not hasItem(sess, "ITEM_EON_TICKET") and not Rse.flag("FLAG_ENABLE_SHIP_SOUTHERN_ISLAND", sess)
+  return EventIslands.relayTickets(sess).eon == true
+    and not hasItem(sess, "ITEM_EON_TICKET") and not Rse.flag("FLAG_ENABLE_SHIP_SOUTHERN_ISLAND", sess)
 end
 
 -- pokeemerald/src/mystery_gift.c:156
 function EventIslands.pendingGift(sess)
   sess = sess or Rse.session()
-  if not EventIslands.enabled(sess) then return nil end
+  if not (sess and EventIslands.enabled(sess)) then return nil end
+  local relay = EventIslands.relayTickets(sess)
   for _, g in ipairs(EventIslands.manifest().gifts) do
     local flag = EventIslands.GIFT_FLAGS[g.id]
-    if flag and not Rse.flag(flag, sess) then return g end
+    if flag and relay[g.id] and not Rse.flag(flag, sess) then return g end
   end
   return nil
 end
 
 -- pokeemerald/src/field_specials.c:3630
-function EventIslands.sync(sess)
+function EventIslands.sync(sess, opts)
   sess = sess or Rse.session()
   if not (sess and Rse.isRse(sess) and Rse.store()) then return false end
   if not EventIslands.enabled(sess) then return false end
+  if not (opts and opts.offline) then pcall(EventIslands.refresh, sess, opts) end
   local pending = EventIslands.eonPending(sess) or EventIslands.pendingGift(sess) ~= nil
-  Rse.setVar("VAR_DISTRIBUTE_EON_TICKET", pending and 1 or 0, sess)
+  if pending then Rse.setVar("VAR_DISTRIBUTE_EON_TICKET", 1, sess) end
   return pending
 end
 
@@ -106,7 +158,7 @@ function EventIslands.optionRow()
     step = function(c)
       local o = require("src.core.game3.options").block(c.options)
       o[EventIslands.OPTION_KEY] = (tonumber(o[EventIslands.OPTION_KEY]) or 0) ~= 0 and 0 or 1
-      pcall(EventIslands.sync, c.session)
+      pcall(EventIslands.sync, c.session, { force = true })
       return true
     end,
   }

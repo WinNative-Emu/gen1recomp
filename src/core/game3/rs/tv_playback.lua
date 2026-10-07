@@ -118,7 +118,7 @@ function M.word(id)
     local E = require("src.core.game3.easy_chat_text")
     local group = E.group(math.floor(value / 512) % 128)
     if group then
-      for _, word in ipairs(group.words) do if word.id == value then return word.text end end
+      for _, word in ipairs(group.words) do if word.id == value then return E.word(value) end end
     end
     return romText("gOtherText_ThreeQuestions")
   end, id)

@@ -395,6 +395,8 @@ end
 -- accident.  Boot.run and Prelaunch.updateAllowed both ask this one function,
 -- so the boot gate and the --update gate cannot disagree.
 function Boot.canUpdateInPlace()
+  -- Catalogue packages are updated by PortMaster, not the standalone updater.
+  if os.getenv("POKEPORT_PORTMASTER_MANAGED") == "1" then return false end
   local fs = love and love.filesystem
   if not fs then return false end
   if fs.isFused and fs.isFused() then return true end

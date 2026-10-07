@@ -1928,6 +1928,7 @@ R.maps = {
     width = f.int(1), height = f.int(1),
     blocks = f.list(f.int(0, 255)),
     borderBlock = f.opt(f.int(0, 255)),
+    outdoor = f.opt(f.bool),
     -- A named SGB palette, which wins over the field.palettes cascade
     -- (OverworldController.lua:506 reads map.def.palette first).  Deliberately
     -- a plain string rather than f.id("palettes"): the ROM-free fixture base

@@ -11,6 +11,7 @@ local check, eq = T.check, T.eq
 
 local Zoom = require("src.render.Zoom")
 local Game2 = require("src.core.Game2")
+local DeferredWrite = require("src.core.DeferredWrite")
 
 local function fakeGame()
   local persisted = 0
@@ -35,6 +36,7 @@ do
   eq(Zoom.offset, -1, "wheel down zooms the live world one step out")
   eq(game.options.zoom, -1, "BUG FIX: wheel zoom is written into options.zoom")
   eq(game.save.options, game.options, "the save's options table follows")
+  DeferredWrite.flush()
   eq(persisted(), 1, "and persisted once")
 
   Game2.applyOptions(game)
@@ -43,7 +45,8 @@ do
   Game2.wheelmoved(game, 0, 1)
   Game2.wheelmoved(game, 0, 1)
   eq(game.options.zoom, 1, "wheel up steps back in and is stored each time")
-  eq(persisted(), 3, "one persist per wheel step")
+  DeferredWrite.flush()
+  eq(persisted(), 2, "a burst of wheel steps persists once")
 end
 
 do
@@ -51,8 +54,10 @@ do
   local game, persisted = fakeGame()
   Game2.hotkey(game, "-")
   eq(game.options.zoom, -1, "the - hotkey still stores the offset")
+  DeferredWrite.flush()
   Game2.hotkey(game, "4")
   eq(game.options.zoom, Zoom.offset, "the 4 hotkey still stores the offset")
+  DeferredWrite.flush()
   eq(persisted(), 2, "hotkeys persist once each")
 end
 

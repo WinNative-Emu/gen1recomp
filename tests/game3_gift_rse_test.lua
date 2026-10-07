@@ -218,10 +218,10 @@ do
   eq(rse and #rse.cards, 1, "rse sees one card")
   eq(rse and rse.cards[1].key, "em", "the rse row")
   eq(rse and rse.cards[1].card.gift.setFlags[1], F("FLAG_ENABLE_SHIP_BIRTH_ISLAND"), "names resolve with Emerald ids")
-  eq(rse and #rse.news, 1, "rse sees one news")
+  eq(rse and #rse.news, 2, "rse sees every news, news has no family limit")
   local frlg = MysteryGift.parseFeed(payload, "frlg")
   eq(frlg and #frlg.cards, 2, "frlg sees its row and the unlabeled one")
-  eq(frlg and #frlg.news, 1, "frlg sees the unlabeled news")
+  eq(frlg and #frlg.news, 2, "frlg sees every news too")
 
   local begun = {}
   local transport = {
@@ -231,10 +231,15 @@ do
   }
   local job = MysteryGift.fetchOnline({ transport = transport, session = newSession("emerald") })
   eq(job.family, "rse", "the Emerald job carries its family")
-  check(begun[1] and begun[1].url:sub(-#"/gifts/gen3?family=rse") == "/gifts/gen3?family=rse",
-    "Emerald fetches ?family=rse: " .. tostring(begun[1] and begun[1].url))
+  local emPath = "/gifts/gen3?family=rse&version=emerald"
+  check(begun[1] and begun[1].url:sub(-#emPath) == emPath,
+    "Emerald fetches ?family=rse and names its game: " .. tostring(begun[1] and begun[1].url))
   MysteryGift.fetchOnline({ transport = transport, session = newSession("firered") })
-  check(begun[2] and begun[2].url:sub(-#"/gifts/gen3") == "/gifts/gen3", "FireRed keeps the bare path")
+  check(begun[2] and begun[2].url:sub(-#"/gifts/gen3?version=firered") == "/gifts/gen3?version=firered",
+    "FireRed keeps the frlg path and names its game")
+  MysteryGift.fetchOnline({ transport = transport, session = newSession("leafgreen") })
+  check(begun[3] and begun[3].url:sub(-#"/gifts/gen3?version=leafgreen") == "/gifts/gen3?version=leafgreen",
+    "LeafGreen names its own game")
 end
 
 print("[test] 11. LINK TOGETHER WITH ALL")

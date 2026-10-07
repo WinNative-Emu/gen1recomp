@@ -18,10 +18,9 @@ end
 
 function Toast.occlude(imp)
   local rect = type(imp) == "table" and imp._toastRect or nil
+  Kit.occlude(nil)
   if rect and rect.shown and Toast.current(imp) then
     Kit.occlude(rect[1], rect[2], rect[3], rect[4])
-  else
-    Kit.occlude(nil)
   end
 end
 

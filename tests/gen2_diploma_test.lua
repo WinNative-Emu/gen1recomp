@@ -111,9 +111,7 @@ else
     "every id in it indexes DiplomaGFX's own 112 tiles, nothing past them")
 end
 
--- gfx/diploma/diploma.pal, colour by colour, so the extracted palette can be
--- checked against the source rather than against itself.  DiplomaPalettes is
--- eight sets; only set 0 is reachable because _CGB_Diploma calls WipeAttrmap.
+-- gfx/diploma/diploma.pal
 local DECOMP_PAL_SET0 = { { 27, 31, 27 }, { 21, 21, 21 }, { 13, 13, 13 },
                           { 0, 0, 0 } }
 local function scale5(value) return math.floor(value * 255 / 31 + 0.5) end
@@ -217,13 +215,15 @@ local fakeGfx = {
   page1 = fakePage1,
   palettes = { { { 222, 255, 222 }, { 173, 173, 173 }, { 107, 107, 107 },
                  { 0, 0, 0 } } },
+  bgPalette = { { 255, 255, 255 }, { 247, 181, 140 }, { 132, 115, 156 },
+                { 0, 0, 0 } },
 }
 
 local screen = Diploma.new(nil, { playerName = "GOLD", gfx = fakeGfx })
 eq(screen.playerName, "GOLD", "the screen takes the player's name")
 local palette = screen:palette()
-check(palette ~= nil and palette[1][2] == 255,
-  "and draws through DiplomaPalettes set 0, the one WipeAttrmap leaves it on")
+check(palette == fakeGfx.bgPalette,
+  "and draws through PREDEFPAL_DIPLOMA, which CopyFourPalettes puts on BG 0")
 
 local batch = screen:batch()
 if not batch then

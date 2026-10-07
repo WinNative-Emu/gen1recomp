@@ -178,7 +178,7 @@ local GEN3_HOOKS = {
   "movement.collision", "warp.destination", "world.talk", "item.use",
   "world.follower.spawn",
   "script.command", "save.write", "save.new_game",
-  "ui.start_menu.items", "pokemon.sprite",
+  "ui.start_menu.items", "pokemon.sprite", "pokemon.icon",
   "input.step", "input.key", "input.gamepad", "input.wheel", "render.hud",
   "trainer.party", "catch.rate", "exp.gain", "evolution.check",
   "battle.damage", "battle.crit", "battle.accuracy", "battle.charge_required",

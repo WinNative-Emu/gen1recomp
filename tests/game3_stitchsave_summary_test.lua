@@ -206,11 +206,11 @@ do
     dex = { seen = {}, owned = {} }, flags = {}, vars = {},
   }
   local fixed = Schema.fromSaveTable(secretSave)
-  eq(fixed.party[1].otSecretId, rolled.secretId,
-    "a stale per-boot secret id on an own mon is repaired")
+  eq(fixed.party[1].otSecretId, ((rolled.secretId or 0) + 1) % 0x10000,
+    "a same-name same-TID mon with a different secret id keeps it on load")
   local ownLine = memoLine(fixed.party[1], fixed)
-  check(ownLine:find("a trade", 1, true) == nil,
-    "so it stops reading as a trade (" .. ownLine:gsub("\n", " ") .. ")")
+  check(ownLine:find("Apparently", 1, true) ~= nil,
+    "so it still reads as another trainer's mon (" .. ownLine:gsub("\n", " ") .. ")")
   eq(fixed.party[2].otSecretId, 4242, "a foreign mon keeps its own secret half")
 end
 

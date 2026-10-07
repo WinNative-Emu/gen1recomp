@@ -95,9 +95,19 @@ local function isMatchingFilter(name, isDir, mode)
   if not ext then return (mode == "all") end
   ext = ext:lower()
   if mode == "rom" then
-    return (ext == "gb" or ext == "gbc" or ext == "gba" or ext == "zip")
+    if ext == "gb" or ext == "gbc" or ext == "gba" then return true end
+    if ext == "zip" or ext == "7z" then
+      local ok, RomArchive = pcall(require, "src.import.RomArchive")
+      if not ok or type(RomArchive.capabilities) ~= "function" then return false end
+      local okCaps, caps = pcall(RomArchive.capabilities)
+      if not okCaps or type(caps) ~= "table" then return false end
+      return (ext == "zip" and caps.zip) or (ext == "7z" and caps.z7) or false
+    end
+    return false
   elseif mode == "save" then
-    return (ext == "sav" or ext == "lua")
+    return (ext == "sav" or ext == "srm" or ext == "lua")
+  elseif mode == "box" then
+    return (ext == "gci" or ext == "sav")
   elseif mode == "mod" then
     return (ext == "zip")
   elseif mode == "cart" then

@@ -373,8 +373,17 @@ eq(Rse.var("VAR_DEOXYS_ROCK_LEVEL", sess), 0, "level back to 0")
 sess.options = {}
 check(Islands.pendingGift(sess) == nil, "no gifts while the option is off")
 Islands.setEnabled(sess, true)
+check(Islands.pendingGift(sess) == nil, "the option alone hands out nothing; the relay controls tickets")
+eq(Rse.var("VAR_DISTRIBUTE_EON_TICKET", sess), 0, "no Eon Ticket without the relay")
+local feedCards = {}
+for _, b in ipairs(require("src.core.game3.mystery_gift").builtins("rse")) do feedCards[#feedCards + 1] = { key = b.key, card = b.card } end
+Islands.applyFeed(sess, { cards = { feedCards[2] } })
+eq(Islands.pendingGift(sess).id, "aurora", "a relay AURORA TICKET card is offered")
+check(not Islands.eonPending(sess), "the relay feed without the Eon card leaves the Eon Ticket off")
+Islands.applyFeed(sess, { cards = feedCards })
+Islands.sync(sess, { offline = true })
 eq(Islands.pendingGift(sess).id, "aurora", "the Aurora Ticket is the first wonder card")
-eq(Rse.var("VAR_DISTRIBUTE_EON_TICKET", sess), 1, "the Eon Ticket distribution var is raised")
+eq(Rse.var("VAR_DISTRIBUTE_EON_TICKET", sess), 1, "the relay Eon Ticket raises the distribution var")
 Rse.setFlag("FLAG_RECEIVED_AURORA_TICKET", true, sess)
 eq(Islands.pendingGift(sess).id, "mystic", "then the Mystic Ticket")
 Rse.setFlag("FLAG_RECEIVED_MYSTIC_TICKET", true, sess)

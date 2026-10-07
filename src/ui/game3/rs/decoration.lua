@@ -27,9 +27,16 @@ local aliases = {
 UI.TEXT_ALIASES = {gText_ApostropheSBase = "gOtherText_PlayersBase"}
 local cats = {gText_Desk = 0, gText_Chair = 1, gText_Plant = 2, gText_Ornament = 3,
   gText_Mat = 4, gText_Poster = 5, gText_Doll = 6, gText_Cushion = 7}
+local resolved = {}
 local function nativeText(key, vars)
   if cats[key] ~= nil then return Inv.categoryName(cats[key]) end
   local native, m = aliases[key] or key, Decor.manifest()
+  if not vars and resolved[native] then return resolved[native] end
+  if Text.has(native) then
+    local value = Text.plain(native, vars and {stringVars = vars} or nil)
+    if not vars then resolved[native] = value end
+    return value
+  end
   if m.textBytes and m.textBytes[native] then
     return IR.toPlain(IR.decode(m.textBytes[native], {dialect = "rs"}), {stringVars = vars or {}})
   end
@@ -116,6 +123,7 @@ function UI.draw(d, host)
 end
 local function options(opts)
   opts = opts or {}
+  resolved = {}
   opts.text, opts.draw = nativeText, UI.draw
   opts.recordSecretBaseVisit = false
   opts.avatarGfx = function(s, female)

@@ -80,6 +80,10 @@ Badges. Boxes supports storage, deposit, withdraw, clone, inspect and release.
 Crystal also shows Buena points in Trainer and Items / Wallet. The Blue Card
 balance accepts whole numbers from 0 to 30 through the numeric popup and supports
 Undo/Redo; it preserves the password, daily state and Blue Card inventory.
+FireRed, LeafGreen and Emerald also show Berry Powder in Trainer and Items /
+Wallet. It accepts whole numbers from 0 to 99999 and supports Undo/Redo; the
+.sav export re-encrypts it with the save's key. Ruby and Sapphire have no Berry
+Powder, so the row is hidden there.
 
 **Undo/Redo** and Ctrl/Cmd+Z (Shift+Z to redo) retain up to eight session snapshots.
 Snapshots preserve unknown metadata. Saving establishes the clean history point;

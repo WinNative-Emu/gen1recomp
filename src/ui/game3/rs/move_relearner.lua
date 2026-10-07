@@ -3,6 +3,7 @@ local Kit = require("src.ui.game3.rse.scene_kit")
 local Font = require("src.ui.game3.frlg_font")
 local Pokemon = require("src.core.game3.pokemon")
 local IR = require("src.core.game3.scripting.text_ir")
+local RomText = require("src.core.game3.rom_text")
 local bit = require("bit")
 local UI = {}
 local keys = {gText_TeachWhichMoveToPkmn = "gOtherText_TeachWhichMove",
@@ -13,13 +14,20 @@ local function manifest()
   assert(m.assetLayout == "rs", "native RS move tutor pack required")
   return m
 end
+local resolved = {}
+local function cartIr(native)
+  if not resolved[native] then
+    resolved[native] = RomText.irOr(native,
+      IR.decode(assert(manifest().textBytes[native], "native tutor text " .. native), {dialect = "rs"}))
+  end
+  return resolved[native]
+end
 local function text(key, ctx)
-  local m, native = manifest(), keys[key] or key
-  return IR.toPlain(IR.decode(assert(m.textBytes[native], "native tutor text " .. native), {dialect = "rs"}), ctx or {})
+  return IR.toPlain(cartIr(keys[key] or key), ctx or {})
 end
 local function pages(key, vars)
   local out = {}
-  local value = IR.toAscii(IR.decode(assert(manifest().textBytes[key]), {dialect = "rs"}), {stringVars = vars})
+  local value = IR.toAscii(cartIr(key), {stringVars = vars})
   for page in (value .. "\\p"):gmatch("(.-)\\p") do if page ~= "" then out[#out + 1] = page end end
   return out
 end
@@ -164,6 +172,7 @@ function UI.draw(st)
 end
 function UI.show(mon, opts)
   manifest(); opts = opts or {}
+  resolved = {}
   opts.maxShown, opts.text, opts.draw, opts.startLearn = 3, text, UI.draw, startLearn
   return Base.show(mon, opts)
 end

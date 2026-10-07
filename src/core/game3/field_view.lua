@@ -893,6 +893,34 @@ local function nativeAtlas(NativeTileset, pair)
   return ts
 end
 
+function FieldView.trimNative(NativeTileset, Map, pair, visiblePairs)
+  local keep, busy = {}, {}
+  keep[pair] = true
+  for p in pairs(visiblePairs or {}) do keep[p] = true end
+  local x0, y0, x1, y1
+  if Map.warmRect then x0, y0, x1, y1 = Map.warmRect() end
+  for _, entry in ipairs(Map.world or {}) do
+    local def = entry.def
+    local p = def and (def.pair or (def.midLayout and def.midLayout.pair))
+    if p and (not Map.warmNear or Map.warmNear(entry, x0, y0, x1, y1)) then keep[p] = true end
+  end
+  local function mark(store)
+    for _, b in pairs(store or {}) do
+      if b.getTexture then busy[b:getTexture()] = true end
+    end
+  end
+  mark(FieldView._nativeBatches)
+  mark(FieldView._nativeOverBatches)
+  local from = FieldView._voidFrom
+  if from then
+    mark(from.under)
+    mark(from.over)
+  end
+  local evicted = NativeTileset.trim(keep, NativeTileset.RESIDENT_MAX, busy)
+  for _, p in ipairs(evicted) do nativeAtlasByPair[p] = nil end
+  return evicted
+end
+
 -- Physical sprite slots per layer (free-list reuse does not grow them).
 local nativeSlots = { under = 0, over = 0 }
 
@@ -1292,6 +1320,12 @@ local function drawNativeTiles(mapDef, camX, camY, canvasW, canvasH)
   if reset then
     pruneNativeStore(underStore)
     pruneNativeStore(overStore)
+  end
+  if NativeTileset.trim and (FieldView._nativeTrimGen ~= NativeTileset._gen or FieldView._nativeLayout ~= layout) then
+    FieldView._nativeTrimGen = NativeTileset._gen
+    if NativeTileset.resident() > NativeTileset.RESIDENT_MAX then
+      FieldView.trimNative(NativeTileset, Map, pair, visiblePairs)
+    end
   end
 
   FieldView._nativeBx, FieldView._nativeBy = cx0, cy0
@@ -1775,6 +1809,14 @@ function FieldView.draw(game, canvasW, canvasH, opts)
       FieldEffects.drawFront(camX, camY, py)
       local W = weatherMask()
       if W then W.writeActorMask(0, function() FieldEffects.drawFront(camX, camY, py) end) end
+    end
+  end
+
+  if underActors or overActors then
+    local LinkTags = package.loaded["src.ui.game3.link_tags"]
+    if LinkTags and LinkTags.draw then
+      LinkTags.draw(underActors, overActors, camX, camY, canvasW, canvasH,
+        FieldView._billboard and pushBillboard or nil)
     end
   end
 

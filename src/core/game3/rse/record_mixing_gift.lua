@@ -84,6 +84,19 @@ local function pcHas(sess, item)
   return false
 end
 
+local function writeGiftState(sess, kind, name, value)
+  if sess.store then
+    local id = constant(sess, kind, name)
+    if id then
+      local Flags = require("src.core.game3.scripting.flags")
+      local setter = kind == "flags" and Flags.setFlag or Flags.setVar
+      setter(sess.store, nil, id, value)
+    end
+  else
+    pcall(kind == "flags" and Rse.setFlag or Rse.setVar, name, value, sess)
+  end
+end
+
 -- pokeemerald/src/record_mixing.c:969
 function Gift.mixImport(players, sess, myIndex)
   sess = sessionOf(sess)
@@ -97,13 +110,13 @@ function Gift.mixImport(players, sess, myIndex)
   sess.bag = sess.bag or Bag.new()
   local got = not Bag.has(sess.bag, item, 1) and not pcHas(sess, item) and Bag.add(sess.bag, item, 1)
   if got then
-    pcall(Rse.setVar, "VAR_TEMP_RECORD_MIX_GIFT_ITEM", item, sess)
+    writeGiftState(sess, "vars", "VAR_TEMP_RECORD_MIX_GIFT_ITEM", item)
     if item == constant(sess, "items", "ITEM_EON_TICKET") then
-      pcall(Rse.setFlag, "FLAG_ENABLE_SHIP_SOUTHERN_ISLAND", true, sess)
+      writeGiftState(sess, "flags", "FLAG_ENABLE_SHIP_SOUTHERN_ISLAND", true)
     end
     return { item = item, from = p0.name or "" }
   end
-  pcall(Rse.setVar, "VAR_TEMP_RECORD_MIX_GIFT_ITEM", 0, sess)
+  writeGiftState(sess, "vars", "VAR_TEMP_RECORD_MIX_GIFT_ITEM", 0)
   return { item = 0 }
 end
 

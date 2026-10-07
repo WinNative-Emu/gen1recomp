@@ -293,6 +293,15 @@ function Sandbox.loadFile(fs, path, env)
   return Sandbox.compile(source, "@" .. path, env)
 end
 
+function Sandbox.evalData(source, chunkname)
+  if type(source) ~= "string" or source == "" then return nil end
+  local chunk = Sandbox.compile(source, chunkname, {})
+  if not chunk then return nil end
+  local ok, result = pcall(chunk)
+  if ok and type(result) == "table" then return result end
+  return nil
+end
+
 Sandbox.safePath = SafePath.safe
 Sandbox.requirePath = SafePath.require
 

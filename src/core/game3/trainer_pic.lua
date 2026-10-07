@@ -57,6 +57,7 @@ function TrainerPic.install(cache)
   TrainerPic._cache = resolve_cache(cache)
   TrainerPic._front = {}
   TrainerPic._back = {}
+  TrainerPic._anims = nil
 end
 
 --- Opponent trainer front pic (64×64). Returns nil if unavailable (no placeholder).
@@ -92,6 +93,24 @@ function TrainerPic.back(gender)
   local entry = { image = image, w = 64, h = 64 * actualFrames, frames = actualFrames }
   TrainerPic._back[gender] = entry
   return entry
+end
+
+-- pokeemerald/src/data/trainer_graphics/back_pic_anims.h:119
+function TrainerPic.backAnims(gender)
+  gender = tonumber(gender) or 0
+  if gender > 5 and require("src.core.game3.profile").family() ~= "rse" then gender = 0 end
+  if not TrainerPic._anims then
+    if not TrainerPic._cache then TrainerPic.install(nil) end
+    local rel = cache_root() .. "/back_anims.lua"
+    local src = assert(TrainerPic._cache:read(rel), "trainer back pic anims missing from the cache")
+    TrainerPic._anims = assert(load(src, "@" .. rel, "t", {}))()
+  end
+  return assert(TrainerPic._anims[gender], "no back pic anims for " .. gender)
+end
+
+-- pokeemerald/src/data.c:121
+function TrainerPic.backIdleFrame(gender)
+  return TrainerPic.backAnims(gender).idle[1][1]
 end
 
 return TrainerPic

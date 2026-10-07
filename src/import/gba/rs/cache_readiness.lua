@@ -19,7 +19,7 @@ local PACKS = {
   {"naming", {version = 3}}, {"rse/menus"}, {"rse/common_ui"}, {"rse/bag"},
   {"rse/berry_tag"}, {"rse/party"}, {"rse/summary"}, {"rse/mail"}, {"rse/easy_chat"},
   {"rse/trendy_phrase"}, {"rse/easy_chat_editor", {editorVersion = 2}}, {"rse/rs_egg_hatch"},
-  {"pokemon/storage", {version = 5}}, {"rse/pokedex"}, {"rse/pokedex_detail"}, {"rse/diploma"},
+  {"pokemon/storage", {version = 5}}, {"rse/pokedex", {packVersion = 1}}, {"rse/pokedex_detail"}, {"rse/diploma"},
   {"rse/trainer_card"}, {"rse/trade"}, {"rse/pokenav"}, {"rse/pokenav_detail"},
   {"rse/pokenav_shell"}, {"rse/pokenav_condition"}, {"rse/pokenav_ribbons"}, {"rs/assets"},
 }

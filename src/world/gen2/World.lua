@@ -1814,7 +1814,7 @@ end
 function World:isCrystal()
   local GameVersion = loaded("src.core.GameVersion")
   -- Rendering follows the loaded ROM column (BorderFill / MapPreview do the
-  -- same), not save.version — a Crystal save under the Gold column still bakes
+  -- same), not save.version: a Crystal save under the Gold column still bakes
   -- and draws with Gold's single-bank tilesets.
   return GameVersion.engine() == "crystal"
 end
@@ -3176,13 +3176,6 @@ function World:bankOfMomAmount(kind, saved, held, onDone)
   return true
 end
 
--- The rename half of the Goldenrod NAME RATER (engine/events/name_rater.asm,
--- src/script/gen2/Specials.lua H.NameRater).  Same keyboard World:nameHatchling
--- opens for a freshly-hatched egg, but the header is the species name loaded
--- by GetBaseData (`ld b, NAME_MON / ld de, wStringBuffer2 / farcall
--- _NamingScreen`), not a fixed prompt -- BoxMenu:askNickname's screen is the
--- same shape for the same reason.  `onDone(name)` gets the typed string or nil
--- for B; IsNewNameEmpty/CompareNewToOld both live in the special, not here.
 -- SetDayOfWeek's wheel (src/ui/gen2/InitClock.lua day mode).  `onDone(day)` is
 -- the special's own resume, the same shape World:nameRival hands H.NameRival:
 -- the screen's close is what starts the script again.
@@ -3223,6 +3216,7 @@ function World:renameMon(mon, onDone, opts)
   end
   local ok = self:pushScreen("Gen2NamingScreen", {
     type = "nickname",
+    mon = mon,
     monName = mon.name or mon.species,
     initial = (opts and opts.blank) and ""
       or (mon.nickname or mon.name or mon.species or ""),
@@ -9390,7 +9384,7 @@ function World:blitBgOverRegion(mapDef, ox, oy, s, rx0, ry0, rx1, ry1, keyed, ti
 
   -- originX/Y is the screen position of map pixel (rx0, ry0): ox/oy are the
   -- playfield-local offset of map (0,0), so a tile at (tx, ty) lands at
-  -- origin + (tx - rx0) * s — same convention as drawGrassOverGoldSilver's
+  -- origin + (tx - rx0) * s, same convention as drawGrassOverGoldSilver's
   -- ox + cx0 * s with absolute map coordinates.
   self:blitBgOverRegionLocal(mapDef,
     math.floor(ox + rx0 * s), math.floor(oy + ry0 * s),
@@ -11149,9 +11143,6 @@ function World:nameHatchling(mon, onDone)
   local game = self.game
   if not (game and game.stack) then return onDone() end
   local data = game.data or {}
-  local icons = data.gen2Icons
-  local iconId = icons and icons.species and icons.species[mon.species]
-  local entry = iconId and icons.icons and icons.icons[iconId]
   local done = function(name)
     game.stack:pop()
     -- _InitString's blank test, not a length one: "zero or more spaces
@@ -11163,8 +11154,8 @@ function World:nameHatchling(mon, onDone)
   end
   Screens.push(game, "Gen2NamingScreen", {
     type = "nickname",
+    mon = mon,
     monName = mon.name or mon.species,
-    iconPath = entry and entry.image or nil,
     menuGfx = data.gen2MenuGfx,
     onDone = done,
     onCancel = function() done(nil) end,

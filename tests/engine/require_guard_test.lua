@@ -90,8 +90,8 @@ check(bootBody:find('require("src.core.RequireGuard").repair()', 1, true) ~= nil
 
 local returnBody = functionBody("local function returnToLauncher%(")
 check(returnBody ~= "", "main.lua still defines returnToLauncher")
-check(returnBody:find('require("src.core.RequireGuard").repair()', 1, true) ~= nil,
-  "returnToLauncher repairs the loader chain")
+check(returnBody:find('require("src.core.HostShell").restart()', 1, true) ~= nil,
+  "returnToLauncher restarts into a fresh Lua state, whose love.load captures the loader chain again")
 
 local issueBody = readFile("src/core/IssueReport.lua") or ""
 check(issueBody:find("RequireGuard", 1, true) ~= nil

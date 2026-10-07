@@ -35,6 +35,8 @@ local Json    = loadModule("src/link/Json.lua")
 local Check   = loadModule("src/update/Check.lua")
 local Version = loadModule("src/core/Version.lua")
 local Semver  = loadModule("src/update/Semver.lua")
+local WinApi  = loadModule("src/core/WinApi.lua")
+if WinApi then package.loaded["src.core.WinApi"] = WinApi end
 local HostShell = loadModule("src/core/HostShell.lua")
 -- Boot's top-level require("src.update.Semver") cannot resolve in this thread
 -- (no src.* searcher), which would leave Boot nil and the minShell gate
@@ -304,19 +306,26 @@ end
 -- failed transfer simply fails the checksum below, which is the real gate.
 local function launchDownload(url, partAbs, doneAbs)
   if isWindows then
-    -- a tiny batch file sidesteps cmd.exe's nested-quote madness
     local batRel = "updates/dl.bat"
+    local partName = partAbs:match("[^/\\]+$")
+    local doneName = doneAbs:match("[^/\\]+$")
     love.filesystem.write(batRel,
       "@echo off\r\n"
-      -- start /b hands the child our cwd, the install folder, and the
-      -- detached cmd.exe held that folder un-movable for the rest of the
-      -- transfer after the game exited (#727).  Every path below is
-      -- absolute, so park the child in its own directory (the save dir).
       .. "cd /d \"%~dp0\"\r\n"
       .. "curl -fsSL --connect-timeout 15 --max-time 900 -o \""
-      .. partAbs .. "\" \"" .. url .. "\"\r\n"
-      .. "type nul > \"" .. doneAbs .. "\"\r\n")
-    os.execute('start "" /b ' .. shq(saveDir .. "/" .. batRel))
+      .. partName .. "\" \"" .. url:gsub("%%", "%%%%") .. "\"\r\n"
+      .. "type nul > \"" .. doneName .. "\"\r\n")
+    local updatesDir = (saveDir .. "/updates"):gsub("/", "\\")
+    local comspec = os.getenv("ComSpec")
+    if type(comspec) ~= "string" or comspec == "" or comspec:find("[\128-\255]") then
+      comspec = (os.getenv("SystemRoot") or "C:\\Windows") .. "\\System32\\cmd.exe"
+    end
+    if not (WinApi and WinApi.spawn(comspec, { "/d", "/c", "dl.bat" }, {
+      cwd = updatesDir,
+      flags = WinApi.CREATE_NO_WINDOW + WinApi.CREATE_NEW_PROCESS_GROUP,
+    })) then
+      os.execute('start "" /b ' .. shq(saveDir .. "/" .. batRel))
+    end
   else
     -- ( ... ) & backgrounds the whole group so os.execute returns at once.
     -- Use the same dual-env curl resolution as HostShell.http*: bundled

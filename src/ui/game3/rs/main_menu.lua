@@ -7,8 +7,14 @@ local Constants = require("src.core.game3.constants")
 local Flags = require("src.core.game3.scripting.flags")
 local Chrome = require("src.ui.game3.chrome")
 local Pal = require("src.core.game3.pal_fade")
+local Stack = require("src.ui.game3.stack")
+local Screens = require("src.ui.game3.screens")
 local Menu = {}
 Menu.__index = Menu
+local function childLayer()
+  local top = Stack.top()
+  if top and top.id ~= "option" and top.mod then return top end
+end
 
 -- pokeruby/src/main_menu.c:45
 Menu.TYPE = { HAS_NO_SAVED_GAME = 0, HAS_SAVED_GAME = 1, HAS_MYSTERY_EVENT = 2 }
@@ -147,8 +153,14 @@ end
 function Menu:update(input, dt)
   if self.state == "events" and self.events then return self.events:update(input,dt) end
   if self.state == "options" and self.options then
-    self.options.handleInput(input)
-    if self.options.update then self.options.update() end
+    local child = childLayer()
+    if child then
+      Screens.handleInput(child.id, child.mod, input)
+      if child.mod.update then child.mod.update() end
+    else
+      self.options.handleInput(input)
+      if self.options.update then self.options.update() end
+    end
   end
   self.step:collect(input)
   return self.step:run(dt, function(inp) return self:frame(inp) end)
@@ -189,7 +201,11 @@ local function composite(img, rect)
 end
 function Menu:draw()
   if self.state == "events" and self.events then return self.events:draw() end
-  if self.state == "options" and self.options then return self.options.draw() end
+  if self.state == "options" and self.options then
+    local child = childLayer()
+    if child then return Screens.draw(child.id, child.mod) end
+    return self.options.draw()
+  end
   local c = self:colors()
   local shade = self.state == "pressed_b" and 1 or 9 / 16
   love.graphics.clear(c.backdrop[1] * shade, c.backdrop[2] * shade, c.backdrop[3] * shade, 1)

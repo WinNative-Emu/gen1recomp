@@ -90,8 +90,16 @@ function OptionMenu.show(opts)
   Stack.push(OptionMenu.ID, OptionMenu, { hideBelow = true, fullscreen = true })
 end
 
+local function closeChildren()
+  for _, name in ipairs({ "src.ui.game3.controls_menu", "src.ui.game3.mod_manager" }) do
+    local child = package.loaded[name]
+    if type(child) == "table" and child.open and child.close then child.close() end
+  end
+end
+
 function OptionMenu.close()
   ShaderFXMenu.close()
+  closeChildren()
   st.pages = nil
   Stack.pop(OptionMenu.ID)
   local cb = st.onClose
@@ -298,6 +306,7 @@ end
 
 function OptionMenu.reset()
   ShaderFXMenu.close()
+  closeChildren()
   if st.pages then Stack.pop(OptionMenu.ID) end
   st.pages, st.onClose = nil, nil
 end

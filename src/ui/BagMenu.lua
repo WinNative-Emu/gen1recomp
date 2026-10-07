@@ -475,6 +475,18 @@ local function vanillaUseOn(game, battle, id, target, list, moveIndex, picker)
       end)
       return
     end
+    -- engine/items/item_effects.asm:1223-1237
+    if picker and picker.keepOpen and target and ItemEffects.isBattleMedicine(id) then
+      picker:eraseCursors()
+      showMessages(game, payload, function()
+        closePicker()
+        if battle then
+          list:close()
+          spent({})
+        end
+      end)
+      return
+    end
     if battle then
       closePicker()
       list:close()
@@ -529,12 +541,10 @@ local function pickTargetAndUse(game, battle, id, list)
     -- NORMAL_PARTY_MENU (item_effects.asm:813, :768). #1610
     itemUse = true,
     battle = battle,
-    -- HP medicine animates with the picker up (#252), RARE CANDY prints over
-    -- the party menu (item_effects.asm:1392-1418); TM/HM stays up through
-    -- `predef LearnMove` (item_effects.asm:2238) (#1686)
-    -- engine/items/item_effects.asm:805 ItemUseMedicine, :1244 .done (#1946)
+    -- engine/items/item_effects.asm:1392-1418, :2238
+    -- engine/items/item_effects.asm:805 ItemUseMedicine, :1244 .done
     -- engine/items/item_effects.asm:1959
-    keepOpen = ItemEffects.healsHP(id) or wantsMove
+    keepOpen = ItemEffects.isBattleMedicine(id) or wantsMove
       or ((not battle)
           and (ItemEffects.keepsPartyMenuOpen(id) or (def and def.machine ~= nil))),
     onSwitch = function(mon, picker)

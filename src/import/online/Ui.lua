@@ -109,10 +109,10 @@ end
 function Ui.chooser(imp, x, y, w, h, key, text, onPrev, onNext)
   local bw = math.max(Kit.tapMin(), math.floor(28 * Kit.scale))
   local gap = math.floor(4 * Kit.scale)
-  LV().btn(imp, x, y, bw, h, key .. "-prev", "<",
-    { kind = "ghost", font = "small", action = onPrev })
-  LV().btn(imp, x + w - bw, y, bw, h, key .. "-next", ">",
-    { kind = "ghost", font = "small", action = onNext })
+  LV().btn(imp, x, y, bw, h, key .. "-prev", "",
+    { kind = "ghost", icon = "chevron-left", action = onPrev })
+  LV().btn(imp, x + w - bw, y, bw, h, key .. "-next", "",
+    { kind = "ghost", icon = "chevron-right", action = onNext })
   local inner = math.max(0, w - 2 * bw - 2 * gap)
   Kit.textCenter("small", Kit.ellipsize("small", text, inner),
     x + bw + gap, y + (h - Kit.textHeight("small")) / 2, inner, PAL.heading)

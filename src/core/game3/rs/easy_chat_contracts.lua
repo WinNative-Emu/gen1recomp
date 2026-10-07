@@ -231,7 +231,7 @@ function M.commit(token, words)
   elseif token.type == 6 then writeBard(token, words)
   elseif token.type == 10 then token.session.gabbyAndTyData.quote[0] = words[1]
   elseif token.type == 9 then
-    out.stringVar2 = Easy.rawWord(words[1]) .. " " .. Easy.rawWord(words[2])
+    out.stringVar2 = Easy.word(words[1]) .. " " .. Easy.word(words[2])
     out.input = require("src.core.game3.rs.dewford_trend").trySetTrendyPhrase(words, token.session) and 1 or 0
   elseif token.type ~= 13 then writeTv(token, words) end
   if token.type == 0 then out.input = M.passphrase(words) and 1 or 0 end

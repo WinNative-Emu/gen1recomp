@@ -1,4 +1,5 @@
 local Json = require("src.link.Json")
+local Work = require("src.sync.SyncWork")
 
 local SyncClient = {}
 SyncClient.__index = SyncClient
@@ -7,7 +8,10 @@ SyncClient.DEFAULT_URL = os.getenv("POKEPORT_SYNC_URL")
   or "https://sync.147.182.215.255.sslip.io"
 SyncClient.MAX_BLOB = 2 * 1024 * 1024
 SyncClient.MAX_RESPONSE = 4 * 1024 * 1024
+SyncClient.MAX_BOX_BODY = 64 * 1024 * 1024
+SyncClient.MAX_BOX_BLOB = 32 * 1024 * 1024
 SyncClient.TIMEOUT = 25
+SyncClient.ASYNC_DECODE = 64 * 1024
 
 function SyncClient.normalizeCode(code)
   if type(code) ~= "string" and type(code) ~= "number" then return nil end
@@ -72,8 +76,10 @@ end
 function SyncClient:send(method, path, body, opts)
   opts = opts or {}
   local headers = { ["Accept"] = "application/json" }
-  local payload
-  if body ~= nil then
+  local payload = opts.encoded
+  if payload ~= nil then
+    headers["Content-Type"] = "application/json"
+  elseif body ~= nil then
     if type(body) == "table" and next(body) == nil then
       payload = "{}"
     else
@@ -92,24 +98,15 @@ function SyncClient:send(method, path, body, opts)
   local handle = self.transport:begin({
     url = url, method = method, body = payload, headers = headers,
     maxSeconds = opts.maxSeconds or SyncClient.TIMEOUT,
+    maxBytes = opts.maxResponse or SyncClient.MAX_RESPONSE,
   })
   if handle == nil then return nil, "no network transport" end
+  self.responseLimits = self.responseLimits or {}
+  self.responseLimits[handle] = opts.maxResponse or SyncClient.MAX_RESPONSE
   return handle
 end
 
-function SyncClient:poll(handle)
-  if handle == nil then return { status = "error", err = "no request" } end
-  local res = self.transport:poll(handle)
-  if res.status == "pending" then return { status = "pending" } end
-  if res.status ~= "ok" then
-    return { status = "error", err = res.err or "sync request failed" }
-  end
-  local raw = res.body or ""
-  local code = tonumber(res.code) or 0
-  if #raw > SyncClient.MAX_RESPONSE then
-    return { status = "error", code = code, err = "the reply was too large" }
-  end
-  local data, decodeErr = Json.decode(raw, SyncClient.MAX_RESPONSE)
+local function reply(code, raw, data, decodeErr)
   if type(data) ~= "table" then
     local why = Json.describeUnexpected(raw) or decodeErr or "unreadable reply"
     if code >= 400 then
@@ -128,8 +125,94 @@ function SyncClient:poll(handle)
   return { status = "ok", code = code, data = data }
 end
 
+function SyncClient:_pollDeferred(job)
+  if job.work then
+    local r = Work.poll(job.work)
+    if not r then return { status = "pending" } end
+    job.work = nil
+    local ok, body = pcall(Work.finish, r, "jsonEncode", { n = 1, job.snapshot })
+    job.snapshot = nil
+    if not ok then
+      job.failed = "Box could not be encoded for sync."
+    elseif #body > SyncClient.MAX_BOX_BODY then
+      job.failed = "The Box collection is too large to sync."
+    else
+      local handle, err = self:send("PUT", "/sync/box", nil, { encoded = body, maxResponse = SyncClient.MAX_BOX_BODY })
+      if handle == nil then job.failed = err or "could not start the request" else job.inner = handle end
+    end
+  end
+  if job.failed then return { status = "error", err = job.failed } end
+  return self:poll(job.inner)
+end
+
+function SyncClient:poll(handle)
+  if handle == nil then return { status = "error", err = "no request" } end
+  if type(handle) == "table" and handle.deferred then return self:_pollDeferred(handle) end
+  local decoding = self.decoding and self.decoding[handle]
+  if decoding then
+    local r = Work.poll(decoding.work)
+    if not r then return { status = "pending" } end
+    self.decoding[handle] = nil
+    local ok, data, decodeErr = pcall(Work.finish, r, "jsonDecode", { n = 2, decoding.raw, decoding.max })
+    if not ok then data, decodeErr = nil, data end
+    return reply(decoding.code, decoding.raw, data, decodeErr)
+  end
+  local res = self.transport:poll(handle)
+  if res.status == "pending" then return { status = "pending" } end
+  if res.status ~= "ok" then
+    return { status = "error", err = res.err or "sync request failed" }
+  end
+  local raw = res.body or ""
+  local code = tonumber(res.code) or 0
+  local maxResponse = self.responseLimits and self.responseLimits[handle] or SyncClient.MAX_RESPONSE
+  if #raw > maxResponse then
+    return { status = "error", code = code, err = "the reply was too large" }
+  end
+  local work = #raw >= SyncClient.ASYNC_DECODE and Work.submit("jsonDecode", raw, maxResponse) or nil
+  if work then
+    self.decoding = self.decoding or {}
+    self.decoding[handle] = { work = work, raw = raw, max = maxResponse, code = code }
+    return { status = "pending" }
+  end
+  local data, decodeErr = Json.decode(raw, maxResponse)
+  return reply(code, raw, data, decodeErr)
+end
+
 function SyncClient:release(handle)
+  if type(handle) == "table" and handle.deferred then
+    Work.forget(handle.work)
+    handle.work, handle.snapshot = nil, nil
+    if handle.inner ~= nil then self:release(handle.inner) end
+    return
+  end
+  local decoding = self.decoding and self.decoding[handle]
+  if decoding then
+    Work.forget(decoding.work)
+    self.decoding[handle] = nil
+  end
   if handle ~= nil then self.transport:release(handle) end
+  if self.responseLimits then self.responseLimits[handle] = nil end
+end
+
+function SyncClient:getBox(keys)
+  local list = {}
+  for key in pairs(keys or {}) do list[#list + 1] = key end
+  table.sort(list)
+  return self:send("GET", "/sync/box", nil, { params = #list > 0 and { include = table.concat(list, ",") } or nil,
+    maxResponse = SyncClient.MAX_BOX_BODY })
+end
+
+function SyncClient:putBox(snapshot)
+  if type(snapshot) ~= "table" or type(snapshot.blob) ~= "string"
+      or #snapshot.blob > SyncClient.MAX_BOX_BLOB then return nil, "Box storage is too large to sync." end
+  if self:isLinked() then
+    local work = Work.submit("jsonEncode", snapshot)
+    if work then return { deferred = true, work = work, snapshot = snapshot } end
+  end
+  local ok, body = pcall(Json.encode, snapshot)
+  if not ok then return nil, "Box could not be encoded for sync." end
+  if #body > SyncClient.MAX_BOX_BODY then return nil, "The Box collection is too large to sync." end
+  return self:send("PUT", "/sync/box", nil, { encoded = body, maxResponse = SyncClient.MAX_BOX_BODY })
 end
 
 function SyncClient:create(deviceLabel)

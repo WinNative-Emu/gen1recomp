@@ -31,7 +31,7 @@ for _, revision in ipairs(Version.revisions("crystal")) do
 end
 
 for _, version in ipairs({ "gold", "silver" }) do
-  T.eq(Contract.formatFor(version), "rom-cache-v13:", version .. " marker stays unchanged")
+  T.eq(Contract.formatFor(version), "rom-cache-v14:", version .. " marker stays unchanged")
   files[Version.cachePrefix(version) .. Contract.MARKER_PATH] = Contract.markerFor(version)
   files[Version.cachePrefix(version) .. "data/generated/events.lua"] = nil
   T.check(Contract.isReady(version, fs), version .. " does not require Crystal password output")

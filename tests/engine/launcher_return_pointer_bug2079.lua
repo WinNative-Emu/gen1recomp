@@ -116,9 +116,9 @@ end
 
 do
   local main = assert(io.open("main.lua")):read("*a")
-  local body = main:match("local function returnToLauncher%(opts%)(.-)\nend\n")
-  check(body ~= nil, "main.lua still has returnToLauncher")
-  check(body:find("ignoreReturningPointer", 1, true) ~= nil,
+  local body = main:match("Importer = makeLauncher%(%{%s*initialTab = type%(handoff%.tab%)(.-)\nend\n")
+  check(body ~= nil, "main.lua rebuilds the launcher from the relaunch handoff")
+  check(body and body:find("ignoreReturningPointer", 1, true) ~= nil,
     "EXIT GAME asks the new launcher to ignore the leftover pointer (#2079)")
 end
 

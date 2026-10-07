@@ -6,6 +6,15 @@ local Cursor = require("src.ui.game3.rs.menu_cursor")
 local Pal = require("src.core.game3.pal_fade")
 local Fx = require("src.core.game3.gba_fx")
 local Easy = require("src.core.game3.easy_chat_text")
+local words, groups = {}, {}
+local function wordText(id)
+  if words[id] == nil then words[id] = Easy.word(id) end
+  return words[id]
+end
+local function groupText(group)
+  if groups[group] == nil then groups[group] = Easy.groupName(group) end
+  return groups[group]
+end
 local Policy = require("src.ui.game3.rs.easy_chat_editor_policy")
 local Frames = require("src.ui.game3.rs.easy_chat_editor_frames")
 local C = {isMenu = true, open = false}
@@ -33,6 +42,7 @@ function C.manifest(kind)
 end
 function C.show(opts)
   opts = opts or {}
+  words, groups = {}, {}
   assert(opts.token and opts.type ~= 9, "native RS editor requires its save contract; type9 uses its separate host")
   C._man, C._session, C._opts = C.manifest(opts.type), assert(opts.session), opts
   C._before, C.words = copyWords(opts.words), copyWords(opts.words)
@@ -347,7 +357,7 @@ local function phraseWords()
       local line = {}
       for col = 0, C._man.columns - 1 do
         local i = row * C._man.columns + col + 1
-        if i <= C._man.wordCount and C.words[i] ~= Policy.EMPTY then line[#line + 1] = Easy.rawWord(C.words[i]) .. " " end
+        if i <= C._man.wordCount and C.words[i] ~= Policy.EMPTY then line[#line + 1] = wordText(C.words[i]) .. " " end
       end
       local pen = C._man.wordPens[row * C._man.columns + 1]
       if pen then text(table.concat(line), pen.x, pen.y, "phrase") end
@@ -360,7 +370,7 @@ local function phraseWords()
       local image = assert(Kit.image(C._man.blankWord))
       love.graphics.setColor(1, 1, 1, 1)
       Fx.draw(function() love.graphics.draw(image, x, y) end, C._pal:fx(0))
-    else text(Easy.rawWord(C.words[i]), x, y, "phrase") end
+    else text(wordText(C.words[i]), x, y, "phrase") end
   end
 end
 local function pickerText()
@@ -382,7 +392,7 @@ local function pickerText()
         local word = (view == "groups" and C.groups or C._list)[row * 2 + col + 1]
         if word then
           local x = (view == "groups" and 16 or 48) + col * 88
-          text(view == "groups" and word.name or word.text, x, 88 + (row - state.top) * 16 + offset, "picker")
+          text(view == "groups" and groupText(word) or wordText(word.id), x, 88 + (row - state.top) * 16 + offset, "picker")
         end
       end
     end

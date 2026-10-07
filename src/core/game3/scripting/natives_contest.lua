@@ -258,8 +258,7 @@ function NativesContest.contestLinkTransfer(vm)
     if not job then
       if live.isReady and not live:isReady() then return false end
       -- pokeemerald/src/contest_link.c:74
-      local flags = CL.FLAG.IS_LINK + (CL.wireless and CL.FLAG.IS_WIRELESS or 0)
-      local s = CL.newSession(live, { flags = flags })
+      local s = CL.newSession(live, { flags = CL.flagsFor(live, CL.wireless) })
       local contestant = Util().contestantFromMon(mon, sess)
       if contestant.nickname == nil or contestant.nickname == "" then
         local Pokemon = require("src.core.game3.pokemon")
@@ -317,7 +316,8 @@ end
 -- pokeemerald/src/contest_util.c:2718
 function NativesContest.linkContestWaitForConnection(ctx, adapters)
   local s = linkSession()
-  if not (s and isWireless()) then return false, 0 end
+  -- pokeemerald/src/contest_link.c:100
+  if not (s and isWireless()) or s:hasRsPlayer() then return false, 0 end
   local Natives = Natives()
   if not Natives.yieldHost(ctx, adapters, function() end) then return false, 1 end
   ctx.nativePoll = function()
@@ -517,7 +517,10 @@ NativesContest.BY_NAME = {
   -- pokeemerald/src/contest_util.c:2754
   LinkContestTryHideWirelessIndicator = function() return false end,
   -- pokeemerald/src/contest_util.c:2763
-  IsContestWithRSPlayer = function() return false, 0 end,
+  IsContestWithRSPlayer = function()
+    local s = linkSession()
+    return false, s and s:hasRsPlayer() and 1 or 0
+  end,
   -- pokeemerald/src/contest_util.c:2771
   ClearLinkContestFlags = function()
     NativesContest.linkFlags = 0

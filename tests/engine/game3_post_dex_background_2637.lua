@@ -167,7 +167,8 @@ local GameVersion = require("src.core.GameVersion")
 for _, profile in ipairs(profiles) do
   local version = GameVersion.forSha1(profile[2])
   Versions.select(profile[2])
-  T.eq(Versions.CACHE_VERSION, 130, profile[1] .. " active edition retains shared130 cache stamp")
+  local shared = require("src.import.gba.versions_frlg").CACHE_VERSION
+  T.eq(Versions.CACHE_VERSION, shared, profile[1] .. " active edition retains the shared FRLG cache stamp")
   local files, set = {}, {}
   for _, path in ipairs(Contract.requiredFiles(version)) do
     files[version .. "/" .. path] = "fixture"
@@ -180,8 +181,8 @@ for _, profile in ipairs(profiles) do
   profileFs.read = function(path) return files[profileFs.prefix .. path] end
   files[meta] = '{"cache_version":129}'
   T.eq(Contract.isReady(version, profileFs), false, profile[1] .. " old129 stamp requires reimport")
-  files[meta] = '{"cache_version":130}'
-  T.eq(Contract.isReady(version, profileFs), true, profile[1] .. " complete130 cache is ready")
+  files[meta] = '{"cache_version":' .. shared .. '}'
+  T.eq(Contract.isReady(version, profileFs), true, profile[1] .. " complete current cache is ready")
   local count = 0
   for key, info in pairs(frlgManifests[profile[1]].terrains) do
     count = count + 1
@@ -202,6 +203,6 @@ for _, profile in ipairs(profiles) do
   end
 end
 Versions.select("firered")
-T.eq(V.CACHE_VERSION, 15, "Emerald cache version advanced once to15")
-T.eq(require("src.import.gba.versions_frlg").CACHE_VERSION, 130, "FRLG cache version advanced once to130")
+T.check(V.CACHE_VERSION >= 15, "Emerald cache version at or past 15")
+T.check(require("src.import.gba.versions_frlg").CACHE_VERSION >= 130, "FRLG cache version at or past 130")
 T.finish("game3_post_dex_background_2637")

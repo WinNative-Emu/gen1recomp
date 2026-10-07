@@ -19,6 +19,8 @@ local function consumeMarker(fs)
 end
 
 local function updateAllowed(opts, fs)
+  -- Catalogue packages are updated by PortMaster, not the standalone updater.
+  if os.getenv("POKEPORT_PORTMASTER_MANAGED") == "1" then return false end
   if opts.allowUpdate ~= nil then return opts.allowUpdate and true or false end
   local ok, Version = pcall(require, "src.core.Version")
   if ok and type(Version) == "table" and Version.isDev and Version.isDev() then

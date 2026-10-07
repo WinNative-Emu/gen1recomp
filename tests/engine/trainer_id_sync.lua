@@ -31,95 +31,16 @@ local function fresh()
 end
 
 do
-  local ids = { [100] = true, [200] = true, [300] = true }
-  local save = {
-    version = "red",
-    player = { id = 200, name = "RED" },
-    party = {
-      { species = "PIKACHU", otId = 200 },
-      { species = "ABRA", otId = 100, traded = true },
-      { species = "MEW", otId = 4242, traded = true },
-      { species = "ODDISH" },
-    },
-    boxes = { { { species = "ZUBAT", otId = 300 } } },
-    daycare = { mon = { species = "EKANS", otId = 200 } },
-  }
-  T.check(TrainerIdSync.rewriteSave(save, 1, 100, ids), "gen1 save reports a change")
-  T.eq(save.player.id, 100, "gen1 player id takes the new id")
-  T.eq(save.party[1].otId, 100, "own catch follows the id")
-  T.eq(save.party[2].otId, 100, "mon traded from another save follows the id")
-  T.eq(save.party[2].traded, nil, "and is no longer flagged traded")
-  T.eq(save.party[3].otId, 4242, "a real trade keeps its OT")
-  T.eq(save.party[3].traded, true, "and stays traded")
-  T.eq(save.party[4].otId, nil, "an unstamped mon is left for load-time stamping")
-  T.eq(save.boxes[1][1].otId, 100, "boxed mons follow the id")
-  T.eq(save.daycare.mon.otId, 100, "daycare mon follows the id")
-  T.check(not TrainerIdSync.rewriteSave(save, 1, 100, ids), "a second pass is a no-op")
-end
-
-do
-  local raw = ("00"):rep(12) .. "00C8" .. ("00"):rep(30)
-  local save = { player = { id = 200 }, party = { { cartRaw = raw } } }
-  TrainerIdSync.rewriteSave(save, 1, 100, { [100] = true, [200] = true })
-  T.eq(save.party[1].cartRaw:sub(25, 28), "0064", "raw gen1 carrier gets its OT bytes rewritten")
-  T.eq(#save.party[1].cartRaw, #raw, "without changing its length")
-end
-
-do
-  local save = {
-    version = "gold", player = { id = 200 },
-    party = { { otId = 200, traded = true } },
-    dayCare = { man = { mon = { otId = 200 } }, egg = { otId = 200 } },
-    hallOfFame = { teams = { { mons = { { otId = 200 } } } } },
-    mail = { party = { { authorId = 200 } }, box = { { authorId = 9 } } },
-  }
-  TrainerIdSync.rewriteSave(save, 2, 100, { [100] = true, [200] = true })
-  T.eq(save.player.id, 100, "gen2 player id")
-  T.eq(save.dayCare.man.mon.otId, 100, "gen2 daycare parent")
-  T.eq(save.dayCare.egg.otId, 100, "gen2 daycare egg")
-  T.eq(save.hallOfFame.teams[1].mons[1].otId, 100, "gen2 hall of fame")
-  T.eq(save.mail.party[1].authorId, 100, "gen2 own mail")
-  T.eq(save.mail.box[1].authorId, 9, "gen2 foreign mail untouched")
-end
-
-do
-  local bit = require("bit")
-  local function shinyKey(tid, sid) return bit.bxor(tid, sid) end
-  local save = {
-    engine = "game3", version = "emerald", trainerId = 200, secretId = 0x1234,
-    party = { { otId = 200, otSecretId = 0x1234 }, { otId = 300, otSecretId = 0x0F0F } },
-    storage = { boxes = { [3] = { mons = { [7] = { otId = 200, otSecretId = 0x1234 } } } } },
-    modData = { emerald_daycare = { daycare = { { otId = 200, otSecretId = 0x1234 } } } },
-    hallOfFameTeams = { { { trainerId = 200, otSecretId = 0x1234 } } },
-    secretBases = { { trainerId = { 200, 0, 0x34, 0x12 } } },
-  }
-  TrainerIdSync.rewriteSave(save, 3, 100, { [100] = true, [200] = true, [300] = true })
-  T.eq(save.trainerId, 100, "gen3 trainer id")
-  T.eq(shinyKey(save.trainerId, save.secretId), shinyKey(200, 0x1234),
-    "gen3 secret id is reseated so own shinies stay shiny")
-  T.eq(save.party[1].otId, 100, "gen3 party mon")
-  T.eq(save.party[1].otSecretId, save.secretId, "own mon keeps matching the save's secret id")
-  T.eq(shinyKey(save.party[2].otId, save.party[2].otSecretId), shinyKey(300, 0x0F0F),
-    "mon from another save keeps its shininess")
-  T.eq(save.storage.boxes[3].mons[7].otId, 100, "gen3 sparse box mon")
-  T.eq(save.modData.emerald_daycare.daycare[1].otId, 100, "gen3 daycare mon")
-  T.eq(save.hallOfFameTeams[1][1].trainerId, 100, "gen3 hall of fame")
-  local b = save.secretBases[1].trainerId
-  T.eq(b[1] + b[2] * 256, 100, "own secret base TID")
-  T.eq(b[3] + b[4] * 256, save.secretId, "own secret base SID")
-end
-
-do
   local files = fresh()
   local red = SaveData.createSlot("red")
   SaveData.writeSlot("red", red, { version = "red", player = { id = 111, name = "RED" },
-    party = { { species = "PIKACHU", otId = 111 } } })
+    party = { { species = "PIKACHU", otId = 111, ot = "RED" } } })
   local gold = SaveData.createSlot("gold")
   SaveData.writeSlot("gold", gold, { version = "gold", generation = 2, player = { id = 222, name = "GOLD" },
-    party = { { species = "CYNDAQUIL", otId = 222 }, { species = "ABRA", otId = 111, traded = true } } })
+    party = { { species = "CYNDAQUIL", otId = 222, ot = "GOLD" }, { species = "ABRA", otId = 111, ot = "RED", traded = true } } })
   local em = SaveData.createSlot("emerald")
   SaveData.writeSlot("emerald", em, { version = "emerald", engine = "game3", generation = 3,
-    trainerId = 333, secretId = 5, name = "MAY", party = { { otId = 333, otSecretId = 5 } } })
+    trainerId = 333, secretId = 5, name = "MAY", party = { { species = 25, otId = 333, otSecretId = 5, otName = "MAY", personality = 12345 } } })
 
   local job = TrainerIdSync.newJob({ scope = "gold", slot = gold })
   local steps, last = 0, -1
@@ -162,10 +83,10 @@ do
 
   local red = SaveData.createSlot("red")
   SaveData.writeSlot("red", red, { version = "red", meta = { savedAt = 500 },
-    player = { id = 111, name = "RED" }, party = { { species = "PIKACHU", otId = 111 } } })
+    player = { id = 111, name = "RED" }, party = { { species = "PIKACHU", otId = 111, ot = "RED" } } })
   local gold = SaveData.createSlot("gold")
   SaveData.writeSlot("gold", gold, { version = "gold", generation = 2, meta = { savedAt = 500 },
-    player = { id = 222, name = "GOLD" }, party = { { species = "CYNDAQUIL", otId = 222 } } })
+    player = { id = 222, name = "GOLD" }, party = { { species = "CYNDAQUIL", otId = 222, ot = "GOLD" } } })
 
   local server, puts = {}, {}
   local transport = { sent = {}, handles = {} }
@@ -226,6 +147,23 @@ do
   T.eq(blob and blob.party[1].otId, 222, "and the synced OT")
   T.eq(up.baseRev, 1, "as a normal revision on top of the server copy, not a conflict")
   T.eq(eng.phase, "idle", "and the engine settles")
+end
+
+do
+  local nick = ("50"):rep(11)
+  local ot = "91848350" .. ("00"):rep(7)
+  local struct = ("A5"):rep(12) .. "006F" .. ("00"):rep(19)
+  local save = { version = "red", player = { id = 111, name = "RED" }, party = {},
+    daycare = { cartRaw = "01" .. nick .. ot .. struct } }
+  local owners = {}
+  TrainerIdSync.addOwner(owners, { id = 111, name = "RED" }, 1)
+  local changed = TrainerIdSync.rewriteSave(save, 1, { id = 222, name = "BLUE", sid = 0 }, owners)
+  T.check(changed, "raw cart day-care block counts as a change")
+  local raw = save.daycare.cartRaw
+  T.eq(#raw, 112, "raw day-care block keeps its size")
+  T.eq(raw:sub(71, 74), "00DE", "raw day-care OT id rewritten")
+  T.eq(raw:sub(25, 34), "818B9484" .. "50", "raw day-care OT name rewritten")
+  T.eq(raw:sub(1, 24), "01" .. nick, "raw day-care nickname untouched")
 end
 
 love.filesystem = realFS

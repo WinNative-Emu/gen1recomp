@@ -1,6 +1,6 @@
 -- GitHub release helpers for mod auto-update / other-versions.
 -- Pure parsing is love-free; fetch/download use HostShell + curl when available.
--- Release lists are cached in options.modUpdateCache for CACHE_TTL seconds
+-- Release lists are cached in mod_update_cache.lua for CACHE_TTL seconds
 -- (default 6 hours). The launcher owns UI and install.
 
 local ModUpdate = {}
@@ -311,27 +311,116 @@ function ModUpdate.statsLine(total, first, latest)
   return table.concat(parts, "  -  ")
 end
 
--- ------- cache (options.modUpdateCache[repo])
+-- ------- cache (mod_update_cache.lua beside options.lua)
 
-local function cacheStore()
+ModUpdate.CACHE_FILE = "mod_update_cache.lua"
+
+local cacheTrees = setmetatable({}, { __mode = "k" })
+local migrated = setmetatable({}, { __mode = "k" })
+
+local function deepCopy(v)
+  if type(v) ~= "table" then return v end
+  local out = {}
+  for k, val in pairs(v) do out[k] = deepCopy(val) end
+  return out
+end
+
+local function cacheFs()
   local SaveData = require("src.core.SaveData")
-  local opts = SaveData.loadOptions()
-  opts.modUpdateCache = opts.modUpdateCache or {}
-  return opts
+  if type(SaveData.persistenceFs) ~= "function" then return nil end
+  return SaveData.persistenceFs()
+end
+
+local function readCacheFile(fs)
+  if not (fs.getInfo and fs.getInfo(ModUpdate.CACHE_FILE)) then return {} end
+  local body = fs.read(ModUpdate.CACHE_FILE)
+  if type(body) ~= "string" then return {} end
+  local ok, t = pcall(require("src.core.SaveSerializer").decode, body)
+  return (ok and type(t) == "table") and t or {}
+end
+
+local function writeCacheTree(all)
+  local fs = cacheFs()
+  if not fs then return false end
+  local ok = fs.write(ModUpdate.CACHE_FILE, require("src.core.SaveSerializer").encode(all))
+  cacheTrees[fs] = ok and all or nil
+  return ok and true or false
+end
+
+local function readRawOptions(fs)
+  local name = require("src.core.SaveData").OPTIONS_FILENAME
+  if type(name) ~= "string" or not (fs.getInfo and fs.getInfo(name)) then return nil end
+  local body = fs.read(name)
+  if type(body) ~= "string" then return nil end
+  local ok, t = pcall(require("src.core.SaveSerializer").decode, body)
+  return (ok and type(t) == "table") and t or nil
+end
+
+local function moveLegacy(fs, all)
+  if migrated[fs] then return false end
+  migrated[fs] = true
+  local raw = readRawOptions(fs)
+  local legacy = raw and raw.modUpdateCache
+  if type(legacy) ~= "table" or next(legacy) == nil then return false end
+  for repo, entry in pairs(legacy) do
+    local have = all[repo]
+    if type(entry) == "table" and (type(have) ~= "table"
+        or (tonumber(entry.checkedAt) or 0) > (tonumber(have.checkedAt) or 0)) then
+      all[repo] = entry
+    end
+  end
+  writeCacheTree(all)
+  return true
+end
+
+local function loadedTree(fs)
+  local all = cacheTrees[fs]
+  if not all then
+    all = readCacheFile(fs)
+    cacheTrees[fs] = all
+  end
+  return all
+end
+
+function ModUpdate._migrateLegacy()
+  local fs = cacheFs()
+  if not fs then return false end
+  return moveLegacy(fs, loadedTree(fs))
+end
+
+local function stripLegacyOptions()
+  pcall(function() require("src.mods.ModIndex")._migrateLegacy() end)
+  local SaveData = require("src.core.SaveData")
+  local ok, opts = pcall(SaveData.loadOptions)
+  if not ok or type(opts) ~= "table" then return end
+  opts.modIndexCache = nil
+  opts.modUpdateCache = nil
+  pcall(SaveData.saveOptions, opts)
+end
+
+local function cacheTree()
+  local fs = cacheFs()
+  if not fs then return nil end
+  local all = loadedTree(fs)
+  if moveLegacy(fs, all) then stripLegacyOptions() end
+  return cacheTrees[fs] or all
+end
+
+function ModUpdate._resetCacheForTests()
+  cacheTrees = setmetatable({}, { __mode = "k" })
+  migrated = setmetatable({}, { __mode = "k" })
 end
 
 function ModUpdate.readCache(repo)
   if type(repo) ~= "string" or repo == "" then return nil end
-  local ok, opts = pcall(function()
-    return require("src.core.SaveData").loadOptions()
-  end)
-  if not ok or type(opts) ~= "table" then return nil end
-  local entry = opts.modUpdateCache and opts.modUpdateCache[repo]
+  local ok, all = pcall(cacheTree)
+  if not ok or type(all) ~= "table" then return nil end
+  local entry = all[repo]
   if type(entry) ~= "table" or type(entry.checkedAt) ~= "number" then
     return nil
   end
   if type(entry.releases) ~= "table" then return nil end
-  return entry
+  return deepCopy(entry)
 end
 
 function ModUpdate.cacheFresh(entry, now, ttl)
@@ -359,9 +448,9 @@ end
 
 function ModUpdate.writeCache(repo, releases)
   if type(repo) ~= "string" or repo == "" then return false end
-  local ok = pcall(function()
-    local SaveData = require("src.core.SaveData")
-    local opts = cacheStore()
+  local ok, wrote = pcall(function()
+    local all = cacheTree()
+    if not all then return false end
     local best = ModUpdate.pickBest(releases)
     -- Persist a lean copy: enough to paint the UI and reinstall without
     -- re-fetching within the TTL.
@@ -382,14 +471,14 @@ function ModUpdate.writeCache(repo, releases)
         } or nil,
       }
     end
-    opts.modUpdateCache[repo] = {
+    all[repo] = {
       checkedAt = os.time(),
       latest = best and best.version or nil,
       releases = lean,
     }
-    SaveData.saveOptions(opts)
+    return writeCacheTree(all)
   end)
-  return ok
+  return ok and wrote == true
 end
 
 -- Status vs an installed version using a cache entry / release list.

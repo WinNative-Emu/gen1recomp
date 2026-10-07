@@ -27,6 +27,12 @@ local function dayCareCount()
   return Daycare.count(Daycare.stateOf())
 end
 
+local function printedPage(sub)
+  local Message = require("src.ui.game3.message")
+  if not (Message.isOpen() and Message.isWaiting()) then return false end
+  return (Message.currentPage():gsub("\n", " ")):find(sub, 1, true) ~= nil
+end
+
 local function talk(game, mapId, x, y, until_, frames)
   X.goTo(d, game, mapId, x, y, "up")
   X.settle(game, 60)
@@ -48,10 +54,16 @@ return function(game)
 
   local okOne = talk(game, "EM_ROUTE117_POKEMON_DAY_CARE", 2, 3, function() return dayCareCount() >= 1 end, 1500)
   d.check(okOne, "daycare lady takes the first Pokemon through ChooseSendDaycareMon + StoreSelectedPokemonInDaycare")
-  local okTwo = X.mash(game, function() return dayCareCount() >= 2 end, 900)
+  local raiseShot = false
+  local okTwo = X.mash(game, function()
+    if not raiseShot and dayCareCount() == 1 and printedPage("raise your") then
+      raiseShot = true
+      d.still(game, "01_daycare_raise_second_mon_text.png")
+    end
+    return dayCareCount() >= 2
+  end, 900)
   d.check(okTwo, "a second Pokemon joins (GetDaycareState=DAYCARE_TWO_MONS, VM " .. X.vmWhere() .. ")")
   X.mash(game, function() return not X.scriptRunning() end, 600, "b")
-  d.shot(game, "01_daycare_two_mons.png")
   d.check(type(sess.modData) == "table" and type(sess.modData.emerald_daycare) == "table" and sess.modData.firered_daycare == nil,
     "daycare saves under the Emerald key (modData.emerald_daycare)")
   local dc = Daycare.stateOf(sess)
@@ -72,7 +84,12 @@ return function(game)
   local man = require("src.core.game3.objects").find(3)
   local mx, my = man and man.cellX or 47, man and man.cellY or 4
   d.note(string.format("daycare man stands at (%s,%s) with an egg pending", tostring(mx), tostring(my)))
+  local eggShot = false
   local okEgg = talk(game, "EM_ROUTE117", mx, my + 1, function()
+    if not eggShot and printedPage("received the EGG") then
+      eggShot = true
+      d.still(game, "02_egg_received_text.png")
+    end
     local w = X.vmWhere()
     if eggTrace[#eggTrace] ~= w then eggTrace[#eggTrace + 1] = w end
     for _, m in ipairs(sess.party or {}) do if m.isEgg then return true end end
@@ -106,6 +123,32 @@ return function(game)
     Daycare.step(sess)
     d.check(egg.friendship == 4, "one egg cycle tick removes 2 cycles with Flame Body (" .. tostring(egg.friendship) .. ")")
   end
-  d.shot(game, "02_egg_received.png")
+
+  local Stack = require("src.ui.game3.stack")
+  local Menu = require("src.ui.game3.daycare_menu")
+  sess.money = 999999
+  local partyBefore = #sess.party
+  local firstBoarded = Daycare.speciesOf(Daycare.mon(dc, 1))
+  local okMenu = talk(game, "EM_ROUTE117_POKEMON_DAY_CARE", 2, 3, function()
+    return Stack.has("daycare_level_menu")
+  end, 900)
+  d.check(okMenu, "YES to take one back opens the level menu (ShowDaycareLevelMenu, VM " .. X.vmWhere() .. ")")
+  if okMenu then
+    local rows = Menu.rowList or {}
+    d.check(rows[3] and rows[3].text == "EXIT", "level menu row 3 reads EXIT (gText_Exit)")
+    d.check(rows[1] and rows[1].level ~= "" and rows[2] and rows[2].level ~= "", "both boarded mons show a level")
+    U.wait(10)
+    d.still(game, "03_level_menu_two_mons.png")
+    U.tap(game, "a")
+    U.wait(4)
+    d.check(not Stack.has("daycare_level_menu"), "A on the first mon closes the level menu")
+    local okTake = X.mash(game, function() return dayCareCount() == 1 end, 900)
+    d.check(okTake, "YES to the cost prompt withdraws the mon (TakePokemonFromDaycare)")
+    X.mash(game, function() return not X.scriptRunning() end, 600, "b")
+    d.check(#sess.party == partyBefore + 1, "the party gained the mon (" .. #sess.party .. ")")
+    d.check(Daycare.speciesOf(sess.party[#sess.party]) == firstBoarded, "and it is the first boarded mon")
+    d.check(dayCareCount() == 1, "one mon is left at the day care")
+    d.check(sess.money < 999999, "the stay was paid for")
+  end
   d.finish()
 end

@@ -335,8 +335,8 @@ do
   local main = assert(io.open("main.lua")):read("*a")
   local body = main:match("local function returnToLauncher%(opts%)(.-)\nend\n")
   T.check(body ~= nil, "main.lua still has returnToLauncher")
-  T.check(body:find("refreshSlotResolution%(currentVersion%)", 1, false) ~= nil,
-    "EXIT GAME refreshes only the version just left")
+  T.check(body and body:find('require("src.core.HostShell").restart()', 1, true) ~= nil,
+    "EXIT GAME restarts, so the launcher resolves every slot list fresh")
   T.check(body:find("resetSlotState", 1, true) == nil,
     "and does not call resetSlotState (that would clear cart/seal state)")
 end

@@ -43,7 +43,7 @@ Versions.ROM_SIZE = 16777216
 -- v115: LeafGreen profiles, edition-specific title assets and Deoxys stats.
 -- v121: chrome/fonts/japanese_{normal,small}_* and japanese_widths.lua, the
 --       cart's Japanese fonts, for text a Japanese translation mod prints.
-Versions.CACHE_VERSION = 130
+Versions.CACHE_VERSION = 131
 Versions.NATIVE_VERSION = 6
 Versions.OW_VERSION = 3
 Versions.ANIM_VERSION = 1
@@ -1537,6 +1537,8 @@ Versions.TRAINER_FRONT_PIC_TABLE = 0x23957C
 Versions.TRAINER_FRONT_PIC_PAL_TABLE = 0x239A1C
 Versions.TRAINER_BACK_PIC_TABLE = 0x239FA4
 Versions.TRAINER_BACK_PIC_PAL_TABLE = 0x239FD4
+-- pokefirered/src/data/trainer_graphics/back_pic_anims.h:83
+Versions.TRAINER_BACK_ANIMS_TABLE = 0x239F74
 Versions.TRAINERS_TABLE = 0x23EAC8
 Versions.TRAINER_STRIDE = 0x28
 Versions.TRAINER_CLASS_NAMES = 0x23E558

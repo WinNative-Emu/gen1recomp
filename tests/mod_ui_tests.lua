@@ -495,9 +495,9 @@ check(bm.items[1].label == "UP" and bm.items[1].right == "UP/D-UP"
   and bm.items[7].label == "START" and bm.items[7].right == "ESC/START"
   and bm.items[8].label == "SELECT" and bm.items[8].right == "TAB/BACK",
   "with no rebind the rows mirror the fixed map, key and pad both (#589)")
-check(bm.items[9].label == "SPEED -" and bm.items[9].right == "LB"
-  and bm.items[10].label == "SPEED +" and bm.items[10].right == "RB",
-  "and the GAME SPEED shortcuts show the shoulders they sit on (#1922)")
+check(bm.items[9].label == "SPEED -" and bm.items[9].right == "0/LB"
+  and bm.items[10].label == "SPEED +" and bm.items[10].right == "1/RB",
+  "and the GAME SPEED shortcuts show their keys and the shoulders they sit on (#1922)")
 check(cbGame.save.options.bindings == nil,
   "opening the screen alone writes nothing")
 

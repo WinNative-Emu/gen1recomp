@@ -152,4 +152,5 @@ function M.receive(s, packets, mine)
     giftItem = true, gift = receiveGift(s, players[1], mine)}
 end
 M.receiveTower = receiveTower
+M.receiveGift = receiveGift
 return M

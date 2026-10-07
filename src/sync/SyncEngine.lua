@@ -1,6 +1,8 @@
 local SyncClient = require("src.sync.SyncClient")
 local SyncState = require("src.sync.SyncState")
 local SyncMods = require("src.sync.SyncMods")
+local SyncBox = require("src.sync.SyncBox")
+local Work = require("src.sync.SyncWork")
 
 local SyncEngine = {}
 SyncEngine.__index = SyncEngine
@@ -325,9 +327,10 @@ local function snapshot(value, seen)
   return out
 end
 
-local function contents(blob)
+local function contents(blob, decoded)
   if type(blob) ~= "string" or blob == "" or #blob > SyncClient.MAX_BLOB then return nil end
-  local ok, save = pcall(saveApi().decode, blob)
+  local ok, save = true, decoded
+  if save == nil then ok, save = pcall(saveApi().decode, blob) end
   if not ok or type(save) ~= "table"
       or (save.meta ~= nil and type(save.meta) ~= "table") then return nil end
   local native = save.engine == "game3" and save.generation == 3
@@ -347,7 +350,12 @@ local function equalValues(a, b)
 end
 
 local function sameContents(a, b)
-  local left, right = contents(a), contents(b)
+  local decoded = {}
+  for i, blob in ipairs({ a, b }) do
+    decoded[i] = type(blob) == "string" and blob ~= "" and #blob <= SyncClient.MAX_BLOB
+      and Work.call("decode", blob) or nil
+  end
+  local left, right = contents(a, decoded[1]), contents(b, decoded[2])
   return left ~= nil and right ~= nil and equalValues(left, right)
 end
 
@@ -374,6 +382,8 @@ function SyncEngine.new(opts)
   eng.client = opts.client or SyncClient.new({
     baseUrl = opts.baseUrl, transport = opts.transport })
   eng.saves = opts.saves or SyncEngine.defaultSaves()
+  if opts.box ~= nil then eng.box = opts.box
+  elseif not opts.saves then eng.box = SyncBox.new(eng.fs) end
   eng.modDeps = opts.modDeps
   eng.now = opts.now or os.time
   eng.persist = opts.persist ~= false
@@ -415,7 +425,42 @@ function SyncEngine:linked()
 end
 
 function SyncEngine:busy()
-  return self.pending ~= nil or #self.queue > 0 or self.modApply ~= nil
+  return self.pending ~= nil or #self.queue > 0 or self.modApply ~= nil or self.working ~= nil
+end
+
+function SyncEngine:_step(rec)
+  self.working = nil
+  local ok, err = coroutine.resume(rec.co, self, rec.arg)
+  if coroutine.status(rec.co) == "suspended" then
+    self.working = rec
+    return false
+  end
+  Work.abandon(rec.co)
+  return true, ok, err
+end
+
+function SyncEngine:_run(fn, arg, task)
+  return self:_step({ co = Work.spawn(fn), arg = arg, task = task })
+end
+
+function SyncEngine:_settle(rec, ok, err)
+  if not ok then self:_fail(err) return false end
+  if rec.task and not self.pending and not self.working and #self.queue == 0 and self.phase ~= "error" then
+    self:_finish()
+  end
+  return true
+end
+
+function SyncEngine:_noteRecovery(notice)
+  notice = notice or (self.box and self.box.recoveryNotice)
+  if self.box then self.box.recoveryNotice = nil end
+  if type(notice) == "string" and notice ~= "" then self.notice = notice end
+end
+
+function SyncEngine:takeNotice()
+  local notice = self.shownNotice
+  self.shownNotice = nil
+  return notice
 end
 
 function SyncEngine:_persist()
@@ -424,6 +469,10 @@ function SyncEngine:_persist()
 end
 
 function SyncEngine:_fail(message)
+  if self.working then
+    Work.abandon(self.working.co)
+    self.working = nil
+  end
   self.phase = "error"
   self.error = tostring(message or "sync failed")
   self.status = "Sync failed: " .. self.error
@@ -438,7 +487,7 @@ function SyncEngine:_finish()
     for _, row in ipairs(self.conflicts) do
       if row.overlap then overlap = true end
     end
-    self.status = overlap
+    self.status = self.conflicts[1].box and "Box and its linked saves changed on another device." or overlap
       and "These saves were played at the same time."
       or "This save also changed on another device."
     return
@@ -449,6 +498,9 @@ function SyncEngine:_finish()
   self.status = self:defaultStatus()
   if type(self.skipped) == "table" and #self.skipped > 0 then
     self.status = self.skipped[1]
+  end
+  if self.notice then
+    self.status, self.shownNotice, self.notice = self.notice, self.notice, nil
   end
   self:_persist()
 end
@@ -468,6 +520,8 @@ end
 
 function SyncEngine:cancel()
   if self.pending then self.client:release(self.pending.handle) end
+  if self.working then Work.abandon(self.working.co) end
+  self.working = nil
   self.pending = nil
   self.queue = {}
   self.modApply = nil
@@ -485,6 +539,18 @@ end
 
 function SyncEngine:noteSaveDeleted(key)
   if type(key) ~= "string" or key == "" then return false end
+  if self.box then
+    local ok, why = self.box:markDeleted(key)
+    if not ok then
+      local known = SyncState.rev(self.state, key)
+      SyncState.forget(self.state, key)
+      if known ~= nil or self.box:owns(key) ~= false then SyncState.markDeleted(self.state, key, known or 0, self.now()) end
+      self:_persist()
+      self:_fail(why)
+      if self.state.enabled and self:linked() then self.uploadAt = self.clock + SyncEngine.UPLOAD_DEBOUNCE end
+      return nil, why
+    end
+  end
   local rev = SyncState.rev(self.state, key)
   SyncState.forget(self.state, key)
   if rev == nil or not self:linked() then
@@ -501,6 +567,12 @@ end
 
 function SyncEngine:update(dt)
   self.clock = self.clock + (tonumber(dt) or 0)
+  if self.working then
+    local rec = self.working
+    local done, ok, err = self:_step(rec)
+    if not done then return end
+    if not self:_settle(rec, ok, err) then return end
+  end
   if self.pending then
     local res = self.client:poll(self.pending.handle)
     if res.status == "pending" then return end
@@ -508,8 +580,8 @@ function SyncEngine:update(dt)
     self.pending = nil
     self.client:release(job.handle)
     if res.status == "ok" then
-      local ok, err = pcall(job.onOk, self, res)
-      if not ok then self:_fail(err) end
+      local done, ok, err = self:_run(job.onOk, res)
+      if done and not ok then self:_fail(err) end
     else
       local handled = false
       if job.onErr then
@@ -520,7 +592,7 @@ function SyncEngine:update(dt)
       if not handled then self:_fail(res.err) end
     end
   end
-  if self.pending then return end
+  if self.pending or self.working then return end
   if self.modApply then
     self:_stepModApply()
     return
@@ -535,15 +607,12 @@ function SyncEngine:update(dt)
     self:syncNow()
   end
   local steps = 0
-  while not self.pending and #self.queue > 0
+  while not self.pending and not self.working and #self.queue > 0
       and steps < SyncEngine.MAX_STEPS_PER_UPDATE do
     steps = steps + 1
     local task = table.remove(self.queue, 1)
-    local ok, err = pcall(task, self)
-    if not ok then self:_fail(err) return end
-    if not self.pending and #self.queue == 0 and self.phase ~= "error" then
-      self:_finish()
-    end
+    local done, ok, err = self:_run(task, nil, true)
+    if done and not self:_settle({ task = true }, ok, err) then return end
   end
 end
 
@@ -699,7 +768,10 @@ function SyncEngine:setEnabled(enabled)
 end
 
 function SyncEngine:protectPlaythrough(version, playthroughId)
+  local previous = self.protectedKey
   self.protectedKey = SyncState.key(version, playthroughId)
+  if previous and not self.protectedKey and self.box and self._boxKeys and self._boxKeys[previous]
+      and self.state.enabled and self:linked() then self.uploadAt = self.clock end
 end
 
 function SyncEngine:noteResumed()
@@ -714,7 +786,7 @@ end
 
 function SyncEngine:syncNow()
   if not self:linked() then return false, "this device is not linked" end
-  if self.pending then return false, "sync is busy" end
+  if self.pending or self.working then return false, "sync is busy" end
   self.autoAt = self.clock + SyncEngine.AUTO_INTERVAL
   self.queue = {}
   self.conflicts = {}
@@ -748,11 +820,18 @@ function SyncEngine:_planFrom(remoteState)
   end
   local remote = type(remoteState.saves) == "table" and remoteState.saves or {}
   local tombs = type(remoteState.deleted) == "table" and remoteState.deleted or {}
+  if self.box then
+    local recovered, recoveryError, notice = self.box:recover()
+    self:_noteRecovery(notice)
+    if not recovered then self:_fail(recoveryError); return end
+  end
   local locals = self.saves.list() or {}
+  self._boxKeys, self._boxSaveRevs = {}, {}
+  if self.box and not self:_planBox(remoteState, locals) then return end
   local seen = {}
   for _, entry in ipairs(locals) do
     local key = SyncState.key(entry.version, entry.playthroughId)
-    if key then
+    if key and not self._boxKeys[key] then
       seen[key] = true
       SyncState.clearDeleted(self.state, key)
       local row = remote[key]
@@ -787,7 +866,7 @@ function SyncEngine:_planFrom(remoteState)
   end
   for key, pending in pairs(self.state.pendingDeletes or {}) do
     local row = remote[key]
-    if not seen[key] then
+    if not seen[key] and not self._boxKeys[key] then
       if row and (tonumber(row.rev) or 0) > (tonumber(pending.rev) or 0) then
         SyncState.clearDeleted(self.state, key)
       else
@@ -797,7 +876,7 @@ function SyncEngine:_planFrom(remoteState)
     end
   end
   for key, row in pairs(remote) do
-    if not seen[key] and key ~= self.protectedKey then
+    if not seen[key] and not self._boxKeys[key] and key ~= self.protectedKey then
       local version, id = SyncState.splitKey(key)
       if version and id then
         self:_queueDownload(key, version, id, "replace", tonumber(row.rev))
@@ -805,6 +884,215 @@ function SyncEngine:_planFrom(remoteState)
     end
   end
   if #self.queue == 0 then self:_finish() end
+end
+
+function SyncEngine:_planBox(remoteState, locals)
+  local remote = type(remoteState.box) == "table" and remoteState.box or nil
+  local extra = {}
+  for _, key in ipairs(remote and remote.members or {}) do extra[key] = true end
+  local current, why = self.box:snapshot(locals, self.state, extra)
+  if not current then self:_fail(why); return false end
+  if not current.exists and not remote then return true end
+  if not (remoteState.capabilities and remoteState.capabilities.box == 1) then
+    self:_fail("The sync server needs its Box update before this collection can sync.")
+    return false
+  end
+  self._boxKeys = current.keys
+  local remoteSaves, tombs = remoteState.saves or {}, remoteState.deleted or {}
+  local saveChanged = false
+  for key in pairs(self._boxKeys) do
+    local row = remoteSaves[key] or tombs[key]
+    self._boxSaveRevs[key] = row and tonumber(row.rev) or 0
+    local known = self.state.pendingDeletes and self.state.pendingDeletes[key]
+    known = known and known.rev or SyncState.rev(self.state, key)
+    if row and self._boxSaveRevs[key] ~= known then saveChanged = true end
+  end
+  local changed = current.fingerprint ~= self.state.boxFingerprint
+  local remoteRev = remote and tonumber(remote.rev) or 0
+  local remoteChanged = remoteRev ~= (self.state.boxRev or 0) or saveChanged
+  if remote and not current.exists then
+    local dirty = false
+    for _, entry in ipairs(locals) do
+      local key = SyncState.key(entry.version, entry.playthroughId)
+      if self._boxKeys[key] then
+        dirty = dirty or SyncState.rev(self.state, key) == nil
+          or unixSeconds(entry.meta and entry.meta.savedAt) ~= unixSeconds(SyncState.stamp(self.state, key))
+      end
+    end
+    if dirty then self:_queueBoxComparison(current, remoteRev)
+    else self:_queueBoxDownload(current.fingerprint) end
+  elseif not remote and saveChanged then self:_queueBoxComparison(current, 0)
+  elseif not remote then self:_queueBoxUpload(current)
+  elseif changed and remoteChanged then self:_queueBoxComparison(current, remoteRev)
+  elseif changed then self:_queueBoxUpload(current)
+  elseif remoteChanged then self:_queueBoxDownload(current.fingerprint) end
+  return true
+end
+
+function SyncEngine:_addBoxConflict(current, remote)
+  self.conflicts[#self.conflicts + 1] = { box = true, key = SyncBox.KEY, version = "Box collection",
+    entry = current, remote = remote, remoteRev = remote.rev,
+    localMeta = { summary = { name = "Box", boxCount = current.payload.meta.count }, savedAt = unixSeconds(current.payload.meta.savedAt) },
+    remoteMeta = { summary = { name = "Box", boxCount = remote.meta and remote.meta.count }, savedAt = unixSeconds(remote.meta and remote.meta.savedAt) },
+    overlap = false }
+  self.state.pendingConflicts[#self.state.pendingConflicts + 1] = { key = SyncBox.KEY, version = "Box collection" }
+end
+
+function SyncEngine:_queueBoxComparison(current, observedRev)
+  self:_enqueue(function(eng)
+    eng.phase, eng.status = "checking", "Checking Box and linked saves..."
+    local handle, err = eng.client:getBox(eng._boxKeys)
+    eng:_request(handle, err, function(e, res)
+      local remote = res.data
+      local valid, why = SyncBox.validate(remote)
+      if not valid then e:_fail(why); return end
+      if type(remote.rev) ~= "number" or remote.rev < observedRev then e:_fail("The cloud Box revision is stale."); return end
+      if not next(current.missing) and SyncBox.fingerprint(remote) == current.fingerprint then
+        local remembered, detail = e.box:remember(remote, e.saves.list(), e.state)
+        if not remembered then e:_fail(detail); return end
+        e:_acceptBox(remote.rev, remote.saves, current.fingerprint)
+      else e:_addBoxConflict(current, remote) end
+      if not e:busy() then e:_finish() end
+    end)
+  end)
+end
+
+function SyncEngine:_acceptBox(rev, rows, fingerprint)
+  self.state.boxRev, self.state.boxFingerprint = rev, fingerprint
+  for key, row in pairs(rows or {}) do
+    SyncState.setRev(self.state, key, row.rev, unixSeconds(row.meta and row.meta.savedAt))
+    SyncState.clearDeleted(self.state, key)
+  end
+  self:_persist()
+end
+
+function SyncEngine:_queueBoxUpload(planned, expectedRev, remote)
+  self:_enqueue(function(eng)
+    if eng.protectedKey and eng._boxKeys[eng.protectedKey] then
+      eng.skipped = { "Box sync will finish after you return to the launcher." }; return
+    end
+    local current, why = eng.box:snapshot(eng.saves.list(), eng.state, eng._boxKeys)
+    if not current then eng:_fail(why); return end
+    if next(current.missing) then eng:_fail("A save linked to Box is missing. Receive the cloud collection before uploading."); return end
+    for key in pairs(current.keys) do
+      if not planned.keys[key] then eng:_fail("Box gained a linked save during sync. Sync again."); return end
+    end
+    local carried = {}
+    for key in pairs(current.remoteOnly or {}) do
+      local row = remote and type(remote.saves) == "table" and remote.saves[key]
+      if type(row) ~= "table" then eng:_fail("Box gained a linked save on another device. Sync again."); return end
+      carried[key] = row.deleted and { version = row.version, deleted = true }
+        or { version = row.version, blob = row.blob, meta = row.meta }
+    end
+    if remote then
+      local backup, backupError = eng.box:archive(remote)
+      if not backup then eng:_fail(backupError); return end
+    end
+    local payload = current.payload
+    for key, row in pairs(carried) do payload.saves[key] = row end
+    payload.baseRev = expectedRev or eng.state.boxRev or 0
+    for key, row in pairs(payload.saves) do
+      row.baseRev = remote and remote.saves[key] and remote.saves[key].rev or eng._boxSaveRevs[key] or 0
+    end
+    eng.phase, eng.status = "uploading", "Uploading Box and linked saves..."
+    local handle, err = eng.client:putBox(payload)
+    eng:_request(handle, err, function(e, res)
+      if not revision(res.data.rev) then e:_fail("The server did not confirm the Box revision."); return end
+      local rows = {}
+      for key, row in pairs(payload.saves) do
+        local rev = res.data.revs and revision(res.data.revs[key])
+        if not rev then e:_fail("The server did not confirm every linked save."); return end
+        if not carried[key] then rows[key] = { rev = rev, meta = row.meta } end
+      end
+      local remembered, detail = e.box:remember(payload, e.saves.list(), e.state)
+      if not remembered then e:_fail(detail); return end
+      if detail == true then
+        e.changed = true; e.lastDownloads = e.lastDownloads or {}
+        e.lastDownloads[#e.lastDownloads + 1] = { box = true }
+      end
+      e:_acceptBox(res.data.rev, rows, current.fingerprint)
+      if next(carried) and e.state.enabled then e.uploadAt = e.clock end
+      if not e:busy() then e:_finish() end
+    end, function(e, res)
+      if res.code == 409 then
+        e:_queueBoxComparison(current, tonumber(res.data and res.data.rev) or 0)
+        return true
+      end
+      return false
+    end)
+  end)
+end
+
+function SyncEngine:_queueBoxDownload(expected, supplied)
+  self:_enqueue(function(eng)
+    if eng.protectedKey and eng._boxKeys[eng.protectedKey] then
+      eng.skipped = { "Box sync will finish after you return to the launcher." }; return
+    end
+    local function apply(e, remote)
+      local locals = e.saves.list()
+      local downloads, why = e.box:apply(remote, locals, e.state, expected)
+      if downloads == false then e.skipped = { why }; return end
+      if not downloads then e:_fail(why); return end
+      local current, err = e.box:snapshot(e.saves.list(), e.state)
+      if not current then e:_fail(err); return end
+      e.lastDownloads = e.lastDownloads or {}
+      for _, row in ipairs(downloads) do e.lastDownloads[#e.lastDownloads + 1] = row end
+      e.changed = true
+      e:_acceptBox(remote.rev, remote.saves, current.fingerprint)
+      if not e:busy() then e:_finish() end
+    end
+    eng.phase, eng.status = "downloading", "Downloading Box and linked saves..."
+    local handle, err = eng.client:getBox(eng._boxKeys)
+    eng:_request(handle, err, function(e, res)
+      local remote = res.data
+      if supplied then
+        local same = remote.rev == supplied.rev
+        for key, row in pairs(supplied.saves) do same = same and remote.saves and remote.saves[key] and remote.saves[key].rev == row.rev end
+        if not same then
+          local current, why = e.box:snapshot(e.saves.list(), e.state, e._boxKeys)
+          if not current then e:_fail(why); return end
+          e:_queueBoxComparison(current, remote.rev or 0); return
+        end
+      end
+      apply(e, remote)
+    end)
+  end)
+end
+
+function SyncEngine:restoreBoxBackup(path)
+  if not self.box then return nil, "Box storage is unavailable." end
+  if self:busy() or #self.conflicts > 0 then return nil, "Finish the current sync before restoring Box." end
+  local recovered, recoveryError, notice = self.box:recover()
+  self:_noteRecovery(notice)
+  if not recovered then return nil, recoveryError end
+  local snapshot, backup = self.box:readBackup(path)
+  if not snapshot then return nil, backup end
+  local entries = self.saves.list()
+  local current, err = self.box:snapshot(entries, self.state, snapshot.saves)
+  if not current then return nil, err end
+  local backupState = backup.state
+  for key in pairs(current.keys) do
+    local row, member = snapshot.saves[key], backupState.syncMembers and backupState.syncMembers[key]
+    if not row or row.deleted and not (member and member.deleted) then
+      return nil, "This backup predates another linked save. Restore a newer complete collection."
+    end
+  end
+  for key in pairs(self._boxKeys or {}) do
+    if not snapshot.saves[key] then return nil, "This backup predates another linked save. Restore a newer complete collection." end
+  end
+  if self.protectedKey and current.keys[self.protectedKey] then
+    return nil, "Return to the launcher before restoring Box and its linked saves."
+  end
+  local downloads, failure = self.box:apply(snapshot, entries, self.state, current.fingerprint)
+  if not downloads then return nil, failure end
+  self.changed, self.lastDownloads = true, downloads
+  self:noteSaveWritten()
+  self.status = "Box and its linked saves were restored."
+  if self.notice then
+    self.status = self.notice .. " " .. self.status
+    self.shownNotice, self.notice = self.notice, nil
+  end
+  return true
 end
 
 function SyncEngine:_removeLocal(entry, key, tomb)
@@ -828,8 +1116,20 @@ function SyncEngine:_removeLocal(entry, key, tomb)
   end
 end
 
+function SyncEngine:_newBoxMember(key)
+  if not self.box or self._boxKeys and self._boxKeys[key] then return false end
+  local owned, why = self.box:owns(key)
+  if owned == nil or owned then
+    self:_fail(why or "Box gained a linked save during sync. Checking the collection again.")
+    if owned and self.state.enabled then self.uploadAt = self.clock end
+    return true
+  end
+  return false
+end
+
 function SyncEngine:_queueDelete(key, rev)
   self:_enqueue(function(eng)
+    if eng:_newBoxMember(key) then return end
     eng.phase = "uploading"
     eng.status = "Removing deleted saves..."
     local version, id = SyncState.splitKey(key)
@@ -872,6 +1172,7 @@ end
 function SyncEngine:_queueComparison(entry, key, row)
   entry, row = snapshot(entry), snapshot(row)
   self:_enqueue(function(eng)
+    if eng:_newBoxMember(key) then return end
     eng.phase = "checking"
     eng.status = "Checking save contents..."
     local function conflict(e, data)
@@ -890,6 +1191,7 @@ function SyncEngine:_queueComparison(entry, key, row)
     if not handle then conflict(eng) return end
     eng:_request(handle, err, function(e, res)
       local data = type(res.data) == "table" and res.data or {}
+      if e:_newBoxMember(key) then return end
       local fetched, observed = revision(data.rev), revision(row.rev)
       if fetched and observed and fetched >= observed
           and sameContents(entry.blob, data.blob) then
@@ -907,6 +1209,7 @@ end
 function SyncEngine:_queueUpload(entry, key, force)
   entry = snapshot(entry)
   self:_enqueue(function(eng)
+    if eng:_newBoxMember(key) then return end
     eng.phase = "uploading"
     eng.status = "Uploading saves..."
     local handle, err = eng.client:putSave({
@@ -941,10 +1244,12 @@ end
 
 function SyncEngine:_queueDownload(key, version, playthroughId, mode, knownRev)
   self:_enqueue(function(eng)
+    if eng:_newBoxMember(key) then return end
     eng.phase = "downloading"
     eng.status = "Downloading saves..."
     local handle, err = eng.client:getSave(version, playthroughId)
     eng:_request(handle, err, function(e, res)
+      if e:_newBoxMember(key) then return end
       local data = res.data or {}
       if type(data.blob) ~= "string" or data.blob == "" then
         e:_fail("the server sent no save data")
@@ -991,6 +1296,21 @@ function SyncEngine:resolveConflict(key, choice)
     if row.key == key then index = i break end
   end
   if not index then return false, "no such conflict" end
+  local proposed = self.conflicts[index]
+  if not proposed.box and self:_newBoxMember(key) then return false, "This save is now linked to Box. Sync the complete collection." end
+  if proposed.box and choice ~= "local" and choice ~= "remote" then return false, "Choose one complete Box collection and its linked saves." end
+  local current
+  if proposed.box then
+    local why
+    current, why = self.box:snapshot(self.saves.list(), self.state, self._boxKeys)
+    if not current then return false, why end
+    if current.fingerprint ~= proposed.entry.fingerprint then
+      proposed.entry = current
+      proposed.localMeta = { summary = { name = "Box", boxCount = current.payload.meta.count }, savedAt = unixSeconds(current.payload.meta.savedAt) }
+      proposed.reviewMessage = "Box changed on this device. Review the updated collection before choosing. The other copy will be kept in a recovery backup."
+      return false, proposed.reviewMessage
+    end
+  end
   local conflict = table.remove(self.conflicts, index)
   local kept = {}
   for _, row in ipairs(self.state.pendingConflicts or {}) do
@@ -998,7 +1318,10 @@ function SyncEngine:resolveConflict(key, choice)
   end
   self.state.pendingConflicts = kept
 
-  if choice == "local" then
+  if conflict.box then
+    if choice == "local" then self:_queueBoxUpload(current, conflict.remoteRev, conflict.remote)
+    else self:_queueBoxDownload(current.fingerprint, conflict.remote) end
+  elseif choice == "local" then
     SyncState.setRev(self.state, key, conflict.remoteRev, nil)
     self:_queueUpload(conflict.entry, key, true)
   elseif choice == "remote" then
