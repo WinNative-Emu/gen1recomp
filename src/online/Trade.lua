@@ -974,6 +974,13 @@ function Trade.pendingSentAt(savePath)
   for _, e in ipairs(readJournal(Trade.journalPath(savePath))) do
     if type(e) == "table" and type(e.sent) == "table" then out[#out + 1] = e.sent end
   end
+  local xpath = type(savePath) == "string" and savePath ~= ""
+    and (savePath:gsub("%.lua$", "")) .. "_xtrade.lua" or nil
+  for _, e in ipairs(readJournal(xpath)) do
+    if type(e) == "table" and type(e.out) == "table" and type(e.out.record) == "table" then
+      out[#out + 1] = e.out.record
+    end
+  end
   return out
 end
 

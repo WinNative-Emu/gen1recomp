@@ -1,8 +1,10 @@
 local faces = {}
 for id = 0, 6 do faces["native_" .. id] = { id = id } end
 -- pokeruby/src/text.c:622
-faces.normal, faces.small = faces.native_3, faces.native_1
-faces.short, faces.narrow, faces.small_narrow = faces.native_0, faces.native_4, faces.native_1
+faces.normal = faces.native_3
+faces.short, faces.narrow = faces.native_0, faces.native_4
+-- pokeruby/src/contest_2.c:883
+faces.small, faces.small_narrow = faces.native_4, faces.native_4
 
 return {
   module = "src.ui.game3.frlg_font",

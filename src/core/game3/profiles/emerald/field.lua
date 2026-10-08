@@ -47,6 +47,8 @@ return {
   eggHatchText = "Text_EggHatchHuh",
   -- pokeemerald/src/field_poison.c:76
   poisonFaintText = "gText_PkmnFainted_FldPsn",
+  -- pokeemerald/src/field_control_avatar.c:551
+  fieldPoisonScript = "EventScript_FieldPoison",
   -- pokeemerald/src/event_object_movement.c:1927
   invalidGfx = "OBJ_EVENT_GFX_NINJA_BOY",
   -- pokeemerald/data/scripts/field_move_scripts.inc:60

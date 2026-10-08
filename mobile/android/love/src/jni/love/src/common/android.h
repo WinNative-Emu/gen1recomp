@@ -181,6 +181,8 @@ bool createStorageDirectories();
 
 bool hasBackgroundMusic();
 
+bool setAudioMixWithSystem(bool mix);
+
 bool hasRecordingPermission();
 
 void requestRecordingPermission();

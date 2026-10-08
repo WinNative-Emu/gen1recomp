@@ -54,6 +54,9 @@ local editorNames = {
   "user-round",
   "wallet",
   "flag",
+  "sparkles",
+  "shuffle",
+  "folder-open",
 }
 local atlases = {
   { path = "assets/launcher/lucide/icons.png", names = names },

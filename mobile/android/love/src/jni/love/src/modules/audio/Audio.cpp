@@ -72,6 +72,8 @@ bool Audio::setMixWithSystem(bool mix)
 {
 #ifdef LOVE_IOS
 	return love::ios::setAudioMixWithOthers(mix);
+#elif defined(LOVE_ANDROID)
+	return love::android::setAudioMixWithSystem(mix);
 #else
 	LOVE_UNUSED(mix);
 	return false;

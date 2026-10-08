@@ -705,6 +705,7 @@ REQUIRED_SYMBOLS = {
     # Battle + pokemon runtime data
     "MoveNames", "TypeNames", "TypeMatchups", "TMHMMoves", "GrowthRates",
     "ItemAttributes", "MoveDescriptions", "ItemDescriptions",
+    "TimeCapsule_CatchRateItems",
     # Wild encounters (data/wild/*)
     "JohtoGrassWildMons", "JohtoWaterWildMons",
     "KantoGrassWildMons", "KantoWaterWildMons",

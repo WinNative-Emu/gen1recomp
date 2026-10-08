@@ -14,7 +14,7 @@ function Rs.new(game, label, prefix)
       scriptConnections = true, scriptStepEvents = false,
       -- pokeruby/src/field_fadetransition.c:195
       onFrameAfterWarpExit = true,
-      fieldModules = {},
+      fieldModules = { unionPlaza = true },
       -- pokeruby/src/overworld.c:496
       escapeWarp = { delta = 1 },
       semantics = {
@@ -74,7 +74,7 @@ function Rs.new(game, label, prefix)
     daycare = require("src.core.game3.rs.daycare"),
     audio = require("src.core.game3.profiles.rs.audio").new(game),
     save = require("src.core.game3.profiles.rs.save"),
-    saveRules = require("src.core.game3.profiles.rs.saveRules"),
+    saveRules = "src.core.game3.rse.union_rs_rules",
     mail = {
       exportEmpty = true,
       newRecord = function(session, record)

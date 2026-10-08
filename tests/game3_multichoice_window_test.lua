@@ -89,7 +89,7 @@ Choice.yesNo(function() end, { left = 22, top = 8 })
 Choice.draw()
 Choice.active = false
 local yn = frames[#frames]
-check(yn ~= nil and yn[1] == 22, "yes/no after multichoice keeps its own left (22)")
+check(yn ~= nil and yn[1] == 21, "yes/no after multichoice ignores left 22 (fixed template 21,9)")
 
 for i = #frames, 1, -1 do frames[i] = nil end
 Choice.multi({ "A", "B" }, 0, function() end, { left = 14, top = 2 })

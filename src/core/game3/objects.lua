@@ -264,6 +264,8 @@ local function newEventObject(src, neighbor, prepared)
     eo.originMapGroup = tonumber(def.originMapGroup or def.mapGroup) or mg
     eo.originMapNum = tonumber(def.originMapNum or def.mapNum) or mn
   end
+  -- pokeemerald/src/event_object_movement.c:1301
+  eo.spawnElevation = true
   return eo
 end
 
@@ -737,7 +739,11 @@ function Objects.snapshot()
   local protos = {}
   for _, def in ipairs(Objects._defs or {}) do
     local lid = tonumber(def.localId or def.index) or 0
-    if lid > 0 then protos[lid] = newEventObject(def) end
+    if lid > 0 then
+      local p = newEventObject(def)
+      Objects.spawnElevation(p)
+      protos[lid] = p
+    end
   end
   local list = {}
   for _, lid in ipairs(Objects._order) do
@@ -941,12 +947,15 @@ function Objects.forDraw()
         vrecs[vo.id] = vrec
       end
       local gid = tonumber(vo.graphicsId) or 0
+      local foreign = vo.foreign
       vrec.cellX = tonumber(vo.x) or 0
       vrec.cellY = tonumber(vo.y) or 0
       vrec.elevation = tonumber(vo.elevation) or 3
       vrec.facing = VIRT_DIR_FACE[tonumber(vo.direction)] or "down"
-      vrec.sprite = GfxIds.spriteFor(gid)
-      vrec.graphicsId = gid
+      vrec.foreign = foreign
+      vrec.draw = foreign and Objects.drawForeign or nil
+      vrec.sprite = not foreign and GfxIds.spriteFor(gid) or nil
+      vrec.graphicsId = not foreign and gid or nil
       vrec.raiseY = tonumber(vo.y2) or 0
       vrec.px, vrec.py, vrec.moving = vo.px, vo.py, vo.moving == true
       vrec.targetX, vrec.targetY = vo.targetX, vo.targetY
@@ -959,6 +968,15 @@ function Objects.forDraw()
   end
   for i = #list, n + 1, -1 do list[i] = nil end
   return list
+end
+
+function Objects.drawForeign(a, camX, camY)
+  local eo = a and a.eventObject
+  local p = eo and eo.foreign
+  if not p then return false end
+  local Avatars = require("src.online.union.Avatars")
+  return Avatars.draw(Avatars.resolve(p, p.host), math.floor(a.x - camX + CELL / 2), math.floor(a.y - camY + CELL),
+    a.facing, a.walkPhase, a.stepFlip, 1)
 end
 
 --- First visible EventObject standing on (tx, ty), or nil if moving onto it.
@@ -1043,6 +1061,20 @@ function Objects.updateElevation(eo)
   if eo.moving then cx, cy = eo.targetX, eo.targetY end
   eo.currentElevation = Coll.nextElevation(mapDef, eo.currentElevation or 0,
     cx, cy, eo.cellX, eo.cellY)
+end
+
+-- pokeemerald/src/event_object_movement.c:7737
+function Objects.spawnElevation(eo)
+  eo.spawnElevation = nil
+  if eo.fixedPriority then return end
+  local Coll = Collision()
+  if not (Coll and Coll.nextElevation) then return end
+  local cx, cy = eo.cellX, eo.cellY
+  if eo.moving then cx, cy = eo.targetX, eo.targetY end
+  local cur, prev = Coll.nextElevation(eo.mapDef or Coll._mapDef, eo.currentElevation or 0,
+    cx, cy, eo.cellX, eo.cellY)
+  eo.currentElevation = cur
+  if prev then eo.elevation = prev end
 end
 
 local function beginStep(eo, tx, ty)
@@ -1815,6 +1847,7 @@ function Objects.update(game)
   for _, lid in ipairs(Objects._order) do
     local eo = Objects._byId[lid]
     if eo then
+      if eo.spawnElevation then Objects.spawnElevation(eo) end
       if eo.bowFrames and eo.bowFrames > 0 then
         eo.bowFrames = eo.bowFrames - 1
         if eo.bowFrames <= 0 then eo.bowFrames = nil end
@@ -2139,6 +2172,7 @@ function Objects.tickPool(pool, game, ctx)
   for _, lid in ipairs(pool.order or {}) do
     local eo = pool.byId[lid]
     if eo then
+      if eo.spawnElevation then Objects.spawnElevation(eo) end
       if eo.bowFrames and eo.bowFrames > 0 then
         eo.bowFrames = eo.bowFrames - 1
         if eo.bowFrames <= 0 then eo.bowFrames = nil end

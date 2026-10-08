@@ -236,21 +236,30 @@ local function windowsModulePath()
   return api and api.modulePath() or nil
 end
 
--- Restart the whole app. The obvious love.event.quit("restart") re-runs LÖVE's
--- boot in-process, which calls love.filesystem.init a second time -- and inside
--- an AppImage physfs is already initialized, so that second init throws
--- ("Failed to initialize filesystem: already initialized") and the relaunch
--- crashes. So on an AppImage we relaunch the executable; the fresh process's
--- Boot step mounts any downloaded update exactly as a manual relaunch would.
--- Android (#575) and iOS restart in-process: love.quit joins every worker
--- first, so no physfs handle outlives lua_close.  iOS turns every quit into
--- DONE_RESTART in love.cpp, so a bare quit() is the restart there.
+-- quit("restart") re-inits physfs, which an AppImage refuses ("already initialized"), so Linux execs the binary.
+function HostShell.loopRestarts()
+  return rawget(_G, "POKEPORT_LOOP_RESTART") == true
+end
+
+function HostShell.canRestart()
+  local osName = love and love.system and love.system.getOS and love.system.getOS()
+  return osName ~= "Android" or HostShell.loopRestarts()
+end
+
+HostShell.restarting = false
+
 function HostShell.restart()
   if not (love and love.event and love.event.quit) then return end
+  HostShell.restarting = true
 
   local osName = love.system and love.system.getOS and love.system.getOS()
   if osName == "Android" then
-    love.event.quit("restart")
+    if HostShell.loopRestarts() then
+      love.event.quit("restart")
+      return
+    end
+    if love.system.restartApp and love.system.restartApp() then return end
+    love.event.quit()
     return
   end
   if osName == "iOS" then

@@ -793,7 +793,7 @@ end
 
 -- the palette-group (0-7) a tile GRAPHIC id resolves to in this tileset,
 -- with the current map's tile-id exceptions (if any) applied first
-function PaletteFX.worldGroupAt(tileset, mapId, tileId)
+function PaletteFX.worldGroupAt(tileset, mapId, tileId, tileSources)
   local w = PaletteFX.worldPack()
   local groups = w and w.tileGroups[tileset]
   if not groups then return nil end
@@ -801,6 +801,11 @@ function PaletteFX.worldGroupAt(tileset, mapId, tileId)
   if exc and exc.tiles[tileId] then return exc.group end
   exc = TILESET_GROUP_EXCEPTIONS[tileset]
   if exc and exc.tiles[tileId] then return exc.group end
+  local src = groups[tileId] == nil and tileSources and tileSources[tileId]
+  if src then
+    local from = w.tileGroups[src.tileset]
+    if from and from[src.tile] then return from[src.tile] end
+  end
   return groups[tileId] or 7 -- TEXT: tile ids past the tileset's 96 (menus)
 end
 

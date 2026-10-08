@@ -75,6 +75,9 @@ local statFrames, statUnderruns, statRestarts = 0, 0, 0
 local statDepthMin, statDepthSum, statDepthFrames = nil, 0, 0
 local statWorkerJit, statWorkerXrt = nil, nil
 local statXrtSum, statXrtCount, statXrtMax = 0, 0, nil
+local statSyncRenders, statSyncMs, statSyncMsMax = 0, 0, 0
+local statSyncLast
+local statPrewarmHits = 0
 local lastCosted
 
 -- ---------------------------------------------------------------------------
@@ -91,8 +94,18 @@ local fxEpoch = 0 -- bumped by invalidate: drops results from a stale def
 local fxReady = {}    -- key -> SoundData | false (renders to nothing)
 local fxPending = {}  -- key -> true while a request is in flight
 local fxReadyCount = 0
+local fxReadyOrder = {}
+local fxOrderCount = 0
 local FX_READY_MAX = 64
-local drainEffects, dropEffects
+local fxPinned = {}
+local fxPinnedCount = 0
+local FX_PINNED_MAX = 24
+local pinRequests = false
+local fxQueue = {}
+local fxInFlight = {}
+local fxInFlightCount = 0
+local FX_IN_FLIGHT_MAX = 2
+local drainEffects, dropEffects, pumpEffects
 
 local function ensureWorker()
   if workerReady ~= nil then return workerReady end
@@ -397,6 +410,14 @@ function ChipAudio.stats()
     xrtAvg = statXrtCount > 0 and (statXrtSum / statXrtCount) or nil,
     xrtMax = statXrtMax,
     buffers = statXrtCount,
+    syncRenders = statSyncRenders,
+    syncRenderMs = statSyncMs,
+    syncRenderMsMax = statSyncMsMax,
+    syncRenderLast = statSyncLast,
+    prewarmHits = statPrewarmHits,
+    prewarmQueued = #fxQueue,
+    prewarmInFlight = fxInFlightCount,
+    prewarmReady = fxReadyCount,
   }
   local function num(value, places)
     if type(value) ~= "number" then return "-" end
@@ -404,18 +425,25 @@ function ChipAudio.stats()
   end
   stats.line = string.format(
     "rate=%d worker=%s depth=%s/%d min=%s avg=%s underruns=%d restarts=%d "
-      .. "xrt=%s/%s/%s n=%d",
+      .. "xrt=%s/%s/%s n=%d sync=%d/%sms max=%sms last=%s prewarm=%d q=%d",
     stats.rate, worker, depth and tostring(depth) or "-", MUSIC_BUFFER_COUNT,
     statDepthMin and tostring(statDepthMin) or "-", num(average, 1),
     statUnderruns, statRestarts,
     num(statWorkerXrt, 3), num(stats.xrtAvg, 3), num(statXrtMax, 3),
-    statXrtCount)
+    statXrtCount, statSyncRenders, num(statSyncMs, 1), num(statSyncMsMax, 1),
+    tostring(statSyncLast or "-"), statPrewarmHits, #fxQueue + fxInFlightCount)
   return stats
+end
+
+function ChipAudio.resetSyncStats()
+  statSyncRenders, statSyncMs, statSyncMsMax = 0, 0, 0
+  statSyncLast = nil
+  statPrewarmHits = 0
 end
 
 function ChipAudio.update()
   if suspended then return end
-  if fxCh then drainEffects() end
+  if fxCh then pumpEffects() end
   local m = currentMusic
   if not m then return end
   if m.threaded then
@@ -708,19 +736,59 @@ local function effectKey(data, header, options)
   }, "|")
 end
 
+local function storeReady(key, sd)
+  if fxReady[key] ~= nil then return end
+  if fxPinned[key] then
+    fxReady[key] = sd
+    fxReadyCount = fxReadyCount + 1
+    return
+  end
+  while fxOrderCount >= FX_READY_MAX and #fxReadyOrder > 0 do
+    local oldest = table.remove(fxReadyOrder, 1)
+    if fxReady[oldest] ~= nil and not fxPinned[oldest] then
+      fxReady[oldest] = nil
+      fxReadyCount = fxReadyCount - 1
+      fxOrderCount = fxOrderCount - 1
+    end
+  end
+  if #fxReadyOrder > FX_READY_MAX * 2 then
+    local live = {}
+    for _, k in ipairs(fxReadyOrder) do
+      if fxReady[k] ~= nil and not fxPinned[k] then live[#live + 1] = k end
+    end
+    fxReadyOrder = live
+  end
+  fxReady[key] = sd
+  fxReadyCount = fxReadyCount + 1
+  fxOrderCount = fxOrderCount + 1
+  fxReadyOrder[#fxReadyOrder + 1] = key
+end
+
+local function pinEffect(key)
+  if fxPinned[key] or fxPinnedCount >= FX_PINNED_MAX then return end
+  fxPinned[key] = true
+  fxPinnedCount = fxPinnedCount + 1
+  if fxReady[key] ~= nil then fxOrderCount = fxOrderCount - 1 end
+end
+
 function drainEffects()
   if not fxCh then return end
   while true do
     local result = fxCh:pop()
     if not result then return end
-    if result.epoch == fxEpoch and fxPending[result.key] then
-      fxPending[result.key] = nil
-      if result.error then
-        require("src.core.Logger").warn("chip audio prewarm: %s",
-          tostring(result.error))
-      elseif fxReadyCount < FX_READY_MAX then
-        fxReady[result.key] = result.sd or false
-        fxReadyCount = fxReadyCount + 1
+    if result.epoch == fxEpoch then
+      if fxInFlight[result.key] then
+        fxInFlight[result.key] = nil
+        fxInFlightCount = fxInFlightCount - 1
+      end
+      if fxPending[result.key] then
+        fxPending[result.key] = nil
+        if result.error then
+          require("src.core.Logger").warn("chip audio prewarm: %s",
+            tostring(result.error))
+        else
+          storeReady(result.key, result.sd or false)
+        end
       end
     end
   end
@@ -729,17 +797,53 @@ end
 function dropEffects()
   fxEpoch = fxEpoch + 1
   fxReady, fxPending, fxReadyCount = {}, {}, 0
+  fxReadyOrder, fxQueue, fxInFlight, fxInFlightCount = {}, {}, {}, 0
+  fxOrderCount, fxPinned, fxPinnedCount = 0, {}, 0
   if fxCh then fxCh:clear() end
+end
+
+local function musicHasHeadroom()
+  local m = currentMusic
+  if not (m and m.threaded and m.started) or m.finished or musicHeld then
+    return true
+  end
+  local depth = queuedBuffers(m.source)
+  if not depth then return true end
+  if outCh then depth = depth + outCh:getCount() end
+  return depth >= MUSIC_PREROLL * 2
+end
+
+function pumpEffects()
+  drainEffects()
+  while #fxQueue > 0 and fxInFlightCount < FX_IN_FLIGHT_MAX do
+    if not workerAlive() then
+      fxQueue = {}
+      return
+    end
+    if fxInFlightCount > 0 and not musicHasHeadroom() then return end
+    local entry = table.remove(fxQueue, 1)
+    if fxPending[entry.key] then
+      local pushed = pcall(cmdCh.push, cmdCh, entry.request)
+      if pushed then
+        fxInFlight[entry.key] = true
+        fxInFlightCount = fxInFlightCount + 1
+      else
+        fxPending[entry.key] = nil
+      end
+    end
+  end
 end
 
 local function requestEffect(data, header, options)
   if not ensureWorker() or not workerAlive() then return false end
   local key = effectKey(data, header, options)
   if not key then return false end
-  drainEffects()
-  if fxReady[key] ~= nil or fxPending[key] then return true end
   fxCh = fxCh or love.thread.getChannel("chipaudio_fx")
-  local pushed = pcall(cmdCh.push, cmdCh, {
+  drainEffects()
+  if pinRequests then pinEffect(key) end
+  if fxReady[key] ~= nil or fxPending[key] then return true end
+  fxPending[key] = true
+  fxQueue[#fxQueue + 1] = { key = key, request = {
     cmd = "effect", key = key, epoch = fxEpoch, header = header,
     options = {
       frequencyOffset = options.frequencyOffset,
@@ -753,9 +857,8 @@ local function requestEffect(data, header, options)
     channelPitches = ChipSynth.getChannelPitches(),
     stereo = ChipSynth.getStereo(),
     sampleRate = sampleRate(),
-  })
-  if not pushed then return false end
-  fxPending[key] = true
+  } }
+  pumpEffects()
   return true
 end
 
@@ -769,16 +872,46 @@ local function takeEffect(data, header, options)
   if sd ~= nil then
     fxReady[key] = nil
     fxReadyCount = fxReadyCount - 1
+    if not fxPinned[key] then fxOrderCount = fxOrderCount - 1 end
     return sd
   end
-  -- about to render it here; the worker's copy would arrive unused
-  fxPending[key] = nil
+  if fxPending[key] then
+    fxPending[key] = nil
+    for i, entry in ipairs(fxQueue) do
+      if entry.key == key then
+        table.remove(fxQueue, i)
+        break
+      end
+    end
+  end
   return nil
 end
 
-local function renderEffect(data, header, options)
+local function nowMs()
+  local timer = love and love.timer
+  if timer and timer.getTime then return timer.getTime() * 1000 end
+  return os.clock() * 1000
+end
+
+local function renderEffect(data, header, options, label)
   local sd = takeEffect(data, header, options)
-  if sd == nil then sd = ChipSynth.renderEffectData(data, header, options) end
+  if sd == nil then
+    local began = nowMs()
+    sd = ChipSynth.renderEffectData(data, header, options)
+    local ms = nowMs() - began
+    statSyncRenders = statSyncRenders + 1
+    statSyncMs = statSyncMs + ms
+    if ms > statSyncMsMax then statSyncMsMax = ms end
+    statSyncLast = label
+    if STATS then
+      require("src.core.Logger").info("chipaudio: sync render %s %.1fms",
+        tostring(label), ms)
+    end
+    local FixedStep = require("src.core.FixedStep")
+    if ms >= FixedStep.STEP * 1000 then FixedStep:discardCatchup() end
+  else
+    statPrewarmHits = statPrewarmHits + 1
+  end
   if not sd then return nil end
   return love.audio.newSource(sd, "static")
 end
@@ -801,7 +934,8 @@ end
 
 function ChipAudio.newSfx(data, name, pitch, tempo, header, plainFrames)
   header = header or data.audio.sfx[name]
-  return renderEffect(data, header, sfxOptions(pitch, tempo, plainFrames))
+  return renderEffect(data, header, sfxOptions(pitch, tempo, plainFrames),
+    name)
 end
 
 -- `resolved` is a {header|chip, pitch, length} def the caller already worked
@@ -810,7 +944,8 @@ end
 function ChipAudio.newCry(data, species, resolved)
   local cry = cryDef(data, species, resolved)
   if not cry then return nil end
-  return renderEffect(data, cry.chip and cry or cry.header, cryOptions(cry))
+  return renderEffect(data, cry.chip and cry or cry.header, cryOptions(cry),
+    "cry:" .. tostring(species))
 end
 
 -- Same arguments as newSfx / newCry; returns true when a render was queued
@@ -830,11 +965,26 @@ function ChipAudio.prewarmCry(data, species, resolved)
   return requestEffect(data, header, cryOptions(cry))
 end
 
+function ChipAudio.pumpEffects()
+  if suspended or not fxCh then return end
+  pumpEffects()
+end
+
+function ChipAudio.prewarmPinned(fn, ...)
+  local was = pinRequests
+  pinRequests = true
+  local ok, err = pcall(fn, ...)
+  pinRequests = was
+  if not ok then error(err, 0) end
+end
+
 -- test hook: prewarm bookkeeping
 function ChipAudio._effectStateForTest()
   local pending = 0
   for _ in pairs(fxPending) do pending = pending + 1 end
-  return { ready = fxReadyCount, pending = pending, epoch = fxEpoch }
+  return { ready = fxReadyCount, pending = pending, epoch = fxEpoch,
+           queued = #fxQueue, inFlight = fxInFlightCount,
+           pinned = fxPinnedCount, unpinnedReady = fxOrderCount }
 end
 
 -- Two channels for the same reason ChipSynth.renderEffectData renders stereo:

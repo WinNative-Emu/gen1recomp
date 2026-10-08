@@ -16,9 +16,10 @@ CacheContract.VERSION_FORMAT = {
   -- wCurMapObjectEventsPointer. A v10 cache has no address to write, and
   -- such an export is refused until the ROM re-imports.
   -- gfx/sgb/predef.pal:28
-  gold = "rom-cache-v14:",
-  silver = "rom-cache-v14:",
-  crystal = "rom-cache-v14-crystal6:",
+  -- data/items/catch_rate_items.asm:5
+  gold = "rom-cache-v15:",
+  silver = "rom-cache-v15:",
+  crystal = "rom-cache-v15-crystal6:",
   -- engine/overworld/map_sprites.asm:181, engine/battle/animations.asm:2600
   -- data/pikachu/pikachu_pic_animation.asm:340
   yellow = "rom-cache-v12-yellow2:",

@@ -38,7 +38,7 @@ check(differ > 100, "Emerald front rows differ from FRLG (" .. differ .. ")")
 
 local BattleChrome = require("src.ui.game3.battle_chrome")
 BattleChrome._manifest = manifest
-check(BattleChrome.isRse(), "chrome layout is rse")
+check(BattleChrome.layout() == "emerald", "chrome layout is emerald")
 local msg = BattleChrome.window(BattleChrome.WIN.MSG)
 eq(msg.x, 16, "B_WIN_MSG left")
 eq(msg.y, 120, "B_WIN_MSG top")

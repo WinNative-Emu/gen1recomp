@@ -210,7 +210,7 @@ function Button.draw(Kit, x, y, w, h, label, opts, hot, focused)
           ix,
           y + (h - layout.iconSize) / 2,
           layout.iconSize,
-          ink,
+          opts.iconInk or ink,
           enabled and 1 or B.disabledA
         )
         lx = ix + layout.iconSize + layout.gap
@@ -221,7 +221,7 @@ function Button.draw(Kit, x, y, w, h, label, opts, hot, focused)
           x + (w - layout.trailing - layout.iconSize) / 2,
           top,
           layout.iconSize,
-          ink,
+          opts.iconInk or ink,
           enabled and 1 or B.disabledA
         )
         ly = top + layout.iconSize + layout.gap
@@ -261,7 +261,7 @@ function Button.draw(Kit, x, y, w, h, label, opts, hot, focused)
         or ""
       local groupW = size + (hasLabel and gap + Kit.textWidth(fname, shown) or 0)
       local ix = opts.align == "left" and x + B.labelPad * Kit.scale or x + (w - groupW) / 2
-      Icons.draw(opts.icon, ix, y + (h - size) / 2, size, ink, enabled and 1 or B.disabledA)
+      Icons.draw(opts.icon, ix, y + (h - size) / 2, size, opts.iconInk or ink, enabled and 1 or B.disabledA)
       if hasLabel then
         if bold then
           Kit.textBold(fname, shown, ix + size + gap, ty, ink)

@@ -67,13 +67,13 @@ for _, size in ipairs({ { 360, 780 }, { 390, 844 }, { 1024, 768 }, { 1360, 860 }
   T.eq(imp._boxState.view, "pc", "choosing a game opens its Game PC")
   T.eq(imp._boxPopup, nil, "choice closes the popup")
   click(imp, "box-tools-menu")
-  T.eq(#imp._boxPopup.options, 10, "tools retain every page except the separate Filters control")
+  T.eq(#imp._boxPopup.options, 11, "tools retain every page except the separate Filters control")
   keyboardChoice(imp, "end")
   T.check(imp._boxPopup.scroll > 0, "keyboard reveals tools below the visible rows")
   keyboardChoice(imp, "return")
-  T.eq(imp._boxState.toolsPage, "Migration", "last tool is reachable without a button wall")
-  click(imp, "box-help-Migration")
-  T.eq(imp._boxPopup.message, UI.HELP.Migration, "context help explains the selected tool")
+  T.eq(imp._boxState.toolsPage, "Items", "last tool is reachable without a button wall")
+  click(imp, "box-help-Items")
+  T.eq(imp._boxPopup.message, UI.HELP.Items, "context help explains the selected tool")
   T.check(#imp._boxPopup.message < 150, "context explanation stays short")
   local bounds = controls["box-popup-close"]
   T.check(bounds.x >= 0 and bounds.y >= 0 and bounds.x + bounds.w <= size[1]
@@ -119,6 +119,23 @@ click(imp, "box-popup-option-1")
 T.check(imp._boxPrompt ~= nil and not imp._boxPopup, "rename opens the existing name prompt")
 keyboardChoice(imp, "escape")
 
+imp._boxState.notice, imp._boxState.noticeKind = "That bag pocket is full.", "error"; settle(imp)
+local function boxToast() return imp._toasts and imp._toasts.box and imp._toasts.box.toast end
+T.eq(boxToast() and boxToast().kind, "error", "a failed operation shows a red toast")
+T.eq(imp._boxState.notice, nil, "notices no longer print inline")
+T.check(controls["box-toast"] ~= nil, "the toast is drawn and tappable")
+local toastRect = controls["box-toast"]
+draw(imp, { x = toastRect.x + toastRect.w / 2, y = toastRect.y + toastRect.h / 2 }); settle(imp)
+T.eq(boxToast(), nil, "tapping the toast dismisses it")
+imp._boxState.notice, imp._boxState.noticeKind = "Pokémon deposited.", "ok"; settle(imp)
+T.eq(boxToast().kind, "ok", "a success shows a green toast")
+clock = clock + 10; settle(imp)
+T.eq(boxToast(), nil, "a success toast times out")
+UI.toast(imp, "Export failed", "error", nil, "red"); settle(imp)
+T.eq(controls["box-toast"], nil, "another tab's toast is not drawn on the box tab")
+T.eq(UI.currentToast(imp), nil, "another tab's toast does not occlude the box tab")
+imp._toasts.red = nil
+
 local changes = 0
 UI.open(imp, "Pick", { { id = 1, label = "One" } }, nil, function() changes = changes + 1 end)
 settle(imp)
@@ -134,6 +151,21 @@ T.eq(imp._boxPopup.index, 11, "controller navigation crosses the visible row bou
 T.check(imp._boxPopup.scroll > 0, "controller reveals the selected option")
 imp:gamepadpressed(nil, "a"); settle(imp)
 T.eq(changes, 11, "controller A applies the revealed option")
+UI.open(imp, "Box", UI.values((function() local out = {}; for i = 1, 25 do out[i] = i end; return out end)()), 1,
+  function(value) changes = value end)
+settle(imp)
+local row = controls["box-popup-option-2"]
+local fx, fy = row.x + row.w / 2, row.y + row.h / 2
+View.touchpressed(imp, "finger", fx, fy)
+for step = 1, 8 do View.touchmoved(imp, "finger", fx, fy - step * 30) end
+settle(imp)
+T.check(imp._boxPopup.scroll > 0, "a finger drag scrolls a long popup list")
+local scrolled = imp._boxPopup.scroll
+View.touchmoved(imp, "finger", fx, fy); settle(imp)
+T.check(imp._boxPopup.scroll < scrolled, "dragging back scrolls the popup list up")
+View.touchreleased(imp, "finger", fx, fy); settle(imp)
+T.check(imp._boxPopup ~= nil, "a drag does not pick an option")
+keyboardChoice(imp, "escape")
 UI.open(imp, "Box", {}, nil); settle(imp)
 imp:gamepadpressed(nil, "b"); settle(imp)
 T.eq(imp._boxPopup, nil, "controller B closes help")

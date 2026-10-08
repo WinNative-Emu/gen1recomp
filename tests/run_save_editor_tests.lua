@@ -1049,6 +1049,8 @@ do
   f:write(SaveData.encode(data))
   f:close()
 
+  local stubDimensions = love.graphics.getDimensions
+  love.graphics.getDimensions = function() return 1280, 900 end
   App.load(tmpPath, { version = "red" })
   local S = App.getState()
   S.tab = "party"
@@ -1107,6 +1109,7 @@ do
   App.textinput("POKE@MON")
   App.draw()
   eq(S.nicknameDraft, "POKEMON", "the @ terminator is stripped at input")
+  love.graphics.getDimensions = stubDimensions
 
   os.remove(tmpPath)
   for _, bak in ipairs(FsIo.globPrefix(tmpPath .. ".bak-")) do os.remove(bak) end

@@ -368,7 +368,8 @@ end
 
 function Game3:writeOptions()
   if type(self.options) ~= "table" then return end
-  if SaveData.saveOptions then pcall(SaveData.saveOptions, self.options) end
+  local write = SaveData.saveSessionOptions or SaveData.saveOptions
+  if write then pcall(write, self.options) end
 end
 Game3.persistOptions = Game3.writeOptions
 
@@ -1044,6 +1045,11 @@ function Game3:saveGame()
   local P = package.loaded["src.core.game3.player"]
   if P and P.facing and not P.moving and P.cellX == self.session.x and P.cellY == self.session.y then self.session.facing = P.facing end
   local save = Schema.toSaveTable(self.session)
+  local rules = Schema.rulesFor(self.session.version)
+  if rules.saveLocation then
+    local map, x, y, facing = rules.saveLocation(self.session, self)
+    if map then save.map, save.x, save.y, save.facing = map, x, y, facing end
+  end
   if SaveData.buildMeta then
     save.meta = SaveData.buildMeta(
       self.modStatus and self.modStatus.loaded, save.meta, self.sessionStartedAt)

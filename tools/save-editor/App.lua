@@ -26,7 +26,32 @@ local Gen = require("Gen")
 local PadInput = require("PadInput")
 local Motion = require("Motion")
 local Chooser = require("Chooser")
+local Toast = require("src.ui.kit.Toast")
 local PAL = Theme.PAL
+local toastArea = {}
+local toastSlots = {}
+
+local function placeClearOfControls(x, w, h)
+  local rects, n = Kit.trackedControls()
+  local gap = 12 * toastSlots.s
+  local best, bestHits, bestAbove
+  local function try(y, fromAbove, limit)
+    if y < toastSlots.minY or y + h > (limit or toastSlots.maxY) then return end
+    local hits = 0
+    for i = 1, n do
+      local r = rects[i]
+      if r[1] < x + w and r[1] + r[3] > x and r[2] < y + h and r[2] + r[4] > y then hits = hits + 1 end
+    end
+    if not best or hits < bestHits then best, bestHits, bestAbove = y, hits, fromAbove end
+  end
+  local fr = toastSlots.field
+  try(fr.y + fr.h + gap, true)
+  try(fr.y - h - gap, false)
+  try(toastSlots.contentY + gap, true)
+  try(toastSlots.maxY - h - gap, false)
+  try(toastSlots.screenBottom - h - 4 * toastSlots.s, false, toastSlots.screenBottom)
+  return best, bestAbove
+end
 
 local Party = require("Party")
 local Boxes = require("Boxes")
@@ -100,6 +125,7 @@ local function applyLoaded(path, statusVerb)
   S.path = path
   local existed = fileExists(path)
   local save, err = SaveIO.load(path)
+  local kind = "ok"
   if save then
     S.save = save
     S.status = statusVerb .. " " .. path
@@ -112,11 +138,13 @@ local function applyLoaded(path, statusVerb)
       .. " ("
       .. tostring(err)
       .. "),  Save disabled, use Reload after fixing the file"
+    kind = "error"
     S.loadError = true
     S.allowSave = false
   else
     S.save = Gen.newGame(S.version)
     S.status = "No save at " .. path .. " (" .. tostring(err) .. "),  editing new game stub"
+    kind = "info"
     S.loadError = false
     S.allowSave = true
   end
@@ -150,6 +178,7 @@ local function applyLoaded(path, statusVerb)
   if not prepared then
     S.loadError, S.allowSave = true, false
     S.status = "Save disabled: " .. tostring(prepareError)
+    Toast.show(S, S.status, "error", { sticky = true })
     return
   end
   local probe = require("src.mods.Merge").deepCopy(S.save)
@@ -172,7 +201,9 @@ local function applyLoaded(path, statusVerb)
           #S.validation.remappedMaps
         )
     end
+    if kind == "ok" and S.status:find("game would quarantine", 1, true) then kind = "warn" end
   end
+  Toast.show(S, S.status, kind, { sticky = kind == "error" })
 end
 
 -- pathOverride lets tests point App.load at a scratch file instead of the
@@ -262,7 +293,7 @@ function App.openPath(path, force)
   end
   if S.dirty and not force and not S._openArmed then
     S._openArmed = true
-    S.status = "Unsaved changes,  open again to discard and load " .. path
+    Ops.say(S, "Unsaved changes,  open again to discard and load " .. path, "warn")
     return false
   end
   applyLoaded(path, "Opened")
@@ -276,7 +307,7 @@ function App.chooseAndOpen()
   else
     local osName = love and love.system and love.system.getOS and love.system.getOS()
     if osName ~= "OS X" and osName ~= "Windows" and osName ~= "Linux" then
-      S.status = "File picker unavailable,  drop a save.lua onto the window"
+      Ops.say(S, "File picker unavailable,  drop a save.lua onto the window")
     end
   end
 end
@@ -287,7 +318,7 @@ function App.filedropped(file)
   end
   local path = file.getFilename and file:getFilename() or nil
   if not path or path == "" then
-    S.status = "Could not read dropped file path"
+    Ops.say(S, "Could not read dropped file path")
     return
   end
   App.openPath(path)
@@ -336,7 +367,7 @@ local function cycleTab(delta)
   end
   idx = ((idx - 1 + delta) % #TABS) + 1
   Motion.change(S, "tab", TABS[idx].id, delta)
-  Ops.say(S, "Tab: " .. TABS[idx].label)
+  Ops.note(S, "Tab: " .. TABS[idx].label)
 end
 
 -- Pad / Joy-Con actions from PadInput.gamepadpressed (A/B via GamepadMap so
@@ -386,7 +417,7 @@ function App.save()
   if Gen.ofState(S) == 3 then
     local prepared, result = pcall(require("Game3Adapter").export, S.save)
     if not prepared then
-      S.status = "Save failed: " .. tostring(result)
+      Ops.say(S, "Save failed: " .. tostring(result))
       return false
     end
     output = result
@@ -397,10 +428,10 @@ function App.save()
     S.historySavedToken = S.historyToken or 0
     S._quitArmed = false
     Ops.disarm(S)
-    S.status = "Saved " .. S.path
+    Ops.say(S, "Saved " .. S.path, "ok")
     return true
   end
-  S.status = "Save failed: " .. tostring(err)
+  Ops.say(S, "Save failed: " .. tostring(err))
   return false
 end
 
@@ -413,7 +444,7 @@ function App.reload()
     applyLoaded(S.path, "Reloaded")
     return not S.loadError
   end
-  S.status = "Reload failed: " .. tostring(err)
+  Ops.say(S, "Reload failed: " .. tostring(err))
   return false
 end
 
@@ -430,7 +461,7 @@ function App.close()
   end
   if S.dirty and not S._quitArmed then
     S._quitArmed = true
-    S.status = "Unsaved changes,  Save first or click Close again to discard"
+    Ops.say(S, "Unsaved changes,  Save first or click Close again to discard", "warn")
     return false
   end
   S._closeRequested = true
@@ -452,6 +483,7 @@ function App.update(dt)
   -- directly in App.draw() via Kit.beginFrame. Tile animation (water,
   -- flowers) still needs ticking so the Map tab isn't static.
   TileRenderer.tick()
+  if S and S.recommendJob then Ops.pollRecommendedMoves(S) end
   PadInput.update(dt)
   local notches = PadInput.takeWheel()
   if notches ~= 0 then
@@ -601,164 +633,142 @@ function App.joystickhat(joystick, hat, direction)
 end
 
 -- ------------------------------------------------------------------ chrome
--- Compact action row, with file identity above it when height allows.
-local function drawTitleBar(x, y, w, h)
-  local pad, gap, row = 12 * Kit.scale, 8 * Kit.scale, Kit.controlH()
-  local inner = w - 2 * pad
-  if not S.compactChrome and not Kit.desktop then
-    Kit.text(
-      "tab",
-      "SAVE EDITOR" .. (S.version and (" / " .. S.version:upper()) or ""),
-      x + pad,
-      y + 8 * Kit.scale,
-      PAL.heading
-    )
-    Kit.text(
-      "tiny",
-      Kit.ellipsize("tiny", (S.dirty and "UNSAVED  " or "SAVED  ") .. (S.path or "New save"), inner),
-      x + pad,
-      y + Kit.textHeight("tab") + 12 * Kit.scale,
-      S.dirty and PAL.yellow or PAL.caption
-    )
+local function versionLabel()
+  local ok, info = pcall(require("src.core.GameVersion").info, S.version)
+  if ok and type(info) == "table" and info.label then return info.label end
+  return S.version and (S.version:sub(1, 1):upper() .. S.version:sub(2)) or nil
+end
+
+local function shortPath(path)
+  if not path then return "New save" end
+  local parts = {}
+  for part in tostring(path):gmatch("[^/\\]+") do parts[#parts + 1] = part end
+  if #parts <= 3 then return tostring(path) end
+  return ".../" .. table.concat(parts, "/", #parts - 2)
+end
+
+local function drawIdentity(x, y, w, h)
+  local s = Kit.scale
+  local titleH, pathH = Kit.textHeight("button"), Kit.textHeight("tiny")
+  local ty = y + (h - titleH - pathH - 4 * s) / 2
+  local lead, version, sep = "Save editor", versionLabel(), " / "
+  local leadW, sepW = Kit.textWidth("button", lead), Kit.textWidth("button", sep)
+  Kit.textBold("button", Kit.ellipsize("button", lead, w), x, ty, PAL.heading)
+  if version and leadW + sepW + 40 * s < w then
+    Kit.text("button", sep, x + leadW + 1, ty, PAL.muted)
+    Kit.textBold("button", Kit.ellipsize("button", version, w - leadW - sepW - 1), x + leadW + sepW + 1, ty, PAL.heading)
   end
-  local narrow = w < 600 * Kit.scale and not S.compactChrome
-  local cols = narrow and 4 or 6
-  local bw = (inner - (cols - 1) * gap) / cols
-  local by = S.compactChrome and (y + 8 * Kit.scale)
-    or (y + Kit.textHeight("tab") + Kit.textHeight("tiny") + 20 * Kit.scale)
-  local saveInk = S.allowSave and S.dirty and PAL.green or PAL.muted
-  local actions = {
-    {
-      S.allowSave and (S.dirty and "Save" or "Saved") or "Save locked",
-      "ghost",
-      function()
-        App.save()
-      end,
-      S.dirty or not S.allowSave,
-      {
-        face = "invert",
-        ink = saveInk,
-        stroke = saveInk,
-        icon = S.allowSave and "save" or "lock",
-      },
-    },
-    {
-      "Undo",
-      "ghost",
-      function()
-        require("History").undo(S)
-      end,
-      S.undoStack and #S.undoStack > 0,
-    },
-    {
-      "Redo",
-      "ghost",
-      function()
-        require("History").redo(S)
-      end,
-      S.redoStack and #S.redoStack > 0,
-    },
-    {
-      "Reload",
-      "ghost",
-      function()
-        App.reload()
-      end,
-      true,
-    },
-    {
-      "Open",
-      "accent",
-      function()
-        App.chooseAndOpen()
-      end,
-      true,
-    },
-    {
-      S._quitArmed and "Discard?" or "Close",
-      S._quitArmed and "danger" or "ghost",
-      function()
-        App.close()
-      end,
-      true,
-    },
+  Kit.text("tiny", Kit.ellipsize("tiny", shortPath(S.path), w), x, ty + titleH + 4 * s, PAL.muted)
+end
+
+local function saveStatus()
+  if S.dirty then return "Unsaved changes", PAL.yellow end
+  return "Saved", PAL.muted
+end
+
+local function saveButton(x, y, h, measure)
+  local label = S.allowSave and "Save" or "Save locked"
+  local ink = S.allowSave and S.dirty and PAL.green or PAL.muted
+  local opts = {
+    font = "button",
+    face = "invert",
+    ink = ink,
+    stroke = ink,
+    icon = S.allowSave and "save" or "lock",
+    enabled = S.dirty or not S.allowSave,
   }
-  local function actionOptions(action)
-    local opts = action[5] or {}
-    opts.kind, opts.enabled, opts.font = action[2], action[4], "small"
-    return opts
+  local w = Kit.buttonWidth(label, opts, h)
+  if not measure and Kit.button(x - w, y, w, h, label, opts) then
+    App.save()
   end
-  if Kit.desktop then
-    local widths, total = {}, 5 * gap
-    for i, action in ipairs(actions) do
-      widths[i] = Kit.buttonWidth(action[1], actionOptions(action), row)
-      if i == 1 then
-        widths[i] = math.max(widths[i], Kit.buttonWidth("Save locked", { font = "small", icon = "lock" }, row))
-      elseif i == 6 then
-        widths[i] = math.max(widths[i], Kit.buttonWidth("Discard?", { font = "small" }, row))
-      end
-      total = total + widths[i]
-    end
-    local bx, by = x + w - pad - total, y + 8 * Kit.scale
-    local identityW = bx - gap - (x + pad)
-    local labelH, pathH = Kit.textHeight("tab"), Kit.textHeight("tiny")
-    local ty = by + (row - labelH - pathH - 4 * Kit.scale) / 2
-    Kit.text("tab", Kit.ellipsize("tab", "SAVE EDITOR" .. (S.version and (" / " .. S.version:upper()) or ""), identityW), x + pad, ty, PAL.heading)
-    Kit.text("tiny", Kit.ellipsize("tiny", (S.dirty and "UNSAVED  " or "SAVED  ") .. (S.path or "New save"), identityW), x + pad, ty + labelH + 4 * Kit.scale, S.dirty and PAL.yellow or PAL.caption)
-    for i, action in ipairs(actions) do
-      if Kit.button(bx, by, widths[i], row, action[1], actionOptions(action)) then action[3]() end
-      bx = bx + widths[i] + gap
-    end
-    return
+  return w
+end
+
+local function drawActionRow(x, y, w, h, withIdentity)
+  local s, row = Kit.scale, Kit.controlH()
+  local gap, pad = 8 * s, (Kit.desktop and 20 or 12) * s
+  local by = y + (h - row) / 2
+  local rx = x + w - pad
+  if S._quitArmed then
+    local cw = Kit.buttonWidth("Discard?", { font = "button" }, row)
+    rx = rx - cw
+    if Kit.button(rx, by, cw, row, "Discard?", { kind = "danger", font = "button" }) then App.close() end
+  else
+    rx = rx - row
+    if Kit.iconButton(rx, by, row, row, "x", "Close", { kind = "ghost" }) then App.close() end
   end
-  if narrow then
-    local more = {
-      S.chromeMenu and "Less" or "More",
-      "ghost",
-      function()
-        S.chromeMenu = not S.chromeMenu
-        Kit.blur()
-      end,
-      true,
+  rx = rx - 2 * gap
+  rx = rx - saveButton(rx, by, row)
+  rx = rx - gap - row
+  if Kit.iconButton(rx, by, row, row, "folder-open", "Open", { kind = "ghost" }) then App.chooseAndOpen() end
+  rx = rx - gap - row
+  if Kit.iconButton(rx, by, row, row, "rotate-ccw", "Reload", { kind = "ghost" }) then App.reload() end
+  rx = rx - gap - row
+  if Kit.iconButton(rx, by, row, row, "redo-2", "Redo", { kind = "ghost", enabled = S.redoStack and #S.redoStack > 0 }) then
+    require("History").redo(S)
+  end
+  rx = rx - 4 * s - row
+  if Kit.iconButton(rx, by, row, row, "undo-2", "Undo", { kind = "ghost", enabled = S.undoStack and #S.undoStack > 0 }) then
+    require("History").undo(S)
+  end
+  rx = rx - 18 * s
+  local status, color = saveStatus()
+  local statusW = Kit.textWidth("small", status)
+  local left = x + pad + (withIdentity and 150 * s or 0)
+  if rx - statusW >= left then
+    Kit.textRight("small", status, rx, by + (row - Kit.textHeight("small")) / 2, color)
+    rx = rx - statusW - 24 * s
+  end
+  if withIdentity then
+    drawIdentity(x + pad, y, rx - x - pad, h)
+  end
+end
+
+local function chromeMenuCols(w)
+  local s, gap = Kit.scale, 8 * Kit.scale
+  local widest = 0
+  for _, label in ipairs({ "Redo", "Reload", "Open", "Close", "Discard?" }) do
+    widest = math.max(widest, Kit.buttonWidth(label, { font = "small" }, Kit.controlH()))
+  end
+  return (w - 24 * s) >= 4 * widest + 3 * gap and 4 or 2
+end
+
+local function drawTitleBar(x, y, w, h)
+  if Kit.desktop or S.compactChrome or w >= 760 * Kit.scale then
+    return drawActionRow(x, y, w, h, not S.compactChrome)
+  end
+  local s = Kit.scale
+  local pad, gap, row = 12 * s, 8 * s, Kit.controlH()
+  local inner = w - 2 * pad
+  local idH = Kit.textHeight("button") + Kit.textHeight("tiny") + 4 * s
+  drawIdentity(x + pad, y + 8 * s, inner, idH)
+  local by = y + idH + 20 * s
+  local rx = x + w - pad - row
+  if Kit.iconButton(rx, by, row, row, S.chromeMenu and "x" or "ellipsis", S.chromeMenu and "Less" or "More", { kind = "ghost" }) then
+    S.chromeMenu = not S.chromeMenu
+    Kit.blur()
+  end
+  rx = rx - gap
+  rx = rx - saveButton(rx, by, row) - gap - row
+  if Kit.iconButton(rx, by, row, row, "undo-2", "Undo", { kind = "ghost", enabled = S.undoStack and #S.undoStack > 0 }) then
+    require("History").undo(S)
+  end
+  local status, color = saveStatus()
+  Kit.text("small", Kit.ellipsize("small", status, rx - gap - x - pad), x + pad, by + (row - Kit.textHeight("small")) / 2, color)
+  if S.chromeMenu then
+    local menu = {
+      { "Redo", "redo-2", function() require("History").redo(S) end, S.redoStack and #S.redoStack > 0 },
+      { "Reload", "rotate-ccw", function() App.reload() end, true },
+      { "Open", "folder-open", function() App.chooseAndOpen() end, true },
+      { S._quitArmed and "Discard?" or "Close", S._quitArmed and "trash" or "x", function() App.close() end, true },
     }
-    local primary = { actions[1], actions[2], actions[3], more }
-    for i, a in ipairs(primary) do
-      if Kit.button(x + pad + (i - 1) * (bw + gap), by, bw, row, a[1], actionOptions(a)) then
-        a[3]()
-      end
-    end
-    if S.chromeMenu then
-      local menuW = (inner - 2 * gap) / 3
-      for i = 4, 6 do
-        local a = actions[i]
-        if
-          Kit.button(
-            x + pad + (i - 4) * (menuW + gap),
-            by + row + gap,
-            menuW,
-            row,
-            a[1],
-            actionOptions(a)
-          )
-        then
-          a[3]()
-        end
-      end
-    end
-    return
-  end
-  for i, a in ipairs(actions) do
-    if
-      Kit.button(
-        x + pad + (i - 1) % cols * (bw + gap),
-        by + math.floor((i - 1) / cols) * (row + gap),
-        bw,
-        row,
-        a[1],
-        actionOptions(a)
-      )
-    then
-      a[3]()
+    local cols = chromeMenuCols(w)
+    local bw = (inner - (cols - 1) * gap) / cols
+    for i, m in ipairs(menu) do
+      local mx = x + pad + (i - 1) % cols * (bw + gap)
+      local my = by + row + gap + math.floor((i - 1) / cols) * (row + gap)
+      local opts = { font = "small", icon = m[2], enabled = m[4], kind = m[1] == "Discard?" and "danger" or "ghost" }
+      if Kit.button(mx, my, bw, row, m[1], opts) then m[3]() end
     end
   end
 end
@@ -800,11 +810,6 @@ local function drawStatusBar(x, y, w, h)
       .. ctrl
       .. "+R reload . Esc clear selection . arrows pan map . wheel scrolls lists"
     )
-  -- The status message is the load-bearing half of this bar (every Ops verb
-  -- narrates through it); the keyboard map is decoration.  On a phone the
-  -- two used to overlap because the hint was drawn unconditionally and the
-  -- status ellipsized against a negative budget (#715), so now the hint only
-  -- draws when the status still keeps a readable share of the bar.
   local hintW = Kit.textWidth("tiny", hint)
   local avail = w - 2 * pad - hintW - 14 * s
   if avail >= 120 * s then
@@ -814,7 +819,7 @@ local function drawStatusBar(x, y, w, h)
   end
   Kit.text(
     "mono",
-    Kit.ellipsize("mono", S.status or "", avail),
+    Kit.ellipsize("mono", S.note or "", avail),
     x + pad,
     y + (h - Kit.textHeight("mono")) / 2,
     PAL.detail
@@ -860,8 +865,13 @@ function App.draw()
   elseif padOn then
     mx, my = padX, padY
   end
+  if mouseClicked and clickX ~= nil and Toast.hit(S, clickX, clickY) then
+    Toast.clear(S)
+    mouseClicked = false
+  end
   Motion.update()
   Kit.beginFrame(mx, my, mouseClicked, wheelY)
+  Kit.trackControls = S.toast ~= nil and Kit.focus ~= nil and not Kit.desktop
   mouseClicked = false
   clickX, clickY = nil, nil
   wheelY = 0
@@ -906,13 +916,13 @@ function App.draw()
   -- identity painting through each other (#715).  The taller bar simply
   -- costs the content column height, which scrolls.
   S.compactChrome = sh < 500 * s and sw > sh
-  local titleTwoRow = sw < 600 * s and not S.compactChrome and S.chromeMenu
-  local titleH = Kit.textHeight("tab")
-    + Kit.textHeight("tiny")
-    + 28 * s
-    + (titleTwoRow and 2 or 1) * (Kit.controlH() + 8 * s)
-  if S.compactChrome or Kit.desktop then
+  local titleH
+  if S.compactChrome or Kit.desktop or sw >= 760 * s then
     titleH = Kit.controlH() + 16 * s
+  else
+    local menuRows = S.chromeMenu and (chromeMenuCols(sw) == 4 and 1 or 2) or 0
+    titleH = Kit.textHeight("button") + Kit.textHeight("tiny") + 4 * s + 28 * s
+      + (1 + menuRows) * (Kit.controlH() + 8 * s)
   end
   local tabH = Kit.controlH() + 6 * s
   local statusH = (Kit.desktop and 28 or 38) * s
@@ -931,6 +941,7 @@ function App.draw()
 
   local contentY = oy + railH + titleH + tabH
   local contentH = sh - railH - titleH - tabH - statusH
+  S.toastBottom, S.toastHeader = nil, nil
   local px, py = ox + 10 * s, contentY + 8 * s
   local pw, ph = sw - 20 * s, math.max(1, contentH - 16 * s)
   local ok, err = xpcall(function()
@@ -977,6 +988,28 @@ function App.draw()
     SpeciesPicker.draw(S, Kit, width, height)
     MovePicker.draw(S, Kit, width, height)
     ItemPicker.draw(S, Kit, width, height)
+  end
+  if S.toast then
+    local a = toastArea
+    a.x, a.w, a.s, a.font = ox, sw, s, Kit.fonts.small
+    a.top, a.bottom, a.maxY, a.centerY, a.width, a.maxLines, a.place = nil, nil, nil, nil, nil, nil, nil
+    local hdr, fr = S.toastHeader, Kit.focusRect
+    if hdr then
+      a.x, a.w, a.width, a.maxLines = hdr.x, hdr.w, hdr.w, 2
+      a.centerY = hdr.y + hdr.h / 2
+    elseif Kit.focus and not Kit.desktop then
+      if fr then
+        a.top, a.bottom, a.maxY = fr.y + fr.h, fr.y, oy + sh - statusH
+        toastSlots.s, toastSlots.field, toastSlots.contentY = s, fr, contentY
+        toastSlots.minY, toastSlots.maxY, toastSlots.screenBottom = oy, oy + sh - statusH, oy + sh
+        a.place = placeClearOfControls
+      else
+        a.top = contentY
+      end
+    else
+      a.bottom = math.min(S.toastBottom or math.huge, oy + sh - statusH)
+    end
+    Toast.draw(S, a)
   end
   Kit.endFrame()
   PadInput.draw()
@@ -1075,7 +1108,7 @@ function App.keypressed(key)
     and (love.keyboard.isDown("lgui", "rgui") or love.keyboard.isDown("lctrl", "rctrl"))
   if key == "escape" and (S.itemMenu or S.chromeMenu) then
     S.itemMenu, S.chromeMenu = nil, false
-    Ops.say(S, "Menu closed")
+    Ops.note(S, "Menu closed")
     return
   end
   if key == "escape" and S.tab == "map" and S.mapFocused then
@@ -1087,7 +1120,7 @@ function App.keypressed(key)
   if key == "escape" then
     S.editingMon = nil
     Ops.disarm(S)
-    Ops.say(S, "Selection cleared")
+    Ops.note(S, "Selection cleared")
   elseif key == "z" and mod then
     if love.keyboard.isDown("lshift", "rshift") then
       require("History").redo(S)
@@ -1114,8 +1147,8 @@ function App.wheelmoved(x, y)
     wheelY = wheelY + (y or 0)
     return
   end
-  -- Only the map viewport spends the wheel on zoom. Search results and
-  -- spawn cards keep the launcher's normal scrolling under the pointer.
+  -- Only the map viewport spends the wheel on zoom. Search results keep the
+  -- launcher's normal scrolling under the pointer.
   local mx, my = love.mouse.getPosition()
   if
     S.tab == "map"
@@ -1138,7 +1171,7 @@ function App.quit()
     -- simple: block quit once and set status; user saves or force-quits again
     if not S._quitArmed then
       S._quitArmed = true
-      S.status = "Unsaved changes,  save or press quit again"
+      Ops.say(S, "Unsaved changes,  save or press quit again", "warn")
       return true
     end
   end

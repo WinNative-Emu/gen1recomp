@@ -19,8 +19,9 @@ function Policy.labelRect(man, selection)
   return c[1] * 8 + 4, c[2] * 8, (c[1] + 13) * 8 + 4, (c[2] + 4) * 8
 end
 
+-- pokeruby/src/starter_choose.c:522
 function Policy.categoryText(category, pokemon)
-  return category:sub(1, 11) .. " " .. pokemon
+  return require("src.ui.game3.frlg_font").truncate(category, 11) .. " " .. pokemon
 end
 
 -- pokeruby/src/sprite.c:1302

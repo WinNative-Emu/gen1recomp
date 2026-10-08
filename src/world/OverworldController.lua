@@ -3980,13 +3980,10 @@ end
 -- for the original serial handshake; declining prints "Please come again!"
 function OverworldState:cableClubReceptionist(onDone)
   local t = Game.data.text
-  if self.map.id == "PEWTER_POKECENTER" and self.pikachuPewterSleepScene then
-    Game.stack:push(TextBox.new(Game,
-      t._LooksContentText or Strings("PIKACHU looks\ncontent."), onDone))
-    return
-  end
   local welcome = t._CableClubNPCWelcomeText or romText(Game.data, "_CableClubNPCWelcomeText", "Welcome to the\nCable Club!")
-  if not Game.save.flags.EVENT_GOT_POKEDEX then
+  -- engine/link/cable_club_npc.asm:4
+  if require("src.world.PikachuFollower").isFollowingDisabled(self)
+      or not Game.save.flags.EVENT_GOT_POKEDEX then
     -- CableClubNPC .didNotConnect path before the pokedex
     Game.stack:push(TextBox.new(Game, welcome .. "\f"
       .. (t._CableClubNPCMakingPreparationsText

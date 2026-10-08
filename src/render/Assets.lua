@@ -54,11 +54,19 @@ function Assets.resolve(path)
   return path
 end
 
+local composed = {}
+
+function Assets.compose(path, build)
+  composed[path] = build
+  cache[path] = nil
+end
+
 function Assets.image(path)
-  local resolved = Assets.resolve(path)
+  local build = composed[path]
+  local resolved = build and path or Assets.resolve(path)
   local image = cache[resolved]
   if not image then
-    image = love.graphics.newImage(resolved)
+    image = love.graphics.newImage(build and build() or resolved)
     cache[resolved] = image
   end
   return image
@@ -67,6 +75,8 @@ end
 -- pixel-level reads (tile-shift variants, the spinner strip blit) resolve
 -- the same way but stay uncached: the caller keeps the derived product
 function Assets.imageData(path)
+  local build = composed[path]
+  if build then return build() end
   return love.image.newImageData(Assets.resolve(path))
 end
 

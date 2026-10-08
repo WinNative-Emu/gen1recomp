@@ -63,6 +63,11 @@ local Rulesets = {
   modern_clean = require("src.battle.rulesets.modern_clean"),
 }
 local FILTERS = { "OFF", "1X", "2X", "3X" }
+local AUDIO_MODES = {
+  { "both", "BOTH" },
+  { "external_only", "EXT ONLY" },
+  { "game_only", "GAME ONLY" },
+}
 local DATE_FORMATS = {
   { "device", "DEVICE" }, { "dmy", "DD-MM-YYYY" },
   { "mdy", "MM-DD-YYYY" }, { "ymd", "YYYY-MM-DD" },
@@ -327,6 +332,26 @@ local function buildRows(game)
         local o = g.save.options
         o.musicFilter = ((o.musicFilter or 0) + dir) % #FILTERS
         require("src.core.Music").setFilterLevel(o.musicFilter)
+        return true
+      end },
+    { id = "audioMode", label = Strings("AUDIO MODE"),
+      value = function(g)
+        local cur = g.save.options.audioMode or "both"
+        for _, entry in ipairs(AUDIO_MODES) do
+          if entry[1] == cur then return Strings(entry[2]) end
+        end
+        return Strings("BOTH")
+      end,
+      step = function(g, dir)
+        local o = g.save.options
+        local cur = o.audioMode or "both"
+        local idx = 1
+        for i, entry in ipairs(AUDIO_MODES) do
+          if entry[1] == cur then idx = i break end
+        end
+        idx = wrapIndex(idx - 1 + (dir or 1), #AUDIO_MODES) + 1
+        o.audioMode = AUDIO_MODES[idx][1]
+        require("src.core.Music").applyOptions(o)
         return true
       end },
     -- Heads the port's display group: one tier that scales the heavy extras
@@ -718,7 +743,7 @@ local GROUPS = {
     members = { "animations", "battleStyle", "battleLayout", "battleFit",
                 "battleHud", "battleBg" } },
   { id = "group.audio", label = "AUDIO",
-    members = { "musicVol", "sfxVol", "pikaVol", "musicFilter" } },
+    members = { "musicVol", "sfxVol", "pikaVol", "musicFilter", "audioMode" } },
   { id = "group.video", label = "VIDEO",
     members = { "uiLayout", "videoMode", "orientation", "faithfulRes",
                 "screenPos", "fpsCap", "vsync", "logicClock" } },

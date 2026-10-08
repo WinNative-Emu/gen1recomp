@@ -205,7 +205,7 @@ return function(game)
     shot("selected-events", 390, 844)
   end
   S.tab = "map"
-  for _, section in ipairs({ "maps", "view", "spawn" }) do
+  for _, section in ipairs({ "maps", "view" }) do
     S.mapSection = section
     shot("map-" .. section, 360, 640)
     shot("map-" .. section .. "-landscape", 640, 360)

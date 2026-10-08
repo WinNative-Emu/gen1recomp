@@ -478,6 +478,7 @@ do
   -- Add to bag
   Ops.addToBag(S, "POTION")
   checkEq(save.inventory["13"], 1, "POTION added to bag x1")
+  checkEq(S.status, "Added POTION x1 to the bag", "the Gen 3 add toast says where the item went")
   check(save.bag ~= nil and save.bag.stacks ~= nil, "save.bag updated")
 
   -- Adjust bag quantity

@@ -178,7 +178,7 @@ end
 function A.fixMon(S, mon)
 	local Ops, L = require("Ops"), require("Legality")
 	if L.mon(S, mon).errors == 0 then
-		return Ops.say(S, "No property errors to fix")
+		return Ops.say(S, "No property errors to fix", "info")
 	end
 	local staged, err = A.repair(S, mon)
 	if not staged then
@@ -205,7 +205,7 @@ function A.fixAll(S)
 		msg = msg .. "; " .. left .. " need a manual choice"
 	end
 	if fixed == 0 then
-		return require("Ops").say(S, left > 0 and msg or "No property errors to fix")
+		return require("Ops").say(S, left > 0 and msg or "No property errors to fix", left > 0 and "error" or "info")
 	end
 	return require("Ops").mark(S, msg .. ". Origin warnings stay for review.")
 end
@@ -218,6 +218,7 @@ function A.maxMon(S, mon)
 	if staged.egg or staged.isEgg then
 		return Ops.say(S, "Hatch the egg before maxing it out")
 	end
+	local keptShiny
 	M.setLevel(S.data, staged, 100, g)
 	M.setHappiness(S.data, staged, 255, g)
 	if g == 3 then
@@ -240,6 +241,11 @@ function A.maxMon(S, mon)
 		for _, k in ipairs(keys) do
 			M.setEv(S.data, staged, k, math.max(staged.evs[k] or 0, 252), g)
 		end
+	elseif g == 2 then
+		keptShiny = M.maxGen2Dvs(S.data, staged, g)
+		for _, k in ipairs({ "hp", "attack", "defense", "speed", "special" }) do
+			staged.statExp[k] = 65535
+		end
 	else
 		for _, k in ipairs({ "attack", "defense", "speed", "special" }) do
 			M.setDv(S.data, staged, k, 15, g)
@@ -261,6 +267,9 @@ function A.maxMon(S, mon)
 		end
 	end
 	replace(mon, staged)
+	if keptShiny then
+		return Ops.mark(S, "Maxed level, stats, friendship and PP; fully healed (kept shiny: Def/Spd/Spc DVs stay 10)")
+	end
 	return Ops.mark(S, "Maxed level, stats, friendship and PP; fully healed")
 end
 -- pokefirered/src/wild_encounter.c:49 sUnownLetterSlots, by chamber.

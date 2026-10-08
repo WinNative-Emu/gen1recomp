@@ -2,11 +2,13 @@ local Kit = require("src.ui.kit.Kit")
 local Theme = require("src.ui.kit.Theme")
 local Transition = require("src.ui.kit.Transition")
 local Strings = require("src.core.Strings")
+local Icons = require("src.ui.kit.Icons")
+local Toast = require("src.ui.kit.Toast")
 local UI = {}
 local PAL = Theme.PAL
 UI.ICONS = { List = "book-open", Filters = "list-filter", Arrange = "arrow-left-right",
   Themes = "paintbrush", Dashboard = "chart-no-axes-column", Teams = "users", Gifts = "package",
-  Showcase = "grid-2x2", Files = "folder", Events = "mail", Migration = "arrow-left-right" }
+  Showcase = "grid-2x2", Files = "folder", Events = "mail", Migration = "arrow-left-right", Items = "backpack" }
 UI.HELP = {
   Box = "these pokémon stay here until you send them to a game. Box saves separately, and sync keeps both sides of a move together.",
   List = "all your stored pokémon in one list. select up to six to compare them.",
@@ -20,7 +22,8 @@ UI.HELP = {
   Backup = "restores Box and its linked saves together. your current collection gets backed up first. older incomplete backups won’t restore.",
   Events = "tickets for event trips in the linked game. collect the ticket, then use the normal ship route. story requirements still apply.",
   Migration = "same pokémon, new generation. check the changes first. the original stays archived so you can switch back.",
-  MigrationPolicy = "Gen 2 and Gen 3 never had an official transfer route. G1R converts what fits and blocks what doesn’t.",
+  MigrationPolicy = "Gen 2 and Gen 3 never had an official transfer route. G1R converts what fits and blocks what doesn’t. Gen 1 and 2 to Gen 3 follows Pokémon Bank: nature from EXP, three perfect IVs, EVs reset, Poké Ball.",
+  Items = "store bag items here, then send them to another game's bag. gen 1 and 2 share a stash. changing a ball uses one up.",
 }
 local HELP_TITLES = { Box = "Box storage",
   Backup = "Restore backup", MigrationPolicy = "Conversion rules" }
@@ -28,6 +31,39 @@ local function view() return require("src.import.LauncherView") end
 function UI.button(imp, x, y, w, h, id, label, action, opts)
   opts = opts or {}; opts.action, opts.font = action, opts.font or "small"
   view().btn(imp, x, y, w, h, "box-" .. id, Strings(label), opts)
+end
+local function toastStore(imp, key)
+  imp._toasts = imp._toasts or {}
+  imp._toasts[key] = imp._toasts[key] or {}
+  return imp._toasts[key]
+end
+function UI.toast(imp, text, kind, sticky, key)
+  local store = toastStore(imp, key or "box")
+  if text == nil or text == "" then return Toast.clear(store) end
+  Toast.show(store, Strings(tostring(text)), kind, { sticky = sticky })
+end
+function UI.currentToast(imp)
+  local store = imp._toasts and imp.tab and imp._toasts[imp.tab]
+  return store and Toast.current(store) and store or nil
+end
+function UI.occludeToast(imp)
+  local store = UI.currentToast(imp)
+  local r = store and store.toast.rect
+  if r then Kit.occlude(r[1], r[2], r[3], r[4]) end
+end
+local function wrapHeight(text, w, maxLines) return Kit.wrapHeight("small", text, w, maxLines) end
+local function drawText(text, x, y, w, c, maxLines) Kit.textWrapped("small", text, x, y, w, c, maxLines) end
+function UI.drawToast(imp, m, bottom)
+  local store = UI.currentToast(imp)
+  if not store then return end
+  local rect = Toast.draw(store, { x = 0, w = m.W, bottom = bottom, s = m.s,
+    wrapHeight = wrapHeight, drawText = drawText })
+  if not rect then return end
+  local overlay = Kit._overlay
+  Kit._overlay = true
+  view().btn(imp, rect[1], rect[2], rect[3], rect[4], "box-toast", "", { face = "bare", ring = false,
+    action = function() Toast.clear(store) end })
+  Kit._overlay = overlay
 end
 function UI.close(imp)
   imp._boxPopup = nil; Kit.blur(); Kit._drag = nil
@@ -47,6 +83,10 @@ function UI.open(imp, title, options, current, apply)
       if not option.disabled then imp._boxPopup.index = i; break end
     end
   end
+end
+function UI.confirm(imp, title, message, label, action)
+  UI.open(imp, title, {}, nil)
+  imp._boxPopup.message, imp._boxPopup.confirm = message, { label = label, action = action }
 end
 function UI.help(imp, key, x, y, size, message)
   UI.button(imp, x, y, size, size, "help-" .. key, "", function()
@@ -110,7 +150,8 @@ function UI.keypressed(imp, key)
   if not p then return false end
   if key == "escape" then UI.close(imp)
   elseif key == "return" or key == "kpenter" then
-    if p.message then UI.close(imp) else choose(imp, p, filtered(p)[p.index]) end
+    if p.confirm then UI.close(imp); p.confirm.action()
+    elseif p.message then UI.close(imp) else choose(imp, p, filtered(p)[p.index]) end
   elseif not p.message and (key == "up" or key == "down" or key == "home" or key == "end") then
     local rows = filtered(p)
     if key == "home" then p.index = 1 elseif key == "end" then p.index = #rows
@@ -132,7 +173,7 @@ function UI.drawPopup(imp, m)
   local width = math.min((p.message and 390 or 460) * m.s, m.W - 2 * m.pad)
   local searchable = not p.message and #p.options > 8
   local inner = width - 2 * pad
-  local content = p.message and Kit.wrapHeight("small", Strings(p.message), inner, 6)
+  local content = p.message and Kit.wrapHeight("small", Strings(p.message), inner, 6) + (p.confirm and gap + row or 0)
     or math.max(row, math.min(7, #p.options) * (row + gap) - gap)
   local x, y, w, h = view().modalPanel(m, width, 2 * pad + row + gap + content + (searchable and row + gap or 0), { scrim = .76, slide = true })
   if Kit.press(0, 0, m.W, m.H) and not Kit.hit(x, y, w, h) then UI.close(imp); return end
@@ -141,7 +182,18 @@ function UI.drawPopup(imp, m)
   Kit.textBold("button", Strings(Kit.ellipsize("button", p.title, w - 2 * pad - row - gap)), x + pad,
     y + pad + (row - Kit.textHeight("button")) / 2, PAL.heading)
   local bx, by, bw = x + pad, y + pad + row + gap, w - 2 * pad
-  if p.message then Kit.textWrapped("small", Strings(p.message), bx, by, bw, PAL.text, 6); return end
+  if p.message then
+    Kit.textWrapped("small", Strings(p.message), bx, by, bw, PAL.text, 6)
+    if p.confirm then
+      local cw, cy = (bw - gap) / 2, y + h - pad - row
+      UI.button(imp, bx, cy, cw, row, "popup-cancel", "Cancel", function() UI.close(imp) end, { icon = "x" })
+      UI.button(imp, bx + cw + gap, cy, cw, row, "popup-confirm", p.confirm.label, function()
+        if imp._boxPopup ~= p then return end
+        UI.close(imp); p.confirm.action()
+      end, { face = "invert", icon = "check", ring = true })
+    end
+    return
+  end
   if searchable then
     local query = Kit.textfield("box-chooser-filter", bx, by, bw, row, p.query, Strings("Find an option"))
     if query ~= p.query then p.query, p.index, p.scroll, p.reveal = query, 1, 0, true end

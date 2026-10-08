@@ -36,6 +36,7 @@ function State.new()
     -- chrome
     tab = "party",      -- party|boxes|items|events|map|dex
     status = "",
+    note = "",
     armed = nil,        -- id of the destructive button awaiting confirmation
     armedAt = nil,      -- when it was armed (Ops.ARM_SECONDS to commit)
 

@@ -39,5 +39,17 @@ return function()
       end
       K.destroy(t)
     end),
+    -- pokeruby/src/battle/anim/sfx.c:194
+    sub_812B2B8 = K.wrap(function(t, vm)
+      local isContest = Context.isContest(vm)
+      local pan = isContest and 63 or (P.atkId(vm) % 2 == 0 and -64 or 63)
+      local species
+      if isContest then species = tonumber(P.species(vm, P.atk(vm))) or 0
+      else species = partySpecies(K.battleState(), P.atkId(vm)) end
+      if species ~= 0 then
+        require("src.core.game3.audio").playCry(species, { mode = 4, pan = pan, volume = 125 })
+      end
+      K.destroy(t)
+    end),
   }
 end

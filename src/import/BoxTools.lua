@@ -6,7 +6,7 @@ local UI = require("src.import.BoxUI")
 local Icons = require("src.ui.kit.Icons")
 local PAL = Theme.PAL
 local Tools = {}
-Tools.PAGES = { "List", "Arrange", "Dashboard", "Teams", "Gifts", "Showcase", "Files", "Events", "Migration" }
+Tools.PAGES = { "List", "Arrange", "Dashboard", "Teams", "Gifts", "Showcase", "Files", "Events", "Migration", "Items" }
 Tools.SORTS = { "slot", "name", "species", "level", "hp", "attack", "defense", "speed",
   "special", "spAtk", "spDef", "nature", "ability", "gender", "trainer", "friendship" }
 Tools.SORT_LABELS = { slot = "Slot order", name = "Nickname", species = "Species", level = "Level",
@@ -19,6 +19,62 @@ Tools.CONTROL_ICONS = { ["stage-slot"] = "save", ["stage-background"] = "paintbr
   sort = "arrow-up-down", ["arrange-sort"] = "arrow-up-down", ["migration-destination"] = "gamepad-2" }
 local ACTION_ICONS = { ["migration-preview"] = "eye", ["exports-folder"] = "folder", arrange = "arrow-up-down",
   ["apply-marks"] = "check", compare = "arrow-left-right", ["stage-wallpaper"] = "paintbrush", ["stage-flip"] = "arrow-left-right" }
+
+local FETCH_ERRORS = { offline = "Couldn't reach the server. Moves unchanged.",
+  server = "The server has no movesets right now. Moves unchanged.", too_many = "Too many Pokémon at once." }
+
+function Tools.fetchRecommended(s, refs)
+  local Migration = require("src.box.Migration")
+  local preview = s.migrationPreview
+  local rows = Migration.moveBlocked(preview)
+  if #rows == 0 then return false end
+  local names = {}
+  for _, row in ipairs(rows) do names[#names + 1] = row.species end
+  local generation = require("src.core.GameVersion").generation(preview.destination)
+  s.migrationFetch = { preview = preview, refs = refs,
+    job = require("src.recommend.Recommend").request(generation, names) }
+  s.notice, s.noticeKind = "Getting recommended moves…", "info"
+  return true
+end
+
+function Tools.askRecommended(imp, s, refs)
+  local rows = require("src.box.Migration").moveBlocked(s.migrationPreview)
+  if #rows == 0 or s.migrationFetch then return false end
+  local game = require("src.core.GameVersion").info(s.migrationPreview.destination).label
+  UI.confirm(imp, "Replace moves?", "Some moves don't exist in " .. game .. ". Replace them with the recommended moveset"
+    .. (#rows > 1 and "s" or "") .. "?", "Replace", function() Tools.fetchRecommended(s, refs) end)
+  return true
+end
+
+function Tools.update(s)
+  local fetch = s and s.migrationFetch
+  if not fetch then return end
+  local Recommend = require("src.recommend.Recommend")
+  local status, reason = Recommend.poll(fetch.job)
+  if status == "pending" then return end
+  s.migrationFetch = nil
+  if fetch.preview ~= s.migrationPreview then return end
+  if status ~= "ok" then
+    s.notice, s.noticeKind = FETCH_ERRORS[reason] or "Couldn't get recommended moves.", "error"
+    return
+  end
+  local Migration = require("src.box.Migration")
+  local version = fetch.preview.destination
+  local moves, failed = Migration.recommendedMoves(fetch.preview, fetch.job, version)
+  if not s.migrationMoves or s.migrationMoves.version ~= version then s.migrationMoves = { version = version, moves = {} } end
+  local any = false
+  for id, keys in pairs(moves) do s.migrationMoves.moves[id], any = keys, true end
+  if any then
+    local fresh, why = Migration.preview(s.service.state, fetch.refs, version, { moves = s.migrationMoves.moves })
+    s.migrationPreview = fresh
+    if not fresh then s.notice, s.noticeKind = why, "error"; return end
+  end
+  if #failed > 0 then
+    s.notice, s.noticeKind = "No recommended moveset for " .. table.concat(failed, ", ") .. ".", "error"
+  else
+    s.notice, s.noticeKind = "Recommended moves set. Check them before converting.", "ok"
+  end
+end
 
 local function search(s, query, sort)
   local cache = s._toolsSearch
@@ -154,6 +210,88 @@ function Tools.draw(imp, s, x, y, w, m, api)
       options, s.box, function(b) UI.change(imp, s, "toolsPage", nil, -1); s.box, s.pageBox, s.view, s.railFirst = b, 1, "box", nil end, "package")
     nextRow()
   end
+  local function migrationCard(row, destination)
+    local GameVersion = require("src.core.GameVersion")
+    local found = findEntry(s, row.id)
+    local source = found and found.entry
+    local sc, pad, cg = m.s, 12 * m.s, 6 * m.s
+    local microH, smallH = Kit.textHeight("micro"), Kit.textHeight("small")
+    local headH = 56 * sc
+    local facts = row.converted and row.lines.facts or {}
+    local cols = w >= 560 * sc and 3 or 2
+    local tw = (w - 2 * pad - (cols - 1) * cg) / cols
+    local th = microH + smallH + 16 * sc
+    local cells = row.converted and (row.lines.ivs and { label = "IVs · 31 is perfect", max = 31, values = row.lines.ivs,
+      order = { { "hp", "HP" }, { "atk", "Atk" }, { "def", "Def" }, { "spa", "SpA" }, { "spd", "SpD" }, { "spe", "Spe" } } }
+      or row.lines.dvs and { label = "DVs · 15 is max", max = 15, values = row.lines.dvs,
+      order = { { "hp", "HP" }, { "atk", "Atk" }, { "def", "Def" }, { "spe", "Spe" }, { "spc", "Spc" } } })
+    local ivH = cells and microH + 6 * sc + th + cg or 0
+    local spots, col, rowY, order = {}, 0, 0, {}
+    for i, item in ipairs(facts) do if Kit.textWidth("small", item.value) <= tw - 18 * sc then order[#order + 1] = i end end
+    for i, item in ipairs(facts) do if Kit.textWidth("small", item.value) > tw - 18 * sc then order[#order + 1] = i end end
+    for _, i in ipairs(order) do
+      local item = facts[i]
+      if Kit.textWidth("small", item.value) > tw - 18 * sc then
+        if col > 0 then col, rowY = 0, rowY + th + cg end
+        spots[i] = { 0, rowY, w - 2 * pad }; rowY = rowY + th + cg
+      else
+        spots[i] = { col * (tw + cg), rowY, tw }
+        col = col + 1
+        if col == cols then col, rowY = 0, rowY + th + cg end
+      end
+    end
+    if col > 0 then rowY = rowY + th + cg end
+    local reason = not row.converted and tostring(row.lines[1] or "This Pokémon cannot be converted.")
+    local reasonH = reason and Kit.wrapHeight("small", reason, w - 2 * pad, 4) + gap or 0
+    local footH = microH + gap
+    local total = pad + headH + gap + rowY + ivH + reasonH + footH + pad
+    local accent = row.converted and PAL.green or PAL.red
+    Theme.card(x, y, w, total, { shadow = true, stroke = accent, strokeA = .55, strokeW = 1.5 })
+    Theme.fillRounded(x + pad, y + pad, headH, headH, PAL.bg, 1, 8)
+    if source then
+      local art = require("src.box.Catalog").art(source)
+      if art then require("src.online.OnlineSprites").drawIcon(art, x + pad, y + pad, headH, math.floor((s.artTime or 0) * 4)) end
+    end
+    local status = row.converted and "READY" or "BLOCKED"
+    local tagW, tagH = Kit.textWidth("micro", status) + 16 * sc, microH + 8 * sc
+    Kit.tag(x + w - pad - tagW, y + pad + 4 * sc, tagW, tagH, status, accent, { fill = true, bold = true })
+    local hx = x + pad + headH + gap
+    local nameW = x + w - pad - tagW - gap - hx
+    Kit.textBold("button", Kit.ellipsize("button", row.name, nameW), hx, y + pad + 4 * sc, PAL.heading)
+    local route = (source and GameVersion.info(source.version).label or "?") .. "  →  " .. GameVersion.info(destination).label
+    Kit.text("small", Kit.ellipsize("small", route, w - 2 * pad - headH - gap), hx,
+      y + pad + 8 * sc + Kit.textHeight("button"), PAL.muted)
+    local cy = y + pad + headH + gap
+    if reason then cy = cy + Kit.textWrapped("small", reason, x + pad, cy, w - 2 * pad, PAL.red, 4) + gap end
+    local tones = { new = PAL.blue, kept = PAL.green, lost = PAL.yellow }
+    for i, item in ipairs(facts) do
+      local tx, ty, fw = x + pad + spots[i][1], cy + spots[i][2], spots[i][3]
+      Theme.fillRounded(tx, ty, fw, th, PAL.raised, 1, 8)
+      if tones[item.tone] then Theme.strokeRounded(tx, ty, fw, th, tones[item.tone], .75, 1.5, 8) end
+      Kit.text("micro", Kit.ellipsize("micro", item.label, fw - 18 * sc), tx + 10 * sc, ty + 7 * sc, PAL.muted)
+      Kit.textBold("small", Kit.ellipsize("small", item.value, fw - 18 * sc), tx + 10 * sc, ty + 9 * sc + microH, PAL.heading)
+    end
+    cy = cy + rowY
+    if cells then
+      Kit.text("micro", cells.label, x + pad, cy, PAL.muted)
+      cy = cy + microH + 6 * sc
+      local n = #cells.order
+      local cw = (w - 2 * pad - (n - 1) * cg) / n
+      local ivs = cells.values
+      for i, stat in ipairs(cells.order) do
+        local cx = x + pad + (i - 1) * (cw + cg)
+        local perfect = ivs[stat[1]] == cells.max
+        Theme.fillRounded(cx, cy, cw, th, perfect and PAL.green or PAL.raised, perfect and .22 or 1, 8)
+        if perfect then Theme.strokeRounded(cx, cy, cw, th, PAL.green, .8, 1.5, 8) end
+        Kit.textCenter("micro", stat[2], cx, cy + 7 * sc, cw, PAL.muted)
+        Kit.textCenterBold("small", tostring(ivs[stat[1]]), cx, cy + 9 * sc + microH, cw, perfect and PAL.green or PAL.heading)
+      end
+      cy = cy + th + cg
+    end
+    Kit.text("micro", Kit.ellipsize("micro", "The original stays archived. Restore swaps it back.", w - 2 * pad),
+      x + pad, y + total - pad - microH, PAL.muted)
+    return total
+  end
   if page == "Migration" then
     local Migration=require("src.box.Migration")
     local GameVersion=require("src.core.GameVersion")
@@ -170,30 +308,46 @@ function Tools.draw(imp, s, x, y, w, m, api)
     if #versions>0 then
       s.migrationVersion=s.migrationVersion or versions[1]
       cycle("migration-destination","Destination",versions,s.migrationVersion,function(value)
-        s.migrationVersion,s.migrationPreview=value,nil
+        s.migrationVersion,s.migrationPreview,s.migrationMoves=value,nil,nil
       end)
       button("migration-preview","Review "..#refs.." selected",function()
-        local preview,why=Migration.preview(s.service.state,refs,s.migrationVersion)
-        s.migrationPreview=preview;if not preview then s.notice=why end
+        local saved=s.migrationMoves and s.migrationMoves.version==s.migrationVersion and s.migrationMoves.moves or nil
+        local preview,why=Migration.preview(s.service.state,refs,s.migrationVersion,{moves=saved})
+        s.migrationPreview=preview;if not preview then s.notice,s.noticeKind=why,"error" end
+        if preview then Tools.askRecommended(imp,s,refs) end
       end,#refs==0);nextRow()
       local preview=s.migrationPreview
+      if preview and #Migration.moveBlocked(preview)>0 then
+        button("migration-recommend",s.migrationFetch and "Getting recommended moves…" or "Use recommended moves",function()
+          Tools.askRecommended(imp,s,refs)
+        end,s.migrationFetch~=nil,nil,nil,false,"award");nextRow()
+      end
       if preview then
         local options, ready = {}, 0
         for i, row in ipairs(preview.rows) do
           options[#options + 1] = { id = i, label = row.name .. (row.converted and " · Ready" or " · Blocked"), icon = row.converted and "check" or "lock" }
           if row.converted then ready = ready + 1 end
         end
-        text(ready .. " ready · " .. (#preview.rows - ready) .. " blocked")
         s.migrationReviewRow = math.min(s.migrationReviewRow or 1, #preview.rows)
         local row = preview.rows[s.migrationReviewRow]
         if row then
-          UI.dropdown(imp, x, y, w, h, "migration-record", row.name, options, s.migrationReviewRow,
-            function(value) s.migrationReviewRow = value end, "eye"); nextRow()
-          for _, line in ipairs(row.lines) do text(line, true) end
+          if #preview.rows > 1 then
+            UI.dropdown(imp, x, y, w, h, "migration-record", row.name .. " · " .. ready .. " of " .. #preview.rows .. " ready",
+              options, s.migrationReviewRow, function(value) s.migrationReviewRow = value end, "eye"); nextRow()
+          end
+          y = y + migrationCard(row, preview.destination) + gap
+          if row.lines.natureExp then
+            local options = {}
+            for _, step in ipairs(Migration.natureSteps(row.lines.natureExp)) do
+              options[#options + 1] = { id = step.nature, label = step.nature .. (step.add == 0 and " · now" or " · +" .. step.add .. " EXP"),
+                icon = "arrow-up", disabled = true }
+            end
+            UI.dropdown(imp, x, y, w, h, "migration-natures", "EXP for each nature", options, nil, nil, "arrow-up"); nextRow()
+          end
         end
         button("migration-apply","Convert selected",function()
           operation(function() return s.service:migrate(refs,s.migrationVersion,preview) end,"Migration saved with archived originals.")
-          s.migrationPreview=nil
+          s.migrationPreview,s.migrationMoves=nil,nil
         end,not preview.allowed or preview.revision~=s.service.state.revision or s.diskStale);nextRow()
       end
     else text("Import both games first.",true) end
@@ -213,6 +367,88 @@ function Tools.draw(imp, s, x, y, w, m, api)
       end
     end
     UI.help(imp, "MigrationPolicy", x + w - h, y, h); nextRow()
+  elseif page == "Items" then
+    local Items = require("src.box.Items")
+    local GameVersion = require("src.core.GameVersion")
+    local source = s.sources[s.sourceIndex]
+    s.itemAmount = s.itemAmount or 1
+    cycle("item-amount", "Amount", { 1, 5, 10, 99 }, s.itemAmount, function(value) s.itemAmount = value end)
+    if source and s.pcSave then
+      local family = Items.family(GameVersion.generation(source.version))
+      local cache = s._itemBag
+      if not cache or cache.body ~= s.pcBody or cache.version ~= source.version then
+        cache = { body = s.pcBody, version = source.version, rows = Items.bag(s.pcSave, source.version) }
+        s._itemBag = cache
+      end
+      local deposit = {}
+      for _, row in ipairs(cache.rows) do
+        deposit[#deposit + 1] = { label = row.name .. " × " .. row.count, icon = "download", action = function()
+          local count = math.min(s.itemAmount, row.count)
+          operation(function() return s.service:depositItem(source, row.id, count) end, count .. " " .. row.name .. " stored in Box.")
+        end }
+      end
+      UI.dropdown(imp, x, y, w, h, "item-deposit", "Store from bag · " .. #deposit, deposit, nil, nil, "download"); nextRow()
+      local withdraw = {}
+      for _, row in ipairs(Items.locker(s.service.state, family)) do
+        local found = Items.find(source.version, row.key) ~= nil
+        withdraw[#withdraw + 1] = { label = row.name .. " × " .. row.count, icon = "upload", disabled = not found, action = function()
+          local count = math.min(s.itemAmount, row.count)
+          operation(function() return s.service:withdrawItem(source, row.key, count) end, count .. " " .. row.name .. " sent to the bag.")
+        end }
+      end
+      UI.dropdown(imp, x, y, w, h, "item-withdraw", "Send to bag · " .. #withdraw, withdraw, nil, nil, "upload"); nextRow()
+    else text("Choose a game save to move items.", true) end
+    for _, family in ipairs({ "gen12", "gen3" }) do
+      local rows = Items.locker(s.service.state, family)
+      if #rows > 0 then
+        Kit.textBold("small", family == "gen3" and "Gen 3 items" or "Gen 1 and 2 items", x, y, PAL.heading)
+        y = y + Kit.textHeight("small") + gap
+        local parts = {}
+        for _, row in ipairs(rows) do parts[#parts + 1] = row.name .. " × " .. row.count end
+        text(table.concat(parts, " · "), true)
+      end
+    end
+    if #refs == 1 then s.itemRef = refs[1] end
+    local ref = s.itemRef
+    local entry = ref and Store.at(s.service.state, ref.box, ref.slot)
+    if not entry or entry.generation == 1 then ref, entry = nil, nil end
+    local holders = {}
+    for _, row in ipairs(search(s, "", "slot")) do
+      if row.entry.generation > 1 then
+        holders[#holders + 1] = { id = row.box .. ":" .. row.slot, entry = row.entry, label = row.entry.display.name
+          .. " · Lv. " .. row.entry.display.level .. " · " .. s.service.state.boxes[row.box].name,
+          action = function() s.itemRef = { box = row.box, slot = row.slot } end }
+      end
+    end
+    UI.dropdown(imp, x, y, w, h, "item-holder", entry and "Pokémon: " .. entry.display.name or "Choose a Pokémon · " .. #holders,
+      holders, ref and ref.box .. ":" .. ref.slot, nil, "users"); nextRow()
+    if entry then
+      local family = Items.family(entry.generation)
+      text(entry.display.name .. " · " .. (entry.display.item ~= "" and entry.display.item or "no held item")
+        .. (entry.generation == 3 and entry.display.ball and " · " .. entry.display.ball or ""))
+      local give = {}
+      for _, row in ipairs(Items.locker(s.service.state, family)) do
+        if not Items.isMail(row.name) then
+          give[#give + 1] = { label = row.name .. " × " .. row.count, icon = "package", action = function()
+            operation(function() return s.service:give(ref, row.key) end, entry.display.name .. " is holding " .. row.name .. ".")
+          end }
+        end
+      end
+      local cw = (w - gap) / 2
+      UI.dropdown(imp, x, y, cw, h, "item-give", "Give item", give, nil, nil, "package")
+      button("item-take", "Take item", function()
+        operation(function() return s.service:takeHeld(ref) end, "Item stored in Box.")
+      end, entry.display.item == "" or entry.mon.isEgg, cw, x + cw + gap, false, "download"); nextRow()
+      if entry.generation == 3 then
+        local balls = {}
+        for _, row in ipairs(Items.balls(s.service.state)) do
+          balls[#balls + 1] = { label = row.name .. " × " .. row.count, icon = "award", action = function()
+            operation(function() return s.service:swapBall(ref, row.key) end, entry.display.name .. " moved into a " .. row.name .. ".")
+          end }
+        end
+        UI.dropdown(imp, x, y, w, h, "item-ball", "Change ball · " .. #balls, balls, nil, nil, "award"); nextRow()
+      end
+    else text("Pick a Gen 2 or Gen 3 Pokémon to give it an item or change its ball.", true) end
   elseif page == "Events" then
     local Events=require("src.box.Events")
     local source=s.sources[s.sourceIndex]
@@ -250,7 +486,7 @@ function Tools.draw(imp, s, x, y, w, m, api)
   elseif page == "Files" then
     local export = function()
       local ok, path = s.service:exportGCI()
-      s.notice = ok and "Exported and verified: " .. path or path
+      s.notice, s.noticeKind = ok and "Exported and verified: " .. path or path, ok and "ok" or "error"
     end
     actions({ { "gci-import", "Import Box save", function() imp:chooseBoxImport() end },
       { "gci-export", "Export GCI", export, not s.service.state.gciTemplate } })
@@ -271,8 +507,10 @@ function Tools.draw(imp, s, x, y, w, m, api)
     button("sync-restore", "Restore sync backup", function()
       s._latestBackup = nil
       local ok, why = sync:restoreBoxBackup(backup)
-      if ok then require("src.import.BoxPanel").refresh(imp).notice = "Box and linked saves restored."
-      else s.notice = why end
+      if ok then
+        local fresh = require("src.import.BoxPanel").refresh(imp)
+        fresh.notice, fresh.noticeKind = "Box and linked saves restored.", "ok"
+      else s.notice, s.noticeKind = why, "error" end
     end, not backup or sync:busy(), w - h - gap)
     UI.help(imp, "Backup", x + w - h, y, h); nextRow()
   elseif page == "Showcase" then
@@ -311,13 +549,13 @@ function Tools.draw(imp, s, x, y, w, m, api)
       local out={}
       if #refs>0 then out[#out+1]={label="Add "..#refs.." selected Pokémon",icon="plus",action=function()
         local added,why=Showcase.add(s.stageDraft,refs,s.service.state)
-        if added then edit(function() s.stageDraft=added end);s.stagePiece=#added.pieces else s.notice=why end
+        if added then edit(function() s.stageDraft=added end);s.stagePiece=#added.pieces else s.notice,s.noticeKind=why,"error" end
       end} end
       for _,row in ipairs(search(s,s.query,"species")) do
         out[#out+1]={label=(row.entry.display.national and ("#"..row.entry.display.national.." · ") or "")..
           row.entry.display.name,entry=row.entry,icon="package",action=function()
             local added,why=Showcase.add(s.stageDraft,{{box=row.box,slot=row.slot}},s.service.state)
-            if added then edit(function() s.stageDraft=added end);s.stagePiece=#added.pieces else s.notice=why end
+            if added then edit(function() s.stageDraft=added end);s.stagePiece=#added.pieces else s.notice,s.noticeKind=why,"error" end
           end}
       end
       return out
@@ -325,7 +563,7 @@ function Tools.draw(imp, s, x, y, w, m, api)
     UI.dropdown(imp,x,y,(w-gap)/2,h,"stage-add-pokemon","Add Pokémon",addOptions,nil,nil,"plus")
     local scenery={}
     for _,kind in ipairs(Showcase.PIECES) do scenery[#scenery+1]={label=kind,prop=kind,icon="package",action=function()
-      if #s.stageDraft.pieces>=1500 then s.notice="The stage is full.";return end
+      if #s.stageDraft.pieces>=1500 then s.notice,s.noticeKind="The stage is full.","error";return end
       edit(function(d) d.pieces[#d.pieces+1]={kind=kind,x=.5,y=.5,scale=1.5,rotation=0,flip=false} end)
       s.stagePiece=#s.stageDraft.pieces
     end} end
@@ -360,7 +598,7 @@ function Tools.draw(imp, s, x, y, w, m, api)
     end)
     button("stage-play", s.stagePlaying and "Stop music" or "Play music", function()
       if s.stagePlaying then Showcase.stopMusic(); s.stagePlaying = nil
-      else local ok, why = Showcase.playMusic(draft); if not ok then s.notice=why else s.stagePlaying = true end end
+      else local ok, why = Showcase.playMusic(draft); if not ok then s.notice,s.noticeKind=why,"error" else s.stagePlaying = true end end
     end,draft.music=="Silent",w,nil,false,s.stagePlaying and "square" or "play");nextRow()
     elseif stageSection == "Placement" then
     local function pieceLabel(i)
@@ -391,7 +629,7 @@ function Tools.draw(imp, s, x, y, w, m, api)
       actions({ { "stage-export", "Export PNG", function()
         local ok,path=s.service:exportStage(s.stageIndex)
         if ok then ok,path=userExport(s,path,s.stageIndex) end
-        s.notice=ok and "PNG exported: "..ok or path
+        s.notice,s.noticeKind=ok and "PNG exported: "..ok or path,ok and "ok" or "error"
       end, not s.service.state.stages or not s.service.state.stages[s.stageIndex] },
       { "stage-wallpaper", "Use as wallpaper", function()
         operation(function() return s.service:exportStage(s.stageIndex,s.box) end,"Wallpaper saved.")
@@ -589,7 +827,7 @@ function Tools.draw(imp, s, x, y, w, m, api)
       end
     end }, { "move-group", "Move / swap " .. #refs, function()
       s.moving, s.view, s.toolsPage, s.query, s.sort = refs, "box", nil, "", "slot"
-      s.notice = "Choose the group's first destination slot. Occupied slots swap back."
+      s.notice, s.noticeKind = "Choose the group's first destination slot. Occupied slots swap back.", "info"
     end, #refs == 0 } })
     picker()
     elseif section == "Sort" or section == "Auto Box" then

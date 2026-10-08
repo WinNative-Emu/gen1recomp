@@ -21,6 +21,10 @@ Kit.mouseX, Kit.mouseY = 0, 0
 Kit.mouseClicked = false -- left button pressed this frame
 Kit.wheelY = 0 -- wheel notches queued since the last frame (#595)
 Kit.focus = nil -- id of the text field receiving keystrokes
+Kit.focusRect = nil
+local focusRect = {}
+Kit.trackControls = false
+local tracked, trackedN = {}, 0
 Kit.time = 0
 Kit.fonts = {}
 Kit.scale = 1
@@ -72,6 +76,7 @@ function Kit.beginFrame(mx, my, clicked, wheel)
   Kit.mouseClicked = clicked
   Kit._fieldHit = false
   Kit._focusDrawn = false
+  trackedN = 0
   Kit.wheelY = wheel or 0
   -- Mouse taps dispatch on release, so dragging never activates a row.
   -- The real touch stream supplies its own precise drag deltas. SDL
@@ -214,6 +219,7 @@ end
 
 function Kit.blur()
   Kit.focus = nil
+  Kit.focusRect = nil
   syncSoftKeyboard(nil) -- the soft keyboard follows focus down too (#529)
 end
 
@@ -245,12 +251,42 @@ end
 -- a modal they cannot take the tap, and the modal legitimately covers them.
 Kit.audit = nil
 
-local function audit(class, x, y, w, h, label)
+local function track(x, y, w, h)
+  local c = Kit._clipRect
+  if c then
+    local x2, y2 = math.min(x + w, c.x + c.w), math.min(y + h, c.y + c.h)
+    x, y = math.max(x, c.x), math.max(y, c.y)
+    w, h = x2 - x, y2 - y
+    if w <= 0 or h <= 0 then return end
+  end
+  trackedN = trackedN + 1
+  local r = tracked[trackedN]
+  if not r then
+    r = {}
+    tracked[trackedN] = r
+  end
+  r[1], r[2], r[3], r[4] = x, y, w, h
+end
+
+function Kit.trackedControls()
+  return tracked, trackedN
+end
+
+local function audit(class, x, y, w, h, label, id)
+  if Kit.blockClicks then
+    return
+  end
+  if class == "control" and Kit.trackControls then
+    track(x, y, w, h)
+  end
   local a = Kit.audit
-  if not a or Kit.blockClicks then
+  if not a then
     return
   end
   local c = Kit._clipRect
+  if c and (x >= c.x + c.w or y >= c.y + c.h or x + w <= c.x or y + h <= c.y) then
+    return
+  end
   a[#a + 1] = {
     class = class,
     x = x,
@@ -258,6 +294,7 @@ local function audit(class, x, y, w, h, label)
     w = w,
     h = h,
     label = tostring(label or ""),
+    id = id,
     clip = c and { x = c.x, y = c.y, w = c.w, h = c.h } or nil,
   }
 end
@@ -529,7 +566,7 @@ function Kit.button(x, y, w, h, label, opts)
     opts.face = "selection"
   end
   opts.icon = opts.icon or ACTION_ICONS[label]
-  audit("control", x, y, w, h, label)
+  audit("control", x, y, w, h, label, opts.id)
   local hot = opts.enabled ~= false and Kit.hover(x, y, w, h)
   local shown = label
   if opts.iconOnly then
@@ -685,6 +722,8 @@ function Kit.textfield(id, x, y, w, h, value, placeholder, opts)
   end
   if focused then
     Kit._focusDrawn = true
+    focusRect.x, focusRect.y, focusRect.w, focusRect.h = x, y, w, h
+    Kit.focusRect = focusRect
     -- raise (or hand off) the soft keyboard while this field owns focus (#529)
     syncSoftKeyboard(id, x, y, w, h)
     for _, edit in ipairs(edits) do
@@ -703,6 +742,9 @@ function Kit.textfield(id, x, y, w, h, value, placeholder, opts)
           Kit.blur() -- commit/cancel also lowers the soft keyboard (#529)
           focused = false
         elseif e == "\27" then
+          if opts and opts.onCancel then
+            opts.onCancel()
+          end
           Kit.blur()
           focused = false
         else

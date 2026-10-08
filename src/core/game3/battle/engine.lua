@@ -802,6 +802,14 @@ end
 
 -- pokefirered/src/battle_script_commands.c:7519
 local function pick_metronome(M)
+  local cap = tonumber(M.st and M.st.moveMax)
+  if cap then
+    local pool, skip = {}, M.st.moveExcluded or {}
+    for m = 1, cap do
+      if not forbidden(m, false) and not skip[m] then pool[#pool + 1] = m end
+    end
+    return pool[roll(M.adapter, 1, #pool)]
+  end
   for _ = 1, 64 do
     local m = roll(M.adapter, 1, 511)
     if m < 355 and not forbidden(m, false) then return m end

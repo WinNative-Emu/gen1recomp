@@ -882,8 +882,8 @@ end
 function ManagerState:restartGame()
   if self.game.restartWithMods then
     self.game:restartWithMods()
-  elseif love.event and love.event.quit then
-    love.event.quit("restart")
+  else
+    require("src.core.HostShell").restart()
   end
 end
 

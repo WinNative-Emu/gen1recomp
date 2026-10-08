@@ -220,6 +220,7 @@ return {
       rows[#rows + 1] = { "text_sound", "Get_Key_Item" }
       rows[#rows + 1] = { "show_text", "_OaksLabReceivedText", { RAM = "PIKACHU" } }
       rows[#rows + 1] = { "give_pokemon", "PIKACHU", 5 }
+      rows[#rows + 1] = { "set_catch_rate", 1, 0xA3 }
       -- DisablePikachuOverworldSpriteDrawing keeps it in the ball (#1009)
       rows[#rows + 1] = { "set_field", "pikachuInBall", true }
       rows[#rows + 1] = { "set_flag", "EVENT_GOT_STARTER" }

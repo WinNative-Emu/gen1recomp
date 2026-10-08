@@ -111,7 +111,7 @@ return function(game)
       relay:handle(s, { type = "lobby_hello", protocol = 3, name = "P" .. i, profiles = { live },
         presence = { where = "launcher", status = "idle", version = "firered" } })
       s.avatar = { name = "P" .. i, trainerId = i * 37, gender = i % 2, version = "firered" }
-      relay:handle(s, { type = "plaza_join", kind = "union", cap = 40, profile = live, avatar = s.avatar })
+      relay:handle(s, { type = "plaza_join", kind = "union", cap = 40, xgen = 1, profile = live, avatar = s.avatar })
       peers[i] = s
     end
   end

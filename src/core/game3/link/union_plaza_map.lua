@@ -1,10 +1,34 @@
 local Family = require("src.core.game3.link.family")
 
+local function rsActive()
+  return Family.isRubySapphire(Family.activeVersion())
+end
+
+local function enginePrefix()
+  local row = require("src.core.game3.profile").of(Family.activeVersion())
+  return row and row.map and row.map.enginePrefix or "FR_"
+end
+
 local Plaza = setmetatable({}, {
-  __index = function(_, k)
-    if k == "SOURCE_ID" then return Family.mapId(nil, "unionRoom") end
-    if k == "MAP_ID" then return Family.mapId(nil, "unionRoom") .. "_PLAZA" end
-    if k == "EXITS" then local t = rawget(_, "FAMILY_EXITS"); return t[Family.of()] or t.frlg end
+  __index = function(t, k)
+    if k == "KIND" then return rsActive() and "rs" or "cart" end
+    if k == "SOURCE_ID" then
+      if rsActive() then return nil end
+      return Family.mapId(nil, "unionRoom")
+    end
+    if k == "TILE_SOURCE_ID" then
+      if rsActive() then return Family.mapId(nil, "recordCorner") end
+      return Family.mapId(nil, "unionRoom")
+    end
+    if k == "MAP_ID" then
+      if rsActive() then return enginePrefix() .. "UNION_ROOM" end
+      return Family.mapId(nil, "unionRoom") .. "_PLAZA"
+    end
+    if k == "EXITS" then
+      if rsActive() then return rawget(t, "RS").EXITS end
+      local ex = rawget(t, "FAMILY_EXITS")
+      return ex[Family.of()] or ex.frlg
+    end
     return nil
   end,
 })
@@ -69,6 +93,57 @@ Plaza.BLOCKED = {
   ["#"] = true,
 }
 
+Plaza.RS = {
+  -- pokeruby/data/maps/RecordCorner/map.json warp_events
+  EXITS = { { x = 11, y = 24, source = 1 }, { x = 12, y = 24, source = 2 }, { x = 13, y = 24, source = 3 } },
+  ROLES = {
+    "ABTTTTTTTTTEFFGTTTTTTTTHI",
+    "abttttttttteffgtttttttthi",
+    "JKLLLLLLLLLMNNOLLLLLLLLPQ",
+    "RS.....................UV",
+    "RS.....................UV",
+    "RS.....................UV",
+    "RS.....................UV",
+    "RS.....................UV",
+    "RS.....................UV",
+    "RS.....................UV",
+    "RS.....................UV",
+    "RS.....................UV",
+    "RS.....................UV",
+    "RS.....................UV",
+    "RS.....................UV",
+    "RS.....................UV",
+    "RS.....................UV",
+    "RS.....................UV",
+    "RS.....................UV",
+    "RS.....................UV",
+    "RS.....................UV",
+    "RS.....................UV",
+    "RS.....................UV",
+    "WX.....................YZ",
+    "###########ppp###########",
+  },
+  -- pokeruby/data/layouts/RecordCorner/map.bin
+  SOURCE = {
+    A = { 3, 0 }, B = { 4, 0 }, T = { 5, 0 }, E = { 8, 0 }, F = { 9, 0 }, G = { 11, 0 }, H = { 15, 0 }, I = { 16, 0 },
+    a = { 3, 1 }, b = { 4, 1 }, t = { 5, 1 }, e = { 8, 1 }, f = { 9, 1 }, g = { 11, 1 }, h = { 15, 1 }, i = { 16, 1 },
+    J = { 3, 2 }, K = { 4, 2 }, L = { 5, 2 }, M = { 8, 2 }, N = { 9, 2 }, O = { 11, 2 }, P = { 15, 2 }, Q = { 16, 2 },
+    R = { 3, 3 }, S = { 4, 3 }, ["."] = { 5, 3 }, U = { 15, 3 }, V = { 16, 3 },
+    W = { 3, 8 }, X = { 4, 8 }, Y = { 15, 8 }, Z = { 16, 8 },
+    ["#"] = { 0, 9 }, p = { 8, 9 },
+  },
+  BLOCKED = {
+    A = true, B = true, T = true, E = true, F = true, G = true, H = true, I = true,
+    a = true, b = true, t = true, e = true, f = true, g = true, h = true, i = true,
+    J = true, Q = true, R = true, V = true, W = true, Z = true, ["#"] = true,
+  },
+}
+
+function Plaza.tables(kind)
+  if (kind or Plaza.KIND) == "rs" then return Plaza.RS.ROLES, Plaza.RS.SOURCE, Plaza.RS.BLOCKED end
+  return Plaza.ROLES, Plaza.SOURCE, Plaza.BLOCKED
+end
+
 local CELL_XS = { 3, 6, 9, 12, 15, 18, 21 }
 local CELL_YS = { 5, 8, 11, 14, 17, 20 }
 local DOOR_X, DOOR_Y = 12, 23
@@ -114,8 +189,9 @@ function Plaza.entry()
   return Plaza.EXIT_X, Plaza.EXIT_Y, "up"
 end
 
-function Plaza.roleAt(x, y)
-  local row = Plaza.ROLES[y + 1]
+function Plaza.roleAt(x, y, kind)
+  local roles = Plaza.tables(kind)
+  local row = roles[y + 1]
   if not row or x < 0 or x >= #row then return nil end
   return row:sub(x + 1, x + 1)
 end
@@ -126,13 +202,14 @@ local function copyRow(row)
   return out
 end
 
-function Plaza.buildDecoded(src)
+function Plaza.buildDecoded(src, kind)
+  local _, source = Plaza.tables(kind)
   local cellsOut = {}
   for y = 0, Plaza.HEIGHT - 1 do
     for x = 0, Plaza.WIDTH - 1 do
-      local s = Plaza.SOURCE[Plaza.roleAt(x, y)]
+      local s = source[Plaza.roleAt(x, y, kind)]
       if s[1] >= (src.trueWidth or src.width or 0) or s[2] >= (src.trueHeight or src.height or 0) then
-        error(("union plaza: %s layout has no cell %d,%d; re-import the ROM"):format(Plaza.SOURCE_ID, s[1], s[2]))
+        error(("union plaza: %s layout has no cell %d,%d; re-import the ROM"):format(Plaza.TILE_SOURCE_ID, s[1], s[2]))
       end
       local c = src:cellAt(s[1], s[2])
       cellsOut[y * Plaza.WIDTH + x + 1] = { mid = c.mid, coll = c.coll, elev = c.elev }
@@ -172,31 +249,34 @@ end
 function Plaza.ensure(game)
   local maps = game and game.data and game.data.maps
   if type(maps) ~= "table" then error("union plaza: no map table to build " .. Plaza.MAP_ID .. " into", 2) end
-  local srcDef = maps[Plaza.SOURCE_ID]
+  local kind = Plaza.KIND
+  local sourceId = Plaza.TILE_SOURCE_ID
+  local srcDef = maps[sourceId]
   if not srcDef then
-    error("union plaza: " .. Plaza.SOURCE_ID .. " is missing from the cache; re-import the ROM", 2)
+    error("union plaza: " .. sourceId .. " is missing from the cache; re-import the ROM", 2)
   end
   if not srcDef.midLayout then
     local okM, Map = pcall(require, "src.core.game3.map")
-    if okM and Map and Map.ensureMidLayout then Map.ensureMidLayout(game, Plaza.SOURCE_ID, srcDef) end
+    if okM and Map and Map.ensureMidLayout then Map.ensureMidLayout(game, sourceId, srcDef) end
   end
   local src = srcDef.midLayout
   if not src then
-    error("union plaza: " .. Plaza.SOURCE_ID .. " has no layout in the cache; re-import the ROM", 2)
+    error("union plaza: " .. sourceId .. " has no layout in the cache; re-import the ROM", 2)
   end
 
-  local def = maps[Plaza.MAP_ID]
+  local mapId = Plaza.MAP_ID
+  local def = maps[mapId]
   if not (def and def._plazaSource == src) then
     local LayoutNative = require("src.core.game3.layout_native")
     local pair = src.pair or srcDef.pair
     def = {}
     for k, v in pairs(srcDef) do def[k] = v end
-    def.id = Plaza.MAP_ID
-    def.name = Plaza.MAP_ID
+    def.id = mapId
+    def.name = mapId
     def.width = Plaza.WIDTH
     def.height = Plaza.HEIGHT
     def.connections = {}
-    def.midLayout = LayoutNative.fromDecoded(Plaza.buildDecoded(src), Plaza.MAP_ID, pair)
+    def.midLayout = LayoutNative.fromDecoded(Plaza.buildDecoded(src, kind), mapId, pair)
     def.pair = pair
     def.warps = {}
     for i, exit in ipairs(Plaza.EXITS) do
@@ -205,24 +285,30 @@ function Plaza.ensure(game)
       warp.x, warp.y = exit.x, exit.y
       def.warps[i] = warp
     end
-    def.objects = nil
+    def.objects = kind == "rs" and {} or nil
     def.objectEvents = nil
     def.bgEvents = {}
     def.coordEvents = {}
+    if kind == "rs" then def.mapScripts = nil end
     def._plazaSource = src
-    maps[Plaza.MAP_ID] = def
+    maps[mapId] = def
+  end
+
+  if kind == "rs" then
+    require("src.core.game3.rse.union_rs").install(game)
+    return def
   end
 
   local Space = package.loaded["src.core.game3.scripting.space"]
   local bundle = Space and Space.bundle
   local events = bundle and bundle.events
-  if type(events) == "table" and events[Plaza.SOURCE_ID]
-      and events[Plaza.MAP_ID] == nil then
-    events[Plaza.MAP_ID] = buildEvents(events[Plaza.SOURCE_ID])
+  if type(events) == "table" and events[sourceId]
+      and events[mapId] == nil then
+    events[mapId] = buildEvents(events[sourceId])
   end
-  local ev = events and events[Plaza.MAP_ID]
+  local ev = events and events[mapId]
   if ev and def.objects == nil and Space.attachEventsToMaps then
-    Space.attachEventsToMaps({ [Plaza.MAP_ID] = def }, bundle)
+    Space.attachEventsToMaps({ [mapId] = def }, bundle)
   end
   return def
 end

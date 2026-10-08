@@ -25,6 +25,7 @@ local restartCalls = 0
 love.system = love.system or {}
 love.system.getOS = function() return osName end
 love.system.restartApp = function() restartCalls = restartCalls + 1 return true end
+_G.POKEPORT_LOOP_RESTART = true
 
 HostShell.restart()
 eq(restartCalls, 0, "Android never schedules the blocked restartApp relaunch")

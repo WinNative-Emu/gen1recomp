@@ -23,6 +23,18 @@ function Transaction.assetValid(path, body)
   return be(17) == 1136 and be(21) == 432
 end
 
+local function forgetOptions(journal)
+  for _, job in ipairs(journal.jobs) do
+    if job.path == "options.lua" then
+      local SaveData = package.loaded["src.core.SaveData"]
+      if type(SaveData) == "table" and SaveData.invalidateOptionsCache then
+        SaveData.invalidateOptionsCache()
+      end
+      return
+    end
+  end
+end
+
 local function write(fs, path, body)
   local dir = path:match("^(.*)/[^/]+$")
   if dir and fs.createDirectory then
@@ -105,6 +117,7 @@ local function abort(fs, journal, body)
     local engine = type(sync) == "table" and sync._shared
     if type(engine) == "table" then engine:noteSaveWritten() end
   end
+  if wrote then forgetOptions(journal) end
   local kept, err = quarantine(fs, body)
   if not kept then return nil, err end
   return true, false, "A save changed while a Box transfer was pending. The transfer was undone and its record kept at " .. kept .. "."
@@ -188,6 +201,7 @@ function Transaction.recover(fs)
       if not ok or fs.getInfo(job.path .. ".tmp") then return nil, err or "Could not clear a stale save recovery file." end
     end
   end
+  forgetOptions(journal)
   local ok, err = fs.remove(Transaction.PATH)
   if not ok or fs.getInfo(Transaction.PATH) then
     return nil, err or "The completed Box transfer journal could not be cleared."

@@ -29,6 +29,7 @@ end
 
 -- src/battle_message.c:437
 function Secondary.statName(stat)
+  if require("src.core.game3.battle.adapter").textSink then return stat end
   return RomText.at("gStatNamesTable", Secondary.STAT_ID[stat])
 end
 
@@ -48,6 +49,15 @@ end
 
 -- src/battle_script_commands.c:6758
 local function stat_text(ad, battler, stat, delta, isUser)
+  if require("src.core.game3.battle.adapter").textSink then
+    local id
+    if delta > 0 then
+      id = isUser and "STRINGID_ATTACKERSSTATROSE" or "STRINGID_DEFENDERSSTATROSE"
+    else
+      id = isUser and "STRINGID_ATTACKERSSTATFELL" or "STRINGID_DEFENDERSSTATFELL"
+    end
+    return ad:sayText(id, { atk = battler, def = battler, stat = stat, delta = delta })
+  end
   local change
   if delta >= 2 then change = Secondary.sharpChange("STRINGID_STATSHARPLY", "STRINGID_STATROSE")
   elseif delta >= 1 then change = RomText.plain("STRINGID_STATROSE")
@@ -112,6 +122,9 @@ function Secondary.changeStat(ad, battler, stat, delta, flags)
   local nxt = cur + delta
   if nxt < -6 then nxt = -6 elseif nxt > 6 then nxt = 6 end
   battler.stages[stat] = nxt
+  if require("src.core.game3.battle.adapter").textSink then
+    ad:pushEvent({ kind = "stage", side = battler.side, battler = battler.id, stat = stat, delta = nxt - cur })
+  end
   if not flags.noAnim then
     ad:playAnim("general", "STATS_CHANGE", battler, battler, Secondary.statAnimArg(stat, delta))
   end

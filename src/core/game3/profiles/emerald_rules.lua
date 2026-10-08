@@ -131,12 +131,21 @@ function Rules.saveWarpFields(session)
   local f = tonumber(session.specialSaveWarpFlags) or 0
   local w = session.continueGameWarp
   local dw = session.dynamicWarp
+  if require("src.core.game3.link.union_save_spot").live(session) then
+    return require("bit").band(f, require("bit").bnot(CONTINUE_GAME_WARP)), w
+  end
   if LINK_ROOMS[session.map] and type(dw) == "table" and type(dw.map) == "string"
       and tonumber(dw.x) and tonumber(dw.y) then
     -- pokeemerald/src/overworld.c:735 SetContinueGameWarpToDynamicWarp
     return require("bit").bor(f, CONTINUE_GAME_WARP), { map = dw.map, warpId = tonumber(dw.warpId), x = tonumber(dw.x), y = tonumber(dw.y) }
   end
   return f, w
+end
+
+function Rules.saveLocation(session, game)
+  local o = require("src.core.game3.link.union_save_spot").live(session, game)
+  if o then return o.map, o.x, o.y, o.facing end
+  return nil
 end
 
 return Rules

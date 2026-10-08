@@ -4509,6 +4509,14 @@ function RomExtractorGen2:extractItems()
       entry.name = entry.name or entry.tmLabel
     end
   end
+  -- data/items/catch_rate_items.asm:5
+  local capsule = self:symbol("TimeCapsule_CatchRateItems")
+  out.timeCapsule = {}
+  for row = 0, 255 do
+    local from = self.rom:byte(capsule.bank, capsule.address + row * 2)
+    if from == 0 then break end
+    out.timeCapsule[from] = order[self.rom:byte(capsule.bank, capsule.address + row * 2 + 1)]
+  end
   self:write("items", out)
   self:tick("Items", #order, #order)
   return out

@@ -1,5 +1,6 @@
 local GameVersion = require("src.core.GameVersion")
 local SaveData = require("src.core.SaveData")
+local Logger = require("src.core.Logger")
 
 local RomSources = {}
 
@@ -236,11 +237,20 @@ end
 
 local function readSource(rec)
   if rec.kept then return RomSources.readKept(rec.path) end
-  local file = io.open(rec.path, "rb")
+  local file = SaveData.openNative(rec.path, "rb")
   if not file then return nil end
   local data = file:read("*a")
   file:close()
   return data
+end
+
+local function unwrapArchive(data, rec)
+  local RomArchive = require("src.import.RomArchive")
+  if not RomArchive.kind(data) then return data end
+  local bytes, why = RomArchive.unwrap(data, rec.path:match("[^/\\]+$"), {
+    prefer = function(candidate) return sha1(candidate) == rec.sha1 end,
+  })
+  return bytes, why
 end
 
 function RomSources.candidate(version, mobile, opts)
@@ -251,11 +261,25 @@ function RomSources.candidate(version, mobile, opts)
     return nil
   end
   local ok, data = pcall(readSource, rec)
-  local okHash, digest = false, nil
-  if ok and data then okHash, digest = pcall(sha1, data) end
-  if not okHash or digest ~= rec.sha1 then
+  local reason
+  if not ok or type(data) ~= "string" then
+    reason = "missing"
+  else
+    local okUnwrap, bytes, why = pcall(unwrapArchive, data, rec)
+    if not okUnwrap or not bytes then
+      reason = "archive"
+      Logger.warn("re-import source %s: %s", tostring(rec.path),
+        tostring(okUnwrap and why or bytes))
+    else
+      local okHash, digest = pcall(sha1, bytes)
+      if not okHash or digest ~= rec.sha1 then reason = "changed" end
+    end
+  end
+  if reason then
+    Logger.warn("re-import source for %s is unusable (%s): %s",
+      tostring(version), reason, tostring(rec.path))
     if rec.kept then return { pick = true, broken = true } end
-    return nil
+    return { pick = true, missing = reason, path = rec.path }
   end
   return { path = rec.path, kept = rec.kept == true }
 end

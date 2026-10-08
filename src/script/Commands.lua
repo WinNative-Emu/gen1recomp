@@ -868,6 +868,12 @@ function Commands.give_pokemon(ctx, species, level, skipNickname, gotText)
   end
 end
 
+-- pokeyellow scripts/OaksLab.asm:1037
+function Commands.set_catch_rate(ctx, slot, value)
+  local mon = ctx.save.party and ctx.save.party[slot]
+  if mon then mon.catchRate = value end
+end
+
 function Commands.give_money(ctx, amount)
   ctx.save.money = math.max(0, ctx.save.money + amount)
 end

@@ -423,6 +423,12 @@ function Adapter.new(battleState, sayFn)
     if faintPolicy and fill and (id == "STRINGID_ATTACKERFAINTED" or id == "STRINGID_TARGETFAINTED") then
       self:prepareFaintAnnouncement(fill.atk or fill.def)
     end
+    if Adapter.textSink then
+      local key = Adapter.textSink(id, fill)
+      self:pushEvent({ kind = "msg", text = key, id = key, fill = fill or {} })
+      self._say(key)
+      return key
+    end
     local BattleText = require("src.core.game3.battle.battle_text")
     fill = Adapter.fill(self._st, fill)
     local text = BattleText.get(id, fill)

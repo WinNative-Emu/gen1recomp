@@ -37,7 +37,8 @@ for _, file in ipairs({ "data.scripts.story", "data.scripts.story2",
                         "data.scripts.story5", "data.scripts.story6",
                         "data.scripts.story7", "data.scripts.flavor_all",
                         "data.scripts.safari", "data.scripts.seafoam",
-                        "data.scripts.gyms" }) do
+                        "data.scripts.gyms",
+                        "data.scripts.pokecenter_upstairs" }) do
   for mapId, mod in pairs(require(file)) do
     MapScripts.attachBase(mapId, mod)
   end
@@ -49,7 +50,8 @@ if GameVersion.isYellow() then
   for _, file in ipairs({ "data.scripts.yellow_gifts",
                           "data.scripts.yellow_jessie_james",
                           "data.scripts.yellow_beach_house",
-                          "data.scripts.yellow_viridian_old_man" }) do
+                          "data.scripts.yellow_viridian_old_man",
+                          "data.scripts.flavor.pokecenter_chansey" }) do
     for mapId, mod in pairs(require(file)) do
       MapScripts.attachBase(mapId, mod)
     end

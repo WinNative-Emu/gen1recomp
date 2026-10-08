@@ -1,6 +1,7 @@
 -- A bounded, session-only undo stack. Snapshots are made on user mutations,
 -- never on draw. Deep copies preserve metadata the editor does not expose.
 local Copy = require("src.mods.Merge").deepCopy
+local Toast = require("src.ui.kit.Toast")
 local H = { LIMIT = 8 }
 function H.capture(S)
   return { save = Copy(S.save), dirty = S.dirty, token = S.historyToken or 0 }
@@ -30,23 +31,27 @@ end
 function H.undo(S)
   if not S.undoStack or #S.undoStack == 0 then
     S.status = "Nothing to undo"
+    Toast.show(S, S.status, "info")
     return false
   end
   S.redoStack = S.redoStack or {}
   S.redoStack[#S.redoStack + 1] = H.capture(S)
   restore(S, table.remove(S.undoStack))
   S.status = "Undid the last edit"
+  Toast.show(S, S.status, "ok")
   return true
 end
 function H.redo(S)
   if not S.redoStack or #S.redoStack == 0 then
     S.status = "Nothing to redo"
+    Toast.show(S, S.status, "info")
     return false
   end
   S.undoStack = S.undoStack or {}
   S.undoStack[#S.undoStack + 1] = H.capture(S)
   restore(S, table.remove(S.redoStack))
   S.status = "Redid the last edit"
+  Toast.show(S, S.status, "ok")
   return true
 end
 return H

@@ -1135,6 +1135,7 @@ function OnlinePanel.tradeSetSide(imp, side, entry)
   tr.sides[side] = entry
   tr.picks[side] = nil
   tr.plan, tr.lines, tr.convertLines = nil, nil, nil
+  OnlinePanel.tradeRecommendReset(imp)
   tr.handles[side] = nil
   if entry then OnlinePanel.tradeOpen(imp, side) end
   return true
@@ -1170,6 +1171,7 @@ function OnlinePanel.tradePick(imp, side, ref)
     tr.picks[side] = ref
   end
   tr.plan, tr.lines, tr.convertLines = nil, nil, nil
+  OnlinePanel.tradeRecommendReset(imp)
   return tr.picks[side]
 end
 
@@ -1243,6 +1245,7 @@ function OnlinePanel.tradeMode(imp, mode)
   tr.mode = mode
   tr.plan, tr.lines, tr.convertLines = nil, nil, nil
   tr.status, tr.statusOk = nil, false
+  OnlinePanel.tradeRecommendReset(imp)
   return true
 end
 
@@ -1268,6 +1271,10 @@ function OnlinePanel.tradeRun(imp, fn)
   if g1.generation ~= 1 or g2.generation ~= 2 then
     return nil, Strings("Those two games can't trade.")
   end
+  local g2Key = OnlinePanel.tradeRecommendKey(imp)
+  local override = tr.recommendMoves
+  local opts = override and override.key == g2Key and { moves = override.moves } or nil
+  tr.moveRefusal = nil
   local gen2Data, err = Trade.withDataset(g2.version, function(d) return d end)
   if not gen2Data then return nil, tostring(err) end
   local out, why
@@ -1277,7 +1284,7 @@ function OnlinePanel.tradeRun(imp, fn)
       local fromData = (fromGen == 1) and gen1Data or gen2Data
       local toData = (toGen == 1) and gen1Data or gen2Data
       local lines, legal = Convert.preview(packed, fromGen, toGen, fromData,
-        toData)
+        toData, toGen == 1 and opts or nil)
       tr.convertLines[#tr.convertLines + 1] =
         { toGen = toGen, lines = lines, ok = legal ~= false }
       if toGen == 2 then
@@ -1285,8 +1292,11 @@ function OnlinePanel.tradeRun(imp, fn)
         if mon then return mon end
         return nil, report
       end
-      local mon, reason = Convert.toGen1(packed, gen2Data, gen1Data)
+      local mon, reason = Convert.toGen1(packed, gen2Data, gen1Data, opts)
       if mon then return mon end
+      if reason == "move_too_new" then
+        tr.moveRefusal = { key = g2Key, species = packed.species, version = g1.version }
+      end
       return nil, reason
     end)
     return true
@@ -1365,6 +1375,13 @@ function OnlinePanel.tradePreview(imp)
       end
     end
     tr.status, tr.statusOk = said, false
+    tr.recommendAsk = nil
+    local refusal = tr.moveRefusal
+    if refusal and not tr.recommendJob and not (tr.recommendTried and tr.recommendTried == refusal.key) then
+      refusal.said = said
+      tr.recommendAsk = refusal
+      tr.status = Strings("Some moves can't come along. Replace them with the recommended moveset?")
+    end
     return false
   end
   tr.plan = plan
@@ -1405,6 +1422,7 @@ function OnlinePanel.tradeConfirm(imp)
   end
   tr.plan, tr.lines, tr.convertLines = nil, nil, nil
   tr.picks = {}
+  OnlinePanel.tradeRecommendReset(imp)
   tr.handles = {}
   st.slotRead, st.converted, st.convertWant = nil, nil, nil
   OnlinePanel.tradeOpen(imp, "a")
@@ -1419,6 +1437,91 @@ function OnlinePanel.tradeConfirm(imp)
   end
   tr.status, tr.statusOk = Strings("Trade complete."), true
   return true
+end
+
+OnlinePanel.recommendClient = nil
+
+function OnlinePanel.tradeRecommendKey(imp)
+  local tr = OnlinePanel.tradeState(imp)
+  local a = OnlinePanel.tradeSideView(imp, "a")
+  local b = OnlinePanel.tradeSideView(imp, "b")
+  local A, B = a and a.handle, b and b.handle
+  if not (A and B) then return nil end
+  local side = (A.generation == 2) and "a" or (B.generation == 2) and "b" or nil
+  local key = side and OnlinePanel.tradePickKey(imp, side)
+  if not key then return nil end
+  local entry = tr.sides[side] or {}
+  return ("%s|%s|%s|%s"):format(side, tostring(entry.version), tostring(entry.slotId), key)
+end
+
+function OnlinePanel.tradeRecommendReset(imp)
+  local tr = OnlinePanel.tradeState(imp)
+  if tr.recommendJob then
+    pcall(require("src.recommend.Recommend").cancel, tr.recommendJob.job)
+  end
+  tr.recommendAsk, tr.recommendJob, tr.recommendMoves, tr.recommendTried = nil, nil, nil, nil
+  tr.moveRefusal = nil
+end
+
+local RECOMMEND_FAIL = {
+  offline = "Couldn't reach the server for a recommended moveset.",
+  server = "The server has no recommended moveset right now.",
+  canceled = "The recommended moveset request was cancelled.",
+}
+
+local function recommendFailed(tr, ask, text)
+  tr.recommendJob = nil
+  tr.status, tr.statusOk = Strings("%s %s", Strings(text), tostring(ask.said or "")), false
+end
+
+function OnlinePanel.tradeRecommendAnswer(imp, yes)
+  local tr = OnlinePanel.tradeState(imp)
+  local ask = tr.recommendAsk
+  if not ask then return false end
+  tr.recommendAsk = nil
+  tr.recommendTried = ask.key
+  if not yes then
+    tr.status, tr.statusOk = tostring(ask.said or tr.status or ""), false
+    return true
+  end
+  local Recommend = require("src.recommend.Recommend")
+  local job = Recommend.request(1, ask.species, { client = OnlinePanel.recommendClient })
+  tr.recommendJob = { job = job, ask = ask }
+  tr.status, tr.statusOk = Strings("Getting the recommended moveset..."), true
+  OnlinePanel.pumpTradeRecommend(imp)
+  return true
+end
+
+function OnlinePanel.pumpTradeRecommend(imp)
+  local tr = OnlinePanel.tradeState(imp)
+  local pending = tr.recommendJob
+  if not pending then return nil end
+  local Recommend = require("src.recommend.Recommend")
+  local state, why = Recommend.poll(pending.job)
+  if state == "pending" then return state end
+  local ask = pending.ask
+  if state ~= "ok" then
+    recommendFailed(tr, ask, RECOMMEND_FAIL[why] or RECOMMEND_FAIL.offline)
+    return state
+  end
+  local entry = Recommend.get(pending.job, ask.species)
+  if not entry then
+    recommendFailed(tr, ask, "There's no recommended moveset for that POKéMON.")
+    return "missing"
+  end
+  local ok, keys = pcall(Recommend.resolveMoves, entry, ask.version)
+  if not ok or type(keys) ~= "table" or #keys == 0 then
+    recommendFailed(tr, ask, "The recommended moveset doesn't fit this game.")
+    return "missing"
+  end
+  tr.recommendJob = nil
+  if OnlinePanel.tradeRecommendKey(imp) ~= ask.key then return "stale" end
+  tr.recommendMoves = { key = ask.key, moves = keys }
+  if OnlinePanel.tradeModalPreview(imp) then return "ok" end
+  if tr.status == nil or tr.statusOk then
+    recommendFailed(tr, ask, "The recommended moveset doesn't fit this game.")
+  end
+  return "refused"
 end
 
 -- ------- the preview / confirm modal
@@ -4344,6 +4447,7 @@ function OnlinePanel.update(imp, dt)
     pcall(imp.pumpOnlineCartInstall, imp)
   end
   OnlinePanel.pumpRemoteTrade(imp, dt)
+  OnlinePanel.pumpTradeRecommend(imp)
   if OnlinePanel._tourClosed then
     st.status, st.statusOk = OnlinePanel._tourClosed, false
     OnlinePanel._tourClosed = nil

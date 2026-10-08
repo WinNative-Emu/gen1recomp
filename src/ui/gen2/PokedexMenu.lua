@@ -64,6 +64,8 @@ local CANCEL_LABEL = Strings.source("CANCEL")
 local NO_SEARCH_RESULTS = Strings.source("No <PK><MN> found!")
 local ENTRY_ACTION_LABEL = Strings.source(" PAGE AREA CRY PRNT")
 local POUND_LABEL = Strings.source("lb")
+local METRE_LABEL = Strings.source("m")
+local KILOGRAM_LABEL = Strings.source("kg")
 local NEST_TITLE = Strings.source("%s'S NEST")
 
 local LIST_DIRS = { "up", "down" }
@@ -173,6 +175,7 @@ function PokedexMenu.new(game, opts)
   local self = setmetatable({}, PokedexMenu)
   self.game = game
   self.save = opts.save or (game and game.save)
+  self.metricLabels = { Strings(METRE_LABEL), Strings(KILOGRAM_LABEL) }
   local data = game and game.data or {}
   -- engine/pokedex/pokedex.asm:447
   self.data = data
@@ -641,6 +644,10 @@ function PokedexMenu:border(tx, ty, interiorRows, interiorCols)
   self:tile(B.bottomRight, tx + interiorCols + 1, bottom)
 end
 
+local function metricString(value)
+  return (("%.1f"):format(value or 0):gsub("%.", ","))
+end
+
 -- PrintNum: a right-aligned field of `digits` characters, space-padded unless
 -- PRINTNUM_LEADINGZEROS was set.  `before` splits the field into an integer
 -- part and a fraction with a '.' between them.
@@ -1041,25 +1048,35 @@ function PokedexMenu:drawEntryBody(row, entry)
   -- "HT  ?'??"" at (9,7) and "WT   ???lb" at (9,9).
   self:text(Strings(HEIGHT_LABEL), 9, 7)
   self:text(Strings(WEIGHT_LABEL), 9, 9)
-  self:tile(TILE_FOOT, 14, 7)
-  self:text(Strings(POUND_LABEL), 17, 9)
+  if entry.heightM then
+    self:text(self.metricLabels[1], 17, 7)
+    self:text(self.metricLabels[2], 17, 9)
+    local height = row.caught and metricString(entry.heightM) or "???"
+    local weight = row.caught and metricString(entry.weightKg) or "???"
+    self:text(height, 17 - #height, 7)
+    self:text(weight, 17 - #weight, 9)
+    if not row.caught then return end
+  else
+    self:tile(TILE_FOOT, 14, 7)
+    self:text(Strings(POUND_LABEL), 17, 9)
 
-  if not row.caught then
-    self:text("  ?", 11, 7)
-    self:text("??", 15, 7)
+    if not row.caught then
+      self:text("  ?", 11, 7)
+      self:text("??", 15, 7)
+      self:tile(TILE_INCH, 17, 7)
+      self:text("  ???", 11, 9)
+      return
+    end
+
+    -- The height word is four digits with two in front of the point and the
+    -- point replaced by the foot mark; the weight word is five with four in
+    -- front.  Both are already the digits the cart prints.
+    local height = printNumString(entry.height or 0, 4, false, 2)
+    self:text(height:sub(1, 2), 12, 7)
+    self:text(height:sub(4), 15, 7)
     self:tile(TILE_INCH, 17, 7)
-    self:text("  ???", 11, 9)
-    return
+    self:text(printNumString(entry.weight or 0, 5, false, 4), 11, 9)
   end
-
-  -- The height word is four digits with two in front of the point and the
-  -- point replaced by the foot mark; the weight word is five with four in
-  -- front.  Both are already the digits the cart prints.
-  local height = printNumString(entry.height or 0, 4, false, 2)
-  self:text(height:sub(1, 2), 12, 7)
-  self:text(height:sub(4), 15, 7)
-  self:tile(TILE_INCH, 17, 7)
-  self:text(printNumString(entry.weight or 0, 5, false, 4), 11, 9)
 
   -- Page marker, then the description.  ClearBox(2,11) is 5 rows by 18
   -- columns and <NEXT> steps two rows, so the three lines land on 11/13/15.
@@ -1114,10 +1131,15 @@ function PokedexMenu:drawPlain()
       Chrome.print(("%s  %s"):format(
         Chrome.number(entry.dex or 0, 3, true), self:monName(row.species)), 1, 1)
       Chrome.print(entry.kind or "", 1, 3)
-      Chrome.print(Strings(HEIGHT_LABEL) .. " "
-        .. printNumString(entry.height or 0, 4, false, 2), 1, 5)
-      Chrome.print(Strings(WEIGHT_LABEL) .. " "
-        .. printNumString(entry.weight or 0, 5, false, 4), 1, 7)
+      if entry.heightM then
+        Chrome.print(Strings(HEIGHT_LABEL) .. " " .. metricString(entry.heightM) .. self.metricLabels[1], 1, 5)
+        Chrome.print(Strings(WEIGHT_LABEL) .. " " .. metricString(entry.weightKg) .. self.metricLabels[2], 1, 7)
+      else
+        Chrome.print(Strings(HEIGHT_LABEL) .. " "
+          .. printNumString(entry.height or 0, 4, false, 2), 1, 5)
+        Chrome.print(Strings(WEIGHT_LABEL) .. " "
+          .. printNumString(entry.weight or 0, 5, false, 4), 1, 7)
+      end
       self:drawPic(row, 12, 1, true)
       Chrome.box(0, 10, 20, 8)
       local ty = 11

@@ -70,7 +70,20 @@ end
 
 function CoinsBox.draw()
   if not CoinsBox.visible then return end
-  if require("src.core.game3.profile").family() == "rse" then
+  local Profile = require("src.core.game3.profile")
+  local row = Profile.forSession()
+  local cw = type(row) == "table" and type(row.ui) == "table" and row.ui.coinsWindow or nil
+  if cw and cw.frameOrigin then
+    -- pokeruby/src/coins.c:16
+    local left, top = CoinsBox.x + 1, CoinsBox.y + 1
+    Window.stdFrame(Window.template(left, top, 8, 2))
+    -- pokeruby/src/coins.c:25
+    local digits = tostring(clamp(CoinsBox._amount))
+    local text = RomText.plain(cw.text or "gText_Coins", { stringVars = { digits } })
+    Window.printPx(text, left * 8 + 7 + math.max(0, 4 - #digits) * 6, top * 8)
+    return
+  end
+  if Profile.family() == "rse" then
     -- pokeemerald/src/coins.c:14 PrintCoinsString, :24 ShowCoinsWindow
     local tpl = Window.template(CoinsBox.x, CoinsBox.y, 8, 2)
     Window.stdFrame(tpl)

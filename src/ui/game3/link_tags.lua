@@ -10,6 +10,11 @@ LinkTags.EDGE = 1
 LinkTags.BLENDER_EM_BASE = 0x7F00
 LinkTags.BLENDER_RS_BASE = 0xF0
 LinkTags.MAX_SEATS = 5
+LinkTags.BADGE_GAP = 1
+LinkTags.NEAR_CELLS = 2
+LinkTags.UNION_PAD = 3
+LinkTags.UNION_HEAD_GAP = 1
+LinkTags.RS_TEXT_DY = -6
 
 LinkTags.PLATE = { 0.06, 0.07, 0.12, 0.62 }
 LinkTags.PLATE_SELF = { 0.08, 0.2, 0.46, 0.7 }
@@ -97,7 +102,12 @@ local function tagRow(i)
     row = {}
     LinkTags._rows[i] = row
   end
+  row.badge, row.union, row.near = nil, nil, nil
   return row
+end
+
+local function badgeModule()
+  return require("src.online.union.Badge")
 end
 
 local function localKind()
@@ -146,14 +156,22 @@ function LinkTags.sources()
   src.player = nil
   local active, n = false, 0
   local U = union()
-  if U and U.isActive and U.isActive() and U.onUnionRoomMap and U.onUnionRoomMap() then
+  local inUnion = U and U.isActive and U.isActive() and U.onUnionRoomMap and U.onUnionRoomMap()
+  if inUnion then
     active = true
+    local P = package.loaded["src.core.game3.player"]
+    local px, py = P and tonumber(P.cellX), P and tonumber(P.cellY)
     for slot = 1, U.capacity() do
       local p = U.players[slot]
       if p and not p.gone and type(p.name) == "string" then
         n = n + 1
         local row = tagRow(n)
         row.name, row.kind = p.name, U.memberStatusKind(p)
+        row.badge = tonumber(p.sourceGen) or 3
+        row.union = true
+        local cx, cy = U.avatarCell(slot)
+        row.near = U._talkSlot == slot or (px ~= nil and cx ~= nil
+          and math.abs(cx - px) + math.abs(cy - py) <= LinkTags.NEAR_CELLS)
         src.byVobj[U.vobjId(slot)] = row
       end
     end
@@ -180,6 +198,7 @@ function LinkTags.sources()
   local me = LinkTags._self
   me.name = type(s) == "table" and tostring(s.name or s.playerName or ""):sub(1, 7) or nil
   me.kind = localKind()
+  me.badge, me.hidden = nil, inUnion and true or nil
   if me.name and me.name ~= "" then src.player = me end
   return src
 end
@@ -215,7 +234,8 @@ function LinkTags.layout(tag, headX, headY, viewW, measure, out)
   local textW = LinkTags.textWidth(tag.name, measure)
   local iconW = tag.kind and LinkTags.iconSize(tag.kind) or 0
   local lead = iconW > 0 and (iconW + LinkTags.ICON_GAP) or 0
-  local w = LinkTags.PAD * 2 + textW + lead
+  local badgeW = tag.badge and (badgeModule().SIZE + LinkTags.BADGE_GAP) or 0
+  local w = LinkTags.PAD * 2 + textW + lead + badgeW
   local x = math.floor(headX - w / 2 + 0.5)
   if viewW then
     x = math.max(LinkTags.EDGE, math.min(viewW - w - LinkTags.EDGE, x))
@@ -223,6 +243,7 @@ function LinkTags.layout(tag, headX, headY, viewW, measure, out)
   out = out or {}
   out.x, out.y, out.w, out.h = x, math.floor(headY - LinkTags.PLATE_H + LinkTags.HEAD_OVERLAP), w, LinkTags.PLATE_H
   out.textW, out.iconW, out.textX = textW, iconW, x + LinkTags.PAD + lead
+  out.badgeX = tag.badge and (out.textX + textW + LinkTags.BADGE_GAP) or nil
   return out
 end
 
@@ -281,7 +302,16 @@ local function opaqueTop(spr)
   return top
 end
 
+local function foreignHeight(eo)
+  local Avatars = require("src.online.union.Avatars")
+  local entry = Avatars.resolve(eo.foreign, eo.foreign.host)
+  if entry.standin then return Avatars.STANDIN_H end
+  return tonumber(entry.h) or Avatars.GB_FRAME
+end
+
 local function headTop(a, camY)
+  local eo = a.eventObject
+  if eo and eo.foreign then return a.y - camY + 16 - foreignHeight(eo) end
   local h, offY, top = 32, 0, 0
   local Ow = package.loaded["src.core.game3.ow_sprites"]
   if Ow and Ow.getDraw and a.graphicsId ~= nil then
@@ -295,7 +325,60 @@ local function headTop(a, camY)
   return a.y - camY + 16 - h + offY + top
 end
 
+local function textDy()
+  local Family = require("src.core.game3.link.family")
+  return Family.isRubySapphire(Family.activeVersion()) and LinkTags.RS_TEXT_DY or LinkTags.TEXT_DY
+end
+
+function LinkTags.unionLayout(tag, headX, headY, viewW, measure, out)
+  local Badge = badgeModule()
+  out = out or {}
+  local bs = Badge.SIZE
+  if not tag.near then
+    out.x, out.y, out.w, out.h = math.floor(headX - bs / 2), math.floor(headY - bs - LinkTags.UNION_HEAD_GAP), bs, bs
+    out.textW, out.badgeX, out.badgeY, out.plate = 0, out.x, out.y, false
+    return out
+  end
+  local textW = LinkTags.textWidth(tag.name, measure)
+  local pad = LinkTags.UNION_PAD
+  local w = pad + textW + LinkTags.BADGE_GAP + 1 + bs + 1
+  local h = LinkTags.PLATE_H
+  local x = math.floor(headX - w / 2)
+  if viewW then x = math.max(LinkTags.EDGE, math.min(viewW - w - LinkTags.EDGE, x)) end
+  local y = math.floor(headY - h - LinkTags.UNION_HEAD_GAP)
+  out.x, out.y, out.w, out.h, out.textW, out.plate = x, y, w, h, textW, true
+  out.textX = x + pad
+  out.badgeX = x + w - 1 - bs
+  out.badgeY = y + math.floor((h - bs) / 2)
+  return out
+end
+
+local function windowPlate(x, y, w, h)
+  local FrlgFont = require("src.ui.game3.frlg_font")
+  local Chrome = require("src.ui.game3.chrome")
+  local fill = Chrome.windowFillColor()
+  local edge = FrlgFont.COLOR.NORMAL.fg
+  local g = love.graphics
+  g.setColor(edge[1], edge[2], edge[3], 1)
+  g.rectangle("fill", x + 1, y, w - 2, h)
+  g.rectangle("fill", x, y + 1, w, h - 2)
+  g.setColor(fill[1], fill[2], fill[3], 1)
+  g.rectangle("fill", x + 1, y + 1, w - 2, h - 2)
+end
+
+local function drawUnionTag(a, tag, camX, camY, viewW)
+  local L = LinkTags.unionLayout(tag, math.floor(a.x - camX) + 8, math.floor(headTop(a, camY)), viewW, nil, LAYOUT)
+  if L.plate then
+    windowPlate(L.x, L.y, L.w, L.h)
+    local FrlgFont = require("src.ui.game3.frlg_font")
+    TEXT_OPTS.colors, TEXT_OPTS.maxWidth = FrlgFont.COLOR.NORMAL, L.textW
+    pcall(FrlgFont.draw, tag.name, L.textX, L.y + textDy(), TEXT_OPTS)
+  end
+  badgeModule().draw(L.badgeX, L.badgeY, tag.badge, tag.badge, 1)
+end
+
 local function drawTag(a, tag, camX, camY, viewW, isSelf)
+  if tag.union then return drawUnionTag(a, tag, camX, camY, viewW) end
   local L = LinkTags.layout(tag, a.x - camX + 8, headTop(a, camY), viewW, nil, LAYOUT)
   plate(L.x, L.y, L.w, L.h, isSelf and LinkTags.PLATE_SELF or LinkTags.PLATE)
   if tag.kind then
@@ -308,14 +391,18 @@ local function drawTag(a, tag, camX, camY, viewW, isSelf)
   end
   local FrlgFont = require("src.ui.game3.frlg_font")
   TEXT_OPTS.colors, TEXT_OPTS.maxWidth = FrlgFont.COLOR.WHITE, L.textW
-  pcall(FrlgFont.draw, tag.name, L.textX, L.y + LinkTags.TEXT_DY, TEXT_OPTS)
+  pcall(FrlgFont.draw, tag.name, L.textX, L.y + textDy(), TEXT_OPTS)
+  if L.badgeX then
+    local Badge = badgeModule()
+    Badge.draw(L.badgeX, L.y + math.floor((L.h - Badge.SIZE) / 2), tag.badge, tag.badge, 1)
+  end
 end
 
 local function drawList(src, list, camX, camY, viewW, billboard)
   if not list then return end
   for _, a in ipairs(list) do
     local tag = LinkTags.tagFor(src, a)
-    if tag and tag.name and tag.name ~= "" then
+    if tag and tag.name and tag.name ~= "" and not tag.hidden then
       local pushed = billboard and billboard(a.x, a.y, camX, camY)
       drawTag(a, tag, camX, camY, viewW, a.kind == "player")
       if pushed then love.graphics.pop() end

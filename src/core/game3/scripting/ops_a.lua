@@ -1284,13 +1284,18 @@ local function dispatch(vm, row)
         if Audio.isFanfareFinished then return Audio.isFanfareFinished() end
         return true
       end
-      if isFinished() then
+      if isFinished() or Audio._suspended then
         return false
       end
       ctx.mode = "native"
       ctx.status = "waiting"
       local done = false
-      ctx.nativePoll = function() return done or isFinished() end
+      local frames = 0
+      ctx.nativePoll = function()
+        frames = frames + 1
+        if frames > 360 or Audio._suspended then return true end
+        return done or isFinished()
+      end
       local finish = function() done = true end
       if a.waitFanfare then
         a.waitFanfare(finish)
@@ -1342,9 +1347,14 @@ local function dispatch(vm, row)
     ctx.mode = "native"
     ctx.status = "waiting"
     local done = false
-    ctx.nativePoll = function() return done end
+    local frames = 0
+    ctx.nativePoll = function()
+      frames = frames + 1
+      if frames > 180 or Audio._suspended then return true end
+      return done or not Audio.isSePlaying(row[1])
+    end
     Audio.waitSe(row[1], function() done = true end)
-    if done or not Audio.isSePlaying(row[1]) then
+    if done or not Audio.isSePlaying(row[1]) or Audio._suspended then
       done = true
       ctx.mode = "bytecode"
       ctx.status = "running"

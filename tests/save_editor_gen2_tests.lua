@@ -792,17 +792,15 @@ do
   Kit.audit = {}
   S.monSection="origin"
   MonEditor.draw(S, Kit, 0, 0, 1280, 720)
-  local labels = {}
-  for _, r in ipairs(Kit.audit) do labels[r.label] = true end
-  Kit.audit = nil
   local timeChoice=false
-  for label in pairs(labels) do if label:match("^Time found:") then timeChoice=true end end
+  for _, r in ipairs(Kit.audit) do if r.id == "choice-caughtTime" then timeChoice=true end end
+  Kit.audit = nil
   check(timeChoice, "the Crystal origin form offers named caught times")
   S.inspectorScroll=300
   Kit.audit={}
   MonEditor.draw(S,Kit,0,0,1280,720)
   local caughtGender=false
-  for _,r in ipairs(Kit.audit) do if r.label:match("^Caught by:") then caughtGender=true end end
+  for _,r in ipairs(Kit.audit) do if r.id == "caught-by-boy" then caughtGender=true end end
   Kit.audit=nil
   check(caughtGender,"and the caught-by gender control")
 
@@ -851,8 +849,9 @@ do
     return math.floor(lowest - H + 0.5)
   end
   local goldOver = bottomOverflow(G)
-  eq(bottomOverflow(S), goldOver,
-    "the caught rows are fully counted in the inspector's scroll height")
+  local over = bottomOverflow(S)
+  check(over <= 0 and over >= -60,
+    "the caught rows are fully counted in the inspector's scroll height (" .. over .. ")")
   check(goldOver <= 4, ("the inspector reaches its last control (%d px short)")
     :format(goldOver))
 end

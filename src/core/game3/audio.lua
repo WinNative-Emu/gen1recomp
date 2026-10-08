@@ -368,13 +368,23 @@ end
 
 function Audio.applyEngineOptions(opts)
   if type(opts) ~= "table" then return end
-  Audio._bgmVolume = level_gain(opts.musicVol, 7)
+  local mode = opts.audioMode or "both"
+  Audio._audioMode = mode
+  if love and love.audio and love.audio.setMixWithSystem then
+    pcall(love.audio.setMixWithSystem, mode ~= "game_only")
+  end
+  if mode == "external_only" then
+    Audio._bgmVolume = 0
+  else
+    Audio._bgmVolume = level_gain(opts.musicVol, 7)
+  end
   Audio._sfxVolume = level_gain(opts.sfxVol, 7)
   local filter = tonumber(opts.musicFilter) or 0
   if filter < 0 then filter = 0 end
   if filter > 3 then filter = 3 end
   Audio._filterLevel = filter > 0 and filter or nil
   Audio.pushMixOptions()
+  Audio.applyGain()
 end
 
 function Audio.applyGain()
@@ -1222,6 +1232,7 @@ function Audio.stopSe(id)
 end
 
 function Audio.isSePlaying(id)
+  if Audio._suspended then return false end
   if id == nil then
     local rse = rse_policy() ~= nil
     for _, src in ipairs(Audio._seSources) do
@@ -1243,6 +1254,7 @@ end
 -- pokeemerald/src/sound.c:624
 -- pokeruby/src/sound.c:554
 function Audio.isSpecialSePlaying()
+  if Audio._suspended then return false end
   for _, src in ipairs(Audio._seSources) do
     local meta = Audio._seMeta[src]
     if meta and tonumber(meta.player) == 3 and src:isPlaying() then return true end
@@ -1251,9 +1263,9 @@ function Audio.isSpecialSePlaying()
 end
 
 function Audio.waitSe(id, cb)
-  -- Poll in update via callback list
+  -- Poll in update via callback list with 180 frame (~3s) defensive timeout
   Audio._waitSe = Audio._waitSe or {}
-  Audio._waitSe[#Audio._waitSe + 1] = { id = id, cb = cb }
+  Audio._waitSe[#Audio._waitSe + 1] = { id = id, cb = cb, frames = 180 }
 end
 
 local function start_fanfare_source(id, mplay)
@@ -1355,6 +1367,7 @@ function Audio.pumpFanfares()
 end
 
 function Audio.isFanfareFinished()
+  if Audio._suspended then return true end
   return not Audio._fanfareActive
 end
 
@@ -1518,7 +1531,7 @@ function Audio.update(dt)
   -- Fanfare countdown (frame-exact)
   if Audio._fanfareActive then
     Audio._fanfareFrames = (Audio._fanfareFrames or 0) - dt * 60
-    if Audio._fanfareFrames <= 0 then
+    if Audio._fanfareFrames <= 0 or Audio._suspended then
       Audio._fanfareActive = false
       Audio._fanfarePending = nil
       local deferred, restore = Audio._fanfareDeferred, Audio._fanfareRestore
@@ -1611,10 +1624,13 @@ function Audio.update(dt)
   if Audio._waitSe then
     local pending = {}
     for _, w in ipairs(Audio._waitSe) do
-      if Audio.isSePlaying(w.id) then
+      w.frames = (w.frames or 180) - dt * 60
+      if not Audio.isSePlaying(w.id) or w.frames <= 0 or Audio._suspended then
+        if w.cb then
+          pcall(w.cb)
+        end
+      else
         pending[#pending + 1] = w
-      elseif w.cb then
-        w.cb()
       end
     end
     Audio._waitSe = pending

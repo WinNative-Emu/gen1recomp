@@ -45,7 +45,9 @@ untouched):
   reports itself up to date (it never chases a release, and it never counts
   as a valid payload to chainload).
 - `shell` - the native-shell contract this build's fused executable
-  implements.
+  implements. Any change to `main.lua`'s `love.run` bumps it and adds the new
+  loop as `tests/data/love_run/shell<N>.lua`; `tests/engine/love_run_shell_matrix.lua`
+  fails until both are done, and runs the payload under every shipped loop.
 - `payloadHost` - the native host family an in-place payload targets. Ordinary
   LÖVE packages use `"love"`. A specialized native package uses a distinct,
   stable identifier and accepts only payloads carrying that same identifier.
@@ -74,7 +76,7 @@ mounted or deleted as stale; the launcher directs the player to a full package.
 Each tagged release `vX.Y.Z` carries the existing per-platform archives
 (`gen1recomp-X.Y.Z-macos.zip`, `-windows.zip`,
 `-linux-x86_64.AppImage`, `-linux-arm64.AppImage`, `-linux.flatpak`,
-`-android.apk`, `-ios.ipa`, `-switch.zip`, Xbox and
+`-android.apk`, `-ios.ipa`, `-switch.zip`, `-ps4.pkg`, Xbox and
 PortMaster archives) plus two assets the updater itself consumes:
 
 - `gen1recomp-X.Y.Z.love` - the payload, matched by the exact pattern
@@ -179,8 +181,13 @@ bundled game, in that case.
   in-app. If neither transport exists, the worker reports `needs_full` and
   the launcher chip opens `Check.releaseUrl()`. Native package-only changes
   still need a full reinstall (`minShell` / `payloadHost` gate →
-  `needs_full`). Applying a downloaded payload on Android relaunches via
-  `love.system.restartApp`; iOS still uses in-process `quit("restart")`.
+  `needs_full`). Applying a downloaded payload on Android restarts
+  in-process with `quit("restart")` only when the running `love.run` sets
+  `POKEPORT_LOOP_RESTART`; an older APK shell's stepper would hand that
+  string to `os.exit`, so there `HostShell.restart` falls back to
+  `love.system.restartApp` (or a plain quit) and EXIT GAME rebuilds the
+  launcher in the same Lua state instead. iOS uses a bare `quit()`, which
+  its `love.cpp` turns into a restart.
 - **Android full updates are user-confirmed and certificate-bound.** The app
   uses a private `FileProvider` cache path plus
   `Intent.ACTION_INSTALL_PACKAGE`, checks Android 8+'s per-app

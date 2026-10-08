@@ -44,6 +44,8 @@ return {
   eggHatchText = "UnknownString_81B2C68",
   -- pokeruby/src/field_poison.c:81
   poisonFaintText = "fieldPoisonText_PokemonFainted",
+  -- pokeruby/src/field_control_avatar.c:580
+  fieldPoisonScript = "gUnknown_081A14B8",
   -- pokeruby/src/event_object_movement.c:1767
   invalidGfx = "OBJ_EVENT_GFX_LITTLE_BOY_1",
   fieldMoveScripts = true,

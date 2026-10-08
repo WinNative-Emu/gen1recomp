@@ -596,18 +596,37 @@ function SB.ownedByAnotherPlayer(sess)
   return SB.base(sess, 0).secretBaseId ~= SB._curId
 end
 
--- pokeemerald/src/secret_base.c:728; the European carts put the owner in the
--- row's STR_VAR_1 ("BASE DE {STR_VAR_1}", pret pokeemerald multi-language,
--- src/secret_base.c:732), the US and Japanese ones append the row to it.
+local BASE_LABELS = { "gText_ApostropheSBase", "gOtherText_PlayersBase" }
+local baseRows = setmetatable({}, { __mode = "k" })
+
+local function baseRow(RomText, Strings, label)
+  local found, ir = pcall(RomText.ir, label)
+  if not found or ir == nil then return nil end
+  local active, hit = Strings.active(), baseRows[ir]
+  if not hit or hit.active ~= active or hit.label ~= label then
+    local ok, text = pcall(RomText.plain, label, { stringVars = { "\1" }, playerName = "\1" })
+    hit = { active = active, label = label, row = ok and text or false }
+    baseRows[ir] = hit
+  end
+  return hit.row or nil
+end
+
+-- pokeemerald/src/secret_base.c:728, pokeruby/src/secret_base.c:629
+function SB.nameWith(owner)
+  owner = tostring(owner or "")
+  local RomText, Strings = require("src.core.game3.rom_text"), require("src.core.Strings")
+  for _, label in ipairs(BASE_LABELS) do
+    local base = baseRow(RomText, Strings, label)
+    if base then
+      if base:find("\1", 1, true) then return (base:gsub("\1", function() return owner end)) end
+      return owner .. base
+    end
+  end
+  return owner .. "'s BASE"
+end
+
 function SB.name(idx, sess)
-  local b = SB.base(sess, idx)
-  local owner = tostring(b.trainerName or "")
-  local ok, base = pcall(function()
-    return require("src.core.game3.rom_text").plain("gText_ApostropheSBase", { stringVars = { "\1" } })
-  end)
-  if not ok then return owner .. "'s BASE" end
-  if base:find("\1", 1, true) then return (base:gsub("\1", function() return owner end)) end
-  return owner .. base
+  return SB.nameWith(SB.base(sess, idx).trainerName)
 end
 
 -- pokeemerald/src/secret_base.c:735

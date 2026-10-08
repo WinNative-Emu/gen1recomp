@@ -2,6 +2,7 @@ local Metadata = {}
 local NATURES = { "Hardy", "Lonely", "Brave", "Adamant", "Naughty", "Bold", "Docile",
   "Relaxed", "Impish", "Lax", "Timid", "Hasty", "Serious", "Jolly", "Naive", "Modest",
   "Mild", "Quiet", "Bashful", "Rash", "Calm", "Gentle", "Sassy", "Careful", "Quirky" }
+Metadata.NATURES = NATURES
 local function number(value) return tonumber(value) end
 local function name(records, key)
   local value = records and records[key]

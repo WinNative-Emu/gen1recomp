@@ -43,6 +43,8 @@ local function fullAssetName(version, osName, arch, port)
     return "gen1recomp-" .. version .. "-xbox-uwp.zip"
   elseif osName == "NX" then
     return "gen1recomp-" .. version .. "-switch.zip"
+  elseif osName == "PS4" then
+    return "gen1recomp-" .. version .. "-ps4.pkg"
   elseif osName == "Linux" and (port == "flatpak"
       or (type(os.getenv) == "function" and os.getenv("FLATPAK_ID"))) then
     return "gen1recomp-" .. version .. "-linux.flatpak"

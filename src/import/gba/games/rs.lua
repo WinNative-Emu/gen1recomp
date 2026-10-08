@@ -6,7 +6,7 @@ local Rs = {}
 local function tables(game, revision)
   local V = VersionsRse.new(game, revision.build)
   local sym, count = V.sym, V.count
-  V.CACHE_VERSION = 4
+  V.CACHE_VERSION = 5
   V.NATIVE_VERSION = 2
   V.OW_VERSION = 1
   V.ANIM_VERSION = 1

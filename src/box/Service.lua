@@ -428,6 +428,30 @@ function Service:migrate(refs, version, preview)
   return self:commit(state)
 end
 
+function Service:depositItem(source, id, count)
+  local save, why, body = self:read(source)
+  if not save then return nil, why end
+  local nextState, nextSave = require("src.box.Items").deposit(self.state, save, source.version, id, count)
+  if not nextState then return nil, nextSave end
+  return self:commit(nextState, source, body, nextSave)
+end
+
+function Service:withdrawItem(source, key, count)
+  local save, why, body = self:read(source)
+  if not save then return nil, why end
+  local nextState, nextSave = require("src.box.Items").withdraw(self.state, save, source.version, key, count)
+  if not nextState then return nil, nextSave end
+  return self:commit(nextState, source, body, nextSave)
+end
+
+for _, operation in ipairs({ "give", "takeHeld", "swapBall" }) do
+  Service[operation] = function(self, ...)
+    local state, why = require("src.box.Items")[operation](self.state, ...)
+    if not state then return nil, why end
+    return self:commit(state)
+  end
+end
+
 function Service:restoreOriginal(ref, index)
   local state, why = require("src.box.Migration").restore(self.state, ref, index)
   if not state then return nil, why end

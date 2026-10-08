@@ -111,10 +111,11 @@ local DATA_MODULES = {
   hiddenItems = { "src.save_convert.data.hidden_items", "src/save_convert/data/hidden_items.lua" },
   tradeFlags = { "src.save_convert.data.trade_flags", "src/save_convert/data/trade_flags.lua" },
   field      = { "data.generated.field",            "data/generated/field.lua" },
+  text_pointers = { "data.generated.text_pointers", "data/generated/text_pointers.lua" },
   trainerHeaders = { "data.generated.trainer_headers", "data/generated/trainer_headers.lua" },
 }
 
-local OPTIONAL_MODULES = { tilesets = true, audio = true, field = true, trainerHeaders = true }
+local OPTIONAL_MODULES = { tilesets = true, audio = true, field = true, trainerHeaders = true, text_pointers = true }
 
 -- Yellow renumbers wEventFlags bits: pokeyellow's constants/event_constants.asm
 -- inserts events pokered does not have (the Jessie & James fights, catch
@@ -619,6 +620,54 @@ end
 -- GenSave reproduces every unmodeled region from it; otherwise those regions
 -- are zero-filled. gameVersion selects the crosswalk tables exactly as in
 -- importSav. On failure returns nil + a message (never raises).
+local function gen2Sealed(saveTable, gameVersion, g2data)
+  local Safety = require("src.world.gen2.UnionSafety")
+  local view = { gen2Maps = g2data.maps }
+  if not Safety.isAdded(view, saveTable.position) then return saveTable end
+  for key, name in pairs({ gen2Tilesets = "tilesets", gen2Landmarks = "landmarks" }) do
+    g2data[name] = g2data[name] or loadCacheTable(gameVersion, "data/generated/" .. name .. ".lua")
+    if not g2data[name] then return nil, gen2CacheMissing(gameVersion) end
+    view[key] = g2data[name]
+  end
+  local out = {}
+  for k, v in pairs(saveTable) do out[k] = v end
+  Safety.seal(out, view)
+  return out
+end
+
+local function gen1Sealed(saveTable, data, gameVersion)
+  local UnionSafety = require("src.world.gen1.UnionSafety")
+  if not data.text_pointers then
+    local p = type(saveTable.player) == "table" and saveTable.player or {}
+    local def = data.maps and data.maps[p.map]
+    local desk = UnionSafety.ADDED[p.map]
+    for _, o in ipairs(type(def) == "table" and def.objects or {}) do
+      if o.sprite == "SPRITE_LINK_RECEPTIONIST" then desk = true end
+    end
+    if desk then return nil, gen1CacheMissing(gameVersion, DATA_MODULES.text_pointers[2]) end
+  end
+  return UnionSafety.forWrite(saveTable, data)
+end
+
+local function gen3Sealed(saveTable, gameVersion)
+  local Spot = require("src.core.game3.link.union_save_spot")
+  local codec = Gen3Save.forVersion(gameVersion)
+  local lookup = Spot.cacheLookup(function(rel) return gen3CacheBytes(gameVersion, rel) end,
+    function(mapId)
+      local w = codec.cartWarp({ map = mapId })
+      return w and (w.group .. "_" .. w.num) or nil
+    end, codec.mapFor)
+  if not Spot.isAdded(gameVersion, lookup, saveTable.map, saveTable.x, saveTable.y) then return saveTable end
+  local o = Spot.resolve(gameVersion, lookup, saveTable)
+  if not o then return nil, codec.MSG.noMap end
+  local out = {}
+  for k, v in pairs(saveTable) do out[k] = v end
+  out.map, out.x, out.y, out.facing = o.map, o.x, o.y, o.facing
+  local bit = require("bit")
+  out.specialSaveWarpFlags = bit.band(tonumber(saveTable.specialSaveWarpFlags) or 0, bit.bnot(codec.L.CONTINUE_GAME_WARP))
+  return out
+end
+
 local function exportRaw(saveTable, gameVersion, cartImage)
   if type(saveTable) ~= "table" then
     return nil, "expected a save table"
@@ -626,7 +675,9 @@ local function exportRaw(saveTable, gameVersion, cartImage)
   local supported, unsupportedWhy = SaveConvert.exportSupported(gameVersion)
   if not supported then return nil, unsupportedWhy end
   if isGen3(gameVersion) then
-    local ok, bytes, err = pcall(Gen3Save.forVersion(gameVersion).exportPort, saveTable, gen3ExportOpts(gameVersion, cartImage))
+    local sealed, serr = gen3Sealed(saveTable, gameVersion)
+    if not sealed then return nil, serr end
+    local ok, bytes, err = pcall(Gen3Save.forVersion(gameVersion).exportPort, sealed, gen3ExportOpts(gameVersion, cartImage))
     if not ok then return nil, "encode failed: " .. tostring(bytes) end
     return bytes, err
   end
@@ -634,12 +685,17 @@ local function exportRaw(saveTable, gameVersion, cartImage)
   if Gen2Save.layoutFor(gameVersion) then
     local g2data = ensureGen2Data(gameVersion)
     if not g2data then return nil, gen2CacheMissing(gameVersion) end
-    local ok, bytes, err = pcall(Gen2Save.encode, saveTable, gameVersion, cartImage, g2data)
+    local sealed, serr = gen2Sealed(saveTable, gameVersion, g2data)
+    if not sealed then return nil, serr end
+    local ok, bytes, err = pcall(Gen2Save.encode, sealed, gameVersion, cartImage, g2data)
     if not ok then return nil, "encode failed: " .. tostring(bytes) end
     return bytes, err
   end
   local data, derr = ensureData(gameVersion)
   if not data then return nil, derr end
+  local serr
+  saveTable, serr = gen1Sealed(saveTable, data, gameVersion)
+  if not saveTable then return nil, serr end
   local ok, bytes = pcall(GenSave.encode, saveTable, data, saveTable.rawImport or cartImage)
   if not ok then return nil, "encode failed: " .. tostring(bytes) end
   return bytes

@@ -6,6 +6,8 @@ local Music = {}
 local VOLUME = 0.7
 
 local volumeScale = 1
+local storedVolumeLevel = 7
+local currentAudioMode = "both"
 local FILTER_HIGHGAIN = { 0.4, 0.16, 0.064 }
 local filterLevel = 0
 
@@ -507,9 +509,26 @@ end
 -- 0-7 music volume (0 mutes), applied to the playing song and the
 -- queued loop body as well as everything played later
 function Music.setVolumeLevel(level)
-  volumeScale = math.max(0, math.min(7, level or 7)) / 7
+  if level ~= nil then storedVolumeLevel = level end
+  if currentAudioMode == "external_only" then
+    volumeScale = 0
+  else
+    volumeScale = math.max(0, math.min(7, storedVolumeLevel or 7)) / 7
+  end
   applyVolume(state.source)
   applyVolume(state.loopSource)
+end
+
+function Music.setAudioMode(mode)
+  currentAudioMode = mode or "both"
+  if love and love.audio and love.audio.setMixWithSystem then
+    pcall(love.audio.setMixWithSystem, currentAudioMode ~= "game_only")
+  end
+  Music.setVolumeLevel(storedVolumeLevel)
+end
+
+function Music.audioMode()
+  return currentAudioMode
 end
 
 -- music low-pass filter level, 0 (OFF) to 3
@@ -528,7 +547,12 @@ end
 -- re-apply persisted audio options (Game calls this on boot and after
 -- loading a save)
 function Music.applyOptions(opts)
-  Music.setVolumeLevel(opts and opts.musicVol or 7)
+  if opts and opts.audioMode then
+    Music.setAudioMode(opts.audioMode)
+  else
+    Music.setAudioMode(currentAudioMode)
+  end
+  Music.setVolumeLevel(opts and opts.musicVol or storedVolumeLevel or 7)
   Music.setFilterLevel(opts and opts.musicFilter or 0)
   -- engine/menus/options_menu.asm SOUND row (wOptions STEREO bit)
   local ChipAudio = require("src.core.ChipAudio")

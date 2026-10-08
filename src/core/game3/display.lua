@@ -360,6 +360,7 @@ local function presentPlanes(game)
   local vw, vh = Renderer:worldViewSize()
   drawFieldPlane(game, vw, vh, Renderer)
   love.graphics.pop()
+  love.graphics.setCanvas(Renderer.worldCanvas)
   local Transition = package.loaded["src.core.game3.battle_transition"]
   if Transition and Transition.isActive and Transition.isActive() then
     Transition.drawWorld(Renderer.worldCanvas, vw, vh)

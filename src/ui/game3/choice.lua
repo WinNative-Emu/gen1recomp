@@ -36,6 +36,25 @@ function Choice.reset()
   return true
 end
 
+local function uiProfile()
+  local okR, Runtime = pcall(require, "src.core.game3.runtime")
+  local session = okR and type(Runtime) == "table" and Runtime.getSession and Runtime.getSession() or nil
+  local okP, Profile = pcall(require, "src.core.game3.profile")
+  local okF, row = pcall(function() return okP and Profile.forSession(session) end)
+  return okF and type(row) == "table" and type(row.ui) == "table" and row.ui or nil
+end
+
+function Choice.fieldLayout()
+  local ui = uiProfile()
+  return ui and ui.saveMenu == "rs" and "rs" or "frlg"
+end
+
+-- pokeemerald/src/menu.c:98, pokefirered/src/new_menu_helpers.c:48
+function Choice.yesNoWidth()
+  local ui = uiProfile()
+  return ui and ui.saveMenu == "rse" and 5 or 6
+end
+
 function Choice.yesNo(cb, layout)
   Choice.active = true
   Choice.kind = "yesno"
@@ -51,9 +70,18 @@ function Choice.yesNo(cb, layout)
   end
   Choice.cursor = 1
   Choice.done = cb
-  -- pokefirered/src/new_menu_helpers.c:48
-  Choice.left = tonumber(layout.left) or 21
-  Choice.top = tonumber(layout.top) or 9
+  if layout.style == "battle" then
+    Choice.left = tonumber(layout.left) or 24
+    Choice.top = tonumber(layout.top) or 9
+  elseif Choice.fieldLayout() == "rs" then
+    -- pokeruby/src/script_menu.c:765, pokeruby/src/start_menu.c:698
+    Choice.left = tonumber(layout.left) or 20
+    Choice.top = tonumber(layout.top) or 8
+  else
+    -- pokeemerald/src/script_menu.c:198, pokefirered/src/script_menu.c:864
+    Choice.left = 21
+    Choice.top = 9
+  end
   Choice.maxRight = nil
   Choice.cols = 1
   Choice.ignoreBPress = layout.ignoreBPress or false
@@ -168,7 +196,18 @@ end
 
 -- pokefirered/src/menu.c:531
 function Choice.drawYesNo(L, Tp, cursor, labels)
-  Window.stdFrame(Window.template(L, Tp, 6, 4))
+  if Choice.fieldLayout() == "rs" then
+    -- pokeruby/src/menu.c:608
+    Window.stdFrame(Window.template(L + 1, Tp + 1, 5, 4))
+    for i, lab in ipairs(labels) do
+      -- pokeruby/src/menu.c:602
+      Window.printPx(lab, (L + 1) * 8, (Tp + 1 + 2 * (i - 1)) * 8)
+    end
+    -- pokeruby/src/menu.c:721, :750
+    require("src.ui.game3.rs.menu_cursor").draw((L + 1) * 8, (Tp + 1) * 8 + (cursor - 1) * 16, 40)
+    return
+  end
+  Window.stdFrame(Window.template(L, Tp, Choice.yesNoWidth(), 4))
   for i, lab in ipairs(labels) do
     local rowPx = Tp * 8 + 2 + (i - 1) * 14
     if i == cursor then Window.cursorPx(L * 8, rowPx) end
@@ -176,28 +215,129 @@ function Choice.drawYesNo(L, Tp, cursor, labels)
   end
 end
 
+function Choice.battleYesNoGeometry(layout, L, Tp)
+  L, Tp = L or 24, Tp or 9
+  if layout == "rs" then
+    -- pokeruby/src/battle_script_commands.c:5273
+    return {
+      frame = { left = L + 1, top = Tp, width = 4, height = 4 },
+      cursor = "rs", cursorX = (L + 1) * 8, cursorWidth = 32,
+      -- pokeruby/src/battle_script_commands.c:9617
+      rowY = function(i) return Tp * 8 + (i - 1) * 16 end,
+      -- pokeruby/src/battle_script_commands.c:5274
+      textX = (L + 1) * 8, textDy = 0,
+    }
+  elseif layout == "emerald" then
+    -- pokeemerald/include/battle_script_commands.h:11
+    return {
+      frame = { left = L + 1, top = Tp, width = 4, height = 4 },
+      -- pokeemerald/src/battle_script_commands.c:10206
+      cursor = "arrow", cursorX = (L + 1) * 8,
+      rowY = function(i) return (Tp + (i - 1) * 2) * 8 end,
+      -- pokeemerald/src/battle_message.c:1600
+      textX = (L + 2) * 8, textDy = 1,
+    }
+  end
+  -- pokefirered/src/battle_script_commands.c:5149
+  return {
+    frame = { left = L, top = Tp, width = 5, height = 4 },
+    -- pokefirered/src/battle_script_commands.c:9775
+    cursor = "arrow", cursorX = L * 8,
+    rowY = function(i) return (Tp + (i - 1) * 2) * 8 end,
+    -- pokefirered/src/battle_message.c:2570
+    textX = (L + 1) * 8, textDy = 2,
+  }
+end
+
+-- pokeruby/src/script_menu.c:626
+local function rsWidthTiles(labels)
+  local FrlgFont = require("src.ui.game3.frlg_font")
+  local w = 0
+  for _, lab in ipairs(labels) do
+    local px = FrlgFont.measure(tostring(lab or ""))
+    local tiles = math.floor((px + 7) / 8)
+    if tiles > w then w = tiles end
+  end
+  return w
+end
+
+-- pokeruby/src/menu.c:458
+local function rsGridRows(n, cols)
+  if cols == 1 or cols == n or not (math.floor(n / 2) < cols or n % 2 ~= 0) then
+    return math.floor(n / cols)
+  end
+  return math.floor(n / cols) + 1
+end
+
+function Choice.rsMultiGeometry(labels, left, top, cols)
+  local n = #labels
+  local w = rsWidthTiles(labels)
+  local tx, ty = left, top
+  if cols <= 1 then
+    -- pokeruby/src/script_menu.c:647
+    if tx + w > 29 then tx = 29 - w end
+    local cells = {}
+    for i = 1, n do
+      cells[i] = { x = tx * 8, y = (ty + 2 * (i - 1)) * 8 }
+    end
+    return { frame = { tx, ty, w, 2 * n }, cells = cells, barWidth = w * 8 }
+  end
+  -- pokeruby/src/menu.c:454
+  local rows = rsGridRows(n, cols)
+  local total = cols * (w + 1) - 1
+  local cells = {}
+  for i = 1, n do
+    local c = (i - 1) % cols
+    local r = math.floor((i - 1) / cols)
+    cells[i] = { x = (tx + c * (w + 1)) * 8, y = (ty + 2 * r) * 8 }
+  end
+  return { frame = { tx, ty, total, 2 * rows }, cells = cells, barWidth = w * 8 }
+end
+
+-- pokeruby/src/script_menu.c:655, pokeruby/src/menu.c:524
+function Choice.drawRsMulti()
+  local g = Choice.rsMultiGeometry(Choice.options, Choice.left or 20, Choice.top or 5, Choice.cols or 1)
+  Window.stdFrame(Window.template(g.frame[1], g.frame[2], g.frame[3], g.frame[4]))
+  for i, lab in ipairs(Choice.options) do
+    Window.printPx(lab, g.cells[i].x, g.cells[i].y)
+  end
+  local cur = g.cells[Choice.cursor] or g.cells[1]
+  if cur then
+    -- pokeruby/src/menu.c:748
+    require("src.ui.game3.rs.menu_cursor").draw(cur.x, cur.y, g.barWidth)
+  end
+end
+
 function Choice.draw()
   if not Choice.active or not Choice.options then return end
   if Choice.style == "battle" and Choice.kind == "yesno" then
-    -- pokefirered/src/battle_script_commands.c:9775
-    local L, Tp = Choice.left, Choice.top
+    local okB, BattleChrome = pcall(require, "src.ui.game3.battle_chrome")
+    local layout = okB and type(BattleChrome) == "table" and BattleChrome.layout and BattleChrome.layout() or "frlg"
+    local g = Choice.battleYesNoGeometry(layout, Choice.left, Choice.top)
     local okR, Runtime = pcall(require, "src.core.game3.runtime")
     local session = okR and type(Runtime) == "table" and Runtime.getSession and Runtime.getSession()
     local opts = type(session) == "table" and session.options or nil
     local frameType = tonumber(type(opts) == "table" and opts.frameType or nil) or 0
-    -- pokefirered/src/battle_bg.c:693
-    Window.userFrame(Window.template(L, Tp, 5, 4), frameType)
+    -- pokefirered/src/battle_bg.c:694
+    Window.userFrame(Window.template(g.frame.left, g.frame.top, g.frame.width, g.frame.height), frameType)
     for i, lab in ipairs(Choice.options) do
-      local rowPx = (Tp + (i - 1) * 2) * 8
-      if i == Choice.cursor then Window.cursorPx(L * 8, rowPx) end
-      -- pokefirered/src/battle_message.c:2574
-      Window.printPx(lab, (L + 1) * 8, rowPx + 2)
+      local rowPx = g.rowY(i)
+      if i == Choice.cursor and g.cursor == "arrow" then Window.cursorPx(g.cursorX, rowPx) end
+      Window.printPx(lab, g.textX, rowPx + g.textDy)
+    end
+    if g.cursor == "rs" then
+      require("src.ui.game3.rs.menu_cursor").draw(g.cursorX, g.rowY(Choice.cursor), g.cursorWidth)
     end
     return
   end
 
   if Choice.kind == "yesno" then
     Choice.drawYesNo(Choice.left, Choice.top, Choice.cursor, Choice.options)
+    return
+  end
+
+  if Choice.fieldLayout() == "rs" then
+    Choice.drawRsMulti()
     return
   end
 

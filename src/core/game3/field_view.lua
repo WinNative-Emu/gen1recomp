@@ -648,6 +648,7 @@ local function collectGame3Actors(game, mapDef, camX, camY, px, py, facing, walk
       a.sprite = eo.sprite or spriteNameForObj(eo.def or {})
       a.graphicsId = eo.graphicsId or (eo.def and (eo.def.graphicsId or eo.def.graphics))
       a.alpha = Objects.fadeAlpha(eo)
+      a.draw = eo.foreign and eo.draw or nil
       a.priority = nil
       a.subpriority = nil
       actors[#actors + 1] = a

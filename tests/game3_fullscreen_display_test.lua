@@ -147,7 +147,7 @@ c = drawYesNo({ left = 21, top = 9 }, true)
 for _, e in ipairs(c) do if e[1] == "cursor" then cur = e end end
 check(cur and cur[3] == 88, "cursor on NO sits one 14 px row down")
 c = drawYesNo({ left = 20, top = 8 })
-check(c[1][2] == 20 and c[1][3] == 8 and c[1][4] == 6, "explicit left/top still honored with the 6-tile width")
+check(c[1][2] == 21 and c[1][3] == 9 and c[1][4] == 6, "explicit left/top ignored: ScriptMenu_YesNo fixed template 21,9 6x4")
 
 print(("game3_fullscreen_display_test: %s (%d failed)"):format(failed == 0 and "PASS" or "FAIL", failed))
 if failed > 0 then os.exit(1) end

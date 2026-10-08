@@ -20,7 +20,7 @@ local function readPC(s)
   local source = s.sources[s.sourceIndex]
   if not source or not s.service then return end
   local save, why, body = s.service:read(source)
-  if not save then s.notice = why; return end
+  if not save then s.notice, s.noticeKind = why, "error"; return end
   s.pcSave, s.pcBody = save, body
   local generation = GameVersion.generation(source.version)
   for _, row in ipairs(Records.candidates(save, generation)) do
@@ -37,7 +37,8 @@ function BoxPanel.refresh(imp)
   Catalog.reset()
   local previous = imp._boxState or {}
   local service, why = Service.open()
-  local s = { service = service, notice = why or (service and service.recoveryNotice), sources = Service.sources(),
+  local s = { service = service, notice = why or (service and service.recoveryNotice), noticeKind = why and "error" or "info",
+    sources = Service.sources(),
     sourceIndex = 1, box = previous.box or 1,
     pcBox = previous.pcBox or 1, query = previous.query or "", sort = previous.sort or "slot",
     selectedBox = {}, selectedPC = {}, pageBox = 1, pagePC = 1, sourcePage = 1, filterQuery = previous.filterQuery,
@@ -87,7 +88,7 @@ local function checkDisk(s, dt)
   s._diskSig, s._diskBody = sig, s.service.body
   local stale = fs.read(Store.PATH) ~= s.service.body
   if stale and not s.diskStale then
-    s.notice, s._latestBackup = "Box changed outside this screen. Reload before making changes.", nil
+    s.notice, s.noticeKind, s.noticeSticky, s._latestBackup = "Box changed outside this screen. Reload before making changes.", "error", true, nil
   end
   s.diskStale = stale or nil
 end
@@ -97,6 +98,7 @@ function BoxPanel.update(imp, dt)
   if not s then return end
   checkDisk(s, dt)
   s.artTime = (s.artTime or 0) + math.max(0, dt or 0)
+  if s.migrationFetch then require("src.import.BoxTools").update(s) end
   if s.animationEntry ~= s.inspect or s.animation and s.animation.released then animateInspection(s) end
   Animation.update(s.animation, dt)
   local Showcase = require("src.box.Showcase")
@@ -126,7 +128,7 @@ local function perform(imp, operation, text)
   if not called then why, ok = ok, nil end
   s._latestBackup = nil
   if not ok then
-    s.notice = tostring(why or "Box operation failed.")
+    s.notice, s.noticeKind = tostring(why or "Box operation failed."), "error"
     local beforeBox, beforePC = s.service and s.service.body, s.pcBody
     if s.service then
       local recovered, err = Service.open(s.service.fs)
@@ -142,7 +144,7 @@ local function perform(imp, operation, text)
     end
     return false
   end
-  s.notice = text
+  s.notice, s.noticeKind = text, "ok"
   require("src.box.Cry").stop()
   Animation.release(s.animation)
   s.animation, s.animationEntry = nil, nil
@@ -159,7 +161,7 @@ end
 
 function BoxPanel.importGCI(imp, bytes, why)
   local s = state(imp)
-  if not bytes then s.notice = why or "The file could not be read."; return false end
+  if not bytes then s.notice, s.noticeKind = why or "The file could not be read.", "error"; return false end
   if not s.service then return false end
   return perform(imp, function() return s.service:importGCI(bytes) end, "Native Pokémon Box save imported.")
 end
@@ -701,7 +703,7 @@ local function drawBody(imp, s, x, y, w, _, m)
     Kit.textRight("small", ("%d / %d"):format(Store.count(s.service.state), Store.BOXES * Store.SLOTS), x + w, y + 3, PAL.muted)
   end
   y = y + Kit.textHeight("button") + gap
-  if s.notice then y = y + Kit.textWrapped("small", Strings(s.notice), x, y, w, s.service and PAL.muted or PAL.red, 3) + gap end
+  if s.notice and not s.service then y = y + Kit.textWrapped("small", Strings(s.notice), x, y, w, PAL.red, 3) + gap end
   local queryAffectsPage = not s.summary and (not s.toolsPage or s.toolsPage=="List"
     or s.toolsPage=="Filters" or s.toolsPage=="Showcase"
     or s.toolsPage=="Arrange" and s.arrangeSection=="Move")
@@ -815,15 +817,15 @@ local function drawBody(imp, s, x, y, w, _, m)
       if s[movingKey] then return end
       s[movingKey] = selected(selection); s.query = ""
       if kind == "box" then s.sort = "slot" end
-      s.notice = kind == "box" and "Pick the first destination slot. Occupied slots swap back."
-        or "Pick a slot. The Pokémon fill that slot and the next free ones."
+      s.notice, s.noticeKind = kind == "box" and "Pick the first destination slot. Occupied slots swap back."
+        or "Pick a slot. The Pokémon fill that slot and the next free ones.", "info"
     end, moving ~= nil)
     local used = moveW + gap
     if moving then
       local cancelW = math.min(110 * m.s, selectorW * .2)
       LV().btn(imp, selectorX + used, selectorY, cancelW, rowH, "box-move-cancel", Strings("Cancel"), {
         kind = "danger", font = "small", icon = "x",
-        action = function() s[movingKey] = nil; s.notice = nil end,
+        action = function() s[movingKey] = nil; UI.toast(imp, nil) end,
       })
       used = used + cancelW + gap
     end
@@ -849,6 +851,11 @@ local function drawBody(imp, s, x, y, w, _, m)
 end
 
 function BoxPanel.draw(imp, x, y, w, h, m)
+  local current = state(imp)
+  if current.notice and current.service then
+    UI.toast(imp, current.notice, current.noticeKind, current.noticeSticky)
+    current.notice, current.noticeKind, current.noticeSticky = nil, nil, nil
+  end
   local f=imp._boxOrganizerFooter
   if f and imp._boxState==f.s and f.s.toolsPage=="Arrange" then
     Kit.occlude(f.x,f.y-10*m.s,f.w,f.h+20*m.s)

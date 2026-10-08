@@ -2111,6 +2111,11 @@ function Field.respawnAtHeal(opts)
       Flags.setVar(Space.store, Space.vm and Space.vm.ctx or nil, Ctx.VAR_LAST_TALKED, healerId)
     end
   end
+  if whiteOut and healRow then
+    -- pokeemerald/src/overworld.c:1563
+    local Fade = lazyReq("src.ui.game3.fade")
+    if Fade.active or (Fade.t or 0) > 0 then Fade.begin(Fade.MODE.FROM_BLACK, 1) end
+  end
   if whiteOut and not healRow then
     -- pokefirered/src/overworld.c:1558
     local home = HealLocations.get(1)

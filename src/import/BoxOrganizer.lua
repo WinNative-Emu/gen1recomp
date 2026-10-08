@@ -133,7 +133,7 @@ local function previewActions(imp,s,o,layout,report,why,x,y,w,m,api,compact)
   api.button(imp,x,y,(w-gap)/2,h,"organize-preview","Preview",function()
     local source=s.sources[s.sourceIndex]
     local p,err=s.service:previewOrganize(o.target,source,o.effective or o.config)
-    o.preview,s.notice,o.previewBox=p,err,1
+    o.preview,s.notice,s.noticeKind,o.previewBox=p,err,"error",1
     if p then
       local moves={}
       for _,row in ipairs(p.report.assignments) do
@@ -243,7 +243,7 @@ function Panel.draw(imp,s,x,y,w,m,api,mode)
   end
   local profileIndex=findProfile(profiles,mode,o.profile)
   local function stalePreset()
-    s.notice,o.profile="That preset changed. Choose it again.",nil
+    s.notice,s.noticeKind,o.profile="That preset changed. Choose it again.","error",nil
   end
   local function savePreset(update)
     require("src.import.BoxPrompt").open(imp,"Preset name",update and profiles[profileIndex] and profiles[profileIndex].name or "",64,function(name)

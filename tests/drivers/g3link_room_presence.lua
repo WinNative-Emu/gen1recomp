@@ -105,10 +105,9 @@ return function(game)
   local function peer(id, name, trainerId, gender, version, status)
     local s = relay:seat(id, name)
     relay:handle(s, { type = "lobby_hello", protocol = 3, name = name, profiles = { live },
-      presence = { where = "launcher", status = "idle", version = version } })
+      presence = { where = "launcher", status = status or "idle", version = version } })
     s.avatar = { name = name, trainerId = trainerId, gender = gender, version = version }
-    s.status = status
-    relay:handle(s, { type = "plaza_join", kind = "union", cap = 40, profile = live, avatar = s.avatar })
+    relay:handle(s, { type = "plaza_join", kind = "union", cap = 40, xgen = 1, profile = live, avatar = s.avatar })
     return s
   end
 

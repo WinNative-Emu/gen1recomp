@@ -9,7 +9,7 @@ local BACKOFF = { 1, 2, 4, 8, 15 }
 local MAX_ATTEMPTS = 12
 local MATCH_STAGES = { battling = true }
 local ROOM_STAGES = { waiting = true, ready = true, battling = true,
-                      ended = true }
+                      ended = true, prep = true, trading = true }
 local UNACKED_MAX = 512
 
 local function now()
@@ -326,6 +326,21 @@ function RoomSession:take(messageType, predicate)
   return nil
 end
 
+function RoomSession:takeWhere(predicate)
+  local rest = leftover(self)
+  local inbox = rest or S.roomInbox
+  for index = 1, #inbox do
+    local entry = inbox[index]
+    local msg = shaped(entry)
+    if predicate(msg) == true then
+      table.remove(inbox, index)
+      if rest then return msg end
+      return deliver({ entry })[1]
+    end
+  end
+  return nil
+end
+
 function RoomSession:unread(messages)
   if type(messages) ~= "table" then return end
   local inbox = leftover(self) or S.roomInbox
@@ -532,6 +547,8 @@ local function applyRoomState(msg)
     maxSpectators = msg.maxSpectators,
     leader = msg.leader,
     deadlines = deadlines,
+    mode = msg.mode,
+    xg = msg.xg,
   }
   S.match = msg.match or S.match
   S.role, S.seat = myRole(S.room)
@@ -565,7 +582,8 @@ clearRoom = function()
     for i = 1, #inbox do
       local entry = inbox[i]
       local kind = entry.msg and entry.msg.type
-      if entry.relay and (kind == "trade_commit" or kind == "trade_abort") then
+      if entry.relay and (kind == "trade_commit" or kind == "trade_abort"
+                          or Protocol2.XG_RELAY_TYPES[kind]) then
         keep[#keep + 1] = entry
       end
     end
@@ -837,7 +855,7 @@ local function resendState()
   if S.presence then sendRaw(Protocol2.presence(S.presence)) end
   for _, kind in ipairs({ "union", "wireless" }) do
     local j = S.plazaJoins[kind]
-    if j then sendRaw(Protocol2.plazaJoin(kind, j.profile, j.avatar, j.cap)) end
+    if j then sendRaw(Protocol2.plazaJoin(kind, j.profile, j.avatar, j.cap, j.opts)) end
   end
   local board = S.presence and S.presence.board
   if S.plazaJoins.union and type(board) == "table" then
@@ -1126,6 +1144,7 @@ helloMessage = function()
     platform = S.platform,
     profiles = opts.profiles,
     presence = S.presence,
+    xgen = Protocol2.XGEN,
   })
 end
 
@@ -1404,11 +1423,25 @@ function Client.replyInvite(id, accept)
   return sendRaw(Protocol2.inviteReply(id, accept == true))
 end
 
-function Client.joinPlaza(kind, profile, avatar, cap)
+function Client.joinPlaza(kind, profile, avatar, cap, opts)
   profile = profile or defaultProfile(3)
   if cap == nil and kind == "union" then cap = Protocol2.PLAZA_CAP end
-  S.plazaJoins[kind] = { profile = profile, avatar = avatar, cap = cap }
-  return sendRaw(Protocol2.plazaJoin(kind, profile, avatar, cap))
+  local xopts = nil
+  if type(opts) == "table" and opts.xgen then
+    xopts = { xgen = Protocol2.XGEN, caps = opts.caps }
+  end
+  S.plazaJoins[kind] = { profile = profile, avatar = avatar, cap = cap, opts = xopts }
+  return sendRaw(Protocol2.plazaJoin(kind, profile, avatar, cap, xopts))
+end
+
+function Client.setCaps(caps)
+  local j = S.plazaJoins.union
+  if j and j.opts then j.opts.caps = caps end
+  return sendRaw(Protocol2.setCaps(caps))
+end
+
+function Client.plazaJoinInfo(kind)
+  return S.plazaJoins[kind or "union"]
 end
 
 function Client.leavePlaza(kind)

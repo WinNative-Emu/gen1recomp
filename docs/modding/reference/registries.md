@@ -941,6 +941,7 @@ do not.
 | `catchRate` | integer 0..255 | yes |
 | `cry` | cries id | no |
 | `dex` | integer >= 1 | yes |
+| `dexEntry` | {heightM?, kind?, text?, text2?, weightKg?} | no |
 | `eggGroups` | list of string | no |
 | `eggGroupsRaw` | integer 0..255 | no |
 | `eggMoves` | list of moves id | no |

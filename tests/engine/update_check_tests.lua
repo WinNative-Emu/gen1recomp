@@ -55,6 +55,8 @@ eq(Check.fullAssetName("1.4.2", "Linux", "aarch64", "rg34xxsp"),
   "gen1recomp-1.4.2-rg34xxsp-stockos64-mod.zip", "RG34XXSP package mapping")
 eq(Check.fullAssetName("1.4.2", "iOS", "arm64"),
   "gen1recomp++-1.4.2-ios.ipa", "iOS package mapping")
+eq(Check.fullAssetName("1.4.2", "PS4", "x64"),
+  "gen1recomp-1.4.2-ps4.pkg", "PS4 package mapping")
 eq(Check.fullAssetName("not-a-version", "Android", "arm64"), nil,
   "invalid full-package version rejected")
 

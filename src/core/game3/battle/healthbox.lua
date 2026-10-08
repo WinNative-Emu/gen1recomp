@@ -206,6 +206,7 @@ end
 local function healthbox_gender(mon)
   if not mon then return nil end
   local g = mon.gender
+  if g == "U" then return nil end
   if g ~= "M" and g ~= "F" then
     local Pokemon = require("src.core.game3.pokemon")
     local species = tonumber(mon.species or mon.speciesId)

@@ -310,7 +310,7 @@ local function drawSection(S, Kit, x, y, w, h)
     function(value)
       S.eventsOffset = 0
       Ops.disarm(S)
-      Ops.say(S, hints[value] or "")
+      Ops.note(S, hints[value] or "")
     end
   )
   local px = cx + chooserW + 10 * s
@@ -340,7 +340,7 @@ local function drawSection(S, Kit, x, y, w, h)
   then
     S.eventFilter = ""
     Kit.blur()
-    Ops.say(S, "Filter cleared")
+    Ops.note(S, "Filter cleared")
   end
 
   local hintY = filterY + pillH + 10 * s

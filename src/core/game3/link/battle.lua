@@ -1,4 +1,6 @@
 local Rng = require("src.core.game3.rng")
+local G3uRng = require("src.battle.g3u.Rng")
+local G3uHash = require("src.battle.g3u.Hash")
 
 local LB = {}
 
@@ -47,7 +49,7 @@ LB.MSG = {
   FORFEIT = "forfeit",
 }
 
-LB.HASH_PARTS = { "actives", "volatile", "bench", "field", "rng" }
+LB.HASH_PARTS = G3uHash.PARTS
 
 LB.MODE_OF = { single = 1, double = 2, multi = 5 }
 
@@ -114,29 +116,7 @@ end
 
 LB.copy = copyTable
 
--- pokefirered/src/random.c:15 ISO_RANDOMIZE1
-function LB.makeRng(seed, counter)
-  local value = math.floor(tonumber(seed) or 0) % 4294967296
-  local function word()
-    if counter then counter.n = counter.n + 1 end
-    value = (Rng.mulU32(value, 1103515245) + 24691) % 4294967296
-    return math.floor(value / 65536) % 65536
-  end
-  return function(lo, hi)
-    if lo == nil and hi == nil then return word() / 65536 end
-    if hi == nil then
-      lo = math.floor(tonumber(lo) or 1)
-      if lo <= 0 then return 0 end
-      return 1 + (word() % lo)
-    end
-    lo = math.floor(tonumber(lo) or 0)
-    hi = math.floor(tonumber(hi) or lo)
-    if hi < lo then lo, hi = hi, lo end
-    local span = hi - lo + 1
-    if span <= 0 then return lo end
-    return lo + (word() % span)
-  end
-end
+LB.makeRng = G3uRng.make
 
 function LB.dealSeed()
   return Rng.Random32() % 4294967296
@@ -336,6 +316,14 @@ end
 function LB.battleParty(s)
   s = s or session()
   local party = partyOf(s)
+  if type(LB._team) == "table" and #LB._team > 0 then
+    local out = {}
+    for _, slot in ipairs(LB._team) do
+      slot = tonumber(slot)
+      if slot and party[slot] then out[#out + 1] = copyTable(party[slot]) end
+    end
+    if #out > 0 then return out end
+  end
   local okT, Tower = pcall(require, "src.core.game3.trainer_tower")
   local order = okT and Tower and Tower.selectedOrder and Tower.selectedOrder(s) or nil
   if type(order) == "table" and (tonumber(order[1]) or 0) ~= 0 then
@@ -478,6 +466,14 @@ LB.TRAINER_PIC_LEAF = 136
 -- pokefirered/include/constants/union_room.h:19
 LB.NUM_UNION_ROOM_CLASSES = 8
 
+function LB.hasUnionRoomClasses()
+  if LB._unionRoomClasses then return true end
+  local ok, src = pcall(function()
+    return require("src.core.game3.dataset").cache():read("data/generated/gba/trainers/union_room_classes.lua")
+  end)
+  return ok and src ~= nil
+end
+
 function LB.unionRoomClasses()
   if not LB._unionRoomClasses then
     local rel = "data/generated/gba/trainers/union_room_classes.lua"
@@ -506,7 +502,7 @@ end
 
 -- pokefirered/src/battle_controller_link_opponent.c:1172
 function LB.peerPicId(setup)
-  if LB.unionRoom then return LB.unionRoomTrainerPic(setup) end
+  if LB.unionRoom and LB.hasUnionRoomClasses() then return LB.unionRoomTrainerPic(setup) end
   if tonumber(setup and setup.gender) == 1 then return LB.TRAINER_PIC_LEAF end
   return LB.TRAINER_PIC_RED
 end
@@ -627,7 +623,7 @@ function LB.beginBattle(setup, onDone)
       [2] = {enigmaBerry = ownEnigmaPacket()}, [3] = setup}),
     hostRules = hostVersion,
     double = double,
-    unionRoom = LB.unionRoom,
+    unionRoom = LB.unionRoom and LB.hasUnionRoomClasses(),
     trainerId = nil,
     rng = LB.makeRng(LB.seed, LB._draws),
     peerName = setup.name,
@@ -822,155 +818,14 @@ local function battleState()
   return Battle and Battle.getState and Battle.getState() or nil, Battle
 end
 
-local bit = require("bit")
-
-local function fnv(text)
-  local h = 0x811C9DC5
-  for i = 1, #text do
-    h = bit.bxor(h, text:byte(i)) % 4294967296
-    h = ((bit.lshift(h, 24) % 4294967296) + h * 403) % 4294967296
-  end
-  return string.format("%08x", h)
-end
-
-LB.fnv = fnv
-
-local function scalar(v)
-  local t = type(v)
-  if t == "number" then
-    if v == math.floor(v) then return string.format("%d", v) end
-    return string.format("%.6f", v)
-  end
-  if t == "boolean" then return v and "T" or "F" end
-  if t == "string" then return v end
-  if v == nil then return "-" end
-  return "t"
-end
-
-local STAGES = { "attack", "defense", "speed", "spAtk", "spDef", "accuracy", "evasion" }
-
-local VOLATILE_KEYS = {
-  "confusion", "substitute", "toxicCounter", "focusEnergy", "perishSong", "seeded", "trapped",
-  "attracted", "disabled", "encore", "taunt", "bide", "rage", "endure", "protect", "destinyBond",
-  "transformed", "isFirstTurn",
-  "expCharged", "expCursed", "expDisableTurns", "expDisabledMove", "expEncoreMove", "expEncoreSlot",
-  "expEncoreTurns", "expFocusEnergy", "expFuryCutter", "expInfatuated", "expIngrain", "expLockedMove",
-  "expLockedSlot", "expMustRecharge", "expNightmare", "expPerishTurns", "expRampageTurns",
-  "expRechargeTurns", "expRolloutTimer", "expSeeded", "expTauntedTurns", "expTormented",
-  "expTransform", "expTrapTurns", "expTrapped", "expTruantCounter", "expUproarTurns", "expYawnTurns",
-  "expCastformForm",
-}
-
-local function perspective(st)
-  if st.linkMaster == false then
-    return { 1, 0, 3, 2 }, { "enemy", "player" }
-  end
-  return { 0, 1, 2, 3 }, { "player", "enemy" }
-end
-
-local function battlerOf(st, id)
-  local State = require("src.core.game3.battle.state")
-  if State.isAbsent(st, id) then return nil end
-  return State.battler(st, id)
-end
-
-local function sortedScalars(t, skip, st)
-  if type(t) ~= "table" then return scalar(t) end
-  local flip = st and st.linkMaster == false
-  local keys = {}
-  for k, v in pairs(t) do
-    if (type(k) == "string" or type(k) == "number") and not (skip and skip[k])
-        and type(v) ~= "table" and type(v) ~= "function" then
-      keys[#keys + 1] = tostring(k)
-    end
-  end
-  table.sort(keys)
-  local out = {}
-  for _, k in ipairs(keys) do
-    local v = t[k]
-    if v == nil then v = t[tonumber(k)] end
-    if flip and type(v) == "number" and k:sub(-2) == "Id" and v >= 0 and v <= 3 then
-      v = (v % 2 == 0) and (v + 1) or (v - 1)
-    end
-    out[#out + 1] = k .. "=" .. scalar(v)
-  end
-  return table.concat(out, ",")
-end
-
-local function monPp(mon)
-  local pp = {}
-  for i = 1, 4 do pp[i] = scalar(mon and mon.pp and mon.pp[i]) end
-  return table.concat(pp, "/")
-end
-
-local SIDE_SKIP = { id = true }
+LB.fnv = G3uHash.fnv
 
 function LB.hashParts(st)
-  local order, sides = perspective(st)
-  local actives, volatile = {}, {}
-  for _, id in ipairs(order) do
-    local b = battlerOf(st, id)
-    if not b then
-      actives[#actives + 1] = "-"
-      volatile[#volatile + 1] = "-"
-    else
-      local mon = b.mon or {}
-      local stages = {}
-      for i, key in ipairs(STAGES) do stages[i] = scalar(b.stages and b.stages[key] or 0) end
-      actives[#actives + 1] = table.concat({
-        scalar(tonumber(b.species or mon.species)), scalar(tonumber(mon.hp)), scalar(tonumber(mon.maxHp)),
-        scalar(b.status or mon.status), scalar(mon.sleep or b.sleepTurns), table.concat(stages, "/"),
-        scalar(b.ability), scalar(tonumber(b.item) or 0), monPp(mon),
-      }, ":")
-      local vol = {}
-      for _, key in ipairs(VOLATILE_KEYS) do vol[#vol + 1] = scalar(b[key]) end
-      vol[#vol + 1] = sortedScalars(b.volatiles)
-      volatile[#volatile + 1] = table.concat(vol, ":")
-    end
-  end
-  local bench, field = {}, {}
-  for _, side in ipairs(sides) do
-    local party = (side == "player") and st.playerParty or st.foeParty
-    local active = {}
-    for _, id in ipairs((side == "player") and { 0, 2 } or { 1, 3 }) do
-      local b = battlerOf(st, id)
-      if b and b.partyIndex then active[b.partyIndex] = true end
-    end
-    local rows = {}
-    for i, mon in ipairs(party or {}) do
-      if active[i] then
-        rows[#rows + 1] = "*"
-      else
-        rows[#rows + 1] = table.concat({
-          scalar(tonumber(mon.species or mon.speciesId)), scalar(tonumber(mon.hp)), scalar(mon.status),
-          scalar(tonumber(mon.item or mon.heldItem) or 0), monPp(mon),
-        }, ":")
-      end
-    end
-    bench[#bench + 1] = table.concat(rows, ";")
-    local sideState = (side == "player") and st.playerSide or st.enemySide
-    field[#field + 1] = sortedScalars(sideState, SIDE_SKIP, st) .. "|" .. sortedScalars(sideState and sideState.hazards, nil, st)
-  end
-  table.insert(field, 1, scalar(st.weather) .. ":" .. scalar(st.weatherTurns))
-  local raw = {
-    actives = table.concat(actives, "#"),
-    volatile = table.concat(volatile, "#"),
-    bench = table.concat(bench, "#"),
-    field = table.concat(field, "#"),
-  }
-  return {
-    actives = fnv(raw.actives),
-    volatile = fnv(raw.volatile),
-    bench = fnv(raw.bench),
-    field = fnv(raw.field),
-    rng = string.format("%d", LB._draws and LB._draws.n or 0),
-  }, raw
+  return G3uHash.parts(st, LB._draws)
 end
 
 function LB.hashValue(parts)
-  local list = {}
-  for i, key in ipairs(LB.HASH_PARTS) do list[i] = tostring(parts[key] or "") end
-  return fnv(table.concat(list, "|"))
+  return G3uHash.value(parts)
 end
 
 local function firstDiff(mine, theirs)
@@ -1834,7 +1689,8 @@ function LB.enterColosseumPlayerSpot(ctx, adapters)
 end
 
 -- pokefirered/src/union_room.c:1811 StartUnionRoomBattle
-function LB.startUnionRoomBattle(onDone)
+function LB.startUnionRoomBattle(onDone, opts)
+  opts = opts or {}
   local L = link()
   local lk = L.link
   if not (lk and lk:isOpen()) then return false, "no_link" end
@@ -1844,6 +1700,7 @@ function LB.startUnionRoomBattle(onDone)
   LB.unionRoom = true
   LB.state = "setup"
   LB.freshBattle()
+  LB._team = type(opts.team) == "table" and opts.team or nil
   if LB.onRelay() then
     LB.seed = LB.seedFromRelay()
   elseif lk.role == "host" then
@@ -1897,6 +1754,7 @@ function LB.freshBattle()
   LB._drained = nil
   LB._myPacked = nil
   LB._myParty = nil
+  LB._team = nil
   LB._reported = false
   LB._relay = nil
   LB._turn = nil

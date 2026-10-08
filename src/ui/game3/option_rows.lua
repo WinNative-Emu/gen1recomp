@@ -129,6 +129,32 @@ function Rows.build(ctx, skip)
       return true
     end,
   })
+  local AUDIO_MODES = {
+    { "both", "BOTH" },
+    { "external_only", "EXT. ONLY" },
+    { "game_only", "GAME ONLY" },
+  }
+  add({
+    id = "audioMode", label = Strings("AUDIO MODE"),
+    value = function(c)
+      local cur = c.options.audioMode or "both"
+      for _, m in ipairs(AUDIO_MODES) do
+        if m[1] == cur then return Strings(m[2]) end
+      end
+      return Strings("BOTH")
+    end,
+    step = function(c, dir)
+      local cur = c.options.audioMode or "both"
+      local idx = 1
+      for i, m in ipairs(AUDIO_MODES) do
+        if m[1] == cur then idx = i break end
+      end
+      idx = ((idx - 1 + (dir < 0 and -1 or 1)) % #AUDIO_MODES) + 1
+      c.options.audioMode = AUDIO_MODES[idx][1]
+      require("src.core.game3.audio").applyEngineOptions(c.options)
+      return true
+    end,
+  })
 
   addCart("buttonMode", function() return {
       id = "buttonMode", label = cartName(4),

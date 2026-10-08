@@ -1,0 +1,9 @@
+{
+  "name": "gen1recomp-pokestats",
+  "private": true,
+  "version": "1.0.0",
+  "description": "Build-time validator for recommendations derived from usage statistics",
+  "dependencies": {
+    "@pkmn/sim": "0.10.11"
+  }
+}

@@ -6,7 +6,7 @@ local M = {REQUIRED = Base.REQUIRED}
 function M.run(rom, cache, opts)
   local c = A.context(rom, cache, opts, "pokemon/battle_anims")
   local templates = {}
-  for name in pairs(Names.templates) do
+  for name, canonical in pairs(Names.templates) do
     local off = c:off(name)
     local row = c:readTemplate(name)
     local affine, tableOff = {}, c:ptr(off + 16)
@@ -21,7 +21,8 @@ function M.run(rom, cache, opts)
     end
     row.affineAnims, row.romOffset = affine, off
     row.images = nil
-    templates[name] = row
+    assert(templates[canonical] == nil, "RS template canonical name collides: " .. canonical)
+    templates[canonical] = row
   end
   local result = Base.run(rom, cache, opts)
   local path = c:path("pack.lua")

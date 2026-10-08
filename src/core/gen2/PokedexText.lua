@@ -26,10 +26,13 @@ function PokedexText.apply(data)
   for species, entry in pairs(dex.entries) do
     local def = pokemon[species]
     local override = def and def.dexEntry
-    if override and (override.kind or override.text or override.text2) then
+    if override and (override.kind or override.text or override.text2 or override.heightM) then
       if override.kind then entry.kind = override.kind end
       if override.text then entry.text = override.text end
       if override.text2 then entry.text2 = override.text2 end
+      if override.heightM and override.weightKg then
+        entry.heightM, entry.weightKg = override.heightM, override.weightKg
+      end
       count = count + 1
     end
   end

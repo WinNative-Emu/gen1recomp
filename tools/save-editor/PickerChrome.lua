@@ -78,4 +78,13 @@ function PickerChrome.closeSize(Kit)
   return math.max(PickerChrome.tapMin(Kit), math.floor(30 * ((Kit and Kit.scale) or 1)))
 end
 
+local header = {}
+function PickerChrome.toastHeader(S, Kit, cx, cy, inner, headH)
+  local s = (Kit and Kit.scale) or 1
+  header.x, header.y, header.h = cx, cy, headH
+  header.w = math.max(1, inner - PickerChrome.closeSize(Kit) - 10 * s)
+  S.toastHeader = header
+  return header
+end
+
 return PickerChrome

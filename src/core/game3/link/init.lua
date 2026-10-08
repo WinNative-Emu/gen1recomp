@@ -622,13 +622,21 @@ function Link.adapterConnected()
   return false
 end
 
+function Link.avatarStyle(version, trainerId)
+  if Family.isRubySapphire(version) then return "player" end
+  -- pokefirered/src/union_room_player_avatar.c:129
+  return "g3:" .. ((tonumber(trainerId) or 0) % 8)
+end
+
 function Link.avatar()
   local s = Link.session() or {}
+  local trainerId = (tonumber(s.trainerId or s.id) or 0) % 65536
   return {
     name = tostring(s.name or s.playerName or ""):sub(1, 7),
-    trainerId = (tonumber(s.trainerId or s.id) or 0) % 65536,
+    trainerId = trainerId,
     gender = (s.gender == 1 or s.gender == "female") and 1 or 0,
     version = Link.version(),
+    style = Link.avatarStyle(Link.version(), trainerId),
     -- pokeemerald/src/link_rfu_3.c:679
     canLinkNationally = Family.canLinkNationally(s, Link.version()) and true or false,
   }

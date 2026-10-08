@@ -1,5 +1,6 @@
 local Kit = require("src.ui.game3.rse.scene_kit")
 local Strings = require("src.core.Strings")
+local Units = require("src.core.game3.pokedex_units")
 local FrlgFont = require("src.ui.game3.frlg_font")
 local RomText = require("src.core.game3.rom_text")
 local Pal = require("src.core.game3.pal_fade")
@@ -946,8 +947,9 @@ local function monInfo(s, nat, nationalNumber, owned, newEntry)
     local category = owned and (Strings(e.category or "") .. categorySuffix(unknown)) or unknown
     local cx = 88 + (owned and (FrlgFont.measure(unknown) - FrlgFont.measure(category)) or 0)
     out[#out + 1] = {text = category, x = cx, y = 40}
-    out[#out + 1] = {text = owned and Pokedex.heightText(e.height or 0) or rsString("UnknownHeight"), x = 128, y = 56}
-    out[#out + 1] = {text = owned and RsPolicy.weightText(e.weight or 0) or rsString("UnknownWeight"), x = 128, y = 72}
+    local metric = owned and Units.metric(Pokedex.speciesOf(nat))
+    out[#out + 1] = {text = metric and Units.height(metric, "  ") or owned and Pokedex.heightText(e.height or 0) or rsString("UnknownHeight"), x = 128, y = 56}
+    out[#out + 1] = {text = metric and Units.weight(metric, "  ") or owned and RsPolicy.weightText(e.weight or 0) or rsString("UnknownWeight"), x = 128, y = 72}
     local desc
     if s.descriptionPage == 1 then
       desc = cached(e.descriptionLabel2, e.description2)
@@ -975,7 +977,11 @@ local function monInfo(s, nat, nationalNumber, owned, newEntry)
   out[#out + 1] = { text = category, x = 0x64, y = 0x29 }
   out[#out + 1] = { text = RomText.plain("gText_HTHeight"), x = 0x60, y = 0x39 }
   out[#out + 1] = { text = RomText.plain("gText_WTWeight"), x = 0x60, y = 0x49 }
-  if owned then
+  local metric = owned and Units.metric(sp)
+  if metric then
+    out[#out + 1] = { text = Units.height(metric, "{UNK_SPACER}"), x = 0x81, y = 0x39 }
+    out[#out + 1] = { text = Units.weight(metric, "{UNK_SPACER}"), x = 0x81, y = 0x49 }
+  elseif owned then
     out[#out + 1] = { text = Pokedex.heightText(e.height or 0), x = 0x81, y = 0x39 }
     out[#out + 1] = { text = Pokedex.weightText(e.weight or 0), x = 0x81, y = 0x49 }
   else

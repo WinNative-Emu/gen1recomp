@@ -87,6 +87,7 @@ function Protocol2.lobbyHello(opts)
     platform = opts.platform,
     profiles = opts.profiles or {},
     presence = opts.presence,
+    xgen = opts.xgen,
   })
 end
 
@@ -116,9 +117,57 @@ end
 
 Protocol2.PLAZA_CAP = 40
 
-function Protocol2.plazaJoin(kind, profile, avatar, cap)
+Protocol2.XGEN = 1
+
+function Protocol2.plazaJoin(kind, profile, avatar, cap, opts)
+  opts = opts or {}
   return build({ type = "plaza_join", kind = kind, profile = profile,
-                 avatar = avatar, cap = cap })
+                 avatar = avatar, cap = cap, xgen = opts.xgen, caps = opts.caps })
+end
+
+function Protocol2.setCaps(caps)
+  return build({ type = "set_caps", caps = caps })
+end
+
+Protocol2.XG_ACTIVITIES = { xg_battle = "battle", xg_trade = "trade" }
+Protocol2.XG_STAGES = { prep = true, trading = true, battling = true, ended = true }
+Protocol2.XG_RELAY_TYPES = { xg_rules = true, xg_blocked = true, xg_size = true, xg_rev = true,
+  xg_go = true, xg_closed = true, xg_nack = true }
+Protocol2.XG_SEAT_TYPES = { xg_caps = true, xg_counter = true, xg_roster = true,
+  xg_size_req = true, xg_offer = true, xg_ready = true, xg_cancel = true }
+
+function Protocol2.isXg(msg)
+  local t = type(msg) == "table" and msg.type or nil
+  return Protocol2.XG_RELAY_TYPES[t] == true or Protocol2.XG_SEAT_TYPES[t] == true
+end
+
+function Protocol2.xgCaps(caps)
+  return build({ type = "xg_caps", caps = caps })
+end
+
+function Protocol2.xgCounter(rev, gen)
+  return build({ type = "xg_counter", rev = rev, gen = gen })
+end
+
+function Protocol2.xgRoster(rev, size, digest16)
+  return build({ type = "xg_roster", rev = rev, size = size, digest16 = digest16 })
+end
+
+function Protocol2.xgSizeReq(rev, size)
+  return build({ type = "xg_size_req", rev = rev, size = size })
+end
+
+function Protocol2.xgOffer(rev, offerRev, payload, digest16)
+  return build({ type = "xg_offer", rev = rev, offerRev = offerRev, payload = payload,
+                 digest16 = digest16 })
+end
+
+function Protocol2.xgReady(rev, digest16)
+  return build({ type = "xg_ready", rev = rev, digest16 = digest16 })
+end
+
+function Protocol2.xgCancel(why)
+  return build({ type = "xg_cancel", why = why })
 end
 
 function Protocol2.plazaLeave(kind)
@@ -323,7 +372,7 @@ Protocol2.CLIENT_TYPES = {
   invite_reply = true, plaza_join = true, plaza_leave = true,
   group_open = true, group_list = true, group_join = true, group_accept = true,
   group_leave = true, group_start = true, direct_queue = true,
-  direct_list = true, direct_leave = true,
+  direct_list = true, direct_leave = true, set_caps = true,
 }
 
 Protocol2.SERVER_TYPES = {
@@ -344,6 +393,7 @@ Protocol2.SERVER_TYPES = {
 
 Protocol2.RELAY_INNER = { trade_commit = true, trade_abort = true,
                           game3_mg_leader = true }
+for t in pairs(Protocol2.XG_RELAY_TYPES) do Protocol2.RELAY_INNER[t] = true end
 
 Protocol2.RESULTS = { win = true, lose = true, draw = true }
 
@@ -618,6 +668,8 @@ local REASONS = {
   bad_activity = Strings.source("That activity isn't available."),
   already_queued = Strings.source("You're already waiting for a partner."),
   rate_limited = Strings.source("Too many requests. Please wait a moment."),
+  bad_avatar = Strings.source("The relay couldn't read your trainer."),
+  bad_caps = Strings.source("The relay couldn't read your game list."),
 }
 
 local CLOSED_REASONS = {
@@ -649,6 +701,7 @@ local INVITE_CLOSED = {
   no_room = Strings.source("That room is gone."),
   no_group = Strings.source("That group is gone."),
   group_full = Strings.source("That group is full."),
+  not_plaza = Strings.source("That trainer isn't in this Union Room."),
 }
 
 Protocol2.UPGRADE_TEXT = Strings.source("This build is too old for online play. Please update.")

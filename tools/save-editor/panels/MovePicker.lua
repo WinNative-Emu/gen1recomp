@@ -34,7 +34,7 @@ end
 function Picker.commitFirst(S, Kit)
   local hits = Picker.results(S)
   if not hits[1] then
-    return Ops.say(S, "No move matches that")
+    return Ops.say(S, "No move matches that", "info")
   end
   local ok = commit(S, hits[1])
   if ok then
@@ -80,6 +80,7 @@ function Picker.draw(S, Kit, width, height)
   local closeW = PickerChrome.closeSize(Kit)
   local captionH = Kit.textHeight("caption")
   local headH = math.max(captionH, closeW)
+  PickerChrome.toastHeader(S, Kit, cx, cy, inner, headH)
   Kit.caption(cx, cy + (headH - captionH) / 2, ("CHOOSE MOVE %d"):format(p.slot or 1))
   if
     Kit.iconButton(

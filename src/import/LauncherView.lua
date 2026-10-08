@@ -43,6 +43,20 @@ local WebClip = require("src.core.WebClip")
 local PAL = Theme.PAL
 local LauncherView = {}
 
+-- Platform capabilities as the view needs them.  Fields on LauncherView, not
+-- locals: this chunk sits at Lua's 200-local limit.  They read plain importer
+-- fields, not methods, so hand-built importers in tests keep working.
+-- Save-directory inbox import (Switch, PS4); same rule as
+-- RomImporter:_inboxImport().
+function LauncherView.inboxImport(imp)
+  return (imp.inboxImport or imp.isNX) and true or false
+end
+
+-- iOS and PS4 leave the app through the system (Home, PS button).
+function LauncherView.hasQuitButton(imp)
+  return not imp.ios and not require("src.core.Platform").systemQuit()
+end
+
 local COMMUNITY_URL = "https://bois.icu"
 
 -- One dedup window covers a touch release plus the mouse click SDL
@@ -192,11 +206,12 @@ function LauncherView.update(imp, dt)
     imp._themeVideoOptions = ok and type(options) == "table" and options or {}
   end
   local videoEnabled = imp._themeVideoOptions.themeVideoBg ~= false
-  if videoEnabled and not imp._themeVideo then
+  if videoEnabled and not imp._themeVideo and not imp._themeVideoFailed then
     local ok, player = pcall(function()
       return require("src.import.LauncherThemeVideo").new()
     end)
     if ok then imp._themeVideo = player end
+    imp._themeVideoFailed = not imp._themeVideo
   elseif not videoEnabled and imp._themeVideo then
     imp._themeVideo:release()
     imp._themeVideo = nil
@@ -363,7 +378,9 @@ function LauncherView.touchpressed(imp, id, x, y)
     region = not shielded and tabScrollMax(imp) > 0 and inRect(imp._tabRegionRect, x, y),
     page = not shielded,
     picker = picker and inRect(picker.rect, x, y) and picker or nil,
+    inner = not noDragAt(imp, x, y),
   }
+  if imp._touchAt[tostring(id)].inner then Kit.dragBegin(x, y) end
 end
 
 function LauncherView.touchmoved(imp, id, x, y)
@@ -388,8 +405,12 @@ function LauncherView.touchmoved(imp, id, x, y)
         move = leftover
       end
       if move ~= 0 and start.page and (imp._pageScrollMax or 0) > 0 then
-        imp._pageScroll = (imp._pageScroll or 0) + move
+        local at, leftover = Kit.scrollHandoff(imp._pageScroll or 0,
+          imp._pageScrollMax, move)
+        imp._pageScroll = at
+        move = leftover
       end
+      if move ~= 0 and start.inner then Kit.dragAdd(move) end
     end
     start.lastY = y
   end
@@ -407,6 +428,7 @@ function LauncherView.touchreleased(imp, id, x, y)
   end
   local start = imp._touchAt and imp._touchAt[tid]
   if imp._touchAt then imp._touchAt[tid] = nil end
+  if start and start.inner then Kit.dragEnd() end
   -- A release with no matching press is leftover from the previous host
   -- (game / save editor), not a launcher tap (#2079).
   if not start then
@@ -1714,9 +1736,9 @@ local function buildHeader(imp, m)
   -- under the gear and the quit X -- "the settings is covering the logo".
   -- Reserving the space on both sides costs a little width and cannot
   -- overlap at any window size.
-  -- iOS has no quit button (the OS owns app exit), so the cluster is the
+  -- No quit button on iOS/PS4 (the OS owns app exit), so the cluster is the
   -- gear alone and the wordmark gets that width back
-  local clusterN = imp.ios and 2 or 3
+  local clusterN = LauncherView.hasQuitButton(imp) and 3 or 2
   local clusterW = clusterN * gear + (clusterN - 1) * math.floor(6 * m.s) + m.pad
   local mobile = not imp.isNX or not m.twoCol
   local boxX = mobile and (m.x + m.pad) or (m.x + clusterW)
@@ -1761,7 +1783,7 @@ local function buildHeader(imp, m)
   -- inboard of it -- but the two are REGISTERED gear first, because the first
   -- focusable of the first frame adopts the keyboard ring and that must not be
   -- the button that exits the app.
-  local quitX = not imp.ios and rx - gear or nil
+  local quitX = LauncherView.hasQuitButton(imp) and rx - gear or nil
   if quitX then rx = quitX - math.floor(6 * m.s) end
 
   -- Settings gear.  It now also owns the CONTROL settings (touch overlay
@@ -1899,14 +1921,18 @@ end
 --   enabled  whether that button may be pressed
 --   progress 0-1 while an import for THIS version is running
 local function romModel(imp, version, info, ready, locked)
-  local importLabel = imp.isNX and Strings("Scan again") or Strings("Import ROM")
+  local importLabel = LauncherView.inboxImport(imp) and Strings("Scan again")
+    or Strings("Import ROM")
   if locked then
     return { state = Strings("Not supported yet"),
       detail = Strings("Support for this game is on the way."),
       label = Strings("Import unavailable"), enabled = false }
   end
   local ext = GameVersion.generation(version) == 3 and ".gba" or ".gb/.gbc"
-  local dropHint = imp.isNX and Strings("Copy the %s via MTP into imports/.", ext)
+  local viaFtp = require("src.core.Platform").inboxTransfer() == "ftp"
+  local dropHint = LauncherView.inboxImport(imp) and (viaFtp
+      and Strings("Copy the %s via FTP into imports/.", ext)
+      or Strings("Copy the %s via MTP into imports/.", ext))
     or (imp.baseRomDiscovery and Strings("Or copy the %s into baseroms/.", ext)
       or (imp.android and Strings("Copy the %s via USB.", ext)
         or Strings("Or drop the %s file here.", ext)))
@@ -2064,7 +2090,7 @@ local function buildSlotCard(imp, x, y, w, availH, m, version, ready)
   for _, entry in ipairs(slots) do if entry.id == active then slot = entry break end end
   local pad, gap = math.floor(14 * m.s), math.floor(8 * m.s)
   local iw, bh = w - 2 * pad, m.btnH
-  local importLabel = imp.isNX and Strings("Scan again") or Strings("Import")
+  local importLabel = LauncherView.inboxImport(imp) and Strings("Scan again") or Strings("Import")
   local browseLabel = Strings("Other saves (%d)", #slots)
   local iconExtra = math.floor(bh * 0.42) + math.floor(7 * Kit.scale)
   local importW = chipWidth(importLabel, m) + iconExtra
@@ -3024,8 +3050,11 @@ local function buildImportersPanel(imp, x, y, w, availH, m)
 
     local job = imp._importerJob
     local running = job ~= nil and job.id == desc.id
-    local runnable = desc.status ~= "planned" and not imp._importerJob
-    local label = running and Strings("Importing...") or Strings("Import dump")
+    local picking = imp.android and imp.pickerPendingKind == "importer"
+    local runnable = desc.status ~= "planned" and not imp._importerJob and not picking
+    local label = running and Strings("Importing...")
+      or (picking and imp.pickerPendingImporterId == desc.id
+        and Strings("Waiting for file...")) or Strings("Import dump")
     local bw = math.min(inner,
       Kit.textWidth("small", label) + math.floor(28 * m.s))
     btn(imp, px, ly, bw, m.btnH, "importer-" .. desc.id, label, {
@@ -3794,12 +3823,18 @@ local function buildFooter(imp, m, y)
   Theme.fill(m.x, y, m.w, 1, PAL.line, Theme.A.hairline)
   local cy = y + math.floor(8 * m.s)
   -- The BCG mark is dark ink; invert it for the black field.
-  imp.invertShader = imp.invertShader or love.graphics.newShader([[
-    vec4 effect(vec4 color, Image tex, vec2 tc, vec2 sc) {
-      vec4 p = Texel(tex, tc);
-      return vec4((vec3(1.0) - p.rgb) * color.rgb, p.a * color.a);
-    }
-  ]])
+  -- pcall: this was the only unguarded newShader on the Gen 1 path, and a
+  -- driver rejecting this trivial fragment shader took down the whole boot
+  -- instead of just losing the inverted footer mark.
+  if imp.invertShader == nil then
+    local ok, sh = pcall(love.graphics.newShader, [[
+      vec4 effect(vec4 color, Image tex, vec2 tc, vec2 sc) {
+        vec4 p = Texel(tex, tc);
+        return vec4((vec3(1.0) - p.rgb) * color.rgb, p.a * color.a);
+      }
+    ]])
+    imp.invertShader = ok and sh or false
+  end
   local bw, bh = imp.bcg:getDimensions()
   local scale = math.min((130 * m.s) / bw, (22 * m.s) / bh)
   local dw, dh = bw * scale, bh * scale
@@ -5615,7 +5650,7 @@ local function buildGameManageModal(imp, m)
     and love.filesystem.getSaveDirectory() or nil
   -- The folder link is desktop-only: Android and NX have no browsable path to
   -- open, and both already print their own transfer hint on the slot card.
-  local canOpenFolder = saveDir and not imp.android and not imp.isNX
+  local canOpenFolder = saveDir and not imp.android and not LauncherView.inboxImport(imp)
   local canWebClip = ready and webClipAvailable(imp)
   local webClipKey = tostring(version) .. ":" .. tostring(cartId or "")
   local webClipNotice = imp._webClipNotice
@@ -5709,7 +5744,10 @@ local function buildSettingsModal(imp, m)
   local x, cy, width = px + pad, py + pad, pw - 2 * pad
   Kit.textBold("title", Strings("Settings"), x, cy, PAL.heading)
   local subtitleW = width - m.btnH - gap
-  if model.flash then
+  if model.saveError then
+    Kit.text("small", Kit.ellipsize("small", model.saveError, subtitleW), x,
+      cy + Kit.textHeight("title") + math.floor(3 * m.s), PAL.red)
+  elseif model.flash then
     Kit.text("small", Kit.ellipsize("small", model.flash, subtitleW), x,
       cy + Kit.textHeight("title") + math.floor(3 * m.s), PAL.green)
   else
@@ -5755,7 +5793,8 @@ local function buildSettingsModal(imp, m)
       item.stacked = item.row.choices ~= nil or Kit.textWidth("small", item.label)
         + math.floor(210 * m.s) > inner
       item.labelH = item.stacked and Kit.wrapHeight("small", item.label, inner) or Kit.textHeight("small")
-      item.h = 2 * inset + m.btnH + (item.stacked and item.labelH + gap or 0)
+      item.noteH = item.row.note and Kit.wrapHeight("micro", item.row.note, inner) + gap or 0
+      item.h = 2 * inset + m.btnH + (item.stacked and item.labelH + gap or 0) + item.noteH
     end
     total = total + item.h + gap
   end
@@ -5799,6 +5838,9 @@ local function buildSettingsModal(imp, m)
       if visible then
         Kit.card(x, ry, rowW, item.h, "row")
         Kit.textWrapped("small", item.label, ix, labelY, inner, PAL.text)
+        if row.note then
+          Kit.textWrapped("micro", row.note, ix, ctlY + m.btnH + gap, inner, PAL.muted)
+        end
       end
       if row.choices then
         local cw = (inner - gap) / 2
@@ -5825,8 +5867,7 @@ local function buildSettingsModal(imp, m)
         local aw = math.min(inner, chipWidth(label, m))
         local function run()
           if row.action() ~= false then
-            model.save()
-            if row.doneText then model.flash = row.doneText end
+            if model.save() ~= false and row.doneText then model.flash = row.doneText end
           end
         end
         control(rx - aw, aw, key .. "-act", label, {
@@ -6965,6 +7006,7 @@ function LauncherView.draw(imp)
   imp._noDragN = 0
   local Toast = require("src.import.online.Toast")
   Toast.occlude(imp)
+  require("src.import.BoxUI").occludeToast(imp)
 
   Theme.field()
   if imp._themeVideo then imp._themeVideo:draw() end
@@ -7071,6 +7113,7 @@ function LauncherView.draw(imp)
   local held = imp._modalHeld
   if held then imp[held.key] = held.value end
   Toast.occlude(imp)
+  require("src.import.BoxUI").occludeToast(imp)
   buildModals(imp, m)
   endModalDraw(m)
   if held then imp[held.key] = nil end
@@ -7079,6 +7122,7 @@ function LauncherView.draw(imp)
   Toast.draw(imp, m, contentY + math.floor(8 * m.s), spec ~= nil
     or (Kit.VirtualKeyboard and Kit.VirtualKeyboard.active)
     or (Kit.FileBrowser and Kit.FileBrowser.active) or false)
+  require("src.import.BoxUI").drawToast(imp, m, math.min(contentY + viewH, m.top + m.h))
 
   -- The loader sits above everything, including modals: it is the one thing
   -- that must never be clicked around.

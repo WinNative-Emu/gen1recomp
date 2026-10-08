@@ -419,6 +419,7 @@ function Boot.update(state, input, dt)
       if pending == "continue" then
         state.fadeT, state.fadeTarget = 0, 0
         require("src.core.game3.link.trade").resumePending()
+        require("src.online.union.TradeTxn").resumePending(nil)
         return { action = "continue" }
       elseif pending == "new_game" then
         state.fadeT, state.fadeTarget = 0, 0

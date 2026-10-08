@@ -63,7 +63,7 @@ for _,from in ipairs(GameVersion.ORDER) do
         if GameVersion.generation(to)==3 then
           local total=0;for _,n in pairs(out.evs) do total=total+n end
           T.check(total<=510,"Gen3 effort fits total EV limit")
-          T.eq(out.nature,0,"new personality has disclosed Hardy nature")
+          if GameVersion.generation(from)<3 then T.eq(out.nature,125500%25,"nature comes from EXP mod 25") end
           local codec=require("src.save_convert.Gen3Save").forVersion(to)
           local round=codec.toPortMon(assert(codec.decodeBoxMon(codec.encodeBoxMon(codec.fromPortMon(out,{},false)))),false)
           T.eq(round.personality,out.personality,"converted PK3 personality survives native encryption")

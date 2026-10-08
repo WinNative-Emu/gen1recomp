@@ -350,6 +350,7 @@ Save.DEFAULT_OPTIONS = {
   musicVol = 7,             -- 0-7, like the GB's NR50 master volume
   sfxVol = 7,               -- 0-7
   musicFilter = 0,          -- low-pass steps, 0 = off
+  audioMode = "both",
   haptics = "light",
   touchControls = { enabled = true },
   screenPos = "center",
@@ -374,6 +375,7 @@ end
 Save.OPTIONS_KEY = "gold"
 
 local SHARED_KEYS = {
+  audioMode = true,
   touchControls = true, haptics = true, screenPos = true,
   videoMode = true, faithfulRes = true, orientation = true,
   mods = true, modsByVersion = true, modsGen2 = true,

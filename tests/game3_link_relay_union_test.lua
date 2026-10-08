@@ -169,7 +169,7 @@ end
 local function ascii(key) return RomText.ascii(key) end
 local function member(id, slot, name, trainerId, gender)
   return { id = id, name = name, slot = slot, online = true, status = "idle",
-    avatar = { name = name, trainerId = trainerId, gender = gender, version = "firered" } }
+    avatar = { name = name, trainerId = trainerId, gender = gender, version = "firered", gen = 3 } }
 end
 
 print("[test] 1. RunUnionRoom joins the union plaza when the adapter is connected")

@@ -137,7 +137,7 @@ local SaveConvert = require("src.save_convert.SaveConvert")
 -- double-quoted registry name anywhere in the test corpus as that registry's
 -- unit test, and this suite is not the mod audio registry's.
 local GENERATED = { "pokemon", "moves", "items", "maps", "tilesets", 'audio', 'encounters',
-  'field', 'trainerHeaders' }
+  'field', 'trainerHeaders', 'text_pointers' }
 
 local function prefixes()
   local seen = {}

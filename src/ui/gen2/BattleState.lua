@@ -377,6 +377,75 @@ function BattleState.trainerArt(data, classId)
   return path, (classDef and classDef.trueColor) and true or false
 end
 
+local BATTLE_SFX = {
+  "Sfx_Damage", "Sfx_SuperEffective", "Sfx_NotVeryEffective",
+  "Sfx_ExpBar", "Sfx_HitEndOfExpBar", "Sfx_DexFanfare5079",
+  "Sfx_Faint", "Sfx_Kinesis", "Sfx_CaughtMon", "Sfx_Run",
+  "Sfx_SwitchPokemon", "Sfx_Potion",
+}
+
+local function animSounds(anims, order, key, out, seen)
+  if not key or seen[key] then return end
+  seen[key] = true
+  for _, row in ipairs(anims.scripts[key] or {}) do
+    if row[1] == "sound" then
+      local name = order[(row[3] or 0) + 1]
+      if name then out[#out + 1] = name end
+    else
+      for i = 2, #row do
+        local target = row[i]
+        if type(target) == "string" and anims.scripts[target] then
+          animSounds(anims, order, target, out, seen)
+        end
+      end
+    end
+  end
+end
+
+local function moveIdOf(move)
+  if type(move) == "table" then return move.id end
+  return move
+end
+
+function BattleState.battleSfxNames(data, anims, battle)
+  local audio = data and data.audio
+  local sfx = audio and audio.sfx
+  if not sfx then return {} end
+  local order = audio.sfxOrder or {}
+  local names, listed = {}, {}
+  local function add(name)
+    if name and sfx[name] and not listed[name] then
+      listed[name] = true
+      names[#names + 1] = name
+    end
+  end
+  local function addMoves(mon)
+    if not (mon and anims and anims.scripts and anims.moves) then return end
+    for _, move in ipairs(mon.moves or {}) do
+      local out = {}
+      animSounds(anims, order, anims.moves[moveIdOf(move)], out, {})
+      for _, name in ipairs(out) do add(name) end
+    end
+  end
+  battle = battle or {}
+  addMoves(battle.enemy)
+  addMoves(battle.player)
+  for _, name in ipairs(BATTLE_SFX) do add(name) end
+  if anims and anims.scripts and anims.ids then
+    local ids = {}
+    for id in pairs(anims.ids) do ids[#ids + 1] = id end
+    table.sort(ids)
+    for _, id in ipairs(ids) do
+      local out = {}
+      animSounds(anims, order, anims.ids[id], out, {})
+      for _, name in ipairs(out) do add(name) end
+    end
+  end
+  for _, mon in ipairs(battle.enemyParty or {}) do addMoves(mon) end
+  for _, mon in ipairs(battle.party or {}) do addMoves(mon) end
+  return names
+end
+
 -- opts: battle (a Battle), onDone(outcome), save
 function BattleState.new(game, opts)
   opts = opts or {}
@@ -628,6 +697,11 @@ function BattleState.new(game, opts)
   local data = game and game.data
   for _, mon in ipairs({ enemy or false, player or false }) do
     if mon and mon.species then pcall(Sound.prewarmCry, data, mon.species) end
+  end
+  local okNames, names = pcall(BattleState.battleSfxNames, data, self.anims,
+    self.battle)
+  if okNames then
+    for _, name in ipairs(names) do pcall(Sound.prewarmSfx, data, name) end
   end
   return self
 end

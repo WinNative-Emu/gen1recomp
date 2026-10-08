@@ -27,16 +27,9 @@ return function(V)
       SURF_OPPONENT = {gfx = sym("gBattleAnimBackgroundImage_Surf"), pal = sym("gBattleAnimBackgroundPalette_Surf"), map = sym("gUnknown_08E70968")},
     }}
   V.ANIM_NAMES, V.ANIM_TAG_NAMES = Names, Names.tagNames
-  local function byPrefix(prefix)
-    local out = {}
-    for n, id in pairs(require("src.core.game3.constants").of(V.GAME).battle.byName) do
-      if n:sub(1, #prefix) == prefix then out[id] = n:sub(8) end
-    end
-    return out
-  end
-  V.BATTLE_ANIM_STATUS_NAMES = byPrefix("B_ANIM_STATUS_")
-  V.BATTLE_ANIM_GENERAL_NAMES = {[0] = "CASTFORM_CHANGE", "STATS_CHANGE", "SUBSTITUTE_FADE", "SUBSTITUTE_APPEAR", "POKEBLOCK_THROW", "ITEM_KNOCKOFF", "TURN_TRAP", "ITEM_EFFECT", "SMOKEBALL_ESCAPE", "HANGED_ON", "RAIN_CONTINUES", "SUN_CONTINUES", "SANDSTORM_CONTINUES", "HAIL_CONTINUES", "LEECH_SEED_DRAIN", "MON_HIT", "ITEM_STEAL", "SNATCH_MOVE", "FUTURE_SIGHT_HIT", "DOOM_DESIRE_HIT", "FOCUS_PUNCH_SETUP", "INGRAIN_HEAL", "WISH_HEAL"}
-  V.BATTLE_ANIM_SPECIAL_NAMES = {[0] = "LVL_UP", "SWITCH_OUT_PLAYER_MON", "SWITCH_OUT_OPPONENT_MON", "BALL_THROW", "BALL_THROW_WITH_TRAINER", "SUBSTITUTE_TO_MON", "MON_TO_SUBSTITUTE"}
+  V.BATTLE_ANIM_STATUS_NAMES = Names.statusNames
+  V.BATTLE_ANIM_GENERAL_NAMES = Names.generalNames
+  V.BATTLE_ANIM_SPECIAL_NAMES = Names.specialNames
   local templates, callbacks, tasks = {}, {}, {}
   local function functionOffset(name)
     if S.hasFunc(name) then return S.funcOff(name) end

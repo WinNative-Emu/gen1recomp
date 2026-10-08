@@ -383,6 +383,12 @@ end
 local function drawText(str, x, y, colors, width)
   Font.draw(str, x, y, {font = "normal", colors = colors, maxWidth = width or 120, linePitch = 16})
 end
+local function quantity(qty, multX, y, colors)
+  local count = tostring(qty)
+  drawText("×", multX, y, colors)
+  -- pokeruby/src/text.c:3474
+  drawText(count, 232 - Font.measure(count, {font = "normal"}), y, colors)
+end
 local function frame(left, top, width, height) Chrome.stdFrame(left + 1, top + 1, width - 1, height - 1) end
 
 function M.draw(Bag)
@@ -409,7 +415,10 @@ function M.draw(Bag)
   local labels = m.labels[Bag.pocketIdx]
   image(fem and labels.female or labels.male, 32, 80)
   if m.indicators then
-    for p = 1, 5 do image(p == Bag.pocketIdx and m.indicators.selected or m.indicators.idle, 32 + p * 8, 72) end
+    -- pokeruby/src/item_menu.c:779
+    local selected, idle = m.indicators.selected, m.indicators.idle
+    if fem then selected, idle = m.indicators.selectedFemale, m.indicators.idleFemale end
+    for p = 1, 5 do image(p == Bag.pocketIdx and selected or idle, 32 + p * 8, 72) end
   end
   local rows = Bag.list()
   local scroll = Bag.scroll
@@ -428,16 +437,26 @@ function M.draw(Bag)
         local hm = pocket == "TM_CASE" and Items.isHm(row.id)
         image(hm and m.hm or m.number, 112, y)
         local number = pocket == "TM_CASE" and Items.tmNumber(row.id) or Items.berryNumber(row.id)
-        drawText(hm and tostring(number) or string.format("%02d", number or 0), 129, y, rowColors)
         local move = pocket == "TM_CASE" and Pokemon.moveFromTmItem(row.id)
-        drawText(move and Pokemon.moveName(move) or row.name, 136, y, rowColors, hm and 96 or 78)
-        if not hm then drawText("×" .. tostring(row.qty), 232 - Font.measure("×" .. tostring(row.qty), {font = "normal"}), y, rowColors) end
+        local name = move and Pokemon.moveName(move) or row.name
+        if hm then
+          -- pokeruby/src/item_menu.c:1249
+          drawText(tostring(number), 129, y, rowColors)
+          drawText(name, 136, y, rowColors, 96)
+        else
+          -- pokeruby/src/item_menu.c:1091
+          local multX = 112 + 120 - ((pocket == "TM_CASE" and 2 or 3) + 1) * 6
+          drawText(string.format("%02d", number or 0), 120, y, rowColors)
+          drawText(name, 136, y, rowColors, multX - 136)
+          quantity(row.qty, multX, y, rowColors)
+        end
       elseif pocket == "KEY_ITEMS" then
         drawText(row.name, 112, y, rowColors, 96)
         if Bag._session and Items.toNumericId(Bag._session.registeredItem) == Items.toNumericId(row.id) then image(m.select, 208, y) end
       else
+        -- pokeruby/src/item_menu.c:1166
         drawText(row.name, 112, y, rowColors, 102)
-        drawText("×" .. tostring(row.qty), 232 - Font.measure("×" .. tostring(row.qty), {font = "normal"}), y, rowColors)
+        quantity(row.qty, 214, y, rowColors)
       end
     end
   end

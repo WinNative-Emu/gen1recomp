@@ -2008,6 +2008,7 @@ function BattleTransition.drawWorld(canvas, vw, vh)
   local fx = BattleTransition._fx
   G.push("all")
   G.origin()
+  G.setCanvas(canvas)
   if fx and fx.def.redraw then
     local scratch = BattleTransition._scratch
     if not scratch or scratch:getWidth() ~= vw or scratch:getHeight() ~= vh then

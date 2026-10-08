@@ -9,6 +9,13 @@ function M.show(session)
   local Space = package.loaded["src.core.game3.scripting.space"]
   M.owner = Space and Space.vm
 end
+function M.isVisible()
+  if M.visible then
+    local Space = package.loaded["src.core.game3.scripting.space"]
+    if M.owner ~= (Space and Space.vm) then M.reset() end
+  end
+  return M.visible
+end
 function M.eraseBox(l, t, r, b)
   if l <= 1 and t <= 0 and r >= 28 and b >= 18 then M.reset() end
 end

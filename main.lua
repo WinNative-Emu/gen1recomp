@@ -208,6 +208,17 @@ local function applySavedOrientation()
   end)
 end
 
+local function applySavedAudioMode()
+  local ok, savedOptions = pcall(function()
+    return require("src.core.SaveData").loadOptions()
+  end)
+  if not ok or type(savedOptions) ~= "table" then savedOptions = {} end
+  local mode = savedOptions.audioMode or "both"
+  if love and love.audio and love.audio.setMixWithSystem then
+    pcall(love.audio.setMixWithSystem, mode ~= "game_only")
+  end
+end
+
 local Game, EditorApp, Importer, TouchEditor, Studio, Prelaunch
 local launcherSplash
 
@@ -525,10 +536,56 @@ local function makeLauncher(launcherOpts)
   })
 end
 
+local deferredLaunchRequest
+
+local function rebuildLauncherInProcess(opts)
+  if require("src.core.RequireGuard").repair() then
+    print("boot: restored love.filesystem searcher (see #2001)")
+  end
+
+  local currentVersion = require("src.core.GameVersion").get()
+  SessionLifecycle.endGameSession(Game)
+  Game = nil
+  pcall(function() require("src.online.Trade").hostIsLive = nil end)
+  local syncEngine = package.loaded["src.sync.SyncEngine"]
+  if type(syncEngine) == "table" and type(syncEngine._shared) == "table" then
+    pcall(syncEngine._shared.protectPlaythrough, syncEngine._shared, nil, nil)
+  end
+  autopilot = nil
+  driverCo = nil
+  local SaveData = require("src.core.SaveData")
+  local cartId = SaveData.getCart()
+  SaveData.setCart(nil)
+  require("src.core.GameSpeed").setAllowed(nil)
+
+  SessionLifecycle.endMountedSession(currentVersion)
+  SaveData.refreshSlotResolution(currentVersion)
+  if cartId then SaveData.refreshSlotResolution("cart_" .. cartId) end
+
+  applySavedOrientation()
+
+  local preload = require("src.mods.LauncherMods").translationStrings()
+  if preload then require("src.core.Strings").load({ strings = preload }) end
+
+  if love.window and love.window.setTitle then
+    local Version = require("src.core.Version")
+    love.window.setTitle(Version.title("Gen 1 Recompilation Project"))
+  end
+
+  Importer = makeLauncher({ initialTab = opts.tab, invite = opts.invite })
+  if Importer.ignoreReturningPointer then
+    Importer:ignoreReturningPointer()
+  end
+  if type(opts.request) == "table" then deferredLaunchRequest = opts.request end
+end
+
 local function returnToLauncher(opts)
   if not Game or quitToLauncher then return end
-  quitToLauncher = true
   opts = opts or {}
+  if not require("src.core.HostShell").canRestart() then
+    return rebuildLauncherInProcess(opts)
+  end
+  quitToLauncher = true
   local handoff = { tab = opts.tab, invite = opts.invite, request = opts.request }
   local okEncode, body = pcall(require("src.core.SaveSerializer").encode, handoff)
   pcall(love.filesystem.write, RELAUNCH_MARKER, okEncode and body or "return {}\n")
@@ -538,6 +595,7 @@ local function returnToLauncher(opts)
   autopilot = nil
   driverCo = nil
   endProcessOnce()
+  if opts.restarting then return end
   require("src.core.HostShell").restart()
 end
 
@@ -672,8 +730,6 @@ local function autoUpdateMods(request, tab)
     Importer:autoUpdateAll(function() end, { tab = tab })
   end
 end
-
-local deferredLaunchRequest
 
 local function launcherBusy()
   return launcherSplash ~= nil or Importer ~= nil and (Importer._updateAll ~= nil
@@ -816,6 +872,7 @@ function love.load(args)
   -- the launcher would rotate freely until options are applied at boot.
   -- No-op on desktop / iOS / when options.lua does not exist yet.
   applySavedOrientation()
+  applySavedAudioMode()
 
   -- Standalone editor.  A bare `--editor` run has no launcher behind it, so
   -- Close quits; --save points it at a specific file, otherwise it opens the
@@ -1617,8 +1674,13 @@ function love.quit()
       and (mobile or not launchedIntoGame)
   end)
   if wouldReturnToLauncher then
-    returnToLauncher()
-    return true
+    local HostShell = require("src.core.HostShell")
+    if HostShell.restarting and HostShell.canRestart() then
+      returnToLauncher({ restarting = true })
+    else
+      returnToLauncher()
+      return true
+    end
   end
   endProcessOnce()
 end
@@ -1649,6 +1711,7 @@ end
 -- Shane #1830 idle render governor (POKEPORT_IDLE_*): drop presentation rate
 -- on static in-game screens; game logic and audio stay at full speed.
 local function idlePresentationCap(idleFor)
+  if Importer then return 30 end
   local after = tonumber(os.getenv("POKEPORT_IDLE_AFTER"))
   local fps = tonumber(os.getenv("POKEPORT_IDLE_FPS"))
   if not after or after <= 0 or not fps or fps <= 0 then return nil end
@@ -1658,6 +1721,7 @@ local function idlePresentationCap(idleFor)
 end
 
 function love.run()
+  _G.POKEPORT_LOOP_RESTART = true
   if love.load then love.load(love.arg.parseGameArguments(arg), arg) end
 
   -- don't let love.load's cost land in the first frame's dt

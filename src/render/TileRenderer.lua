@@ -427,6 +427,8 @@ end
 
 local function getGbcAtlas(imagePath, tilesetId, mapId, perRow, data, bgp)
   local key = imagePath .. gbcKeyFor(mapId)
+  local tileSources = data and data.tilesets and data.tilesets[tilesetId]
+  tileSources = tileSources and tileSources.tileSources
   if not bgp and gbcAtlasCache[key] ~= nil then return gbcAtlasCache[key] or nil end
   local img = false
   if love.image and love.image.newImageData then
@@ -440,7 +442,7 @@ local function getGbcAtlas(imagePath, tilesetId, mapId, perRow, data, bgp)
       for t = 0, total - 1 do
         local colors = tileColors[t]
         if colors == nil then
-          local group = PaletteFX.worldGroupAt(tilesetId, mapId, t)
+          local group = PaletteFX.worldGroupAt(tilesetId, mapId, t, tileSources)
           colors = (group and groupColors[group + 1]) or false
           tileColors[t] = colors
         end
@@ -504,6 +506,7 @@ function TileRenderer.new(map, data)
       -- context rather than re-deriving it per draw.
       gbcCtx.imagePath = map.tileset.image
       gbcCtx.perRow = map.tileset.tilesPerRow
+      gbcCtx.tileSources = map.tileset.tileSources
       self.gbcCtx = gbcCtx
       self.gbcAtlasKey = map.tileset.image .. gbcCtx.key
       self.gbcKeyed = {}
@@ -711,7 +714,7 @@ local function getKeyedTile(self, tile)
   if cached ~= nil then return cached or nil end
   local img = false
   if ctx.groupColors and love.image and love.image.newImageData then
-    local group = PaletteFX.worldGroupAt(ctx.tilesetId, ctx.mapId, tile)
+    local group = PaletteFX.worldGroupAt(ctx.tilesetId, ctx.mapId, tile, ctx.tileSources)
     local colors = group and ctx.groupColors[group + 1]
     local src = Assets.imageData(ctx.imagePath)
     local ox = (tile % ctx.perRow) * 8

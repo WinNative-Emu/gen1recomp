@@ -339,6 +339,8 @@ function PikachuFollower.onMapEntered(game, ow, opts, viaMapLoad)
   -- Pikachu off the normal trailing loop.  A new map instance ends it.
   ow.pikachuBillsScene = nil
   ow.pikachuFanClubScene = nil
+  -- home/overworld.asm:1895
+  if viaMapLoad and not (opts and opts.keepPikachu) then ow.pikachuPewterSleepScene = nil end
   remove(ow)
   if not ModRuntime.call("world.follower.spawn", shouldSpawn, game, ow) then return end
   -- opts.keepPikachu is the follower a connection crossing kept alive:

@@ -87,6 +87,7 @@ function Store.validate(state)
       return nil, "Gift progress is invalid."
     end
   end
+  if not require("src.box.Items").validate(state.items) then return nil, "The item locker is invalid." end
   if state.presets ~= nil and type(state.presets) ~= "table" then return nil, "Team presets are invalid." end
   if state.organizerProfiles ~= nil then
     if type(state.organizerProfiles) ~= "table" or #state.organizerProfiles > 20 then return nil, "Auto Box presets are invalid." end

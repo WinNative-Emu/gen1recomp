@@ -129,7 +129,7 @@ do
   eq(S.mapClickCell, nil, "select drops the previous cell selection")
   eq(S._mapCenteredFor, nil,
      "select defers centring to the next draw, which knows the viewport size")
-  check(S.status:match("VIRIDIAN_CITY") ~= nil, "select says what it is showing")
+  check(S.note:match("VIRIDIAN_CITY") ~= nil, "select says what it is showing")
 end
 
 do

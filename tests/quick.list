@@ -4,6 +4,7 @@ tests/engine/amnesia_rest_share_anim_bug1881.lua
 tests/engine/android_asymmetric_display.lua
 tests/engine/android_exit_to_launcher_test.lua
 tests/engine/android_host_extension_test.lua
+tests/engine/android_old_shell_restart_bug2738.lua
 tests/engine/android_secondary_present.lua
 tests/engine/android_shortcuts_payload_test.lua
 tests/engine/applying_attack_sfx_wait_bug1998.lua
@@ -114,7 +115,9 @@ tests/engine/game3_em_bike_doors_2637.lua
 tests/engine/game3_em_catch_prompt_2637.lua
 tests/engine/game3_frontier_obedience_2638.lua
 tests/engine/game3_post_dex_background_2637.lua
+tests/engine/game3_rs_anim_names_test.lua
 tests/engine/game3_rs_bag_cursor_width_2709.lua
+tests/engine/game3_rs_bag_row_layout_2727.lua
 tests/engine/game3_rs_item_use_text_2699_test.lua
 tests/engine/game3_rs_starter_choose_scale_2703.lua
 tests/engine/game3_rs_summary_memo_location_2707.lua
@@ -389,6 +392,7 @@ tests/engine/host_shell_bridge_request.lua
 tests/engine/host_shell_fetch_errors.lua
 tests/engine/host_shell_postlog.lua
 tests/engine/host_shell_request_headers.lua
+tests/engine/hostshell_restart_single_spawn_2740.lua
 tests/engine/hostshell_spawn_self.lua
 tests/engine/hostshell_win_http_nonascii.lua
 tests/engine/hostshell_win_restart_2721.lua
@@ -446,6 +450,7 @@ tests/engine/launcher_page_scroll.lua
 tests/engine/launcher_patch_notes.lua
 tests/engine/launcher_return_pointer_bug2079.lua
 tests/engine/launcher_secret_emerald_test.lua
+tests/engine/launcher_settings_persist_2740.lua
 tests/engine/launcher_skins_options_reads_bug2038.lua
 tests/engine/launcher_skins_tab.lua
 tests/engine/launcher_skins_ux.lua
@@ -620,6 +625,7 @@ tests/engine/save_convert_toggle_objects.lua
 tests/engine/save_editor_berry_powder_2698.lua
 tests/engine/save_editor_buena_points_2640.lua
 tests/engine/save_editor_custom_maps.lua
+tests/engine/save_editor_unown_form_2726.lua
 tests/engine/save_export_map_window_bug1691.lua
 tests/engine/save_export_portable_bug752.lua
 tests/engine/save_export_same_map_moved_2468.lua
@@ -852,3 +858,14 @@ tests/save_compat/gen3_cache_selection_test.lua
 tests/save_compat/regions_test.lua
 tests/save_editor_split_stack_bug2671_test.lua
 tests/save_editor_task6_tests.lua
+tests/engine/game3_field_poison_step_gate_test.lua
+tests/engine/game3_rs_layout_keys_test.lua
+tests/engine/game3_rs_save_window_test.lua
+tests/engine/game3_rs_coins_box_test.lua
+tests/engine/game3_battle_yesno_frame_s7.lua
+tests/engine/game3_rs_field_yesno_s2.lua
+tests/engine/save_editor_mail_maxdv_spinda.lua
+tests/engine/save_editor_toast_s6.lua
+tests/engine/launcher_save_toast_s6.lua
+tests/engine/save_editor_map_point_buttons_s8.lua
+tests/engine/love_run_shell_matrix.lua

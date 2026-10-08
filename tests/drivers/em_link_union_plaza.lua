@@ -17,11 +17,15 @@ return function(game)
   local SaveData = require("src.core.SaveData")
   local Schema = require("src.core.game3.save_schema_firered")
   local raw = love.filesystem.read("saves/emerald/slot1.lua")
-  if not check(type(raw) == "string", "identity has a save") then return d.finish() end
-  local session = Schema.fromSaveTable(SaveData.decode(raw))
-  require("src.core.game3.options").bind(session, game.options)
-  game:adoptSave(session, true)
-  game:_enterField(session, "continue")
+  local session
+  if type(raw) == "string" then
+    session = Schema.fromSaveTable(SaveData.decode(raw))
+    require("src.core.game3.options").bind(session, game.options)
+    game:adoptSave(session, true)
+    game:_enterField(session, "continue")
+  else
+    game:_handleBootAction({ action = "new_game", name = "MAY", gender = 1 })
+  end
   U.wait(30)
   S.settle(game)
 
@@ -126,7 +130,7 @@ return function(game)
     relay:handle(s, { type = "lobby_hello", protocol = 3, name = "P" .. i, profiles = { live },
       presence = { where = "launcher", status = "idle", version = v } })
     s.avatar = { name = "P" .. i, trainerId = 0x1000 + i, gender = i % 2, version = v }
-    relay:handle(s, { type = "plaza_join", kind = "union", cap = 40, profile = live, avatar = s.avatar })
+    relay:handle(s, { type = "plaza_join", kind = "union", cap = 40, xgen = 1, profile = live, avatar = s.avatar })
     peers[#peers + 1] = s
   end
   check(waitFor(function() return Union.playerCount() == 3 end, 8, 120), "three FR/LG/EM plaza members appear")

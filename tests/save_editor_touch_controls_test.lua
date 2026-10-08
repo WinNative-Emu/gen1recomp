@@ -316,8 +316,6 @@ check(App.save(), "bulk-edited save writes")
 check(App.reload(), "bulk-edited save reloads")
 S = App.getState()
 check(require("Legality").save(S).errors == 0, "bulk edits survive save round trip")
--- Result clicks and keyboard adds report inside the open picker, where the
--- dimmed status bar cannot provide visible confirmation.
 local picker = require("ItemPicker")
 local item = assert(Ops.itemSearch(S, "potion")[1])
 local oldClock, oldPrint = love.timer.getTime, love.graphics.print
@@ -331,27 +329,37 @@ local function pickerFrame()
   printed = {}
   App.draw()
 end
+local function shown(text)
+  for line in pairs(printed) do
+    if #line >= 8 and text:sub(1, #line) == line then return true end
+  end
+  return false
+end
 S.tab = "items"
 Ops.openItemPicker(S, Kit, "bag")
 pickerFrame()
 pickerFrame()
+check(picker.feedback == nil and picker.drawFeedback == nil, "picker has no private toast")
 check(picker.commit(S, Kit, item), "bag add succeeds")
 pickerFrame()
-check(printed["Added to Bag"] and S.itemPicker ~= nil, "bag toast renders without closing picker")
-toastClock = toastClock + 2.6
+local added = S.toast and S.toast.text
+check(S.toast and S.toast.kind == "ok", "bag add raises a green toast")
+check(added and shown(added) and S.itemPicker ~= nil, "bag toast renders over the open picker")
+toastClock = toastClock + 3.5 + 0.25 + 0.01
 pickerFrame()
-check(not printed["Added to Bag"], "toast disappears automatically")
+check(not shown(added) and S.toast == nil, "toast disappears automatically")
 S.itemPicker.dest = "pc"
 App.textinput("potion")
 App.keypressed("return")
 pickerFrame()
-check(printed["Added to PC"], "keyboard add renders PC toast")
+check(S.toast and S.toast.kind == "ok" and S.toast.text:find("PC", 1, true) and shown(S.toast.text),
+  "keyboard add renders PC toast")
 local realAdd = Ops.addToBag
 Ops.addToBag = function(state) return Ops.say(state, "Bag is full") end
 S.itemPicker.dest = "bag"
 check(not picker.commit(S, Kit, item), "refused add does not report success")
 pickerFrame()
-check(printed["Item not added"] and not printed["Added to Bag"], "refused add has visible failure feedback")
+check(S.toast and S.toast.kind == "error" and printed["Bag is full"], "refused add has visible failure feedback")
 Ops.addToBag = realAdd
 Ops.closeItemPicker(S, Kit)
 love.timer.getTime, love.graphics.print = oldClock, oldPrint

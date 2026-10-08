@@ -151,7 +151,7 @@ return function(game)
   local yellow = peer("d0000004", "YELLOW", 6, 0, "firered")
   for _, s in ipairs({ green, pink, yellow }) do
     s.presence.where = "union"
-    relay:handle(s, { type = "plaza_join", kind = "union", cap = 40, profile = live, avatar = s.avatar })
+    relay:handle(s, { type = "plaza_join", kind = "union", cap = 40, xgen = 1, profile = live, avatar = s.avatar })
   end
   local group = { leader = pink.id, members = { pink.id, yellow.id }, activity = "chat" }
   pink.group, pink.status = group, "chatting"

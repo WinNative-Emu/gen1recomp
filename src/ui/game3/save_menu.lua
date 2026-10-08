@@ -47,8 +47,9 @@ end
 -- pokefirered/src/save_menu_util.c:25
 function SaveMenu.countDex(session)
   local dex = type(session) == "table" and session.dex or nil
-  if SaveMenu.layout(session) == "rse" then
+  if SaveMenu.isHoenn(session) then
     -- pokeemerald/src/menu.c:2122
+    -- pokeruby/src/save_menu_util.c:118
     local st = SaveMenu.flagStore(session)
     return Dex.summaryCount({ version = session.version, dex = dex, flags = st.flags, vars = st.vars })
   end
@@ -75,6 +76,10 @@ function SaveMenu.layout(session)
   return ui and ui.saveMenu or "frlg"
 end
 
+function SaveMenu.isHoenn(session)
+  return SaveMenu.layout(session) ~= "frlg"
+end
+
 local function saveExists(session)
   local ok, raw = pcall(require("src.core.SaveData").load, session and session.version)
   return ok and type(raw) == "table"
@@ -85,7 +90,8 @@ function SaveMenu.show(opts)
   SaveMenu.open = true
   SaveMenu.cursor = 1
   SaveMenu._phase = "confirm"
-  SaveMenu._rse = SaveMenu.layout(opts.session) == "rse"
+  SaveMenu._layout = SaveMenu.layout(opts.session)
+  SaveMenu._rse = SaveMenu._layout ~= "frlg"
   SaveMenu._timer = nil
   SaveMenu._error = nil
   SaveMenu._session = opts.session
@@ -245,7 +251,7 @@ end
 
 function SaveMenu.locationName(session)
   session = session or {}
-  if SaveMenu.layout(session) == "rse" then return rseLocationName(session) end
+  if SaveMenu.isHoenn(session) then return rseLocationName(session) end
   if type(session.mapName) == "string" and session.mapName ~= "" and not session.mapName:find("^FR_") and not session.mapName:find("^SEVII_") then
     return session.mapName:upper()
   end
@@ -310,7 +316,40 @@ function SaveMenu.drawRse()
   local pt = session.playtime or session.playTime or {}
   row(y, "gText_SavingTime", string.format("%d:%02d", tonumber(pt.hours or session.hours) or 0,
     tonumber(pt.minutes or session.minutes) or 0))
+  SaveMenu.drawDialog(session)
+end
 
+-- pokeruby/src/save_menu_util.c:12
+function SaveMenu.drawRs()
+  local session = SaveMenu._session or {}
+  local hasDex = SaveMenu.hasDex(session)
+  local win = Window.template(1, 1, 12, hasDex and 10 or 8)
+  Window.stdFrame(win)
+  local x0, y0 = win.left * 8, win.top * 8
+  local right = (win.left + 12) * 8
+  local NORMAL = FrlgFont.COLOR.NORMAL
+  local function row(y, labelKey, value)
+    FrlgFont.draw(RomText.plain(labelKey), x0, y0 + y, { colors = NORMAL })
+    -- pokeruby/src/save_menu_util.c:68
+    FrlgFont.draw(value, right - FrlgFont.measure(value), y0 + y, { colors = NORMAL })
+  end
+  -- pokeruby/src/save_menu_util.c:76
+  FrlgFont.draw(Strings(SaveMenu.locationName(session)), x0, y0, { colors = NORMAL })
+  row(16, "gText_SavingPlayer", tostring(session.name or session.playerName or ""))
+  row(32, "gText_SavingBadges", tostring(SaveMenu.countBadges(session)))
+  local y = 48
+  if hasDex then
+    row(y, "gText_SavingPokedex", tostring(SaveMenu.countDex(session)))
+    y = y + 16
+  end
+  local pt = session.playtime or session.playTime or {}
+  row(y, "gText_SavingTime", string.format("%d:%02d", tonumber(pt.hours or session.hours) or 0,
+    tonumber(pt.minutes or session.minutes) or 0))
+  SaveMenu.drawDialog(session)
+end
+
+function SaveMenu.drawDialog(session)
+  local NORMAL = FrlgFont.COLOR.NORMAL
   Chrome.dialogueFrame()
   local left, top, width = Chrome.dialogueWindow()
   local key = ({ confirm = "gText_ConfirmSave", overwrite = "gText_AlreadySavedFile",
@@ -332,6 +371,14 @@ function SaveMenu.drawRse()
     local yn = Window.template(21, 9, 5, 4)
     Window.stdFrame(yn)
     local yx, yy = yn.left * 8, yn.top * 8
+    if SaveMenu._layout == "rs" then
+      -- pokeruby/src/menu.c:602
+      FrlgFont.draw(RomText.plain("gText_Yes"), yx, yy, { colors = NORMAL })
+      FrlgFont.draw(RomText.plain("gText_No"), yx, yy + 16, { colors = NORMAL })
+      -- pokeruby/src/menu.c:721
+      require("src.ui.game3.rs.menu_cursor").draw(yx, yy + (SaveMenu.cursor - 1) * 16, 40)
+      return
+    end
     FrlgFont.draw(RomText.plain("gText_Yes"), yx + 8, yy + 1, { colors = NORMAL })
     FrlgFont.draw(RomText.plain("gText_No"), yx + 8, yy + 17, { colors = NORMAL })
     Window.cursorPx(yx, yy + 1 + (SaveMenu.cursor == 2 and 16 or 0))
@@ -340,6 +387,7 @@ end
 
 function SaveMenu.draw()
   if not SaveMenu.open then return end
+  if SaveMenu._layout == "rs" then return SaveMenu.drawRs() end
   if SaveMenu._rse then return SaveMenu.drawRse() end
   local session = SaveMenu._session or {}
   local name = tostring(session.name or session.playerName or "")

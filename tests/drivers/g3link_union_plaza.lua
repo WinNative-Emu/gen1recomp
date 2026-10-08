@@ -137,11 +137,11 @@ return function(game)
   me.presence.where = "union"
 
   local blue = peer("b0000002", "BLUE", 0x2222, 0, "leafgreen")
-  relay:handle(blue, { type = "plaza_join", kind = "union", cap = 40, profile = live, avatar = blue.avatar })
+  relay:handle(blue, { type = "plaza_join", kind = "union", cap = 40, xgen = 1, profile = live, avatar = blue.avatar })
   local crowd = { blue }
   for i = 2, OTHERS do
     local s = peer(string.format("c%07x", i), "T" .. i, 0x100 + i * 13, i % 2, i % 3 == 0 and "leafgreen" or "firered")
-    relay:handle(s, { type = "plaza_join", kind = "union", cap = 40, profile = live, avatar = s.avatar })
+    relay:handle(s, { type = "plaza_join", kind = "union", cap = 40, xgen = 1, profile = live, avatar = s.avatar })
     crowd[#crowd + 1] = s
   end
   result(waitFor(function() return Union.playerCount() == OTHERS end, 10, 120),

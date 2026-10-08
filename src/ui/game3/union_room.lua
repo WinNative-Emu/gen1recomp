@@ -414,6 +414,7 @@ UnionRoomScreen.LABELS = RomText.lazy({
 })
 
 function UnionRoomScreen.labelFor(item)
+  if type(item) == "table" and type(item.label) == "string" then return item.label end
   return UnionRoomScreen.LABELS[item and item.key] or ""
 end
 

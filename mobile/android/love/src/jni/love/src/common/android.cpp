@@ -906,6 +906,22 @@ bool hasBackgroundMusic()
 	return result;
 }
 
+bool setAudioMixWithSystem(bool mix)
+{
+	JNIEnv *env = (JNIEnv*) SDL_AndroidGetJNIEnv();
+	jobject activity = (jobject) SDL_AndroidGetActivity();
+
+	jclass clazz(env->GetObjectClass(activity));
+	jmethodID method_id = env->GetMethodID(clazz, "setAudioMixWithSystem", "(Z)Z");
+
+	jboolean result = env->CallBooleanMethod(activity, method_id, (jboolean) mix);
+
+	env->DeleteLocalRef(activity);
+	env->DeleteLocalRef(clazz);
+
+	return result;
+}
+
 bool hasRecordingPermission()
 {
 	JNIEnv *env = (JNIEnv*) SDL_AndroidGetJNIEnv();

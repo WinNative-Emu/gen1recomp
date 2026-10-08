@@ -111,6 +111,18 @@ local function localTrade(imp, x, y, w, m)
     cy = cy + Kit.textWrapped("small", tostring(tr.status), x, cy, w,
       tr.statusOk and PAL.green or PAL.yellow, 3) + tiny
   end
+  if tr.recommendAsk then
+    local half = math.floor((w - gap) / 2)
+    LV().btn(imp, x, cy, half, rowH, "online-trade-recommend-yes",
+      Strings("Yes"),
+      { kind = "primary", font = "small",
+        action = function() OnlinePanel.tradeRecommendAnswer(imp, true) end })
+    LV().btn(imp, x + half + gap, cy, w - half - gap, rowH,
+      "online-trade-recommend-no", Strings("No"),
+      { kind = "ghost", font = "small",
+        action = function() OnlinePanel.tradeRecommendAnswer(imp, false) end })
+    cy = cy + rowH + tiny
+  end
   return cy - y
 end
 

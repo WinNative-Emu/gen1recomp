@@ -10,7 +10,8 @@ NAMES = [
     "save", "rotate-ccw", "ellipsis", "copy", "heart", "package", "backpack", "list-filter",
     "arrow-up", "arrow-down", "arrow-left", "arrow-right", "arrow-up-down", "eye", "award",
     "book-open", "shield-check", "map-pin", "grid-2x2", "sliders-horizontal", "expand",
-    "chevrons-up", "users", "user-round", "wallet", "flag",
+    "chevrons-up", "users", "user-round", "wallet", "flag", "sparkles", "shuffle",
+    "folder-open",
 ]
 
 

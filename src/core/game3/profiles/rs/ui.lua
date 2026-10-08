@@ -145,7 +145,10 @@ return {
   },
   startMenu = "src.ui.game3.rs.start_menu_data",
   shopMenu = "src.ui.game3.rs.shop_menu",
-  saveMenu = "rse",
+  -- pokeruby/src/save_menu_util.c:12
+  saveMenu = "rs",
+  -- pokeruby/src/coins.c:16
+  coinsWindow = { frameOrigin = true, text = "gOtherText_Coins2" },
   battleSpriteLayout = "rs",
   healthbox = { layout = "rs", doublesCenters = {
     [0] = { x = 159, y = 77 }, [1] = { x = 44, y = 19 },

@@ -3820,7 +3820,7 @@ AnimTasks.REGISTRY.AnimTask_ExtrasensoryDistortion = AnimTasks.ScreenDistortionW
 AnimTasks.REGISTRY.UproarDistortion = AnimTasks.ScreenDistortionWobble
 AnimTasks.REGISTRY.AnimTask_UproarDistortion = AnimTasks.ScreenDistortionWobble
 
---- pret CreateSpotlight & RemoveSpotlight (Spotlight, Follow Me)
+-- pokeemerald/src/battle_anim_effects_3.c:1674
 function AnimTasks.Spotlight(t, vm)
   local frame = t.data[14] or 0
   t.data[14] = frame + 1

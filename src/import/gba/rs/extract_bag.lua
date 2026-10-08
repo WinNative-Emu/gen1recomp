@@ -1,7 +1,8 @@
 local K = require("src.import.gba.rse.boot_gfx")
 local A = require("src.import.gba.rs.assets")
 local M = {SUB = "rse/bag", FILES = {"bg.png", "bg_female.png", "bag_male.png", "bag_female.png", "ball.png", "select.png",
-  "arrows_vertical.png", "arrows_horizontal.png", "hm.png", "number.png", "indicator_0.png", "indicator_1.png", "list_cursor.png"}}
+  "arrows_vertical.png", "arrows_horizontal.png", "hm.png", "number.png", "indicator_0.png", "indicator_1.png",
+  "indicator_0_female.png", "indicator_1_female.png", "list_cursor.png"}}
 for i = 0, 4 do for _, g in ipairs({"male", "female"}) do M.FILES[#M.FILES + 1] = "label_" .. i .. "_" .. g .. ".png" end end
 M.REQUIRED = K.required(M.SUB, M.FILES)
 local N, H = "item_menu.o:", "menu_helpers.o:"
@@ -39,11 +40,15 @@ function M.run(rom, cache, opts)
     local words = {}; for _, word in ipairs(g[2]) do words[#words + 1] = string.char(word % 256, math.floor(word / 256)) end
     local pixels, gw, gh = K.bakeText(gfx, table.concat(words), g[3], g[4], {linear = true, mapWidth = g[3]})
     local rec = {png = c:png(g[1] .. ".png", gw, gh, pixels, male, true), w = gw, h = gh, words = g[2], paletteBank = math.floor(g[2][1] / 4096)}
-    if g[1]:find("indicator", 1, true) then man.indicators[tonumber(g[1]:sub(-1))] = rec else man.glyphs[g[1]] = rec end
+    if g[1]:find("indicator", 1, true) then
+      rec.female = c:png(g[1] .. "_female.png", gw, gh, pixels, female, true)
+      man.indicators[tonumber(g[1]:sub(-1))] = rec
+    else man.glyphs[g[1]] = rec end
   end
   man.indicatorGeometry = {x = 40, y = 72, spacing = 8, pockets = 5}
   man.hm, man.number = man.glyphs.hm.png, man.glyphs.number.png
   man.indicators.idle, man.indicators.selected = man.indicators[0].png, man.indicators[1].png
+  man.indicators.idleFemale, man.indicators.selectedFemale = man.indicators[0].female, man.indicators[1].female
   local tableOff = c:off("gSubspriteTables_842F6C0") + 15 * 8
   local count, parts, tiles = c:u8(tableOff), {}, c:raw("OutlineCursorTiles_12")
   local sub = assert(c:ptr(tableOff + 4))

@@ -239,6 +239,7 @@ function Pokedex.showRegistration(speciesId, opts)
   opts = opts or {}
   Pokedex.open = true
   Pokedex._regSpecies = tonumber(speciesId) or 1
+  Pokedex._unitTexts = nil
   Pokedex.selectedSpecies = Pokedex._regSpecies
   Pokedex._session = opts.session
   Pokedex._dex = (opts.session and opts.session.dex) or Dex.new()
@@ -269,6 +270,7 @@ end
 
 -- pokedex_screen.c
 function Pokedex.resetScreenState()
+  Pokedex._unitTexts = nil
   Pokedex.screen = "mode_select"
   Pokedex.subScreenPrev = "mode_select"
   Pokedex.modeCursor = 2
@@ -856,6 +858,20 @@ function Pokedex.controlInfoForDataPage(screen)
   return RomText.plain("gText_Cry"), RomText.plain("gText_NextDataCancel")
 end
 
+local function unitTexts(sp, caught)
+  local memo = Pokedex._unitTexts
+  if memo and memo.sp == sp and memo.caught == caught then return memo end
+  local Units = require("src.core.game3.pokedex_units")
+  local metric = Units.metric(sp)
+  memo = { sp = sp, caught = caught }
+  if metric then
+    memo.height = caught and Units.height(metric) or Units.unknownHeight()
+    memo.weight = caught and Units.weight(metric) or Units.unknownWeight()
+  end
+  Pokedex._unitTexts = memo
+  return memo
+end
+
 --- 3. Detailed Data Entry Screen (Page 1: Specs & Flavor Text, Page 2: Size Chart & Area Map)
 local function draw_data_screen()
   local dex = Pokedex._dex
@@ -903,13 +919,14 @@ local function draw_data_screen()
 
     -- Line 3 (y = 60): HT in FONT_SMALL at x=16; Height value at x=46
     FrlgFont.draw(RomText.plain("gText_HT"), 16, 60, { small = true, colors = upperColors })
-    local htStr = isCaught and (entry.heightFormatted or " ??'??\"") or " ??'??\""
+    local units = unitTexts(sp, isCaught)
+    local htStr = units.height or (isCaught and (entry.heightFormatted or " ??'??\"") or " ??'??\"")
     FrlgFont.draw(htStr, 46, 60, { small = true, colors = upperColors })
 
     -- Line 4 (y = 72): WT in FONT_SMALL at x=16; Weight value at x=46
     FrlgFont.draw(RomText.plain("gText_WT"), 16, 72, { small = true, colors = upperColors })
     -- src/pokedex_screen.c:2834
-    local wtStr = isCaught and entry.weightFormatted or ("????.? " .. RomText.plain("gText_Lbs"))
+    local wtStr = units.weight or (isCaught and entry.weightFormatted or ("????.? " .. RomText.plain("gText_Lbs")))
     FrlgFont.draw(wtStr, 46, 72, { small = true, colors = upperColors })
 
     -- Footprint (16x16) at screen x=104, y=64 (window x=88, y=40)

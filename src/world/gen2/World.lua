@@ -8641,6 +8641,7 @@ function World:interactBody()
   local d = Map.DELTA[p.facing]
   local fx, fy = p.cellX + d[1], p.cellY + d[2]
   local npc = self:npcAt(self:facingObjectCell())
+  if npc and npc.onTalk then return npc:onTalk(self) end
   -- TryObjectEvent writes hLastTalked for EVERY A-press dispatch; scripts
   -- then use LAST_TALKED (`disappear`, `applymovementlasttalked`) without any
   -- setlasttalked of their own.  The port only wrote it from the explicit
@@ -10462,6 +10463,8 @@ function World:takeWarp(warpDef)
       if ok then
         self:spawnFacing()
         self:recordWarpBackup(prevMapId, prevWarpIndex, destWarp, destMapId)
+        require("src.world.gen2.UnionCenter2F").noteWarp(self, prevMapId,
+          prevWarpIndex, warpDef, destMapId, destWarp)
       end
       return ok
     end)

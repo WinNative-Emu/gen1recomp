@@ -3,8 +3,7 @@
 -- Reuses the game's own MapLoader/TileRenderer/Warp so the editor's view
 -- matches what the player would actually see.
 --
--- Three columns: a searchable map list, the viewport, and the spawn
--- inspector.  Overlays are drawn in this order so the selection always wins:
+-- Overlays are drawn in this order so the selection always wins:
 --   cyan hollow  warp cell (clicking follows the warp)
 --   red filled   the save's player position
 --   green / amber  lastHeal / lastOutdoor
@@ -181,9 +180,9 @@ local function goToWarp(S, warp)
     local dest = def.destMap or def.map
     if dest then
       MapBrowser.select(S, dest)
-      S.status = "Followed warp to " .. tostring(dest)
+      Ops.note(S, "Followed warp to " .. tostring(dest))
     else
-      S.status = "Warp has no destination map"
+      Ops.say(S, "Warp has no destination map")
     end
     return
   end
@@ -197,12 +196,12 @@ local function goToWarp(S, warp)
     S.save.lastOutdoor = { id = S.mapId, x = def.x, y = def.y }
   end
   if def.destMap == "LAST_MAP" and not S.save.lastOutdoor then
-    S.status = "Can't follow warp: no remembered outdoor map (lastOutdoor unset)"
+    Ops.say(S, "Can't follow warp: no remembered outdoor map")
     return
   end
   local ok, destMap, dx, dy = pcall(Warp.destination, S.data, def, S.save.lastOutdoor)
   if not ok then
-    S.status = "Warp failed: " .. tostring(destMap)
+    Ops.say(S, "Warp failed: " .. tostring(destMap))
     return
   end
   S.mapId = destMap
@@ -212,7 +211,7 @@ local function goToWarp(S, warp)
   -- claim the lazy first-draw centering below, so it does not immediately
   -- re-centre the destination map and lose the warp's landing cell
   S._mapCenteredFor = destMap
-  S.status = "Followed warp to " .. destMap
+  Ops.note(S, "Followed warp to " .. destMap)
 end
 
 -- Screen-space point inside the viewport -> map cell, or nil if the point is
@@ -264,7 +263,7 @@ function MapBrowser.select(S, id)
   S.mapClickCell = nil
   S._mapCenteredFor = nil
   MapBrowser.clearTouches(S)
-  S.status = "Viewing " .. id
+  Ops.note(S, "Viewing " .. id)
 end
 
 -- Called inside the viewport's translate+scale transform, so every rect is
@@ -412,6 +411,118 @@ function MapBrowser.preview(S)
   return true, map, reason and ("Preview unavailable: " .. reason .. ". Coordinate grid remains available.")
 end
 
+local function insideOverlay(S, x, y)
+  for _, r in ipairs(S._mapOverlayRects or {}) do
+    if x >= r.x and x <= r.x + r.w and y >= r.y and y <= r.y + r.h then return true end
+  end
+  return false
+end
+MapBrowser.insideOverlay = insideOverlay
+
+function MapBrowser.pointActions(S, map)
+  local pmap, px, py = playerPos(S)
+  local function at(id, cx, cy)
+    return id and ("%s (%d,%d)"):format(id, cx or 0, cy or 0) or "unset"
+  end
+  local heal = { id = "heal", label = "Heal", what = "Last heal", icon = "heart", run = Ops.setLastHeal }
+  local actions = {
+    { id = "player", label = "Player", what = "Player", icon = "user-round", value = at(pmap, px, py),
+      run = Ops.setPlayerHere },
+    heal,
+  }
+  local generation = Gen.ofState(S)
+  if generation == 3 then
+    heal.value = at(S.save.healMap, S.save.healX, S.save.healY)
+  elseif generation == 2 then
+    heal.id, heal.label, heal.what = "spawn", "Spawn", "Spawn"
+    heal.value = tostring(S.save.spawn or "SPAWN_HOME")
+  else
+    local last, out = S.save.lastHeal, S.save.lastOutdoor
+    heal.value = last and at(last.map, last.x, last.y) or "unset"
+    actions[3] = {
+      id = "outdoor", label = "Outdoor", what = "Last outdoor", icon = "flag",
+      value = out and at(out.id, out.x, out.y) or "unset",
+      run = function(state) return Ops.setLastOutdoor(state, map) end,
+      refused = not Ops.isOutdoor(S, map),
+    }
+  end
+  for _, action in ipairs(actions) do
+    action.enabled = S.mapClickCell ~= nil and not action.refused
+    if not S.mapClickCell then
+      action.reason = ("%s: %s. Tap a cell first"):format(action.what, action.value)
+    end
+  end
+  return actions
+end
+
+local function layoutActions(S, Kit, actions, vx0, vy0, vinner, vh0)
+  local s = Kit.scale
+  local h, gapB, inset = Kit.controlH(), 6 * s, 6 * s
+  local right, top = vx0 + vinner - inset, vy0 + inset
+  local availW, availH = vinner - 2 * inset, vh0 - 2 * inset
+  local function place(compact, column)
+    local total, widest = -gapB, 0
+    for _, action in ipairs(actions) do
+      action.w = compact and h or Kit.buttonWidth(action.label, { font = "small", icon = action.icon }, h)
+      total = total + action.w + gapB
+      widest = math.max(widest, action.w)
+    end
+    if column then
+      if widest > availW or #actions * (h + gapB) - gapB > availH then return false end
+      local y = top
+      for _, action in ipairs(actions) do
+        action.rect = { x = right - action.w, y = y, w = action.w, h = h }
+        y = y + h + gapB
+      end
+    else
+      if total > availW or h > availH then return false end
+      local x = right - total
+      for _, action in ipairs(actions) do
+        action.rect = { x = x, y = top, w = action.w, h = h }
+        x = x + action.w + gapB
+      end
+    end
+    S._mapActionsCompact = compact
+    return true
+  end
+  if not (place(false, false) or place(false, true) or place(true, false) or place(true, true)) then
+    S._mapOverlayRects, S._mapActionsCompact = {}, nil
+    return 0
+  end
+  local rects, bottom = {}, top
+  for _, action in ipairs(actions) do
+    rects[#rects + 1] = action.rect
+    bottom = math.max(bottom, action.rect.y + h)
+  end
+  S._mapOverlayRects = rects
+  return bottom - vy0
+end
+
+local function drawActions(S, Kit, actions)
+  for _, action in ipairs(S._mapOverlayRects and #S._mapOverlayRects > 0 and actions or {}) do
+    local r = action.rect
+    local pressed
+    if S._mapActionsCompact then
+      pressed = Kit.iconButton(r.x, r.y, r.w, r.h, action.icon, action.label, {
+        kind = "accent", enabled = action.enabled,
+      })
+    else
+      pressed = Kit.button(r.x, r.y, r.w, r.h, action.label, {
+        kind = "accent", font = "small", icon = action.icon, enabled = action.enabled,
+      })
+    end
+    if pressed then
+      action.run(S)
+    elseif not action.enabled and Kit.press(r.x, r.y, r.w, r.h) then
+      if action.reason then
+        Ops.say(S, action.reason, "info")
+      else
+        action.run(S)
+      end
+    end
+  end
+end
+
 local function drawSection(S, Kit, x, y, w, h)
   local s = Kit.scale
   local gap = 20 * s
@@ -419,25 +530,24 @@ local function drawSection(S, Kit, x, y, w, h)
   S.mapQuery = S.mapQuery or ""
   S.mapZoom = clampZoom(S.mapZoom or 2)
 
-  -- Column plan (#715).  Side by side, the list and spawn cards claim ~470
-  -- logical px before the viewport gets anything, and a portrait phone does
-  -- not have it: the old layout answered by laying the viewport out at a
+  -- Column plan (#715).  A portrait phone cannot fit the list beside the
+  -- viewport: the old layout answered by laying the viewport out at a
   -- negative width, which the scissor below rejected ("Can't set scissor
   -- with negative width and/or height") and took the whole editor down.
-  -- Phones open Maps / View / Spawn as sliding pages. Every viewport
+  -- Phones open Maps / View as sliding pages. Every viewport
   -- dimension is clamped so no window shape creates a negative scissor.
   local listW = math.max(200 * s, math.min(260 * s, w * 0.2))
   local sideW = math.max(230 * s, math.min(300 * s, w * 0.22))
-  local viewW = w - listW - sideW - 2 * gap
-  local stacked = S.mapFocused or h > w or viewW < 260 * s
+  local viewW = w - listW - gap
+  local stacked = S.mapFocused or h > w or viewW - sideW - gap < 260 * s
   S._mapStacked = stacked
-  local lr, vr, sr -- list / viewport / spawn card rects
+  local lr, vr -- list / viewport rects
   local row, gapNav = Kit.controlH(), 6 * s
   local labelW = 48 * s
   local inlineZoom = stacked and w > h and w >= 5 * row + labelW + 6 * gapNav + 100 * s
   if stacked then
-    S.mapSection = S.mapSection or "view"
-    local sections = { { "maps", "Maps" }, { "view", "View" }, { "spawn", "Spawn" } }
+    if S.mapSection ~= "maps" then S.mapSection = "view" end
+    local sections = { { "maps", "Maps" }, { "view", "View" } }
     if Kit.iconButton(x, y, row, row, S.mapFocused and "chevron-left" or "expand",
       S.mapFocused and "Back to editor" or "Focus map") then
       S.mapFocused = not S.mapFocused
@@ -484,11 +594,9 @@ local function drawSection(S, Kit, x, y, w, h)
     y, h = y + row + gapNav, math.max(0, h - row - gapNav)
     lr = { x = x, y = y, w = w, h = h }
     vr = lr
-    sr = lr
   else
     lr = { x = x, y = y, w = listW, h = h }
     vr = { x = x + listW + gap, y = y, w = math.max(0, viewW), h = h }
-    sr = { x = x + w - sideW, y = y, w = sideW, h = h }
   end
 
   -- --------------------------------------------------------- the map list
@@ -521,6 +629,9 @@ local function drawSection(S, Kit, x, y, w, h)
     local gotoY = lr.y + lr.h - pad - gotoH
     local pagerH = Kit.controlH()
     local pagerY = gotoY - 10 * s - pagerH
+    if stacked and not compactList then
+      S.toastBottom = math.min(S.toastBottom or pagerY, pagerY)
+    end
     local listTop = qy + Kit.controlH() + 10 * s
     local mRowH = Kit.controlH()
     local mGap = 4 * s
@@ -572,7 +683,7 @@ local function drawSection(S, Kit, x, y, w, h)
       local pmap, px, py = playerPos(S)
       if pmap then
         MapBrowser.select(S, pmap)
-        Ops.say(S, ("Jumped to %s (%d,%d)"):format(pmap, px, py))
+        Ops.say(S, ("Jumped to %s (%d,%d)"):format(pmap, px, py), "ok")
       else
         Ops.say(S, "No player location on this save")
       end
@@ -663,7 +774,7 @@ local function drawSection(S, Kit, x, y, w, h)
         )
       then
         showPlayer(S)
-        Ops.say(S, "Centred on the player")
+        Ops.note(S, "Centred on the player")
       end
     end
     local zoomY = vr.y + vpad
@@ -728,8 +839,11 @@ local function drawSection(S, Kit, x, y, w, h)
       S._mapCenterPlayer, S.mapAutoFit = nil, false
     end
 
+    local actions = MapBrowser.pointActions(S, map)
+    local barH = layoutActions(S, Kit, actions, vx0, vy0, vinner, vh0)
+
     if Kit.mouseDown and not Kit.blockClicks and not S._mapPinch
-      and (S._mapDrag or Kit.hit(vx0, vy0, vinner, vh0)) then
+      and (S._mapDrag or (Kit.hit(vx0, vy0, vinner, vh0) and not insideOverlay(S, Kit.mouseX, Kit.mouseY))) then
       local d = S._mapDrag
       if not d then
         S._mapDrag = { mx = Kit.mouseX, my = Kit.mouseY, camX = S.mapCamX, camY = S.mapCamY }
@@ -781,13 +895,15 @@ local function drawSection(S, Kit, x, y, w, h)
       drawOverlays(S, map)
       love.graphics.pop()
       if previewReason then
-        Kit.textWrapped("tiny", previewReason, vx0 + 8 * s, vy0 + 8 * s, math.max(0, vinner - 16 * s), PAL.yellow)
+        Kit.textWrapped("tiny", previewReason, vx0 + 8 * s, vy0 + 8 * s + barH, math.max(0, vinner - 16 * s), PAL.yellow)
       end
       Kit.popClip()
     end
+    drawActions(S, Kit, actions)
 
     -- click handling: warp cells jump the view, everything else selects
-    if Kit.mouseClicked and not Kit.blockClicks and not S._mapPinch then
+    if Kit.mouseClicked and not Kit.blockClicks and not S._mapPinch
+      and not insideOverlay(S, Kit.mouseX, Kit.mouseY) then
       local cx, cy = cellAtScreen(S, map, Kit, vx0, vy0, vinner, vh0)
       if cx then
         local warp = map:warpAtCell(cx, cy)
@@ -795,7 +911,7 @@ local function drawSection(S, Kit, x, y, w, h)
           goToWarp(S, warp)
         else
           S.mapClickCell = { cx = cx, cy = cy }
-          S.status = string.format("Selected cell (%d,%d) on %s", cx, cy, S.mapId)
+          Ops.note(S, string.format("Selected cell (%d,%d) on %s", cx, cy, S.mapId))
         end
       end
     end
@@ -806,12 +922,13 @@ local function drawSection(S, Kit, x, y, w, h)
     local legend = {
       { PAL.blue, "warp", false },
       { PAL.red, "player", true },
-      { PAL.green, "lastHeal", false },
-      { PAL.yellow, "lastOutdoor", false },
+      { PAL.green, "last heal", false },
+      { PAL.yellow, "last outdoor", false },
     }
     if stacked then
       if not inlineZoom then
         local toolY = ly - row - 6 * s
+        S.toastBottom = math.min(S.toastBottom or toolY, toolY)
         local fitW = Kit.buttonWidth("Fit", { font = "small" }, row)
         local percentW = Kit.textWidth("tiny", "400%") + 4 * s
         local toolsW = 3 * row + fitW + percentW + 4 * gapNav
@@ -828,7 +945,7 @@ local function drawSection(S, Kit, x, y, w, h)
       Kit.text(
         "tiny",
         S.mapClickCell
-            and ("Selected (%d,%d) · set in Spawn"):format(S.mapClickCell.cx, S.mapClickCell.cy)
+            and ("Selected (%d,%d) · set it with the map buttons"):format(S.mapClickCell.cx, S.mapClickCell.cy)
           or "Pinch to zoom · drag to pan · tap a cell",
         vx0,
         ly,
@@ -855,140 +972,7 @@ local function drawSection(S, Kit, x, y, w, h)
         PAL.caption
       )
     end
-    if stacked then
-      return
-    end
   end
-
-  -- ------------------------------------------------------ spawn inspector
-  local sx0 = sr.x
-  Kit.card(sx0, sr.y, sr.w, sr.h)
-  Kit.caption(sx0 + pad, sr.y + pad, "SPAWN POINTS")
-  local sTop = sr.y + pad + Kit.textHeight("caption") + 12 * s
-  local sInner = sr.w - 2 * pad
-  local pmap2, px2, py2 = playerPos(S)
-  local playerValue = pmap2 and ("%s (%d,%d)"):format(pmap2, px2, py2) or "unset"
-  local spawns
-  if Gen.of(S.save) == 3 then
-    local healMap = S.save.healMap
-    local healX = S.save.healX or 0
-    local healY = S.save.healY or 0
-    spawns = {
-      {
-        key = "PLAYER",
-        color = PAL.red,
-        value = playerValue,
-        set = function()
-          Ops.setPlayerHere(S)
-        end,
-      },
-      {
-        key = "LAST HEAL",
-        color = PAL.green,
-        value = healMap and ("%s (%d,%d)"):format(healMap, healX, healY) or "unset",
-        set = function()
-          Ops.setLastHeal(S)
-        end,
-      },
-    }
-  elseif Gen.of(S.save) == 2 then
-    spawns = {
-      {
-        key = "PLAYER",
-        color = PAL.red,
-        value = playerValue,
-        set = function()
-          Ops.setPlayerHere(S)
-        end,
-      },
-      {
-        key = "SPAWN",
-        color = PAL.green,
-        value = tostring(S.save.spawn or "SPAWN_HOME"),
-        set = function()
-          Ops.setLastHeal(S)
-        end,
-      },
-    }
-  else
-    local out = S.save.lastOutdoor
-    local heal = S.save.lastHeal
-    spawns = {
-      {
-        key = "PLAYER",
-        color = PAL.red,
-        value = playerValue,
-        set = function()
-          Ops.setPlayerHere(S)
-        end,
-      },
-      {
-        key = "LAST HEAL",
-        color = PAL.green,
-        value = heal and ("%s (%d,%d)"):format(heal.map, heal.x, heal.y) or "unset",
-        set = function()
-          Ops.setLastHeal(S)
-        end,
-      },
-      {
-        key = "LAST OUTDOOR",
-        color = PAL.yellow,
-        value = out and ("%s (%d,%d)"):format(out.id, out.x, out.y) or "unset",
-        set = function()
-          Ops.setLastOutdoor(S, map)
-        end,
-      },
-    }
-  end
-  local spawnH = math.max(80 * s, Kit.controlH() + 2 * Kit.textHeight("mono"))
-  local spawnTop = sTop
-  local spawnViewH = math.max(0, sr.y + sr.h - pad - spawnTop)
-  S.mapSpawnScroll = Kit.scrollPixels(
-    sx0 + pad,
-    spawnTop,
-    sInner,
-    spawnViewH,
-    S.mapSpawnScroll or 0,
-    #spawns * (spawnH + 8 * s) + 70 * s
-  )
-  Kit.pushClip(sx0 + pad, spawnTop, sInner, spawnViewH)
-  sTop = sTop - S.mapSpawnScroll
-  for i, sp in ipairs(spawns) do
-    local ry = sTop + (i - 1) * (spawnH + 8 * s)
-    Theme.row(sx0 + pad, ry, sInner, spawnH, 10 * s, 0.6)
-    Kit.text("tiny", sp.key, sx0 + pad + 12 * s, ry + 11 * s, sp.color)
-    local setW = 70 * s
-    if
-      Kit.button(
-        sx0 + pad + sInner - 12 * s - setW,
-        ry + 8 * s,
-        setW,
-        Kit.controlH(),
-        "Set here",
-        { kind = "accent", font = "tiny", radius = 7 * s, enabled = S.mapClickCell ~= nil }
-      )
-    then
-      sp.set()
-    end
-    Kit.text(
-      "mono",
-      Kit.ellipsize("mono", sp.value, sInner - 24 * s),
-      sx0 + pad + 12 * s,
-      ry + spawnH - 10 * s - Kit.textHeight("mono"),
-      PAL.muted
-    )
-  end
-
-  local noteY = sTop + #spawns * (spawnH + 8 * s) + 6 * s
-  Kit.textWrapped(
-    "tiny",
-    "Select a cell in View, then set a spawn point here. Drag to pan; use the zoom controls to zoom.",
-    sx0 + pad,
-    noteY,
-    sInner,
-    PAL.caption
-  )
-  Kit.popClip()
 end
 
 function MapBrowser.draw(S, Kit, x, y, w, h)
@@ -999,7 +983,7 @@ function MapBrowser.draw(S, Kit, x, y, w, h)
     require("src.world.gen2.MapPreview").clear(S._g2MapBaker)
   end
   S._mapWindowKey = windowKey
-  S._mapViewRect = nil
+  S._mapViewRect, S._mapOverlayRects = nil, nil
   Motion.pages(S, Kit, "mapSection", x, y, w, h, drawSection)
   if S._mapStacked and S.mapSection ~= "view" then S._mapViewRect = nil end
 end

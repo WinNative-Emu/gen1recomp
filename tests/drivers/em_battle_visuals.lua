@@ -117,7 +117,7 @@ return function(game)
     U.wait(60)
   end
 
-  result(BattleChrome.isRse(), "Emerald chrome manifest is the rse layout")
+  result(BattleChrome.layout() == "emerald", "Emerald chrome manifest is the emerald layout")
 
   load_map("EM_ROUTE117", 32, 15)
   set_party()

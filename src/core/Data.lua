@@ -182,6 +182,7 @@ function Data:seedDefaults(version)
   Data.seedMtMoonB2FSuperNerd(self)
   -- #189: 1F cabin door order vs rooms map (survey zoom)
   require("src.world.SsAnneLayout").apply(self.maps)
+  if gen == 1 then require("src.world.gen1.UnionCenters").seed(self) end
 end
 
 -- The Karate Master (FightingDojo.asm) is a text_asm object: his object has

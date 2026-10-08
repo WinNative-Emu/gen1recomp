@@ -2,21 +2,32 @@
 """Generate src/import/gba/anim_names_<game>.lua for an RSE-family pret build.
 
 usage: tools/gen_anim_names.py --game emerald [--pret ../pokeemerald] [--ref ../pokefirered] [--check]
+       tools/gen_anim_names.py --game ruby [--pret ../pokeruby] [--ref ../pokeemerald] [--check]
 """
 
 import argparse
+import difflib
 import hashlib
 import importlib.util
 import os
 import re
 import sys
+from collections import Counter
 
 ROM_LO = 0x08000000
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 GAMES = {
     "emerald": {"repo": "pokeemerald", "elf": "pokeemerald.elf", "rom": "pokeemerald.gba"},
+    "ruby": {"repo": "pokeruby", "elf": "pokeruby.elf", "rom": "pokeruby.gba"},
 }
 REF = {"repo": "pokefirered", "elf": "pokefirered.elf", "rom": "pokefirered.gba"}
+RS_REF = {"repo": "pokeemerald", "elf": "pokeemerald.elf", "rom": "pokeemerald.gba"}
+RS_NATIVE_GLOB = ("rs_callbacks.lua", "rs_early_callbacks.lua", "rs_tasks.lua", "rs_sound_tasks.lua")
+PTR_FIELDS = {
+    0x02: ((1, "template"),), 0x03: ((1, "task"),), 0x1F: ((1, "task"),),
+    0x0E: ((1, "branch"),), 0x13: ((1, "branch"),), 0x24: ((1, "branch"),),
+    0x21: ((4, "branch"),), 0x12: ((2, "branch"),), 0x11: ((1, "branch"), (5, "branch")),
+}
 
 FIXED = {
     0x00: 3, 0x01: 3, 0x04: 2, 0x05: 1, 0x06: 1, 0x07: 1, 0x08: 1, 0x09: 3,
@@ -247,6 +258,305 @@ def render_indexed(name, d, indent="  "):
     return rows
 
 
+def decode_ops(bd, o, errors):
+    ops, pos = [], o
+    for _ in range(8192):
+        op = bd.u8(pos)
+        n = op_len(bd, pos)
+        raw = bytearray(bd.b[pos:pos + n])
+        ptrs = []
+        for at, kind in PTR_FIELDS.get(op, ()):
+            ptrs.append((kind, bd.u32(pos + at)))
+            raw[at:at + 4] = b"\0\0\0\0"
+        ops.append((bytes(raw), ptrs))
+        if op in (0x08, 0x0F, 0x13):
+            return ops
+        pos += n
+    errors.append("script at 0x%X did not terminate" % o)
+    return ops
+
+
+def parse_lua_maps(path, sections):
+    out, cur = {s: {} for s in sections}, None
+    with open(path) as f:
+        for line in f:
+            m = re.match(r"^  (\w+) = \{$", line)
+            if m:
+                cur = m.group(1) if m.group(1) in out else None
+                continue
+            if line.startswith("  }"):
+                cur = None
+                continue
+            if cur:
+                m = re.match(r'^    (?:\["([^"]+)"\]|(\w+)) = "([^"]*)",$', line)
+                if m:
+                    out[cur][m.group(1) or m.group(2)] = m.group(3)
+    return out
+
+
+def native_names():
+    names = set()
+    base = os.path.join(ROOT, "src", "core", "game3", "battle", "anim_port")
+    for fn in RS_NATIVE_GLOB:
+        with open(os.path.join(base, fn)) as f:
+            for m in re.finditer(r"\b(sub_[0-9A-Fa-f]{7})\s*=", f.read()):
+                names.add(m.group(1))
+    return names
+
+
+def status_names(pret, count):
+    out = {}
+    with open(os.path.join(pret, "include", "constants", "battle.h")) as f:
+        for l in f:
+            m = re.match(r"#define\s+B_ANIM_(STATUS_\w+)\s+(0x[0-9A-Fa-f]+|\d+)", l)
+            if m and int(m.group(2), 0) < count:
+                out[int(m.group(2), 0)] = m.group(1)
+    return out
+
+
+def best(counter):
+    top = counter.most_common(2)
+    if len(top) > 1 and top[0][1] == top[1][1]:
+        return None
+    return top[0][0]
+
+
+def main_rs(args):
+    info = GAMES[args.game]
+    pret = args.pret or os.path.join(os.path.dirname(ROOT), info["repo"])
+    refp = args.ref or os.path.join(os.path.dirname(ROOT), RS_REF["repo"])
+    out = args.out or os.path.join(ROOT, "src", "import", "gba", "rs", "anim_names.lua")
+    symmod = load_syms_module()
+    rs = Build(pret, info, symmod)
+    em = Build(refp, RS_REF, symmod)
+    errors = []
+    em_names = parse_lua_maps(os.path.join(ROOT, "src", "import", "gba", "anim_names_emerald.lua"),
+                              ("templates", "callbacks", "tasks"))
+
+    rs_tables, em_tables = table_labels(pret), table_labels(refp)
+    roots, queue, counts = [], [], {}
+    for key, tname in TABLES:
+        rbase, ebase = rs.sym_off(tname), em.sym_off(tname)
+        rn = len([l for l, _ in rs_tables[tname] if l != "Move_COUNT"])
+        en = len([l for l, _ in em_tables[tname] if l != "Move_COUNT"])
+        counts[key] = rn
+        for i in range(rn):
+            ro = rs.off(rs.u32(rbase + i * 4))
+            if ro is None:
+                errors.append("%s[%d] bad pointer" % (tname, i))
+                continue
+            roots.append(ro)
+            if i < en:
+                eo = em.off(em.u32(ebase + i * 4))
+                if eo is not None:
+                    queue.append((ro, eo))
+
+    tmpl_ptrs, task_ptrs = walk(rs, roots, errors)
+
+    def func_size(bd, ptr):
+        r = bd.func_row(ptr)
+        return r and r["size"]
+
+    def close(x, y):
+        return x is not None and y is not None and abs(x - y) <= max(8, max(x, y) // 10)
+
+    def same_size(pa, pb):
+        if pa[0] == "template":
+            ra, rb = rs.data_row(pa[1]), em.data_row(pb[1])
+            if not ra or not rb:
+                return False
+            return close(func_size(rs, rs.u32(ra["off"] + 20)), func_size(em, em.u32(rb["off"] + 20)))
+        return close(func_size(rs, pa[1]), func_size(em, pb[1]))
+
+    votes = {"template": {}, "task": {}}
+    seen, drift = set(), 0
+    while queue:
+        pair = queue.pop()
+        if pair in seen:
+            continue
+        seen.add(pair)
+        a, b = decode_ops(rs, pair[0], errors), decode_ops(em, pair[1], errors)
+        ta, tb = [x[0] for x in a], [x[0] for x in b]
+        if ta != tb:
+            drift += 1
+        sm = difflib.SequenceMatcher(None, ta, tb, autojunk=False)
+        matched, loose_a, loose_b = [], [], []
+        for tag, i1, i2, j1, j2 in sm.get_opcodes():
+            if tag == "equal" or (tag == "replace" and i2 - i1 == j2 - j1
+                                  and all(ta[i1 + k][0] == tb[j1 + k][0] for k in range(i2 - i1))):
+                matched += [(i1 + k, j1 + k) for k in range(i2 - i1)]
+            else:
+                loose_a += [i for i in range(i1, i2) if ta[i][0] in (0x02, 0x03, 0x1F)]
+                loose_b += [j for j in range(j1, j2) if tb[j][0] in (0x02, 0x03, 0x1F)]
+        ca, cb = Counter(ta[i] for i in loose_a), Counter(tb[j] for j in loose_b)
+        matched += [(i, j) for i in loose_a for j in loose_b if ta[i] == tb[j] and ca[ta[i]] == 1 and cb[tb[j]] == 1
+                    and same_size(a[i][1][0], b[j][1][0])]
+        for ia, ib in matched:
+            for (ka, pa), (_, pb) in zip(a[ia][1], b[ib][1]):
+                if ka == "branch":
+                    ro, eo = rs.off(pa), em.off(pb)
+                    if ro is not None and eo is not None:
+                        queue.append((ro, eo))
+                else:
+                    votes[ka].setdefault(pa, Counter())[pb] += 1
+
+    natives = native_names()
+    ambiguous, resized = [], []
+
+    def rs_func_key(r):
+        return rs.func_key(r) if r.get("obj") else r["name"]
+
+    def em_func_canon(ptr, section):
+        r = em.func_row(ptr)
+        return r and em_names[section].get(em.func_key(r))
+
+    tasks, task_src = {}, {}
+    for ptr in sorted(task_ptrs):
+        r = rs.func_row(ptr)
+        if not r:
+            errors.append("task pointer 0x%08X has no ELF function" % ptr)
+            continue
+        key = rs_func_key(r)
+        canon = None
+        if ptr in votes["task"] and r["name"] not in natives:
+            eptr = best(votes["task"][ptr])
+            if eptr is None:
+                ambiguous.append("task %s: %s" % (key, ", ".join(
+                    "%s x%d" % (em.func_row(p)["name"], c) for p, c in votes["task"][ptr].most_common())))
+            else:
+                canon = em_func_canon(eptr, "tasks")
+                if canon and func_size(rs, ptr) != func_size(em, eptr):
+                    resized.append("task %s %d -> %s %d" % (key, func_size(rs, ptr), canon, func_size(em, eptr)))
+        tasks[key] = canon or short_task(r["name"])
+        task_src[key] = canon is not None
+
+    cb_votes, tmpl_canon = {}, {}
+    templates, callbacks, cb_src = {}, {}, {}
+    for ptr in sorted(tmpl_ptrs):
+        r = rs.data_row(ptr)
+        if not r:
+            errors.append("template pointer 0x%08X has no ELF symbol" % ptr)
+            continue
+        key = rs.data_key(r) if r.get("obj") else r["name"]
+        cbptr = rs.u32(r["off"] + 20)
+        cbr = rs.func_row(cbptr)
+        if not cbr:
+            errors.append("template %s callback 0x%08X has no ELF function" % (key, cbptr))
+            continue
+        eptr = None
+        if ptr in votes["template"]:
+            eptr = best(votes["template"][ptr])
+            if eptr is None:
+                ambiguous.append("template %s: %s" % (key, ", ".join(
+                    "%s x%d" % (em.data_row(p)["name"], c) for p, c in votes["template"][ptr].most_common())))
+        if eptr is not None:
+            er = em.data_row(eptr)
+            tmpl_canon[key] = (em_names["templates"].get(em.data_key(er)), sum(votes["template"][ptr].values()))
+            ecb = em.u32(er["off"] + 20)
+            cb_votes.setdefault(cbptr, Counter())[ecb] += votes["template"][ptr][eptr]
+        templates[key] = key
+        callbacks.setdefault(rs_func_key(cbr), None)
+
+    by_canon = {}
+    for key, (canon, n) in tmpl_canon.items():
+        if canon:
+            by_canon.setdefault(canon, []).append((n, key))
+    shared, tmpl_src = [], set()
+    for canon, rows in by_canon.items():
+        rows.sort(key=lambda x: (-x[0], x[1]))
+        if canon in templates and canon not in [k for _, k in rows]:
+            shared.append("%s (RS template of that name exists): %s" % (canon, ", ".join(k for _, k in rows)))
+            continue
+        templates[rows[0][1]] = canon
+        tmpl_src.add(rows[0][1])
+        if len(rows) > 1:
+            shared.append("%s <- %s; kept RS name for %s" % (canon, rows[0][1], ", ".join(k for _, k in rows[1:])))
+
+    for ptr in sorted({rs.u32(rs.data_row(p)["off"] + 20) for p in tmpl_ptrs if rs.data_row(p)}):
+        r = rs.func_row(ptr)
+        if not r:
+            continue
+        key = rs_func_key(r)
+        canon = None
+        if ptr in cb_votes and r["name"] not in natives:
+            eptr = best(cb_votes[ptr])
+            if eptr is None:
+                ambiguous.append("callback %s: %s" % (key, ", ".join(
+                    "%s x%d" % (em.func_row(p)["name"], c) for p, c in cb_votes[ptr].most_common())))
+            else:
+                canon = em_func_canon(eptr, "callbacks")
+                if canon and func_size(rs, ptr) != func_size(em, eptr):
+                    resized.append("callback %s %d -> %s %d" % (key, func_size(rs, ptr), canon, func_size(em, eptr)))
+        callbacks[key] = canon or short_cb(r["name"])
+        cb_src[key] = canon is not None
+
+    tags = tag_names(pret)
+    if sorted(tags) != list(range(len(tags))):
+        errors.append("ANIM_TAG_ indices are not contiguous")
+    status = status_names(pret, counts["status"])
+    shared_names = {}
+    for key, tname in TABLES[2:]:
+        lst = [re.match(r"B_ANIM_(\w+)", c) for _, c in em_tables[tname]]
+        if len(lst) != counts[key] or not all(lst):
+            errors.append("%s does not line up with %s" % (tname, RS_REF["repo"]))
+        shared_names[key] = dict(enumerate(m.group(1) for m in lst if m))
+    if sorted(status) != list(range(counts["status"])):
+        errors.append("B_ANIM_STATUS_ constants do not cover gBattleAnims_StatusConditions")
+
+    rs_only_cb = sorted(k for k, v in callbacks.items() if not cb_src.get(k) and k not in natives)
+    rs_only_task = sorted(k for k, v in tasks.items() if not task_src.get(k) and k not in natives)
+    rs_only_tmpl = sorted(k for k in templates if k not in tmpl_src)
+    print("%s: %d script roots, %d paired scripts (%d drifted), %d templates, %d callbacks, %d tasks" % (
+        args.game, len(roots), len(seen), drift, len(templates), len(callbacks), len(tasks)))
+    print("aligned: callbacks=%d tasks=%d templates=%d natives=%d" % (
+        sum(1 for v in cb_src.values() if v), sum(1 for v in task_src.values() if v),
+        len(templates) - len(rs_only_tmpl), len(natives)))
+    print("rs-only callbacks: %s" % (", ".join(rs_only_cb) or "-"))
+    print("rs-only tasks: %s" % (", ".join(rs_only_task) or "-"))
+    for s in ambiguous:
+        print("  ambiguous " + s)
+    for s in shared:
+        print("  shared " + s)
+    for s in resized:
+        print("  resized " + s)
+    if errors:
+        print("ERRORS (%d):" % len(errors))
+        for e in errors[:80]:
+            print("  " + e)
+        sys.exit(1)
+
+    lines = [
+        "-- tools/gen_anim_names.py --game ruby from %s, %s/data/battle_anim_scripts.s aligned with %s/data/battle_anim_scripts.s"
+        % (info["elf"], info["repo"], RS_REF["repo"]),
+        "return {",
+        '  game = "rs",',
+    ]
+    lines += render_map("templates", templates)
+    lines += render_map("callbacks", callbacks)
+    lines += render_map("tasks", tasks)
+    lines += ["  rsOnly = {"]
+    lines += render_list("callbacks", rs_only_cb, "    ")
+    lines += render_list("tasks", rs_only_task, "    ")
+    lines += render_list("templates", rs_only_tmpl, "    ")
+    lines += ["  },"]
+    lines += render_indexed("tagNames", tags)
+    lines += render_indexed("statusNames", status)
+    lines += render_indexed("generalNames", shared_names["general"])
+    lines += render_indexed("specialNames", shared_names["special"])
+    lines += ["}", ""]
+    text = "\n".join(lines)
+    if args.check:
+        cur = open(out).read() if os.path.exists(out) else ""
+        if cur != text:
+            print("STALE %s" % out)
+            sys.exit(1)
+        print("OK %s" % out)
+        return
+    with open(out, "w") as f:
+        f.write(text)
+    print("wrote %s" % out)
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--game", default="emerald", choices=sorted(GAMES))
@@ -255,6 +565,8 @@ def main():
     ap.add_argument("--out")
     ap.add_argument("--check", action="store_true")
     args = ap.parse_args()
+    if args.game == "ruby":
+        return main_rs(args)
 
     info = GAMES[args.game]
     pret = args.pret or os.path.join(os.path.dirname(ROOT), info["repo"])

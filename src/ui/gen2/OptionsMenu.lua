@@ -62,6 +62,8 @@ local FINITE_VALUE_SOURCES = {
   Strings.source("ADAPTIVE"), Strings.source("UNAVAILABLE"),
   Strings.source("DISPLAY"), Strings.source("DISPLAY (%dHZ)"),
   Strings.source("ON"), Strings.source("4X"),
+  Strings.source("AUDIO MODE"), Strings.source("BOTH"), Strings.source("EXT ONLY"),
+  Strings.source("GAME ONLY"),
 }
 
 local function volLabel(v)
@@ -201,6 +203,22 @@ local ROWS = {
     end,
     text = function(options)
       return Strings(FILTERS[(options.musicFilter or 0) + 1])
+    end },
+  { label = Strings.source("AUDIO MODE"), key = "audioMode", port = true,
+    cycle = function(options, delta)
+      local cur = options.audioMode or "both"
+      local modes = { "both", "external_only", "game_only" }
+      local idx = 1
+      for i, m in ipairs(modes) do if m == cur then idx = i break end end
+      idx = ((idx - 1 + (delta < 0 and -1 or 1)) % #modes) + 1
+      options.audioMode = modes[idx]
+      require("src.core.Music").applyOptions(options)
+    end,
+    text = function(options)
+      local cur = options.audioMode or "both"
+      if cur == "external_only" then return Strings("EXT ONLY") end
+      if cur == "game_only" then return Strings("GAME ONLY") end
+      return Strings("BOTH")
     end },
   -- Heads the port's display group, same spot src/ui/OptionsMenu.lua's own
   -- PERFORMANCE row occupies relative to ZOOM/VOID FILL/TILT/SHADER FX below
@@ -514,7 +532,7 @@ local GROUPS = {
   { id = "group.graphics", label = Strings.source("GRAPHICS"),
     members = { "color", "uiLetterbox", "shaderfx", "shaderfx2", "frame" } },
   { id = "group.audio", label = Strings.source("AUDIO"),
-    members = { "sound", "musicVol", "sfxVol", "musicFilter" } },
+    members = { "sound", "musicVol", "sfxVol", "musicFilter", "audioMode" } },
   { id = "group.battle", label = Strings.source("BATTLE OPTIONS"),
     members = { "battleScene", "battleStyle", "battleLayout", "battleHud",
       "battleFit", "battleBg" } },

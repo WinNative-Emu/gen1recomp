@@ -342,7 +342,9 @@ function Game2:continueGame(save)
   self:applyOptions()
   self.stack:clear()
   self.world = nil
+  require("src.world.gen2.UnionSafety").settle(save, self.data)
   self:startWorld()
+  require("src.online.union.TradeTxn").resumePending(self)
   -- After the adopt and after the world is standing, which is where Gen 1
   -- emits it (src/core/Game.lua:1127, once the stack has been rebuilt).
   if modsDiff then
@@ -1002,6 +1004,7 @@ function Game2:snapshotSave()
     -- WRAM on the cart, so a save made on POKECENTER_2F must still know which
     -- centre's stairs lead back down -- World:loadPlayerData reads it back.
     self.save.backupWarp = world.backupWarp or self.save.backupWarp
+    require("src.world.gen2.UnionSafety").seal(self.save, self.data)
   end
   self.save.options = self.options
   return self.save
@@ -1137,6 +1140,7 @@ function Game2:load(opts)
   self.data.gen2Scripts = loadGenerated("data/generated/scripts.lua")
   self.data.gen2StdScripts = loadGenerated("data/generated/std_scripts.lua")
   self.data.gen2Text = loadGenerated("data/generated/text.lua")
+  require("src.world.gen2.UnionCenter2F").apply(self.data)
   -- The engine's own strings, keyed by the disassembly's label.  gen2Text
   -- above is the script text and is keyed by bank:address for the overworld
   -- VM, so the two are different tables and both are loaded.  This one is
@@ -1234,6 +1238,7 @@ function Game2:load(opts)
     pcall(Font.load, self.data)
   end
   Strings.load(self.data)
+  self:prewarmSessionSfx()
 
   -- The boot skeleton (Game2.new built it, before any bus existed) announced
   -- here rather than at its construction, which is the same spot in the boot
@@ -1301,6 +1306,7 @@ function Game2:load(opts)
     -- open the same frame), rather than once per render frame in World:draw.
     local world = self.world
     if world and world.tickFrameClocks then world:tickFrameClocks() end
+    if world then require("src.world.gen2.UnionRoomPresence").tick(self) end
     -- Not the audio tick: _UpdateSound runs once per frame off VBlank
     -- (audio/engine.asm:84, home/vblank.asm:141-143), never off the logic clock.
     local top = self.stack:top()
@@ -1341,6 +1347,25 @@ function Game2:load(opts)
   end
 end
 
+Game2.SESSION_SFX = {
+  -- engine/overworld/scripting.asm:467
+  "Sfx_Item", "Sfx_KeyItem", "Sfx_GetTm",
+  "Sfx_ReadText2", "Sfx_Menu", "Sfx_Bump", "Sfx_EnterDoor",
+  "Sfx_ExitBuilding", "Sfx_JumpOverLedge", "Sfx_WarpTo", "Sfx_WarpFrom",
+  "Sfx_Save", "Sfx_Transaction", "Sfx_Wrong", "Sfx_SwitchPokemon",
+  "Sfx_GetBadge", "Sfx_Strength",
+}
+
+function Game2:prewarmSessionSfx()
+  local Sound = require("src.core.Sound")
+  local ChipAudio = require("src.core.ChipAudio")
+  ChipAudio.prewarmPinned(function()
+    for _, name in ipairs(Game2.SESSION_SFX) do
+      pcall(Sound.prewarmSfx, self.data, name)
+    end
+  end)
+end
+
 function Game2:inFillBoot()
   -- Entire pre-world cinema (copyright / title / Oak / name / nested NamingScreen)
   -- draws in GB letterbox space.
@@ -1376,6 +1401,8 @@ end
 
 function Game2:update(dt)
   require("src.core.DeferredWrite").tick()
+  local ChipAudio = package.loaded["src.core.ChipAudio"]
+  if ChipAudio then ChipAudio.pumpEffects() end
   -- _UpdateSound is a VBlank job, so it runs at 60Hz off real time whatever the
   -- logic multiplier is (audio/engine.asm:84, home/vblank.asm:141-143).
   local step = FixedStep.STEP
