@@ -9,6 +9,7 @@ local Chrome = require("src.ui.game3.chrome")
 local Pal = require("src.core.game3.pal_fade")
 local Stack = require("src.ui.game3.stack")
 local Screens = require("src.ui.game3.screens")
+local PixelCanvas = require("src.render.PixelCanvas")
 local Menu = {}
 Menu.__index = Menu
 local function childLayer()
@@ -213,7 +214,7 @@ function Menu:draw()
   local error = self.state == "save_error" or self.state == "rtc_error"
   local showMenu = self.state == "highlight" or self.state == "input" or self.state == "pressed_a" or self.state == "pressed_b" or self.state == "options"
   if showMenu then
-    canvas = canvas or love.graphics.newCanvas(240, 160)
+    canvas = canvas or PixelCanvas.new(240, 160)
     canvas:setFilter("nearest", "nearest")
     love.graphics.push("all"); love.graphics.setCanvas(canvas); love.graphics.origin(); love.graphics.clear(0, 0, 0, 0)
     local dy = self.scroll or 0

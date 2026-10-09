@@ -10,6 +10,7 @@ local Area = require("src.ui.game3.rse.pokedex_area")
 local Cry = require("src.ui.game3.rse.pokedex_cry")
 local Mapsec = require("src.ui.game3.rse.mapsec")
 local RsPolicy = require("src.ui.game3.rs.pokedex_policy")
+local PixelCanvas = require("src.render.PixelCanvas")
 local function nativeRs() return Gfx.manifest().assetLayout == "rs" end
 local rsTextNames = {gText_CryOf = "CryOf", gText_SizeComparedTo = "SizeComparedTo", gText_SelectorArrow = "RightPointingTriangle",
   gText_SearchingPleaseWait = "Searching", gText_SearchCompleted = "SearchComplete", gText_NoMatchingPkmnWereFound = "NoMatching"}
@@ -312,7 +313,7 @@ local function monPic(s, dexNum)
   -- pokeemerald/src/pokedex.c:4654
   if sp == C.species.byName.SPECIES_UNOWN then personality = tonumber(dex.unownPersonality) or 0 end
   if sp == C.species.byName.SPECIES_SPINDA then personality = tonumber(dex.spindaPersonality) or 0 end
-  local entry = P.frontPic(P.picSpecies(sp, personality), nil, false, personality)
+  local entry = P.frontPic(P.picSpecies(sp, personality), nil, false, personality, "dex")
   return entry and entry.image or nil
 end
 
@@ -2187,7 +2188,7 @@ function tasks.caught(s)
     s.state = 4
   elseif st == 4 then
     local img = pokemon().frontPic(pokemon().picSpecies(Pokedex.speciesOf(c.dexNum), c.personality or 0), nil, false,
-      c.personality or 0)
+      c.personality or 0, "dex")
     c.mon = { dexNum = c.dexNum, img = img and img.image, x = MON_PAGE_X, y = MON_PAGE_Y, x2 = 0, y2 = 0, prio = 0,
       affine = false, scaleY = 1 }
     s.monSprites = { [0] = c.mon }
@@ -2237,7 +2238,7 @@ function tasks.caughtExit(s)
     -- pokeemerald/src/pokedex.c:4069
     local species = Pokedex.speciesOf(c.dexNum)
     local pic = pokemon().frontPic(pokemon().picSpecies(species, c.personality or 0), nil, c.shiny,
-      c.personality or 0)
+      c.personality or 0, "dex")
     c.mon.img = assert(pic and pic.image, "caught mon palette missing from the cache")
     Pokedex.Host._s = nil
     Stack.pop(Pokedex.ID)
@@ -2352,7 +2353,7 @@ local function tintMask(img, color, x, y)
 end
 
 local function stencilled(maskFn, test, value, drawFn)
-  maskCanvas = maskCanvas or love.graphics.newCanvas(240, 160)
+  maskCanvas = maskCanvas or PixelCanvas.new(240, 160)
   maskCanvas:setFilter("nearest", "nearest")
   love.graphics.push("all")
   love.graphics.origin()
@@ -2583,7 +2584,7 @@ function Pokedex.draw(s)
       end
       if page == PAGE.CRY and s.cryNeedle and not ex.select then
         love.graphics.draw(s.cryNeedle, 184 + (s.cryNeedleX or 0), 80 + (s.cryNeedleY or 0),
-          (s.cry and s.cry.needle.rotation or 0) * 2 * math.pi / 256, 1, 1, 32, 32)
+          -(s.cry and s.cry.needle.rotation or 0) * 2 * math.pi / 256, 1, 1, 32, 32)
       end
     end
   end

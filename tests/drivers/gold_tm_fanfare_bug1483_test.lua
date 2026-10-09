@@ -1,19 +1,11 @@
 -- #1483: the TM/HM jingle under `verbosegiveitem`, and the item jingle beside it.
 --
---   POKEPORT_IDENTITY=gold-dev POKEPORT_GAME=gold POKEPORT_TOUCH=0 \
---     POKEPORT_DRIVER=tests/drivers/gold_tm_fanfare_bug1483_test.lua \
---     POKEPORT_SHOT_DIR=/tmp/gold-tm-fanfare \
---     perl -e 'alarm 300; exec @ARGV' \
---     python3 -c "import pty; pty.spawn(['love','.'])"
+--   tools/run_driver.sh gold <identity> tests/drivers/gold_tm_fanfare_bug1483_test.lua <shotdir>
 --
 -- GiveItemScript is `waitsfx / specialsound / waitbutton`, the drain sitting
 -- ABOVE the sound (engine/overworld/scripting.asm:441-449).  Without it PlaySFX
 -- drops SFX_GET_TM ($9b) under the beep the box rang on its own press,
 -- SFX_READ_TEXT_2 ($08) -- while SFX_ITEM ($01) outranks that beep and survives.
---
--- No POKEPORT_SPEED here on purpose: audio runs on its own real-time
--- accumulator, so fast-forward slides the jingle off the press it belongs to,
--- and the ordering is the whole thing being judged.
 local U = require("tests.drivers.util")
 
 local FieldMoves = require("src.world.gen2.FieldMoves")
@@ -47,14 +39,16 @@ return function(game)
 
   local function stop()
     for _, line in ipairs(lines) do U.log(line) end
+    U.log(("%d checks, %d failed"):format(#lines, fails))
+    love.event.quit(fails == 0 and 0 or 1)
     while true do coroutine.yield() end
   end
 
   U.wait(45)
   local world = game.world
   if not (world and world.map) then
-    U.log("FAIL the gold world never booted, nothing to listen to")
-    while true do coroutine.yield() end
+    claim(false, "the gold world booted")
+    stop()
   end
   local data = game.data
 
@@ -154,10 +148,28 @@ return function(game)
   -- Press first, then look: at rest the Gold overworld holds nothing on the
   -- stack at all, so a leading idle() check would return before the A that
   -- starts the conversation was ever sent.
-  local function mash(limit, gap)
-    for _ = 1, (limit or 40) do
-      tap("a", gap)
-      if idle() then return true end
+  local function waitFrame()
+    frame = frame + 1
+    coroutine.yield()
+  end
+
+  local function typing()
+    local top = game.stack:top()
+    return top ~= nil and top.isTextBox == true and not top.done
+      and not top.waiting
+  end
+
+  local function mash(seconds, gap)
+    local deadline = love.timer.getTime() + (seconds or 30)
+    local started = false
+    while love.timer.getTime() < deadline do
+      if started and idle() then return true end
+      if Sound.sfxBusy() or typing() then
+        waitFrame()
+      else
+        tap("a", gap)
+        started = true
+      end
     end
     return idle()
   end
@@ -241,21 +253,25 @@ return function(game)
     local first = #calls + 1
     U.shot(game, shots[1])
 
-    -- Mash A the way a player does: through the intro line, the yes/no the
-    -- guru asks (YES is the resting cursor), the received line and the pocket
-    -- line.  Nothing here waits for the jingle; that is the point.
     local function rang()
       for i = first, #calls do
         if calls[i].name == spot.want and calls[i].special then return true end
       end
       return false
     end
-    for _ = 1, 40 do
-      tap("a")
-      if rang() or idle() then break end
+    local deadline, began = love.timer.getTime() + 20, false
+    while not rang() and love.timer.getTime() < deadline do
+      if began and idle() then break end
+      if Sound.sfxBusy() or typing() then
+        waitFrame()
+      else
+        tap("a")
+        began = true
+      end
     end
-    U.shot(game, shots[2]) -- the box the jingle is meant to be ringing under
-    local finished = mash(40)
+    for _ = 1, 20 do waitFrame() end
+    U.still(game, shots[2])
+    local finished = mash(30)
     claim(finished, ("the %s conversation ran to the end"):format(spot.item))
     U.wait(30)
 
@@ -301,38 +317,5 @@ return function(game)
 
   Sound.play = realPlay
   Sound.waitSfxDone = realDrain
-
-  for _, line in ipairs(lines) do U.log(line) end
-  U.log(("%d checks, %d failed"):format(#lines, fails))
-  if fails > 0 then
-    U.log("something above is FAIL, so do not spend time listening")
-  end
-
-  -- ---- the replay, live ------------------------------------------------------
-  --
-  -- EVENT_GOT_TM05_ROAR is the only latch the Roar guy reads, so clearing what
-  -- his own script checked puts the whole hand-over back.
-  clear()
-  for _, ev in ipairs(TM_GIVER.events or {}) do world.events:set(ev, false) end
-  game.save.inventory[TM_GIVER.item] = nil
-  world:setMap(TM_GIVER.map, TM_GIVER.sx, TM_GIVER.sy, TM_GIVER.side.face)
-  world.noWildEncounters = true
-  U.wait(30)
-  U.log("the Roar guy is a couple of steps away; the replay starts in three")
-  U.log("seconds and mashes A the whole way through.")
-  U.wait(180)
-  if TM_GIVER.steps > 0 then walk(TM_GIVER.side.face, 20 * TM_GIVER.steps) end
-  U.wait(10)
-  mash(40, 16)
-  U.wait(60)
-
-  U.log("what right sounds like: the route music cuts out on the received line")
-  U.log("and the TM jingle rings under it, then the music comes back.")
-  U.log("dead silence with the music still playing is the drop this fixes.")
-  U.log("expect the jingle to be cut short by the beep on the next box -- that")
-  U.log("is the missing trailing WaitSFX, not this fix failing.")
-  U.log("the guru in the Route 32 centre is the control: same beep, but his")
-  U.log("OLD ROD jingle rang before the fix as well.")
-  U.log("the controls are yours.")
-  while true do coroutine.yield() end
+  stop()
 end

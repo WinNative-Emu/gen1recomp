@@ -25,6 +25,7 @@
 -- itself and calls onDone() when finished or skipped.
 
 local Music = require("src.core.Music")
+local PixelCanvas = require("src.render.PixelCanvas")
 
 local YellowIntro = {}
 YellowIntro.__index = YellowIntro
@@ -253,7 +254,7 @@ function YellowIntro.new(game, onDone)
   self:bgLetterbox()
   self.bgDirty = true
   self.wave = nil
-  local ok, canvas = pcall(love.graphics.newCanvas, 256, 256)
+  local ok, canvas = pcall(PixelCanvas.new, 256, 256)
   self.bgCanvas = ok and canvas or nil
 
   -- intro.asm:311 copyright card, splash.asm:29 shooting star

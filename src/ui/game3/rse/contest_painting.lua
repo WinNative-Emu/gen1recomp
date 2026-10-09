@@ -2,6 +2,7 @@ local bit = require("bit")
 local band, rshift = bit.band, bit.rshift
 
 local Fx = require("src.ui.game3.rse.contest_image_fx")
+local PixelCanvas = require("src.render.PixelCanvas")
 
 local Painting = {}
 
@@ -355,7 +356,7 @@ end
 function Painting.draw()
   if not st or st.headless then return end
   local lg = love.graphics
-  st.canvas = st.canvas or lg.newCanvas(240, 160)
+  st.canvas = st.canvas or PixelCanvas.new(240, 160)
   st.canvas:setFilter("nearest", "nearest")
   lg.push("all")
   lg.setCanvas(st.canvas)

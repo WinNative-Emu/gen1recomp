@@ -5,6 +5,7 @@ local Items = require("src.core.game3.items_data")
 local Pal = require("src.core.game3.pal_fade")
 local Fx = require("src.core.game3.gba_fx")
 local Data = require("src.ui.game3.rs.berry_tag_data")
+local PixelCanvas = require("src.render.PixelCanvas")
 local Tag = {ID = "rs_berry_tag", isMenu = true, open = false}
 local st = {}
 Tag._st = st
@@ -175,7 +176,7 @@ local function fontColors()
 end
 local function textLayer()
   if not st.textCanvas then
-    st.textCanvas = love.graphics.newCanvas(256, 256)
+    st.textCanvas = PixelCanvas.new(256, 256)
     st.textCanvas:setFilter("nearest", "nearest")
   end
   if st.textDirty then

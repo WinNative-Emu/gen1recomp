@@ -141,7 +141,8 @@ local function run(game)
     local bx, by = CameraObject.offset()
     return bx == 0 and by == 0 and not CameraObject.isActive()
   end)
-  result(panBack, "RemoveCameraObject put the camera back on the player")
+  local rbx, rby = CameraObject.offset()
+  result(panBack, string.format("the camera panned back onto the player before RemoveCameraObject, %d,%d", rbx, rby))
   result(Player.px == px0 and Player.py == py0,
     "the player still never moved for the whole scene")
   U.shot(game, DIR .. "/indigo_camera_03_camera_returned.png")
@@ -190,8 +191,10 @@ local function run(game)
   result(not CameraObject.isActive(),
     "RemoveCameraObject ran at the end of the scene")
   local fx, fy = CameraObject.offset()
-  result(fx == 0 and fy == 0, string.format(
-    "the camera is back on the player, %d,%d", fx, fy))
+  local P = Player
+  local hx, hy = math.floor(camPx0 - P.px + 0.5), math.floor(camPy0 - P.py + 0.5)
+  result(fx == hx and fy == hy, string.format(
+    "the view stays on the plaza after RemoveCameraObject, %d,%d (held %d,%d)", fx, fy, hx, hy))
   U.shot(game, DIR .. "/indigo_camera_06_after_credits_scene.png")
 
   local rival = Objects.find(1)

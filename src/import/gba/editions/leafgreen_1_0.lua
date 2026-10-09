@@ -1717,6 +1717,7 @@ return {
   [0x3E2280] = 0x3E20BC, -- naming_screen.o:sTransferredToPCMessages + 0
   [0x3ECED4] = 0x3ECD10, -- easy_chat.o:sEasyChatGroups + 0
   [0x3EDF98] = 0x3EDDD4, -- easy_chat.o:sEasyChatGroupNamePointers + 0
+  [0x3EE008] = 0x3EDE44, -- mon_markings.o:sMonMarkings_Pal + 0
   [0x3EE028] = 0x3EDE64, -- mon_markings.o:sMonMarkings_Gfx + 0
   [0x3EE828] = 0x3EE664, -- mon_markings.o:sJPText_Confirm + 0
   [0x3EEBF8] = 0x3EEA34, -- heal_location.o:sHealLocations + 0

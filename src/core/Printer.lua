@@ -11,6 +11,7 @@
 -- media-scans the in-app copy so both Gallery and the save folder work.
 
 local Logger = require("src.core.Logger")
+local PixelCanvas = require("src.render.PixelCanvas")
 
 local Printer = {}
 
@@ -46,7 +47,7 @@ function Printer.save(name, w, h, drawFn)
   if not (love.graphics and love.graphics.newCanvas) then
     return nil, "no graphics"
   end
-  local ok, canvas = pcall(love.graphics.newCanvas, w * SCALE, h * SCALE)
+  local ok, canvas = pcall(PixelCanvas.new, w * SCALE, h * SCALE)
   if not ok then return nil, tostring(canvas) end
   love.graphics.push("all")
   love.graphics.setCanvas(canvas)

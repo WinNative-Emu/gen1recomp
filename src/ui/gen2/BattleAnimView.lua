@@ -18,6 +18,7 @@
 
 local bit = require("bit")
 local Assets = require("src.render.Assets")
+local PixelCanvas = require("src.render.PixelCanvas")
 local Chrome = require("src.ui.gen2.Chrome")
 local GbcPalette = require("src.render.GbcPalette")
 local Palettes = require("src.world.gen2.Palettes")
@@ -251,7 +252,7 @@ end
 function BattleAnimView:bake(drawBg, palByte)
   local G = love.graphics
   if not self.canvas then
-    self.canvas = G.newCanvas(SCREEN_W, SCREEN_H)
+    self.canvas = PixelCanvas.new(SCREEN_W, SCREEN_H)
     self.canvas:setFilter("nearest", "nearest")
   end
   local previousCanvas = G.getCanvas()

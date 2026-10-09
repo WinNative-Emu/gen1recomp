@@ -356,7 +356,9 @@ local function drawTitles(m, page, detail, Sm)
     local w = win(m, prompt[1])
     local sx = 62 - width(prompt[2])
     local ix = math.max(0, sx - 16)
-    FrlgFont.drawKeypadIcon(0x00, w.left * 8 + ix + 4, w.top * 8 + 2)
+    -- pokeemerald/src/pokemon_summary_screen.c:2821
+    assert(m.buttons and Kit.image(m.buttons.png), "rse/summary/buttons.png is not in the cache")
+    drawFrame(m.buttons, 0, w.left * 8 + ix, w.top * 8)
     put(m, w, prompt[2], sx, 1, 0)
   end
 end

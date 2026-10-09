@@ -89,6 +89,15 @@ FireRed, LeafGreen and Emerald also show Berry Powder in Trainer and Items /
 Wallet. It accepts whole numbers from 0 to 99999 and supports Undo/Redo; the
 .sav export re-encrypts it with the save's key. Ruby and Sapphire have no Berry
 Powder, so the row is hidden there.
+Ruby, Sapphire and Emerald also show Volcanic Ash in Trainer and Items / Wallet.
+It accepts whole numbers from 0 to 9999 and supports Undo/Redo. Edits update
+`VAR_ASH_GATHER_COUNT`, the Soot Sack currency spent at the Glass Workshop;
+Lua saves and cartridge `.sav` export preserve that same variable. Other
+editions do not show the row.
+Emerald also shows Battle Points in Trainer and Items / Wallet: the Battle
+Frontier balance spent at the Exchange Service Corner. It accepts whole numbers
+from 0 to 9999 and supports Undo/Redo; the `.sav` export writes the Frontier
+`battlePoints` word and leaves the trainer card's earned-BP total alone.
 
 **Undo/Redo** and Ctrl/Cmd+Z (Shift+Z to redo) retain up to eight session snapshots.
 Snapshots preserve unknown metadata. Saving establishes the clean history point;

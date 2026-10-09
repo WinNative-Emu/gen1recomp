@@ -4,6 +4,7 @@ local Bg = require("src.core.game3.bg")
 local Oam = require("src.core.game3.oam")
 local Pal = require("src.core.game3.pal_fade")
 local Trig = require("src.core.game3.trig")
+local PixelCanvas = require("src.render.PixelCanvas")
 
 local IntroMovie = {}
 IntroMovie.__index = IntroMovie
@@ -117,8 +118,7 @@ local function relayoutTiles(img, startTile, wTiles, hTiles)
   if not (img and love and love.graphics and love.graphics.newCanvas) then return nil end
   local iw, ih = img:getDimensions()
   local sheetCols = iw / 8
-  local canvas = love.graphics.newCanvas(wTiles * 8, hTiles * 8)
-  canvas:setFilter("nearest", "nearest")
+  local canvas = PixelCanvas.new(wTiles * 8, hTiles * 8, "nearest")
   love.graphics.push("all")
   love.graphics.setCanvas(canvas)
   love.graphics.origin()
@@ -141,8 +141,7 @@ end
 
 local function composeGfWindow(text, logo)
   if not (love and love.graphics and love.graphics.newCanvas) then return nil end
-  local canvas = love.graphics.newCanvas(Display.W, Display.H)
-  canvas:setFilter("nearest", "nearest")
+  local canvas = PixelCanvas.new(Display.W, Display.H, "nearest")
   love.graphics.push("all")
   love.graphics.setCanvas(canvas)
   love.graphics.origin()

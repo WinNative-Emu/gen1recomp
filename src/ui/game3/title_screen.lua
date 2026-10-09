@@ -3,6 +3,7 @@ local Bg = require("src.core.game3.bg")
 local Oam = require("src.core.game3.oam")
 local Pal = require("src.core.game3.pal_fade")
 local Audio = require("src.core.game3.audio")
+local PixelCanvas = require("src.render.PixelCanvas")
 
 local Title = {}
 
@@ -57,8 +58,7 @@ end
 
 local function composite(images)
   if not (love and love.graphics and love.graphics.newCanvas) then return images[1] end
-  local canvas = love.graphics.newCanvas(Display.W, Display.H)
-  canvas:setFilter("nearest", "nearest")
+  local canvas = PixelCanvas.new(Display.W, Display.H, "nearest")
   love.graphics.push("all")
   love.graphics.setCanvas(canvas)
   love.graphics.origin()

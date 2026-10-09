@@ -5,6 +5,7 @@ local Gfx = require("src.ui.game3.rse.pokeblock_gfx")
 local Font = require("src.ui.game3.frlg_font")
 local Chrome = require("src.ui.game3.chrome")
 local Graph = require("src.ui.game3.rse.condition_graph")
+local PixelCanvas = require("src.render.PixelCanvas")
 local UI = {}
 
 -- use_pokeblock.c:44
@@ -31,7 +32,7 @@ local function layers(st, m, gfx)
     {rows = 32, tileBase = m.monFrameTileBase})
   local data = gfx:renderMap(gfx:map("graph_data"), "graph", Gfx.palette(m.palettes.graph_data, {}, 3),
     {rows = 32, tileBase = m.graphTileBase})
-  local shifted = love.graphics.newCanvas(256, 256)
+  local shifted = PixelCanvas.new(256, 256)
   love.graphics.push("all")
   love.graphics.setCanvas(shifted); love.graphics.clear(0, 0, 0, 0)
   love.graphics.setColor(1, 1, 1, 1)

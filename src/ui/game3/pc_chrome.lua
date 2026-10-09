@@ -5,7 +5,6 @@
 local FrlgFont = require("src.ui.game3.frlg_font")
 local Pokemon = require("src.core.game3.pokemon")
 local ItemsData = require("src.core.game3.items_data")
-local Strings = require("src.core.Strings")
 local Presentation = require("src.ui.game3.storage_presentation")
 local CacheBlob = require("src.import.CacheBlob")
 
@@ -153,6 +152,7 @@ function PcChrome.ensure()
   end
   PcChrome._waveformImg = load_texture("waveform.png")
   PcChrome._waveformQuads = nil
+  PcChrome._markingsImg = load_texture("markings.png")
 
   for id, name in ipairs(PcChrome.wallpaperNames()) do
     PcChrome._wallpapers[id] = load_texture("wallpapers/" .. name .. ".png")
@@ -422,17 +422,14 @@ function PcChrome.drawLeftDataPanel(hoveredMon, frame, mosaic)
 
   if not hoveredMon then return end
 
-  -- 1. Front Sprite in TV Screen (X: 10..73, Y: 19..80, W: 64, H: 61)
   -- pokefirered/src/pokemon_storage_system_data.c:1034, :1057 MON_DATA_SPECIES_OR_EGG
   local sp = Pokemon.speciesOrEgg(hoveredMon)
-  local sprite = Pokemon.monFrontPic(hoveredMon)
+  local sprite = Pokemon.monFrontPic(hoveredMon, nil, "box")
   if sprite and sprite.image then
     love.graphics.setColor(1, 1, 1, 1)
     local sw, sh = sprite.image:getDimensions()
-    local rs = PcChrome._game == "ruby" or PcChrome._game == "sapphire"
-    local scale = rs and 1 or math.min(54 / sw, 54 / sh)
-    local sx = rs and (40 - sw / 2) or (10 + math.floor((64 - sw * scale) / 2))
-    local sy = rs and (48 - sh / 2) or (19 + math.floor((61 - sh * scale) / 2))
+    -- pokefirered/src/pokemon_storage_system_tasks.c:2254
+    local sx, sy = 40 - sw / 2, 48 - sh / 2
     local previousShader = love.graphics.getShader()
     if not PcChrome._effect and mosaic and mosaic > 0 then
       if not PcChrome._mosaicShader then PcChrome._mosaicShader = love.graphics.newShader([[
@@ -449,9 +446,9 @@ function PcChrome.drawLeftDataPanel(hoveredMon, frame, mosaic)
       love.graphics.setShader(PcChrome._mosaicShader)
     end
     if PcChrome._effect then
-      PcChrome.effectLayer("obj", function() love.graphics.draw(sprite.image, sx, sy, 0, scale, scale) end,
+      PcChrome.effectLayer("obj", function() love.graphics.draw(sprite.image, sx, sy) end,
         {size = {sw, sh}, block = (mosaic or 0) + 1})
-    else love.graphics.draw(sprite.image, sx, sy, 0, scale, scale) end
+    else love.graphics.draw(sprite.image, sx, sy) end
     love.graphics.setShader(previousShader)
   end
 
@@ -484,6 +481,8 @@ function PcChrome.drawLeftDataPanel(hoveredMon, frame, mosaic)
       local held = hoveredMon.heldItem or hoveredMon.item
       if held and held > 0 then FrlgFont.draw(ItemsData.displayName(held), 8, 128, {font = "native_4", colors = colors, maxWidth = 72}) end
     end
+    -- pokeruby/src/pokemon_storage_system_2.c:1464
+    PcChrome.drawMarkings(hoveredMon.markings, 149)
     love.graphics.setColor(1, 1, 1, 1)
     return
   end
@@ -493,65 +492,66 @@ function PcChrome.drawLeftDataPanel(hoveredMon, frame, mosaic)
     nick = require("src.core.game3.rom_text").plain("gText_EggNickname")
   end
 
-  -- Line 1: Nickname or Species Name (FONT_NORMAL, Y: 88)
-  FrlgFont.draw(FrlgFont.truncate(nick, 10), 6, 88, {
-    small = false,
-    colors = FrlgFont.COLOR.WHITE
-  })
+  local em = PcChrome._game == "emerald"
+  local text, male, female = PcChrome.textColors()
+  -- pokeemerald/src/pokemon_storage_system.c:3994
+  local lineFont = em and "short" or nil
+  local speciesY, genderY, itemY = 102, 116, 132
+  if em then speciesY, genderY, itemY = 103, 117, 131 end
+  -- pokefirered/src/pokemon_storage_system_tasks.c:2294
+  FrlgFont.draw(FrlgFont.truncate(nick, 10), 6, 88, {colors = text})
 
   if not isEgg then
-    -- Line 2: /Species Name (FONT_NORMAL, Y: 102)
-    FrlgFont.draw("/" .. FrlgFont.truncate(spName, 10), 6, 102, {
-      small = false,
-      colors = FrlgFont.COLOR.WHITE
-    })
+    FrlgFont.draw("/" .. FrlgFont.truncate(spName, 10), 6, speciesY, {font = lineFont, colors = text})
 
-    -- Line 3: Gender & Level (FONT_NORMAL, Y: 116)
-    -- src/pokemon_storage_system_data.c:1148
-    if gender == "M" or gender == "male" then
-      FrlgFont.draw("♂", 6, 116, { small = false, colors = FrlgFont.COLOR.MALE })
-      FrlgFont.draw("{LV_2}" .. tostring(lvl), 18, 116, { small = false, colors = FrlgFont.COLOR.WHITE })
-    elseif gender == "F" or gender == "female" then
-      FrlgFont.draw("♀", 6, 116, { small = false, colors = FrlgFont.COLOR.FEMALE })
-      FrlgFont.draw("{LV_2}" .. tostring(lvl), 18, 116, { small = false, colors = FrlgFont.COLOR.WHITE })
-    else
-      FrlgFont.draw("{LV_2}" .. tostring(lvl), 6, 116, { small = false, colors = FrlgFont.COLOR.WHITE })
-    end
+    -- pokefirered/src/pokemon_storage_system_data.c:1117
+    local mark, markColors = em and "{UNK_SPACER}" or " ", text
+    if gender == "M" or gender == "male" then mark, markColors = "♂", male
+    elseif gender == "F" or gender == "female" then mark, markColors = "♀", female end
+    FrlgFont.draw(mark, 10, genderY, {font = lineFont, colors = markColors})
+    FrlgFont.draw("{LV_2}" .. tostring(lvl), 10 + FrlgFont.measure(mark .. " ", {font = lineFont}), genderY,
+      {font = lineFont, colors = text})
 
-    -- Line 4: Held Item Name (if holding an item) (FONT_SMALL, Y: 132)
     local held = hoveredMon.heldItem or hoveredMon.item
     if held and held > 0 then
       local heldName = ItemsData.displayName(held)
       if heldName and heldName ~= "" and heldName ~= "NONE" then
-        FrlgFont.draw(FrlgFont.truncate(heldName, 10), 6, 132, {
-          small = true,
-          colors = FrlgFont.COLOR.WHITE
-        })
+        FrlgFont.draw(FrlgFont.truncate(heldName, 10), 6, itemY, {small = true, colors = text})
       end
     end
   end
 
-  -- Line 5: 4 Markings ● ■ ▲ ♥ (pret markingComboSprite centered at X: 40, Y: 148)
-  local marks = hoveredMon.markings or 0
-  local markSyms = { "●", "■", "▲", "♥" }
-  for m = 1, 4 do
-    local bitMask = math.pow(2, m - 1)
-    local hasMark = (type(marks) == "number") and ((marks % (bitMask * 2)) >= bitMask)
-    local mx = 23 + (m - 1) * 9
-    if hasMark then
-      FrlgFont.draw(markSyms[m], mx, 146, {
-        small = true,
-        colors = { fg = { 1, 1, 1, 1 }, shadow = { 40/255, 48/255, 60/255, 1 } }
-      })
-    else
-      FrlgFont.draw(markSyms[m], mx, 146, {
-        small = true,
-        colors = { fg = { 72/255, 80/255, 96/255, 0.7 }, shadow = { 40/255, 44/255, 56/255, 0.5 } }
-      })
-    end
-  end
-
+  -- pokefirered/src/pokemon_storage_system_tasks.c:2170
+  PcChrome.drawMarkings(hoveredMon.markings, 150)
   love.graphics.setColor(1, 1, 1, 1)
+end
+
+local function rgb(c)
+  return { c[1] / 255, c[2] / 255, c[3] / 255, 1 }
+end
+
+-- pokefirered/src/pokemon_storage_system_tasks.c:2154
+function PcChrome.textColors()
+  PcChrome.ensure()
+  local P = assert(PcChrome._manifest and PcChrome._manifest.palettes and PcChrome._manifest.palettes.scrollingBg,
+    "storage text palette missing from cache")
+  local clear = { 0, 0, 0, 0 }
+  return { fg = rgb(P[2]), shadow = rgb(P[3]), bg = clear },
+    { fg = rgb(P[4]), shadow = rgb(P[5]), bg = clear },
+    { fg = rgb(P[6]), shadow = rgb(P[7]), bg = clear }
+end
+
+-- pokefirered/src/mon_markings.c:601
+function PcChrome.drawMarkings(markings, centerY)
+  PcChrome.ensure()
+  local img = assert(PcChrome._markingsImg, "storage markings sheet missing from cache")
+  local m = (tonumber(markings) or 0) % 16
+  local q = love.graphics.newQuad(0, m * 8, 32, 8, img:getDimensions())
+  local function draw()
+    love.graphics.setColor(1, 1, 1, 1)
+    love.graphics.draw(img, q, 40 - 16, centerY - 4)
+  end
+  if PcChrome._effect then PcChrome.effectLayer("obj", draw) else draw() end
 end
 
 --- Draw Top Right Buttons: PARTY POKéMON (X: 80, Y: 0) and CLOSE BOX (X: 168, Y: 0).
@@ -584,12 +584,11 @@ function PcChrome.drawBoxHeader(boxName, boxNum, isHovered, opts)
     if x >= 69 and x <= 243 then love.graphics.draw(PcChrome._arrowImg, leftQuad, x, 20) end
   end
 
-  -- Box Name Text (drawn centered on the ROM wallpaper's capsule)
-  -- Default names are stored in English ("BOX 3", see Storage.new); show those
-  -- translated and leave the names the player typed alone.
   local num = tonumber(boxNum) or 1
+  local rs = PcChrome._game == "ruby" or PcChrome._game == "sapphire"
+  -- pokefirered/src/pokemon_storage_system_menu.c:415
   local nameStr = (boxName == nil or boxName == string.format("BOX %d", num))
-    and Strings("BOX %d", num)
+    and (require("src.core.game3.rom_text").plain(rs and "gPCText_BOX" or "gText_Box") .. num)
     or tostring(boxName)
   local nw = FrlgFont.measure(nameStr)
   local tx = math.floor(160 - nw / 2) + dx

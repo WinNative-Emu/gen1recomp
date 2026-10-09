@@ -356,6 +356,21 @@ function PartyChrome.ready()
   return PartyChromeExtract.ready(PartyChrome._cache, cache_root())
 end
 
+-- pokefirered/src/party_menu.c:2167
+function PartyChrome.palColor(id)
+  local pal = man().palBuffer
+  local c = pal and pal[id]
+  if not c then error("party_chrome: pokemon/party/manifest.lua has no palBuffer[" .. tostring(id) .. "]", 0) end
+  return c[1] / 255, c[2] / 255, c[3] / 255
+end
+
+-- pokeemerald/src/data/party_menu.h:115
+function PartyChrome.textColors(winPal)
+  local fr, fgr, fb = PartyChrome.palColor(winPal * 16 + 3)
+  local sr, sg, sb = PartyChrome.palColor(winPal * 16 + 2)
+  return { fg = { fr, fgr, fb, 1 }, shadow = { sr, sg, sb, 1 }, bg = FrlgFont.STDPAL[0] }
+end
+
 function PartyChrome.drawBg()
   if PartyChrome._nativeDelegate then return PartyChrome._nativeDelegate.drawBg() end
   local W, H = Display.W or 240, Display.H or 160
@@ -507,12 +522,12 @@ function PartyChrome.drawCancelButton(px, py, selected)
     -- pokeemerald/src/party_menu.c:2131
     local t = RomText.plain(b.cancel)
     local w = FrlgFont.measure(t, { small = true })
-    FrlgFont.draw(t, px + 8 + math.floor((48 - w) / 2) + 3, py + 1, { colors = FrlgFont.COLOR.PARTY, small = true })
+    FrlgFont.draw(t, px + 8 + math.floor((48 - w) / 2) + 3, py + 1, { colors = PartyChrome.textColors(3), small = true })
     return
   end
   -- pokefirered/src/party_menu.c:2154
   FrlgFont.draw(RomText.plain("gFameCheckerText_Cancel"), px + 20, py + 1, {
-    colors = FrlgFont.COLOR.PARTY,
+    colors = PartyChrome.textColors(3),
     small = true,
   })
 end
@@ -532,12 +547,12 @@ function PartyChrome.drawConfirmButton(px, py, selected)
     -- pokeemerald/src/party_menu.c:2114
     local t = RomText.plain(b.confirm)
     local w = FrlgFont.measure(t, { small = true })
-    FrlgFont.draw(t, px + 8 + math.floor((48 - w) / 2), py + 1, { colors = FrlgFont.COLOR.PARTY, small = true })
+    FrlgFont.draw(t, px + 8 + math.floor((48 - w) / 2), py + 1, { colors = PartyChrome.textColors(3), small = true })
     return
   end
   -- pokefirered/src/party_menu.c:2138
   FrlgFont.draw(RomText.plain("gText_PartyMenu_OK"), px + 25, py + 2, {
-    colors = FrlgFont.COLOR.PARTY,
+    colors = PartyChrome.textColors(3),
     small = true,
   })
 end

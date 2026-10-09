@@ -9,6 +9,7 @@ M.PAGES = { "info", "info_egg", "skills", "battle_moves", "contest_moves" }
 M.FILES = {
   "info.png", "info_egg.png", "skills.png", "battle_moves.png", "contest_moves.png",
   "move_types.png", "move_select.png", "status.png", "status_plate.png", "tiles.png", "markings.png",
+  "buttons.png",
 }
 
 -- pokeemerald/src/pokemon_summary_screen.c:2338
@@ -145,6 +146,19 @@ function M.run(rom, cache, opts)
   local stSheet, stW, stH = K.stack(stFrames, 32, 8)
   c:png("status.png", stW, stH, stSheet, stPal, true)
 
+  -- pokeemerald/src/pokemon_summary_screen.c:725
+  local summaryWindows = windows(c, "sSummaryTemplate")
+  local buttonBank = summaryWindows[5].paletteNum
+  local btnGfx = c:raw("pokemon_summary_screen.o:sButtons_Gfx")
+  local btnFrames = {}
+  for i = 0, math.floor(#btnGfx / (32 * 4)) - 1 do
+    local f = K.bakeSprite(btnGfx, 16, 16, i * 4, 4)
+    for p = 1, #f do f[p] = f[p] == 0 and 0 or buttonBank * 16 + f[p] end
+    btnFrames[i + 1] = f
+  end
+  local btnSheet, btnW, btnH = K.stack(btnFrames, 16, 16)
+  c:png("buttons.png", btnW, btnH, btnSheet, pal, true)
+
   -- pokeemerald/src/mon_markings.c:589
   local markings = c:strip("markings", c:raw("sMonMarkings_Gfx"), 32, 8, 16, c:pal("sMarkings_Pal", 16))
 
@@ -164,8 +178,9 @@ function M.run(rom, cache, opts)
     moveSelect = { png = c:path("move_select.png"), w = 16, h = 16, count = #selFrames },
     statusPlate = { png = c:path("status_plate.png"), x = 0, y = 144 },
     status = { png = c:path("status.png"), w = 32, h = 8, count = #stFrames },
+    buttons = { png = c:path("buttons.png"), w = 16, h = 16, count = #btnFrames },
     palette = K.palList(pal, 0, 144),
-    windows = windows(c, "sSummaryTemplate"),
+    windows = summaryWindows,
     pageWindows = {
       info = windows(c, "sPageInfoTemplate"),
       skills = windows(c, "sPageSkillsTemplate"),

@@ -1,5 +1,3 @@
--- Party menu — pret PARTY_LAYOUT_SINGLE (windows + FONT_SMALL + OAM sprites).
-
 local Stack = require("src.ui.game3.stack")
 local Chrome = require("src.ui.game3.chrome")
 local Window = require("src.ui.game3.window")
@@ -287,7 +285,17 @@ local SLOT_SPRITES = {
   { 104, 114, 108, 124, 144, 123, 102, 121 },
 }
 
--- pret sPartyBoxInfoRects — x,y relative to window
+-- pokeemerald/src/data/party_menu.h:72
+local SLOT_SPRITES_EM = {
+  { 16, 40, 20, 50, 50, 52, 16, 34 },
+  { 104, 18, 108, 28, 136, 27, 102, 25 },
+  { 104, 42, 108, 52, 136, 51, 102, 49 },
+  { 104, 66, 108, 76, 136, 75, 102, 73 },
+  { 104, 90, 108, 100, 136, 99, 102, 97 },
+  { 104, 114, 108, 124, 136, 123, 102, 121 },
+}
+
+-- pokefirered/src/data/party_menu.h:38
 local INFO_LEFT = {
   nick = { 24, 11 }, level = { 32, 20 }, gender = { 64, 20 },
   hp = { 38, 36 }, hpMax = { 53, 36 }, hpBar = { 24, 35 },
@@ -295,6 +303,18 @@ local INFO_LEFT = {
 }
 local INFO_RIGHT = {
   nick = { 22, 3 }, level = { 32, 12 }, gender = { 64, 12 },
+  hp = { 102, 12 }, hpMax = { 117, 12 }, hpBar = { 88, 10 },
+  desc = { 77, 4 },
+}
+
+-- pokeemerald/src/data/party_menu.h:32
+local INFO_LEFT_EM = {
+  nick = { 24, 11 }, level = { 32, 20 }, gender = { 64, 20 },
+  hp = { 38, 37 }, hpMax = { 53, 37 }, hpBar = { 24, 35 },
+  desc = { 12, 34 },
+}
+local INFO_RIGHT_EM = {
+  nick = { 22, 3 }, level = { 30, 12 }, gender = { 62, 12 },
   hp = { 102, 12 }, hpMax = { 117, 12 }, hpBar = { 88, 10 },
   desc = { 77, 4 },
 }
@@ -319,6 +339,16 @@ local SLOT_SPRITES_DOUBLE = {
   { 104, 114, 108, 124, 144, 123, 102, 121 },
 }
 
+-- pokeemerald/src/data/party_menu.h:79
+local SLOT_SPRITES_DOUBLE_EM = {
+  { 16, 24, 20, 34, 50, 36, 16, 18 },
+  { 16, 80, 20, 90, 50, 92, 16, 74 },
+  { 104, 18, 108, 28, 136, 27, 102, 25 },
+  { 104, 50, 108, 60, 136, 59, 102, 57 },
+  { 104, 82, 108, 92, 136, 91, 102, 89 },
+  { 104, 114, 108, 124, 136, 123, 102, 121 },
+}
+
 local function is_double()
   return PartyMenu._layout == "double"
 end
@@ -328,13 +358,23 @@ local function slot_win(i)
 end
 
 local function slot_sprites(i)
+  if isRse() then return (is_double() and SLOT_SPRITES_DOUBLE_EM or SLOT_SPRITES_EM)[i] end
   return (is_double() and SLOT_SPRITES_DOUBLE or SLOT_SPRITES)[i]
+end
+
+function PartyMenu.slotSprites(i)
+  return slot_sprites(i)
 end
 
 -- pokefirered/src/party_menu.c:735
 local function slot_info(i)
-  if i == 1 or (i == 2 and is_double()) then return INFO_LEFT end
-  return INFO_RIGHT
+  local left = i == 1 or (i == 2 and is_double())
+  if isRse() then return left and INFO_LEFT_EM or INFO_RIGHT_EM end
+  return left and INFO_LEFT or INFO_RIGHT
+end
+
+function PartyMenu.slotInfo(i)
+  return slot_info(i)
 end
 
 local function slot_filled(i)
@@ -416,10 +456,10 @@ local function open_battle_actions_double(prevMode)
   PartyMenu.actionCursor = 1
 end
 
-local function party_print(text, px, py, maxW)
+local function party_print(text, px, py, maxW, winPal)
   FrlgFont.draw(tostring(text or ""), px, py, {
     maxWidth = maxW or 56,
-    colors = FrlgFont.COLOR.PARTY,
+    colors = PartyChrome.textColors(winPal),
     small = true,
   })
 end
@@ -1141,6 +1181,7 @@ end
 
 function PartyMenu.showMessage(text, onDismiss)
   local pages = TextIR.splitPages(tostring(text), true)
+  PartyMenu._messageStd = false
   local function show(i)
     PartyMenu.mode = "message"
     PartyMenu._messageText = pages[i]
@@ -1151,6 +1192,12 @@ function PartyMenu.showMessage(text, onDismiss)
     end
   end
   show(1)
+end
+
+-- pokeemerald/src/party_menu.c:2459
+function PartyMenu.showStdMessage(text, onDismiss)
+  PartyMenu.showMessage(text, onDismiss)
+  PartyMenu._messageStd = true
 end
 
 local function show_rom_message(key, vars, onDismiss)
@@ -1860,7 +1907,9 @@ function PartyMenu.handleInput(input)
           local res = FieldMoves.fromMenu(act, ctx)
           if not res or not res.ok then
             se("SE_SELECT") -- pokefirered/src/party_menu.c:3910
-            PartyMenu.showMessage((res and res.text) or RomText.plain("gText_CantUseHere"), function()
+            -- pokeemerald/src/party_menu.c:3727
+            local show = (res and res.badge) and PartyMenu.showMessage or PartyMenu.showStdMessage
+            show((res and res.text) or RomText.plain("gText_CantUseHere"), function()
               PartyMenu.mode = "list"
             end)
           else
@@ -2590,22 +2639,57 @@ function PartyMenu.handleInput(input)
   end
 end
 
-local function hp_bar(hp, maxHp, px, py, width)
-  width = width or 48
-  hp = tonumber(hp) or 0
-  maxHp = tonumber(maxHp) or 1
-  if maxHp < 1 then maxHp = 1 end
-  local ratio = math.max(0, math.min(1, hp / maxHp))
-  local w = math.floor(width * ratio)
-  if w <= 0 then return end
-  if ratio > 0.5 then
-    love.graphics.setColor(0.25, 0.85, 0.25, 1)
-  elseif ratio > 0.2 then
-    love.graphics.setColor(0.95, 0.85, 0.15, 1)
-  else
-    love.graphics.setColor(0.95, 0.2, 0.15, 1)
+-- pokefirered/src/battle_interface.c:2155
+function PartyMenu.hpBarFraction(hp, maxHp, scale)
+  hp = math.max(0, tonumber(hp) or 0)
+  maxHp = math.max(1, tonumber(maxHp) or 1)
+  if hp > maxHp then hp = maxHp end
+  local r = math.floor(hp * scale / maxHp)
+  if r == 0 and hp > 0 then return 1 end
+  return r
+end
+
+-- pokefirered/src/data/party_menu.h:573
+local HP_BAR_PAL_IDS = {
+  green = { 57, 58 },
+  yellow = { 73, 74 },
+  red = { 89, 90 },
+}
+
+-- pokefirered/src/battle_interface.c:2165
+function PartyMenu.hpBarLevelName(hp, maxHp)
+  hp = math.max(0, tonumber(hp) or 0)
+  maxHp = math.max(1, tonumber(maxHp) or 1)
+  if hp == maxHp then return "green" end
+  local f = PartyMenu.hpBarFraction(hp, maxHp, 48)
+  if f > 24 then return "green" end
+  if f > 9 then return "yellow" end
+  return "red"
+end
+
+-- pokefirered/src/party_menu.c:2418
+function PartyMenu.hpBarColors(hp, maxHp, winPal)
+  local ids = HP_BAR_PAL_IDS[PartyMenu.hpBarLevelName(hp, maxHp)]
+  local function c(id) return { PartyChrome.palColor(id) } end
+  return {
+    top = c(ids[2]), bottom = c(ids[1]),
+    emptyTop = c(winPal * 16 + 13), emptyBottom = c(winPal * 16 + 2),
+  }
+end
+
+local function hp_bar(hp, maxHp, px, py, width, winPal)
+  local colors = PartyMenu.hpBarColors(hp, maxHp, winPal)
+  local w = PartyMenu.hpBarFraction(hp, maxHp, width)
+  local function fill(c, x, y, fw, fh)
+    if fw <= 0 then return end
+    love.graphics.setColor(c[1], c[2], c[3], 1)
+    love.graphics.rectangle("fill", x, y, fw, fh)
   end
-  love.graphics.rectangle("fill", px, py, w, 3)
+  -- pokefirered/src/party_menu.c:2440
+  fill(colors.top, px, py, w, 1)
+  fill(colors.bottom, px, py + 1, w, 2)
+  fill(colors.emptyTop, px + w, py, width - w, 1)
+  fill(colors.emptyBottom, px + w, py + 1, width - w, 2)
   love.graphics.setColor(1, 1, 1, 1)
 end
 
@@ -2664,10 +2748,12 @@ local function draw_filled_slot(i, mon, selected)
   local baseX, baseY = win.left * T, win.top * T
   local info = slot_info(i)
   local desc = slot_description(i, mon)
+  -- pokefirered/src/data/party_menu.h:132
+  local winPal = 2 + i
   local function drawDescription()
     local p = partyUi()
     if p and p.drawDescription then p.drawDescription(desc, baseX + info.desc[1], baseY + info.desc[2])
-    else party_print(desc, baseX + info.desc[1], baseY + info.desc[2], 64) end
+    else party_print(desc, baseX + info.desc[1], baseY + info.desc[2], 64, winPal) end
   end
 
   -- pokefirered/src/party_menu.c:781 DisplayPartyPokemonData: an egg's slot
@@ -2678,7 +2764,7 @@ local function draw_filled_slot(i, mon, selected)
   PartyChrome.drawSlot(win.kind, win.left, win.top, selected, desc ~= nil or isEgg, multiAlt)
 
   local name = Pokemon.displayName(mon)
-  party_print(name, baseX + info.nick[1], baseY + info.nick[2], 56)
+  party_print(name, baseX + info.nick[1], baseY + info.nick[2], 56, winPal)
   if isEgg then
     if desc then drawDescription() end
     return
@@ -2689,7 +2775,7 @@ local function draw_filled_slot(i, mon, selected)
   -- Level is only shown when the mon is healthy (or PKRS); status ailments replace level.
   if ailment == 0 or ailment == 6 then
     -- pokefirered/src/party_menu.c:2335
-    party_print(RomText.plain(partyText("level", "gText_Lv")) .. tostring(mon.level or 0), baseX + info.level[1], baseY + info.level[2], 32)
+    party_print(RomText.plain(partyText("level", "gText_Lv")) .. tostring(mon.level or 0), baseX + info.level[1], baseY + info.level[2], 32, winPal)
   end
 
   local gender = mon.gender or (Pokemon.gender and Pokemon.gender(mon.species, mon.personality))
@@ -2714,9 +2800,9 @@ local function draw_filled_slot(i, mon, selected)
   if anim and anim.slot == i then
     displayHp = math.floor(anim.current + 0.5)
   end
-  party_print(right_align_3(displayHp) .. "/", baseX + info.hp[1], baseY + info.hp[2], 24)
-  party_print("/" .. right_align_3(maxHp), baseX + info.hpMax[1], baseY + info.hpMax[2], 24)
-  hp_bar(displayHp, maxHp, baseX + info.hpBar[1], baseY + info.hpBar[2], 48)
+  party_print(right_align_3(displayHp) .. "/", baseX + info.hp[1], baseY + info.hp[2], 24, winPal)
+  party_print("/" .. right_align_3(maxHp), baseX + info.hpMax[1], baseY + info.hpMax[2], 24, winPal)
+  hp_bar(displayHp, maxHp, baseX + info.hpBar[1], baseY + info.hpBar[2], 48, winPal)
 end
 
 function PartyMenu.draw()
@@ -2785,7 +2871,13 @@ function PartyMenu.draw()
       end
     end
   elseif PartyMenu.mode == "message" then
-    if p and p.drawMessage then p.drawMessage(PartyMenu._messageText) else
+    if p and p.drawMessage then p.drawMessage(PartyMenu._messageText)
+    elseif PartyMenu._messageStd then
+      -- pokeemerald/src/data/party_menu.h:419
+      Window.stdFrame(Window.template(1, 17, 21, 2))
+      FrlgFont.draw(PartyMenu._messageText or "", 1 * 8 + ins.msgX, 17 * 8 + ins.msgY, { colors = FrlgFont.COLOR.NORMAL })
+      PartyChrome.drawCancelButton(184, 136, false)
+    else
     Window.stdFrame(Window.template(1, 15, 28, 4))
     if PartyMenu._messageText then
       local wrapped = FrlgFont.wrap(PartyMenu._messageText, 216)

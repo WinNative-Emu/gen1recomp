@@ -7,6 +7,7 @@ local Constants = require("src.core.game3.constants")
 local Pal = require("src.core.game3.pal_fade")
 local Stack = require("src.ui.game3.stack")
 local Screens = require("src.ui.game3.screens")
+local PixelCanvas = require("src.render.PixelCanvas")
 
 local MainMenu = {}
 MainMenu.__index = MainMenu
@@ -475,7 +476,7 @@ function MainMenu:draw()
   local darken = self.state == "input" or self.state == "a_pressed" or self.state == "b_pressed"
   local canvas
   if darken and love.graphics.newCanvas then
-    layerCanvas = layerCanvas or love.graphics.newCanvas(240, 160)
+    layerCanvas = layerCanvas or PixelCanvas.new(240, 160)
     layerCanvas:setFilter("nearest", "nearest")
     canvas = layerCanvas
     love.graphics.push("all")

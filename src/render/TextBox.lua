@@ -141,10 +141,12 @@ function TextBox.new(game, text, onDone, opts)
   -- engine/events/vending_machine.asm:4
   self.moneyOnShown = opts and opts.moneyOnShown
   self.auto = opts and opts.auto
+  -- home/print_text.asm:8
+  self.noLetterDelay = opts and opts.noLetterDelay
   self.stay = opts and opts.stay
   -- engine/events/hidden_events/cinnabar_gym_quiz.asm:119
   self.preSound = opts and opts.preSound
-  -- pokegold engine/overworld/scripting.asm:485 WaitSFX
+  -- ../pokecrystal/engine/overworld/scripting.asm:537
   self.sfxWait = opts and opts.sfxWait
   -- ../pokecrystal/home/joypad.asm:302 WaitButton
   self.waitButton = opts and opts.waitButton
@@ -409,7 +411,7 @@ function TextBox:visibleText()
   return #out > 0 and out or nil
 end
 
--- pokegold engine/overworld/scripting.asm:484-485 PlaySFX / WaitSFX
+-- ../pokecrystal/engine/overworld/scripting.asm:536
 function TextBox:sfxHeld()
   if not self.sfxWait then return false end
   if require("src.core.Sound").sfxBusy() then return true end
@@ -427,13 +429,13 @@ function TextBox:arrowVisible()
   if self.sfxWait then return false end
   if self.waiting then return true end
   -- ../pokecrystal/home/text.asm:566 DoneText
-  -- pokered home/text_script.asm:96 -> home/joypad2.asm:71-72
-  if self.waitButton and self:isGold() then return false end
+  -- pokered home/text_script.asm:96 -> home/joypad2.asm:60-61, home/window.asm:247-250
+  local autoPrompt = self.auto and self.auto.promptFirst and not self.autoPrompted
+  local stayPrompt = self.stay and self.stay.prompt and not self.stayShown
+  if self.waitButton and not (autoPrompt or stayPrompt) then return false end
   return not not (self.done and not self.choice
-    and (not self.auto
-         or (self.auto.promptFirst and not self.autoPrompted))
-    and (not self.stay
-         or (self.stay.prompt and not self.stayShown)))
+    and (not self.auto or autoPrompt)
+    and (not self.stay or stayPrompt))
 end
 
 -- home/text.asm:209
@@ -537,9 +539,10 @@ function step(self, dt)
     -- exactly once (#591)
     if self.stay then
       if not self.stayShown then
+        if self:sfxHeld() then return end
         -- stay.prompt: arrowed A/B wait, then the box stays up
         -- (TextCommand_PROMPT_BUTTON, home/text.asm:434-444)
-        if self.stay.prompt
+        if (self.stay.prompt or self.stay.press)
            and not (input:wasPressed("a") or input:wasPressed("b")) then
           return
         end
@@ -682,6 +685,7 @@ function step(self, dt)
   local delay = NAME_DELAYS[rawSpeed] or rawSpeed or 3
   if delay ~= 1 and delay ~= 3 and delay ~= 5 then delay = 3 end
   if input:isDown("a") or input:isDown("b") then delay = 1 end
+  if self.noLetterDelay then delay = 0 end
   self.charTimer = (self.charTimer or 0) + 1
   while self.charTimer >= delay do
     self.charTimer = self.charTimer - delay

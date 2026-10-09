@@ -60,6 +60,10 @@ end
 local PcChrome = require("src.ui.game3.pc_chrome")
 PcChrome.ensure = function() end
 PcChrome.drawWaveforms = function() end
+local storagePal = {}
+for i = 0, 15 do storagePal[i] = { 0, 0, 0 } end
+PcChrome._manifest = { palettes = { scrollingBg = storagePal } }
+PcChrome._markingsImg = { getDimensions = function() return 32, 128 end }
 pics, texts = {}, {}
 PcChrome.drawLeftDataPanel(egg(), 0)
 check(pics[1] == 412, "the PC panel draws an egg's front pic as the EGG's (got " .. tostring(pics[1]) .. ")")
@@ -75,12 +79,15 @@ check(pics[1] == 172 and has(texts, "/PICHU") and has(texts, "{LV_2}5"),
 local PartyMenu = require("src.ui.game3.party_menu")
 local PartyChrome = require("src.ui.game3.party_chrome")
 PartyMenu.heldItemSheet = function() return nil end
+local partyPal = {}
+for i = 0, 175 do partyPal[i] = { 0, 0, 0 } end
 local slotsHidingHp = {}
 PartyChrome.drawSlot = function(kind, _, _, _, hideHp)
   if kind ~= "empty" then slotsHidingHp[#slotsHidingHp + 1] = hideHp and true or false end
 end
 texts, slotsHidingHp = {}, {}
 PartyMenu.show({ { species = 25, nickname = "SPARKY", level = 12, gender = "M", hp = 30, maxHp = 30 }, egg() })
+PartyChrome._manifest = { palBuffer = partyPal }
 PartyMenu.draw()
 PartyMenu.close()
 check(has(texts, "OEUF") and has(texts, "SPARKY"), "the party names both mons: " .. table.concat(texts, " | "))

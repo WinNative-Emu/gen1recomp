@@ -814,6 +814,22 @@ function Ops.setTrainerProperty(S, key, value)
     if Gen.buenaPoints(S.save, S.version) == n then return true end
     if not Gen.setBuenaPoints(S.save, n, S.version) then return Ops.say(S, "Invalid Crystal Buena state") end
     return Ops.mark(S, "Buena points updated")
+  elseif key == "volcanicAsh" then
+    if not Gen.hasVolcanicAsh(S.save, S.version) then
+      return Ops.say(S, "Volcanic Ash is only in Ruby, Sapphire and Emerald")
+    end
+    local n = tonumber(value)
+    if not n or n ~= n or n < 0 or n > Gen.VOLCANIC_ASH_MAX or n ~= math.floor(n) then
+      return Ops.say(S, "Volcanic Ash must be a whole number from 0 to 9999")
+    end
+    if S.save.vars ~= nil and type(S.save.vars) ~= "table" then
+      return Ops.say(S, "Invalid Volcanic Ash variable state")
+    end
+    if Gen.volcanicAsh(S.save, S.version) == n then return true end
+    if not Gen.setVolcanicAsh(S.save, n, S.version) then
+      return Ops.say(S, "Invalid Volcanic Ash variable state")
+    end
+    return Ops.mark(S, "Volcanic Ash updated")
   elseif key == "berryPowder" then
     if not Gen.hasBerryPowder(S.save, S.version) then
       return Ops.say(S, "Berry Powder is only in FireRed, LeafGreen and Emerald")
@@ -825,6 +841,20 @@ function Ops.setTrainerProperty(S, key, value)
     if Gen.berryPowder(S.save, S.version) == n then return true end
     Gen.setBerryPowder(S.save, n, S.version)
     return Ops.mark(S, "Berry Powder updated")
+  elseif key == "battlePoints" then
+    if not Gen.hasBattlePoints(S.save, S.version) then
+      return Ops.say(S, "Battle Points are only in Emerald")
+    end
+    local n = tonumber(value)
+    if not n or n ~= n or n < 0 or n > Gen.BATTLE_POINTS_MAX or n ~= math.floor(n) then
+      return Ops.say(S, "Battle Points must be a whole number from 0 to 9999")
+    end
+    if S.save.frontier ~= nil and type(S.save.frontier) ~= "table" then
+      return Ops.say(S, "Invalid Battle Frontier state")
+    end
+    if Gen.battlePoints(S.save, S.version) == n then return true end
+    Gen.setBattlePoints(S.save, n, S.version)
+    return Ops.mark(S, "Battle Points updated")
   else
     local max = ({id=65535,secretId=65535,money=999999,coins=9999})[key]
     local n=tonumber(value)

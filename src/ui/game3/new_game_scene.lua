@@ -12,6 +12,7 @@ local Window = require("src.ui.game3.window")
 local Naming = require("src.ui.game3.naming")
 local BallOpen = require("src.core.game3.battle.ball_open")
 local ModRuntime = require("src.mods.Runtime")
+local PixelCanvas = require("src.render.PixelCanvas")
 
 local Scene = {}
 Scene.__index = Scene
@@ -1610,8 +1611,7 @@ function Scene:layerCanvas(key)
   self._canvases = self._canvases or {}
   local c = self._canvases[key]
   if not c then
-    c = love.graphics.newCanvas(Display.W, Display.H)
-    c:setFilter("nearest", "nearest")
+    c = PixelCanvas.new(Display.W, Display.H, "nearest")
     self._canvases[key] = c
   end
   return c

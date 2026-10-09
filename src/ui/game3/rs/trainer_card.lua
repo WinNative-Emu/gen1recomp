@@ -4,6 +4,7 @@ local Font = require("src.ui.game3.frlg_font")
 local Pal = require("src.core.game3.pal_fade")
 local Fx = require("src.core.game3.gba_fx")
 local Policy = require("src.ui.game3.rs.trainer_card_policy")
+local PixelCanvas = require("src.render.PixelCanvas")
 local T = {isMenu = true, open = false, side = "front", _phase = "idle"}
 function T.manifest()
   local m = assert(Kit.manifest("rse/trainer_card"), "native RS trainer card pack missing")
@@ -210,7 +211,7 @@ local function drawContent()
 end
 function T.draw()
   if not T.open then return end
-  if not T._canvas then T._canvas = love.graphics.newCanvas(256, 256); T._canvas:setFilter("nearest", "nearest") end
+  if not T._canvas then T._canvas = PixelCanvas.new(256, 256); T._canvas:setFilter("nearest", "nearest") end
   local previous = love.graphics.getCanvas()
   love.graphics.push("all")
   love.graphics.setCanvas(T._canvas); love.graphics.origin(); love.graphics.setColor(1, 1, 1, 1)

@@ -20,6 +20,7 @@
 -- - Full beach outro results scene with step-by-step tally animation and high-score fanfare
 
 local Font = require("src.render.Font")
+local PixelCanvas = require("src.render.PixelCanvas")
 local Strings = require("src.core.Strings")
 local Music = require("src.core.Music")
 local Sound = require("src.core.Sound")
@@ -616,7 +617,7 @@ function SurfingMinigame.new(game, onDone, skipTitle)
   end
 
   if love and love.graphics and love.graphics.newCanvas then
-    local ok, canvas = pcall(love.graphics.newCanvas, 160, 144)
+    local ok, canvas = pcall(PixelCanvas.new, 160, 144)
     if ok then self.bgCanvas = canvas end
   end
 

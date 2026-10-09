@@ -615,7 +615,14 @@ assert_true(StorageChromeExtract.ready(nil, storageRoot), "StorageChromeExtract 
 
 local manifestChunk = assert(loadfile(chromeDir .. "/manifest.lua"))
 local manifest = manifestChunk()
-assert_eq(manifest.version, 3, "Manifest version is 3")
+assert_eq(manifest.version, StorageChromeExtract.FORMAT_VERSION, "Manifest version is current")
+assert_true(manifest.textures.markings ~= nil, "Manifest includes markings sheet")
+local scrollingBg = manifest.palettes and manifest.palettes.scrollingBg
+local palComplete = scrollingBg ~= nil
+for i = 0, 15 do
+  if not (scrollingBg and scrollingBg[i]) then palComplete = false end
+end
+assert_true(palComplete, "Manifest includes the 16-color scrolling bg palette at indices 0..15")
 assert_true(manifest.textures.cursor ~= nil, "Manifest includes cursor texture")
 assert_true(manifest.textures.party_drawer_bg ~= nil, "Manifest includes party_drawer_bg")
 assert_true(manifest.textures.scrolling_bg ~= nil, "Manifest includes scrolling_bg")
@@ -643,8 +650,8 @@ for _, wpName in ipairs(PcChrome.WALLPAPER_NAMES) do
   assert_png(chromeDir .. "/wallpapers/" .. wpName .. ".png", "Wallpaper " .. wpName .. ".png")
   assetCount = assetCount + 1
 end
-assert_eq(assetCount, 30, "14 UI textures + 16 box wallpapers (total 30 assets)")
-print("[ok] All 14 UI textures and 16 wallpapers validated in manifest and file system")
+assert_eq(assetCount, 31, "15 UI textures + 16 box wallpapers (total 31 assets)")
+print("[ok] All 15 UI textures and 16 wallpapers validated in manifest and file system")
 end
 
 print("=== [TEST 16] Party-to-Box Move Compacts a Holed Party ===")

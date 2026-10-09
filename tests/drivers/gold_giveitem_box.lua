@@ -1,37 +1,38 @@
--- GiveItemScript (engine/overworld/scripting.asm:441-449) is ONE MapTextbox.
---
---   POKEPORT_GAME=gold POKEPORT_DRIVER=tests/drivers/gold_giveitem_box.lua love .
---
--- `writetext .ReceivedItemText / iffalse .Full / waitsfx / specialsound /
--- waitbutton / itemnotify`: the received line and the "put it in the pocket"
--- line print into the SAME box, which the caller's `opentext` opened and the
--- caller's `closetext` closes.  Nothing between them takes the box down.
---
--- This port draws a box per message, so the seam between them is where the
--- fidelity is: the second box has to go up inside the same frame the first
--- one pops.  If a frame renders with an empty state stack in between, the box
--- visibly tears down and rebuilds AND Game2's play clock -- which only ticks
--- while the overworld is the top state (src/core/Game2.lua, wGameTimerPaused)
--- -- comes off pause for the length of the gap.
---
--- The run counts the bare-overworld frames between the two boxes and the
--- play-clock frames they cost, and shoots both pages.
+-- ../pokegold/engine/overworld/scripting.asm:441
 local U = require("tests.drivers.util")
+local Sound = require("src.core.Sound")
 
 return function(game)
   local out = os.getenv("POKEPORT_SHOT_DIR") or "/tmp/gold-giveitem"
+  local fails = 0
+  local function ok(cond, line)
+    if not cond then fails = fails + 1 end
+    print("[driver] " .. (cond and "PASS " or "FAIL ") .. line)
+    return cond
+  end
+  local function finish()
+    print("[driver] " .. (fails == 0 and "PASS gold giveitem single box" or ("FAIL " .. fails .. " claims failed")))
+    love.event.quit(fails == 0 and 0 or 1)
+    while true do U.wait(60) end
+  end
 
-  local function tap(button)
-    game.input.pressQueue[#game.input.pressQueue + 1] = button
-    game.input.state[button] = true
-    U.wait(2)
-    game.input.state[button] = false
-    U.wait(2)
+  local function boxText(top)
+    if not (top and top.isTextBox and top.pages) then return "" end
+    local lines = {}
+    for _, page in ipairs(top.pages) do
+      for _, line in ipairs(page) do lines[#lines + 1] = tostring(line) end
+    end
+    return table.concat(lines, "\n")
   end
 
   U.wait(45)
   local world = game.world
-  assert(world and world.map, "gold world did not boot")
+  if not ok(world and world.map, "gold world booted") then finish() end
+
+  local def = game.data.items and game.data.items.POTION
+  if not ok(def ~= nil and def.index ~= nil, "the cache names POTION") then finish() end
+  game.save.inventory = game.save.inventory or {}
+  game.save.inventory.POTION = nil
 
   game.save.playTime = { hours = 0, minutes = 0, seconds = 0, frames = 0 }
   local function clockFrames()
@@ -39,22 +40,17 @@ return function(game)
     return ((t.hours * 60 + t.minutes) * 60 + t.seconds) * 60 + t.frames
   end
 
-  -- `opentext / verbosegiveitem POTION, 1 / closetext / end`, the shape every
-  -- NPC hand-over in the game uses.
   world.vm:start({
     { op = "opentext" },
-    { op = "verbosegiveitem", args = { "POTION", 1 } },
+    { op = "verbosegiveitem", item = def.index, quantity = 1 },
     { op = "closetext" },
     { op = "end" },
   })
 
-  -- Sampled every frame, and the A press goes in every sixth: a sample taken
-  -- only on press frames would step straight over the seam being measured.
-  local bare, boxes, seenFirst = 0, 0, false
-  local clockAtFirstBox, clockAtLastBox = nil, nil
-  local shots, pressIn = 0, 8
-  for _ = 1, 900 do
-    if not world:busy() and seenFirst then break end
+  local bare, seenFirst = 0, false
+  local clockAtFirstBox, clockAtLastBox
+  local function step()
+    U.wait(1)
     local top = game.stack:top()
     if top then
       if not seenFirst then
@@ -62,38 +58,75 @@ return function(game)
         clockAtFirstBox = clockFrames()
       end
       clockAtLastBox = clockFrames()
-      if shots < 2 and boxes % 12 == 6 then
-        shots = shots + 1
-        U.shot(game, ("%s/%02d-page.png"):format(out, shots))
-      end
-      boxes = boxes + 1
-    elseif seenFirst then
+    elseif seenFirst and world:busy() then
       bare = bare + 1
     end
-    pressIn = pressIn - 1
-    if pressIn <= 0 then
-      pressIn = 6
-      game.input.pressQueue[#game.input.pressQueue + 1] = "a"
-      game.input.state.a = true
-      U.wait(1)
-      game.input.state.a = false
-    else
-      U.wait(1)
+    return top
+  end
+  local function press()
+    table.insert(game.input.pressQueue, "a")
+    game.input.state.a = true
+    step()
+    game.input.state.a = false
+  end
+  local function waitFor(pred, seconds)
+    local deadline = love.timer.getTime() + seconds
+    while love.timer.getTime() < deadline do
+      local top = step()
+      if pred(top) then return top end
     end
+    return nil
   end
 
+  local received = waitFor(function(top)
+    return boxText(top):find("received", 1, true) and top.done
+  end, 10)
+  local recText = boxText(received)
+  ok(received ~= nil and recText:find("received\nPOTION.", 1, true) ~= nil and not recText:find("ITEMPOTION", 1, true),
+    ("received page reads \"received / POTION.\" (got %q)"):format(recText))
+  U.still(game, out .. "/01-received.png")
+
+  local jingle = false
+  waitFor(function()
+    jingle = jingle or Sound.sfxBusy()
+    return jingle
+  end, 2)
+  ok(jingle, "Sfx_Item starts under the received page")
+  if jingle then press() end
+  ok(received ~= nil and game.stack:top() == received, "a press while the jingle rings is swallowed")
+  local deadline = love.timer.getTime() + 8
+  while Sound.sfxBusy() and love.timer.getTime() < deadline do step() end
+  ok(received ~= nil and game.stack:top() == received, "received page stays up through the jingle")
+  local pocket
+  local frames = 0
+  while not pocket and frames < 600 do
+    if boxText(game.stack:top()):find("put the", 1, true) then
+      pocket = game.stack:top()
+    else
+      frames = frames + 1
+      press()
+    end
+  end
+  ok(pocket ~= nil, "pocket page follows the press")
+  ok(pocket ~= nil and frames <= 2,
+    ("A pressed every frame after the jingle ends is taken within 2 frames (%d)"):format(frames))
+  pocket = pocket and waitFor(function(top)
+    return top ~= pocket or top.done
+  end, 10)
+  local pocketText = boxText(pocket)
+  ok(pocketText:find("put the\nPOTION in\nthe ITEM POCKET.", 1, true) ~= nil,
+    ("pocket page reads \"put the / POTION in / the ITEM POCKET.\" (got %q)"):format(pocketText))
+  U.still(game, out .. "/02-pocket.png")
+
+  local closeDeadline = love.timer.getTime() + 10
+  while (world:busy() or game.stack:top() ~= nil) and love.timer.getTime() < closeDeadline do
+    press()
+    for _ = 1, 5 do step() end
+  end
+  ok(not world:busy() and game.stack:top() == nil, "closetext took the box down")
+  ok((game.save.inventory.POTION or 0) > 0, "POTION reached the pack")
+  ok(seenFirst and bare == 0, ("no bare overworld frame between the two pages (%d)"):format(bare))
   local spent = (clockAtLastBox or 0) - (clockAtFirstBox or 0)
-  print(("[driver] %d frames with a box up, %d bare frames between the pages")
-    :format(boxes, bare))
-  print(("[driver] the play clock advanced %d frames across the exchange")
-    :format(spent))
-  assert(seenFirst, "no text box ever went up for the item")
-  assert(bare == 0,
-    ("the overworld drew bare for %d frames between the two pages of one "
-     .. "GiveItemScript textbox"):format(bare))
-  assert(spent == 0,
-    ("the play clock ran for %d frames while an item was being handed over")
-      :format(spent))
-  print("[driver] PASS gold giveitem single box in " .. out)
-  love.event.quit()
+  ok(spent == 0, ("play clock paused while the box was up (%d frames)"):format(spent))
+  finish()
 end

@@ -196,6 +196,305 @@ end
 check(received, "verbosegiveitem shows received text")
 check(pocket, "verbosegiveitem shows pocket notify")
 
+-- engine/overworld/scripting.asm:467
+-- engine/events/hidden_item.asm:1
+-- engine/events/fruit_trees.asm:16
+do
+  local function jingleHost(full)
+    local log, stayed = {}, false
+    local hooks = {
+      showText = function(body, onDone, stay)
+        log[#log + 1] = (stay and "stay:" or "text:") .. body
+        stayed = stay and true or false
+        onDone()
+      end,
+      hasStayedText = function() return stayed end,
+      holdStayedText = function(kind, done)
+        log[#log + 1] = "hold:" .. kind
+        done()
+        return true
+      end,
+      getItemName = function() return "POTION" end,
+      giveItem = function() return not full end,
+      specialSound = function() log[#log + 1] = "sfx" end,
+      fruitTreeItem = function() return 18 end,
+      fruitTreePicked = function() return false end,
+    }
+    return log, hooks
+  end
+
+  local function shape(log)
+    local out = {}
+    for _, row in ipairs(log) do
+      out[#out + 1] = row:match("^(%a+:)") and (row:match("^(%a+:)")
+        .. ((row:find("received", 1, true) and "received")
+          or (row:find("put the", 1, true) and "pocket")
+          or (row:find("Obtained", 1, true) and "obtained")
+          or (row:find("found", 1, true) and "found")
+          or (row:find("no space", 1, true) and "nospace")
+          or row:match("^%a+:(.*)$")))
+        or row
+    end
+    return table.concat(out, " ")
+  end
+
+  local log, hooks = jingleHost(false)
+  local giveVm = Vm.new({ generation = 2, ["s:give"] = {
+    { op = "opentext" },
+    { op = "verbosegiveitem", item = 18, quantity = 1 },
+    { op = "closetext" },
+    { op = "end" },
+  } }, {}, Events.new(), hooks)
+  giveVm:start("s:give")
+  for _ = 1, 20 do giveVm:update() end
+  eq(shape(log), "stay:received sfx hold:sfx hold:button text:pocket",
+    "verbosegiveitem: jingle on the received line, then WaitSFX, then the press")
+
+  log, hooks = jingleHost(false)
+  local hiddenVm = Vm.new({ generation = 2, ["s:hidden"] = {
+    { op = "opentext" },
+    { op = "rawtext", text = "{PLAYER} found\nPOTION!" },
+    { op = "giveitem", item = 18, quantity = 1 },
+    { op = "iffalse", script = "s:full" },
+    { op = "specialsound" },
+    { op = "itemnotify" },
+    { op = "closetext" },
+    { op = "end" },
+  }, ["s:full"] = {
+    { op = "promptbutton" },
+    { op = "rawtext", text = "But there's no space" },
+    { op = "end" },
+  } }, {}, Events.new(), hooks)
+  hiddenVm:start("s:hidden")
+  for _ = 1, 20 do hiddenVm:update() end
+  eq(shape(log), "stay:found sfx hold:sfx text:pocket",
+    "hidden item: found line stays up through the jingle into itemnotify")
+
+  log, hooks = jingleHost(true)
+  local fullVm = Vm.new({ generation = 2, ["s:hidden"] = {
+    { op = "rawtext", text = "{PLAYER} found\nPOTION!" },
+    { op = "giveitem", item = 18, quantity = 1 },
+    { op = "iffalse", script = "s:full" },
+    { op = "specialsound" },
+    { op = "end" },
+  }, ["s:full"] = {
+    { op = "promptbutton" },
+    { op = "rawtext", text = "But there's no space" },
+    { op = "end" },
+  } }, {}, Events.new(), hooks)
+  fullVm:start("s:hidden")
+  for _ = 1, 20 do fullVm:update() end
+  eq(shape(log), "stay:found hold:prompt text:nospace",
+    "hidden item, full pack: the found line takes its promptbutton press")
+
+  log, hooks = jingleHost(false)
+  local treeVm = Vm.new({ generation = 2, ["s:tree"] = {
+    { op = "fruittree", tree = 1 },
+  } }, {}, Events.new(), hooks)
+  treeVm:start("s:tree")
+  for _ = 1, 20 do treeVm:update() end
+  check(shape(log):find("stay:obtained sfx hold:sfx text:pocket", 1, true) ~= nil,
+    "fruit tree: obtained line stays up through the jingle into itemnotify ("
+    .. shape(log) .. ")")
+
+  log, hooks = jingleHost(true)
+  local fullGiveVm = Vm.new({ generation = 2, ["s:give"] = {
+    { op = "verbosegiveitem", item = 18, quantity = 1 },
+    { op = "end" },
+  } }, {}, Events.new(), hooks)
+  fullGiveVm:start("s:give")
+  for _ = 1, 20 do fullGiveVm:update() end
+  eq(shape(log), "stay:received hold:prompt text:The ITEM POCKET\nis full…",
+    "verbosegiveitem, full pack: the received line takes the arrowed promptbutton")
+end
+
+-- engine/overworld/scripting.asm:329
+-- engine/overworld/scripting.asm:371
+-- engine/overworld/scripting.asm:2208
+-- home/pokemon.asm:124
+do
+  local function flowHost()
+    local log, stayed = {}, false
+    local hooks = {
+      showText = function(body, onDone, stay)
+        log[#log + 1] = (stay and "stay:" or "text:") .. body
+        stayed = stay and true or false
+        onDone()
+      end,
+      hasStayedText = function() return stayed end,
+      holdStayedText = function(kind, done, frames)
+        if kind == "close" then
+          stayed = false
+          log[#log + 1] = "close"
+          return false
+        end
+        log[#log + 1] = "hold:" .. kind .. (frames and tostring(frames) or "")
+        done()
+        return true
+      end,
+      playSound = function(id) log[#log + 1] = "snd" .. tostring(id) end,
+      cry = function() log[#log + 1] = "cry" end,
+      yesorno = function(choose)
+        stayed = false
+        log[#log + 1] = "yesno"
+        choose(true)
+      end,
+      getItemName = function() return "BICYCLE" end,
+      giveItem = function() return true end,
+    }
+    return log, hooks
+  end
+  local texts = {
+    ["t:badge"] = "{PLAYER} received\nZEPHYRBADGE.{DONE}",
+    ["t:after"] = "after{DONE}",
+    ["t:phone"] = "{PLAYER} got ELM's\nphone number.{DONE}",
+    ["t:key"] = "{PLAYER} borrowed a\nBICYCLE.{DONE}",
+    ["t:cry"] = "Moo!{DONE}",
+    ["t:a"] = "a{DONE}", ["t:b"] = "b{DONE}",
+    ["t:ask"] = "ask{DONE}",
+    ["t:prompt"] = "wait{PROMPT}",
+  }
+  local function short(row)
+    return (row:gsub("{PLAYER} received\nZEPHYRBADGE.{DONE}", "badge")
+      :gsub("{PLAYER} got ELM's\nphone number.{DONE}", "phone")
+      :gsub("{PLAYER} borrowed a\nBICYCLE.{DONE}", "key")
+      :gsub("{PLAYER} put the\nBICYCLE in\nthe [^\n]*%.", "pocket")
+      :gsub("Moo!{DONE}", "cry")
+      :gsub("{DONE}", ""):gsub("{PROMPT}", ""))
+  end
+  local function run(list)
+    local log, hooks = flowHost()
+    local vm = Vm.new({ generation = 2, ["s"] = list }, texts, Events.new(), hooks)
+    vm:start("s")
+    for _ = 1, 400 do vm:update() end
+    local out = {}
+    for _, row in ipairs(log) do out[#out + 1] = short(row) end
+    return table.concat(out, " "), vm
+  end
+
+  local got, vm = run({
+    { op = "opentext" },
+    { op = "writetext", text = "t:badge" },
+    { op = "playsound", id = 0x9e },
+    { op = "waitsfx" },
+    { op = "setflag", flag = 27 },
+    { op = "writetext", text = "t:after" },
+    { op = "waitbutton" },
+    { op = "closetext" },
+    { op = "end" },
+  })
+  eq(got, "stay:badge snd158 hold:sfx text:after",
+    "badge: jingle while the received line is up, WaitSFX on that box, next page with no press")
+  check(not vm:running(), "badge script ran to the end")
+
+  got = run({
+    { op = "writetext", text = "t:phone" },
+    { op = "playsound", id = 0x92 },
+    { op = "waitsfx" },
+    { op = "waitbutton" },
+    { op = "closetext" },
+    { op = "end" },
+  })
+  eq(got, "stay:phone snd146 hold:sfx hold:button close",
+    "phone number: jingle on the line, WaitSFX, then WaitButton on the same box, then closetext")
+
+  got = run({
+    { op = "giveitem", item = 7, quantity = 1 },
+    { op = "writetext", text = "t:key" },
+    { op = "playsound", id = 0x9b },
+    { op = "waitsfx" },
+    { op = "itemnotify" },
+    { op = "setevent", event = 5 },
+    { op = "closetext" },
+    { op = "end" },
+  })
+  eq(got, "stay:key snd155 hold:sfx text:pocket",
+    "key item: jingle on the borrowed line, WaitSFX, then itemnotify into the same box")
+
+  got = run({
+    { op = "writetext", text = "t:cry" },
+    { op = "cry", id = 241 },
+    { op = "waitbutton" },
+    { op = "closetext" },
+    { op = "end" },
+  })
+  eq(got, "stay:cry cry hold:cry hold:button close",
+    "writetext / cry / waitbutton: the cry plays under the line before the press")
+
+  got = run({
+    { op = "writetext", text = "t:a" },
+    { op = "pause", frames = 45 },
+    { op = "writetext", text = "t:b" },
+    { op = "pause", frames = 45 },
+    { op = "closetext" },
+    { op = "end" },
+  })
+  eq(got, "stay:a hold:frames90 stay:b hold:frames90 close",
+    "writetext / pause: the line stays up for the pause, no press")
+
+  got = run({
+    { op = "writetext", text = "t:a" },
+    { op = "playsound", id = 1 },
+    { op = "waitsfx" },
+    { op = "special", id = 9999 },
+    { op = "end" },
+  })
+  eq(got, "stay:a snd1 hold:sfx close",
+    "a stayed line is closed before a command that cannot run under it")
+
+  got = run({
+    { op = "writetext", text = "t:a" },
+    { op = "playsound", id = 1 },
+    { op = "end" },
+  })
+  eq(got, "stay:a snd1 close", "a stayed line is closed when the script ends")
+
+  got = run({
+    { op = "writetext", text = "t:a" },
+    { op = "waitbutton" },
+    { op = "closetext" },
+    { op = "end" },
+  })
+  eq(got, "text:a", "writetext / waitbutton still takes its press on the box")
+
+  got = run({
+    { op = "writetext", text = "t:ask" },
+    { op = "yesorno" },
+    { op = "closetext" },
+    { op = "end" },
+  })
+  eq(got, "stay:ask yesno", "writetext / yesorno still keeps the question up under YES/NO")
+
+  got = run({
+    { op = "writetext", text = "t:a" },
+    { op = "promptbutton" },
+    { op = "writetext", text = "t:b" },
+    { op = "waitbutton" },
+    { op = "end" },
+  })
+  eq(got, "text:a text:b", "writetext / promptbutton still takes its arrowed press on the box")
+
+  got = run({
+    { op = "writetext", text = "t:prompt" },
+    { op = "playsound", id = 1 },
+    { op = "end" },
+  })
+  eq(got, "text:wait snd1", "a {PROMPT} line takes its own press before the sound")
+
+  -- engine/events/overworld.asm:1006
+  got = run({
+    { op = "writetext", text = "t:a" },
+    { op = "readmem", args = { 0, 0 } },
+    { op = "cry", id = 0 },
+    { op = "pause", frames = 3 },
+    { op = "writetext", text = "t:prompt" },
+    { op = "closetext" },
+    { op = "end" },
+  })
+  eq(got, "stay:a cry hold:cry hold:frames6 text:wait",
+    "writetext / readmem / cry / pause: the line stays up past a silent command")
+end
+
 -- pokemart.  Script_pokemart farcalls OpenMartDialog, which does not return
 -- until the shop is closed, so the VM has to PARK on it the way it parks on a
 -- battle; and its mart id is a WORD, not a byte.

@@ -1,80 +1,94 @@
--- The MeetMomScript cutscene, shot at the moments that used to go wrong.
---
---   POKEPORT_GAME=gold POKEPORT_DRIVER=tests/drivers/gold_mom_scene.lua love .
---
--- Three things this is watching for, all of them general rather than
--- Mom-specific:
---   * an object whose event flag a RUNNING script flips must not swap on the
---     spot -- the cart only re-reads the object list on a map load, so Mom
---     stays standing beside you until she has walked back to her chair
---   * an object that appears mid-map must have its palette baked immediately,
---     not on the next once-a-second poll, or it stands there in greyscale
---   * a `yesorno` keeps the question on screen underneath the prompt
---
--- Shots land in /tmp/gold-mom.
+-- ../pokegold/maps/PlayersHouse1F.asm:21
 local U = require("tests.drivers.util")
+local ChoiceBox = require("src.ui.ChoiceBox")
+local InitClock = require("src.ui.gen2.InitClock")
 
 return function(game)
   local out = os.getenv("POKEPORT_SHOT_DIR") or "/tmp/gold-mom"
+  local fails = 0
+  local function ok(cond, line)
+    if not cond then fails = fails + 1 end
+    print("[driver] " .. (cond and "PASS " or "FAIL ") .. line)
+    return cond
+  end
+  local function finish()
+    print("[driver] " .. (fails == 0 and "PASS gold mom scene" or ("FAIL " .. fails .. " claims failed")))
+    love.event.quit(fails == 0 and 0 or 1)
+    while true do U.wait(60) end
+  end
 
-  local function tap(button, frames)
-    game.input.pressQueue[#game.input.pressQueue + 1] = button
+  local function press(button)
+    table.insert(game.input.pressQueue, button)
     game.input.state[button] = true
-    U.wait(2)
+    U.wait(1)
     game.input.state[button] = false
-    U.wait(frames or 4)
+  end
+  local function boxText(box)
+    if not (box and box.isTextBox and box.pages) then return "" end
+    local lines = {}
+    for _, page in ipairs(box.pages) do
+      for _, line in ipairs(page) do lines[#lines + 1] = tostring(line) end
+    end
+    return table.concat(lines, "\n")
+  end
+  local function under(state)
+    local states = game.stack.states
+    for i = #states, 2, -1 do
+      if states[i] == state then return states[i - 1] end
+    end
+    return nil
   end
 
   U.wait(45)
   local world = game.world
-  assert(world and world.map, "gold world did not boot")
+  if not ok(world and world.map, "gold world booted") then finish() end
+  U.still(game, out .. "/00-bedroom.png")
 
-  U.shot(game, out .. "/00-bedroom.png")
+  world:warpToMapId("PLAYERS_HOUSE_1F", 9, 0, "down")
+  local deadline = love.timer.getTime() + 5
+  while not world:busy() and love.timer.getTime() < deadline do U.wait(1) end
+  if not ok(world:busy(), "MeetMomScript started on the stairs") then finish() end
 
-  -- Drop straight into the living room at the top of the stairs, which is
-  -- where MeetMomScript's coord event sits.  The indoor route down from the
-  -- bedroom is a fragile way to reach a scene that is not about stairs.
-  world:setMap("PLAYERS_HOUSE_1F", 7, 3, "down")
-  U.wait(20)
-  for _ = 1, 3 do tap("down", 8) end
-  U.wait(40)
-  U.shot(game, out .. "/01-scene-start.png")
-
-  -- Page through until the first yes/no is up, shooting as we go.
-  local shots, sawChoice = 1, false
-  for step = 1, 200 do
+  local MOMENTS = {
+    { id = "01-here-you-go", match = function(top) return top.isTextBox and top.done and boxText(top):find("neighbor", 1, true) end },
+    { id = "02-received-pokegear", match = function(top) return top.isTextBox and top.done and boxText(top):find("received", 1, true) and boxText(top):find("GEAR", 1, true) end },
+    { id = "03-day-not-set", match = function(top) return top.isTextBox and top.done and boxText(top):find("just ", 1, true) end },
+    { id = "04-day-of-week", match = function(top) return getmetatable(top) == InitClock and top.mode == "day" end },
+    { id = "05-dst-yes-no", match = function(top) return getmetatable(top) == ChoiceBox and boxText(under(top)):find("Saving Time now?", 1, true) end },
+    { id = "06-come-home-yes-no", match = function(top) return getmetatable(top) == ChoiceBox and boxText(under(top)):find("PHONE?", 1, true) end },
+    { id = "07-phone-numbers", match = function(top) return top.isTextBox and top.done and boxText(top):find("Phone numbers", 1, true) end },
+  }
+  local reached, nextPress = {}, 0
+  deadline = love.timer.getTime() + 22
+  while love.timer.getTime() < deadline and not (reached["07-phone-numbers"] and not world:busy()) do
     local top = game.stack:top()
-    local isChoice = top and top.index ~= nil and top.onChoose ~= nil
-    -- A TextBox that has pushed its own choice box counts too.
-    if game.world.choicebox and not sawChoice then
-      sawChoice = true
-      U.shot(game, out .. "/02-yes-no.png")
+    if top then
+      for _, m in ipairs(MOMENTS) do
+        if not reached[m.id] and m.match(top) then
+          reached[m.id] = true
+          U.still(game, ("%s/%s.png"):format(out, m.id))
+        end
+      end
     end
-    if isChoice and not sawChoice then
-      sawChoice = true
-      U.shot(game, out .. "/02-yes-no.png")
+    if top and love.timer.getTime() >= nextPress then
+      nextPress = love.timer.getTime() + 0.2
+      press("a")
+    else
+      U.wait(1)
     end
-    if step % 25 == 0 then
-      shots = shots + 1
-      U.shot(game, ("%s/03-scene-%02d.png"):format(out, shots))
-    end
-    if not world:busy() and step > 20 then break end
-    tap("a", 4)
   end
-  U.wait(30)
-  U.shot(game, out .. "/04-scene-end.png")
+  for _ = 1, 30 do U.wait(1) end
+  ok(not world:busy(), "MeetMomScript ran to its end")
+  U.still(game, out .. "/08-scene-end.png")
+  for _, m in ipairs(MOMENTS) do
+    ok(reached[m.id] == true, "reached " .. m.id)
+  end
 
-  -- The two invariants, checked rather than eyeballed.
-  local greyed = {}
+  local greyed, pooled = 0, 0
   for _, npc in pairs(world.npcPool or {}) do
-    if npc.sprite and npc.spriteDef and not npc.sprite.objColors then
-      greyed[#greyed + 1] = npc.spriteDef.id or "?"
-    end
+    pooled = pooled + 1
+    if npc.sprite and npc.spriteDef and not npc.sprite.objColors then greyed = greyed + 1 end
   end
-  print(("[driver] %d pooled NPCs, %d without a baked palette")
-    :format((function() local n = 0 for _ in pairs(world.npcPool or {}) do n = n + 1 end return n end)(),
-      #greyed))
-  print(("[driver] saw a yes/no prompt: %s"):format(tostring(sawChoice)))
-  print("[driver] PASS gold mom scene in " .. out)
-  love.event.quit()
+  ok(greyed == 0, ("every pooled NPC has a baked palette (%d pooled, %d grey)"):format(pooled, greyed))
+  finish()
 end

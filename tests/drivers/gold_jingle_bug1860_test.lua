@@ -2,8 +2,7 @@
 -- (pokegold engine/overworld/scripting.asm:441-449), Oak's rating
 -- (engine/events/prof_oaks_pc.asm:14-21), bug contest judging
 -- (engine/events/bug_contest/judging.asm:29-32).
---   POKEPORT_IDENTITY=gold-dev POKEPORT_GAME=gold POKEPORT_TOUCH=0 \
---     POKEPORT_DRIVER=tests/drivers/gold_jingle_bug1860_test.lua love .
+--   tools/run_driver.sh gold <identity> tests/drivers/gold_jingle_bug1860_test.lua <shotdir>
 local U = require("tests.drivers.util")
 local Sound = require("src.core.Sound")
 
@@ -18,8 +17,9 @@ return function(game)
     U.log("WARNING: silent; raise SFX volume before judging this by ear")
   end
 
-  local results = {}
+  local results, fails = {}, 0
   local function check(label, ok)
+    if not ok then fails = fails + 1 end
     results[#results + 1] = (ok and "PASS " or "FAIL ") .. label
   end
 
@@ -126,12 +126,7 @@ return function(game)
   end
 
   for _, line in ipairs(results) do U.log(line) end
-
-  U.log("Right sounds like: the TM jingle, the dex-rating fanfare and each")
-  U.log("place fanfare play out in full even while A is mashed; the box under")
-  U.log("each one only closes once its jingle has finished ringing.")
-
-  while true do
-    coroutine.yield()
-  end
+  U.log(("%d checks, %d failed"):format(#results, fails))
+  love.event.quit(fails == 0 and 0 or 1)
+  while true do U.wait(60) end
 end

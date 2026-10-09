@@ -513,14 +513,18 @@ local function sortActors(a, b)
   return a.subpriority > b.subpriority
 end
 
+local drawOrderObjects = {}
+
 -- event_object_movement.c:7739-7754, scrcmd.c:1130
 local function applyDrawOrder(actors, underActors, overActors, camY)
   underActors = underActors or {}
   overActors = overActors or {}
   for i = #underActors, 1, -1 do underActors[i] = nil end
   for i = #overActors, 1, -1 do overActors[i] = nil end
+  for obj in pairs(drawOrderObjects) do drawOrderObjects[obj] = nil end
   for _, a in ipairs(actors) do
     local obj = a.eventObject
+    if obj then drawOrderObjects[obj] = a end
     if (obj and obj.fixedPriority) or a.fixedPriority then
       a.fixedPriority = true
       if obj and obj.fixedClass == nil then obj.fixedClass = a.priority or actorPriority(a) end
@@ -541,6 +545,11 @@ local function applyDrawOrder(actors, underActors, overActors, camY)
     else
       underActors[#underActors + 1] = a
     end
+  end
+  -- pokeemerald/src/field_effect_helpers.c:1365
+  for _, a in ipairs(actors) do
+    local linked = a.disguiseObject and drawOrderObjects[a.disguiseObject]
+    if linked then a.subpriority = (linked.subpriority - 1) % 256 end
   end
   table.sort(underActors, sortActors)
   table.sort(overActors, sortActors)
@@ -733,7 +742,8 @@ local function collectGame3Actors(game, mapDef, camX, camY, px, py, facing, walk
     a.fishing = fishFrame ~= nil
     a.fishFrame = fishFrame
     a.running = PlayerMod and PlayerMod.runPose and PlayerMod.runPose() or nil
-    a.frame = PlayerMod and PlayerMod.acroFrame and PlayerMod.acroFrame() or nil
+    a.frame = PlayerMod and (PlayerMod.surfJumpFrame and PlayerMod.surfJumpFrame()
+      or PlayerMod.acroFrame and PlayerMod.acroFrame()) or nil
     a.sprite = playerSpriteName(game)
     a.graphicsId = useOw and OwSprites.playerGraphicsId(game) or nil
     a.priority = nil
@@ -1103,7 +1113,7 @@ local function drawNativeTiles(mapDef, camX, camY, canvasW, canvasH)
   local NativeTileset = modNativeTileset()
   if not (NativeTileset and NativeTileset.ready and NativeTileset.ready(pair)) then
     if not FieldView._loggedNativeFallback then
-      log("native unavailable for " .. tostring(pair) .. " — Gen2 atlas fallback")
+      log("native unavailable for " .. tostring(pair) .. ": Gen2 atlas fallback")
       FieldView._loggedNativeFallback = true
     end
     return false
@@ -1367,7 +1377,7 @@ local function drawNativeTiles(mapDef, camX, camY, canvasW, canvasH)
   return true
 end
 
---- BG2 overhead (building eaves, desk tops) — draw after OW sprites.
+--- BG2 overhead (building eaves, desk tops): draw after OW sprites.
 local function drawNativeOverTiles()
   local batches = FieldView._nativeOverBatches
   if not batches then return end
@@ -1646,7 +1656,7 @@ function FieldView.draw(game, canvasW, canvasH, opts)
     if mapId then session.map = mapId end
   end
 
-  -- pret CameraUpdate: always track the player. No map-rect clamp — edges
+  -- pret CameraUpdate: always track the player. No map-rect clamp: edges
   -- show connected neighbors (or border), same as walking mid-town.
   local camX = math.floor(px + CELL / 2 - canvasW / 2)
   local camY = math.floor(py + CELL / 2 - canvasH / 2)
@@ -1787,6 +1797,7 @@ function FieldView.draw(game, canvasW, canvasH, opts)
     for _, a in ipairs(underActors) do
       drawSingleActor(game, mapDef, a, camX, camY)
     end
+    if usedNative and opts.endUnderActors then opts.endUnderActors(drawNativeOverTiles) end
   end
 
   -- pret BG1: metatile top layer covers normal OW sprites (roofs, desk counters, trees).

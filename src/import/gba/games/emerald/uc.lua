@@ -36,6 +36,12 @@ return function(V)
   V.STORAGE_WALLPAPER_COUNT = count(PSS .. "sWallpapers", 12)
   V.STORAGE_WALLPAPER_W = 20
   V.STORAGE_WALLPAPER_H = 18
+  -- pokeemerald/src/mon_markings.c:25
+  V.STORAGE_MARKINGS = {
+    gfx = sym("mon_markings.o:sMonMarkings_Gfx"),
+    pal = sym("mon_markings.o:sMonMarkings_Pal"),
+    size = size("mon_markings.o:sMonMarkings_Gfx"),
+  }
   -- pokeemerald/include/constants/pokemon.h:283
   V.STORAGE_WALLPAPER_NAMES = {
     "forest", "city", "desert", "savanna",

@@ -1,3 +1,4 @@
+local PixelCanvas = require("src.render.PixelCanvas")
 local M = {}
 
 function M.enabled(session)
@@ -136,7 +137,7 @@ function M.draw(st)
   if not current(t) then M.reset(); return end
   local g = love.graphics
   if not M._canvas then
-    M._canvas = g.newCanvas(240, 160)
+    M._canvas = PixelCanvas.new(240, 160)
     M._canvas:setFilter("nearest", "nearest")
   end
   local order = {}

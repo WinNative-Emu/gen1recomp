@@ -90,6 +90,14 @@ local function drawView(S, Kit, x, y, w, h)
       fields[#fields + 1] = { "berryPowder", "Berry Powder", Gen.berryPowder(S.save, S.version),
         Gen.BERRY_POWDER_MAX, "Powder from Berry Crush, spent at the Berry Powder shop. Choose 0 to 99999." }
     end
+    if Gen.hasVolcanicAsh(S.save, S.version) then
+      fields[#fields + 1] = { "volcanicAsh", "Volcanic Ash", Gen.volcanicAsh(S.save, S.version),
+        Gen.VOLCANIC_ASH_MAX, "Ash collected in the Soot Sack, spent at the Glass Workshop. Choose 0 to 9999." }
+    end
+    if Gen.hasBattlePoints(S.save, S.version) then
+      fields[#fields + 1] = { "battlePoints", "Battle Points", Gen.battlePoints(S.save, S.version),
+        Gen.BATTLE_POINTS_MAX, "Battle Frontier points, spent at the Exchange Service Corner. Choose 0 to 9999." }
+    end
     for _, f in ipairs(fields) do
       cy = cy
         + Touch.value(

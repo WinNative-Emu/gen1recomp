@@ -4,6 +4,7 @@ local bit = require("bit")
 local Trig = require("src.core.game3.trig")
 local AnimPal = require("src.core.game3.battle.anim_pal")
 local AnimCoords = require("src.core.game3.battle.anim_coords")
+local PixelCanvas = require("src.render.PixelCanvas")
 P.band, P.bor, P.bxor, P.lshift, P.rshift = bit.band, bit.bor, bit.bxor, bit.lshift, bit.rshift
 
 local SINE = Trig.SINE
@@ -318,7 +319,7 @@ function P.sheet(vm, tag, w, h)
   local cw = math.max(1, floor(w / 8))
   local perFrame = cw * math.max(1, floor(h / 8))
   local nframes = math.max(1, floor(total / perFrame))
-  local ok, canvas = pcall(love.graphics.newCanvas, w, h * nframes)
+  local ok, canvas = pcall(PixelCanvas.new, w, h * nframes)
   if not ok or not canvas then
     per[key] = { image = img, frames = 1 }
     return img, 1
@@ -345,7 +346,7 @@ function P.sheet(vm, tag, w, h)
   relay(img, canvas)
   local idxImg, idxTag = AnimPal.indexImage(img)
   if idxImg then
-    local okc, ic = pcall(love.graphics.newCanvas, w, h * nframes)
+    local okc, ic = pcall(PixelCanvas.new, w, h * nframes)
     if okc and ic then
       ic:setFilter("nearest", "nearest")
       relay(idxImg, ic)
@@ -1404,7 +1405,7 @@ local function overlayResources()
     overlayRes = false
     return nil
   end
-  local ok1, canvas = pcall(love.graphics.newCanvas, 240, 160)
+  local ok1, canvas = pcall(PixelCanvas.new, 240, 160)
   local ok2, mask = pcall(love.graphics.newShader, MASK_SHADER_SRC)
   local ok3, over = pcall(love.graphics.newShader, OVERLAY_SHADER_SRC)
   if not (ok1 and ok2 and ok3) then

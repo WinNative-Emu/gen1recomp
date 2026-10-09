@@ -8,6 +8,7 @@ local CacheBlob = require("src.import.CacheBlob")
 local PartyChromeExtract = {}
 
 PartyChromeExtract.CACHE_SUB = "pokemon/party"
+PartyChromeExtract.FORMAT_VERSION = 2
 
 local function default_cache_root()
   local ok, Extract = pcall(require, "src.import.gba.extract_island1")
@@ -459,9 +460,16 @@ function PartyChromeExtract.run(rom, cache, opts)
     end
   end
 
+  -- pokeemerald/src/party_menu.c:749
+  local palLines = {}
+  for id = 0, math.floor(byte_len(pal) / 2) - 1 do
+    local r, g, b = bgr555_to_rgb8((pal[id * 2 + 1] or 0) + (pal[id * 2 + 2] or 0) * 256)
+    palLines[#palLines + 1] = string.format("[%d] = { %d, %d, %d },", id, r, g, b)
+  end
   local manifest = string.format(
-    "return {\n  width = %d, height = %d,\n  ballW = %d, ballSheetH = %d, ballFrames = %d,\n  slotMainW = 80, slotMainH = 56,\n  slotWideW = 144, slotWideH = 24,\n  cancelButtonW = 56, cancelButtonH = 16,\n  holdIconW = %d, holdIconSheetH = %d, holdIconFrames = %d,\n  pokemonVersion = %d,\n}\n",
-    W, H, bw, bh, frames or 2, holdW, holdH, holdFrames, K.POKEMON_VERSION or 1)
+    "return {\n  formatVersion = %d,\n  width = %d, height = %d,\n  ballW = %d, ballSheetH = %d, ballFrames = %d,\n  slotMainW = 80, slotMainH = 56,\n  slotWideW = 144, slotWideH = 24,\n  cancelButtonW = 56, cancelButtonH = 16,\n  holdIconW = %d, holdIconSheetH = %d, holdIconFrames = %d,\n  pokemonVersion = %d,\n  palBuffer = { %s },\n}\n",
+    PartyChromeExtract.FORMAT_VERSION, W, H, bw, bh, frames or 2, holdW, holdH, holdFrames, K.POKEMON_VERSION or 1,
+    table.concat(palLines, " "))
   cache:write(root .. "/manifest.lua", manifest)
 
   return {
@@ -471,34 +479,40 @@ function PartyChromeExtract.run(rom, cache, opts)
   }
 end
 
-function PartyChromeExtract.ready(cache, cacheRoot)
-  local root = (cacheRoot or default_cache_root()) .. "/" .. PartyChromeExtract.CACHE_SUB
-  local need = root .. "/slot_main.rgba"
+local function read_any(cache, rel)
   if cache then
-    if cache.read then
-      local d = cache:read(need)
-      return (d and #d >= 80 * 56 * 4) or false
-    elseif cache.exists then
-      return cache:exists(need) or false
-    end
-    return false
+    if cache.read then return cache:read(rel) end
+    return nil
   end
   local okC, CacheFs = pcall(require, "src.import.CacheFs")
   if okC and CacheFs and CacheFs.readActive then
-    local d = CacheFs.readActive(need)
-    if d and #d >= 80 * 56 * 4 then return true end
+    local d = CacheFs.readActive(rel)
+    if d then return d end
   end
   if love and love.filesystem and love.filesystem.read then
-    local d = CacheBlob.readFs(need)
-    if d and #d >= 80 * 56 * 4 then return true end
+    local d = CacheBlob.readFs(rel)
+    if d then return d end
   end
-  local f = io.open(need, "rb") or io.open("data/generated/gba/" .. PartyChromeExtract.CACHE_SUB .. "/slot_main.rgba", "rb")
+  local f = io.open(rel, "rb")
   if f then
-    local d = CacheBlob.decode(need, f:read("*a"))
+    local d = CacheBlob.decode(rel, f:read("*a"))
     f:close()
-    if d and #d >= 80 * 56 * 4 then return true end
+    return d
   end
-  return false
+  return nil
+end
+
+function PartyChromeExtract.manifestReady(body)
+  if type(body) ~= "string" then return false end
+  if tonumber(body:match("formatVersion%s*=%s*(%d+)")) ~= PartyChromeExtract.FORMAT_VERSION then return false end
+  return body:find("palBuffer = { [0] = {", 1, true) ~= nil
+end
+
+function PartyChromeExtract.ready(cache, cacheRoot)
+  local root = (cacheRoot or default_cache_root()) .. "/" .. PartyChromeExtract.CACHE_SUB
+  if not PartyChromeExtract.manifestReady(read_any(cache, root .. "/manifest.lua")) then return false end
+  local d = read_any(cache, root .. "/slot_main.rgba")
+  return (type(d) == "string" and #d >= 80 * 56 * 4) or false
 end
 
 return PartyChromeExtract

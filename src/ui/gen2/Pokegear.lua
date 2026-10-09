@@ -2676,7 +2676,7 @@ function Pokegear:drawPanel()
   if Pokegear.CUSTOM_RAMP_FILM and GbcPalette.customRamp
       and GbcPalette.available() then
     if not self.filmCanvas then
-      self.filmCanvas = G.newCanvas(SCREEN_W * 8, SCREEN_H * 8)
+      self.filmCanvas = require("src.render.PixelCanvas").new(SCREEN_W * 8, SCREEN_H * 8)
       self.filmCanvas:setFilter("nearest", "nearest")
     end
     local previousCanvas = G.getCanvas()

@@ -889,10 +889,11 @@ local function drawReflections(camX, camY)
     local ok, gid = pcall(Ow.playerGraphicsId, rt and rt._game)
     local spr = ok and gid and Ow.getDraw(gid)
     if spr then
+      local opts, x2, fishY2 = FE().playerReflectionPose(P, Ow)
       local frame, flip = Ow.pose(spr, P.facing, P.walkPhase and P.walkPhase() or 0,
-        P.drawFlip and P.drawFlip() or false, { running = P.runPose and P.runPose() or nil })
-      local y2 = P.jumpSpriteY and P.jumpSpriteY() or 0
-      drawReflection(P, gid, frame, flip, 0, y2, camX, camY)
+        P.drawFlip and P.drawFlip() or false, opts)
+      local y2 = (P.jumpSpriteY and P.jumpSpriteY() or 0) + fishY2
+      drawReflection(P, gid, frame, flip, x2, y2, camX, camY)
     end
   end
   coverReflections(camX, camY)
@@ -992,7 +993,8 @@ function FxRse.collectActors(actors)
     local eo = O._byId[lid]
     if eo and eo.visible and not eo.hidden then
       local d = eo.disguise
-      if d and not d.done then
+      -- pokeemerald/src/field_effect_helpers.c:1362
+      if d and not d.done and not eo.invisible then
         local sheet = FE().loadSheet(d.sheet)
         local q = sheet and d.a and sheet.quads[d.a.frame or 0]
         if q then
@@ -1004,6 +1006,8 @@ function FxRse.collectActors(actors)
             love.graphics.draw(sheet.image, q, math.floor(x) - camX, math.floor(y) - camY)
             love.graphics.setColor(1, 1, 1, 1)
           end)
+          -- pokeemerald/src/field_effect_helpers.c:1365
+          actors[#actors].disguiseObject = eo
         end
       end
       local bt = eo.berryTree

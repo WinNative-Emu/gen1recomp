@@ -25,6 +25,22 @@ function Rules.newGameFlags()
   return {}
 end
 
+-- #2748: MossdeepCity_Gym_EventScript_TateAndLizaDefeated sets the shared
+-- hideout flag. If the gym was completed out of order, this hides Matt before
+-- AquaHideout_B2F_EventScript_SubmarineEscape can advance the story. Recover
+-- at load/map entry, not by granting a battle win or rewriting ROM scripts.
+-- In the normal order the escape flag is already set when the badge is earned.
+function Rules.repairSaveState(store)
+  local Flags = require("src.core.game3.scripting.flags")
+  local F = constants().flags.byName
+  if not Flags.getFlag(store, nil, F.FLAG_BADGE07_GET) then return end
+  local escaped = Flags.getFlag(store, nil, F.FLAG_TEAM_AQUA_ESCAPED_IN_SUBMARINE)
+  local hide = F.FLAG_HIDE_AQUA_HIDEOUT_GRUNTS
+  if Flags.getFlag(store, nil, hide) ~= escaped then
+    Flags.setFlag(store, nil, hide, escaped)
+  end
+end
+
 function Rules.newVsSeeker()
   return nil
 end

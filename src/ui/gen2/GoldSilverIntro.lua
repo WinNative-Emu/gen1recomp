@@ -28,6 +28,7 @@
 -- Any button skips the whole thing, exactly as .PlayFrame does on PAD_BUTTONS.
 
 local Assets = require("src.render.Assets")
+local PixelCanvas = require("src.render.PixelCanvas")
 local Chrome = require("src.ui.gen2.Chrome")
 local GbcPalette = require("src.render.GbcPalette")
 local Logger = require("src.core.Logger")
@@ -885,7 +886,7 @@ function GoldSilverIntro:bgCanvas()
     self.mapDirty = true
   end
   if not self.canvas then
-    local ok, canvas = pcall(love.graphics.newCanvas, BG_PIXELS, BG_PIXELS)
+    local ok, canvas = pcall(PixelCanvas.new, BG_PIXELS, BG_PIXELS)
     if not ok then return nil end
     canvas:setFilter("nearest", "nearest")
     self.canvas = canvas
@@ -983,7 +984,7 @@ function GoldSilverIntro:renderFrame()
   -- Priming the BG canvas first keeps the two setCanvas calls from nesting.
   self:bgCanvas()
   if not self.frameCanvas then
-    local ok, canvas = pcall(G.newCanvas, SCREEN_W, SCREEN_H)
+    local ok, canvas = pcall(PixelCanvas.new, SCREEN_W, SCREEN_H)
     if not ok then return nil end
     canvas:setFilter("nearest", "nearest")
     self.frameCanvas = canvas

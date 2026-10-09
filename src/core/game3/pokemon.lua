@@ -178,7 +178,7 @@ function Pokemon.install(cache)
   if Pokemon._names then
     log("species pack ready (" .. tostring(Pokemon._manifest and Pokemon._manifest.numSpecies) .. ")")
   else
-    log("species pack missing — re-import FireRed ROM")
+    log("species pack missing: re-import FireRed ROM")
   end
   Pokemon._runReloadHooks()
 end
@@ -349,7 +349,7 @@ function Pokemon.expYield(species)
   return (meta and tonumber(meta.expYield)) or 0
 end
 
---- ROM BaseStats.growthRate — pret GROWTH_* index into gExperienceTables.
+--- ROM BaseStats.growthRate: pret GROWTH_* index into gExperienceTables.
 function Pokemon.growthRate(species)
   local meta = Pokemon.speciesMeta(species)
   return (meta and tonumber(meta.growthRate) or 0) % 6
@@ -1433,8 +1433,9 @@ function Pokemon.isShiny(mon)
   if not mon then return false end
   if mon.isShiny ~= nil then return not not mon.isShiny end
   local p = (tonumber(mon.personality) or 0) % 4294967296
-  local tid = (tonumber(mon.otId or mon.trainerId) or 0) % 65536
-  local sid = (tonumber(mon.otSecretId) or 0) % 65536
+  local full = (tonumber(mon.otId or mon.trainerId) or 0) % 4294967296
+  local tid = full % 65536
+  local sid = (tonumber(mon.otSecretId) or math.floor(full / 65536)) % 65536
   local value = bit.bxor(bit.bxor(tid, sid), bit.bxor(math.floor(p / 65536), p % 65536))
   return value < 8
 end
@@ -1444,12 +1445,12 @@ function Pokemon.monPicSpecies(mon)
   return Pokemon.picSpecies(Pokemon.speciesOf(mon), mon and mon.personality)
 end
 
-function Pokemon.monFrontPic(mon, form)
-  return Pokemon.frontPic(Pokemon.monPicSpecies(mon), form, Pokemon.isShiny(mon), mon and mon.personality)
+function Pokemon.monFrontPic(mon, form, kind)
+  return Pokemon.frontPic(Pokemon.monPicSpecies(mon), form, Pokemon.isShiny(mon), mon and mon.personality, kind)
 end
 
-function Pokemon.monBackPic(mon, form)
-  return Pokemon.backPic(Pokemon.monPicSpecies(mon), form, Pokemon.isShiny(mon))
+function Pokemon.monBackPic(mon, form, kind)
+  return Pokemon.backPic(Pokemon.monPicSpecies(mon), form, Pokemon.isShiny(mon), kind)
 end
 
 -- pokefirered/src/pokemon_icon.c:1116
@@ -1693,11 +1694,11 @@ function Pokemon.frontPic(species, form, shiny, personality)
 end
 
 -- pokefirered/src/pokedex_screen.c:2212
-function Pokemon.dexFrontPic(species, personality)
+function Pokemon.dexFrontPic(species, personality, kind)
   local p = (tonumber(personality) or 0) % 4294967296
   -- include/constants/pokemon.h:185
   local shiny = Pokemon.isShiny({ personality = p, otId = 8, otSecretId = 0 })
-  return Pokemon.frontPic(Pokemon.picSpecies(species, p), 0, shiny, p)
+  return Pokemon.frontPic(Pokemon.picSpecies(species, p), 0, shiny, p, kind or "dex")
 end
 
 -- pokefirered/src/pokedex_screen.c:3058

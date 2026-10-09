@@ -478,6 +478,59 @@ function Gen.setBerryPowder(save, amount, version)
   return true
 end
 
+Gen.BATTLE_POINTS_MAX = 9999 -- pokeemerald/include/constants/battle_frontier.h:48
+
+function Gen.hasBattlePoints(save, version)
+  if type(save) ~= "table" or Gen.of(save, version) ~= 3 then return false end
+  return versionOf(save, version) == "emerald"
+end
+
+-- pokeemerald/include/global.h:449
+function Gen.battlePoints(save, version)
+  if not Gen.hasBattlePoints(save, version) or type(save.frontier) ~= "table" then return 0 end
+  return tonumber(save.frontier.battlePoints) or 0
+end
+
+function Gen.setBattlePoints(save, amount, version)
+  if not Gen.hasBattlePoints(save, version) or type(amount) ~= "number" or amount ~= amount
+      or amount < 0 or amount > Gen.BATTLE_POINTS_MAX or amount ~= math.floor(amount) then return false end
+  if save.frontier ~= nil and type(save.frontier) ~= "table" then return false end
+  save.frontier = save.frontier or {}
+  save.frontier.battlePoints = amount
+  return true
+end
+
+Gen.VOLCANIC_ASH_MAX = 9999 -- pokeemerald/src/field_tasks.c:773
+
+function Gen.hasVolcanicAsh(save, version)
+  if type(save) ~= "table" or Gen.of(save, version) ~= 3 then return false end
+  local v = versionOf(save, version)
+  return v == "ruby" or v == "sapphire" or v == "emerald"
+end
+
+local function volcanicAshVar(save, version)
+  return require("src.core.game3.scripting.flags").forVersion(versionOf(save, version))
+    .VAR_IDS.VAR_ASH_GATHER_COUNT
+end
+
+function Gen.volcanicAsh(save, version)
+  if not Gen.hasVolcanicAsh(save, version) or type(save.vars) ~= "table" then return 0 end
+  -- Read by the save's edition, not the currently active cart. Flags.getVar
+  -- accepts both canonical numeric keys and legacy serialized string keys.
+  return tonumber(require("src.core.game3.scripting.flags").getVar(save, nil,
+    volcanicAshVar(save, version))) or 0
+end
+
+function Gen.setVolcanicAsh(save, amount, version)
+  if not Gen.hasVolcanicAsh(save, version) or type(amount) ~= "number" or amount ~= amount
+      or amount < 0 or amount > Gen.VOLCANIC_ASH_MAX or amount ~= math.floor(amount) then return false end
+  if save.vars ~= nil and type(save.vars) ~= "table" then return false end
+  if Gen.volcanicAsh(save, version) == amount then return true end
+  save.vars = save.vars or {}
+  require("src.core.game3.scripting.flags").setVar(save, nil, volcanicAshVar(save, version), amount)
+  return true
+end
+
 function Gen.playerGender(save)
   if type(save) ~= "table" then return "male" end
   if save.gender == 1 or (save.player and (save.player.gender == 1 or save.player.gender == "female")) then

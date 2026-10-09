@@ -1047,14 +1047,6 @@ function BoxStorageUI.draw()
           else love.graphics.draw(icon.image, px, py + bounceY) end
         end)
       end
-
-      -- Held Item indicator (small yellow dot/diamond)
-      local held = mon.heldItem or mon.item
-      if not is_rs() and held and held > 0 then
-        love.graphics.setColor(240/255, 180/255, 60/255, 1)
-        love.graphics.rectangle("fill", px + 22, py + 22 + bounceY, 3, 3)
-        love.graphics.setColor(1, 1, 1, 1)
-      end
     end
   end
   end

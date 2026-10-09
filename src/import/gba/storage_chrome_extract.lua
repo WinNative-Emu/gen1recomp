@@ -8,7 +8,7 @@ local BattleAnimExtract = require("src.import.gba.battle_anim_extract")
 local StorageChromeExtract = {}
 
 StorageChromeExtract.CACHE_SUB = "pokemon/storage"
-StorageChromeExtract.FORMAT_VERSION = 3
+StorageChromeExtract.FORMAT_VERSION = 4
 
 StorageChromeExtract.WALLPAPER_NAMES = {
   "forest", "city", "desert", "savanna",
@@ -38,6 +38,7 @@ StorageChromeExtract.TEXTURE_FILES = {
   { key = "party_drawer_full", file = "party_drawer_full.png" },
   { key = "party_slot_filled", file = "party_slot_filled.png" },
   { key = "party_slot_empty", file = "party_slot_empty.png" },
+  { key = "markings", file = "markings.png" },
 }
 
 local function default_cache_root()
@@ -266,6 +267,7 @@ function StorageChromeExtract.ready(cache, root)
   if not manifestData then return false end
   local v = tonumber(manifestData:match("version%s*=%s*(%d+)"))
   if v ~= StorageChromeExtract.FORMAT_VERSION then return false end
+  if not manifestData:find("palettes = { scrollingBg = {", 1, true) then return false end
 
   for _, tex in ipairs(StorageChromeExtract.TEXTURE_FILES) do
     if not valid_file(outDir .. "/" .. tex.file, 30) then return false end
@@ -337,6 +339,13 @@ function StorageChromeExtract.extract(rom, opts)
     (StorageChromeExtract.bakeSheet(sheet.menu, sheetLen.menu, pal.interface, 16)))
   emit("menu_pal0", "menu_pal0.png",
     (StorageChromeExtract.bakeSheet(sheet.menu, sheetLen.menu, pal.menu, 16)))
+  local mk = Versions.STORAGE_MARKINGS
+  if mk then
+    -- src/mon_markings.c:601
+    local bytes, len = read_sheet(rom, { off = mk.gfx, size = mk.size })
+    emit("markings", "markings.png",
+      (StorageChromeExtract.bakeSheet(bytes, len, read_palette(rom, mk.pal, 16), 4)))
+  end
 
   -- src/pokemon_storage_system_tasks.c:2126
   local menuTiles = sheet.menu
@@ -437,6 +446,15 @@ function StorageChromeExtract.extract(rom, opts)
       lines[#lines + 1] = string.format("    \"%s\",", name)
     end
     lines[#lines + 1] = "  },"
+  end
+  if pal.scrollingBg then
+    -- src/pokemon_storage_system_tasks.c:2154
+    local row = {}
+    for i = 0, 15 do
+      local c = pal.scrollingBg[i]
+      row[#row + 1] = string.format("[%d] = {%d,%d,%d}", i, c[1], c[2], c[3])
+    end
+    lines[#lines + 1] = "  palettes = { scrollingBg = { " .. table.concat(row, ", ") .. " } },"
   end
   if Versions.STORAGE_FRIENDS then
     written = written + StorageChromeExtract.extractFriends(rom, cache, outDir)

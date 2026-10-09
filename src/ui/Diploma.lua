@@ -6,6 +6,7 @@
 
 local Assets = require("src.render.Assets")
 local Font = require("src.render.Font")
+local PixelCanvas = require("src.render.PixelCanvas")
 local GameVersion = require("src.core.GameVersion")
 local PaletteFX = require("src.render.PaletteFX")
 local Sprites = require("src.pokemon.Sprites")
@@ -105,7 +106,7 @@ local function textOverlay(game)
   local key = playerName(game) .. "\0" .. tostring(Strings.active())
   if overlayCanvas and overlayKey == key then return overlayCanvas end
   if not overlayCanvas then
-    local ok, c = pcall(g.newCanvas, 160, 144)
+    local ok, c = pcall(PixelCanvas.new, 160, 144)
     if not ok or not c then return nil end
     overlayCanvas = c
   end

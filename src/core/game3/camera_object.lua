@@ -15,6 +15,8 @@ local CELL = 16
 CameraObject._eo = nil
 CameraObject._mapId = nil
 CameraObject._wrapped = false
+CameraObject._restX = 0
+CameraObject._restY = 0
 
 local function Objects()
   return package.loaded["src.core.game3.objects"]
@@ -64,7 +66,7 @@ end
 -- pokefirered/src/event_object_movement.c:2427
 function CameraObject.offset()
   local eo = live()
-  if not eo then return 0, 0 end
+  if not eo then return CameraObject._restX, CameraObject._restY end
   local P = Player()
   local dx = (tonumber(eo.px) or 0) - (tonumber(P.px) or 0)
   local dy = (tonumber(eo.py) or 0) - (tonumber(P.py) or 0)
@@ -102,8 +104,10 @@ function CameraObject.spawn(game, opts)
   local O = Objects()
   local P = Player()
   local lid = CameraObject.LOCALID
-  local cx = tonumber(P.cellX) or 0
-  local cy = tonumber(P.cellY) or 0
+  -- pokeemerald/src/field_specials.c:1253
+  local rx, ry = CameraObject._restX, CameraObject._restY
+  local cx = (tonumber(P.cellX) or 0) + math.floor(rx / CELL + 0.5)
+  local cy = (tonumber(P.cellY) or 0) + math.floor(ry / CELL + 0.5)
   opts = opts or {}
   local pool = O.spawnFromDefs({ {
     localId = lid,
@@ -117,8 +121,9 @@ function CameraObject.spawn(game, opts)
   if not eo then return nil end
   eo.visible = false
   eo.hidden = true
-  eo.px = tonumber(P.px) or (cx * CELL)
-  eo.py = tonumber(P.py) or (cy * CELL)
+  eo.px = (tonumber(P.px) or (cx * CELL - rx)) + rx
+  eo.py = (tonumber(P.py) or (cy * CELL - ry)) + ry
+  CameraObject._restX, CameraObject._restY = 0, 0
   eo.facing = opts.facing or P.facing or "down"
   O._byId[lid] = eo
   if not orderIndex(O._order, lid) then
@@ -135,6 +140,10 @@ end
 function CameraObject.remove(game)
   local O = Objects()
   local lid = CameraObject.LOCALID
+  if live() then
+    -- pokeemerald/src/event_object_movement.c:2244
+    CameraObject._restX, CameraObject._restY = CameraObject.offset()
+  end
   local eo = CameraObject._eo
   CameraObject._eo = nil
   CameraObject._mapId = nil
@@ -164,6 +173,7 @@ function CameraObject.reset()
   end
   CameraObject._eo = nil
   CameraObject._mapId = nil
+  CameraObject._restX, CameraObject._restY = 0, 0
 end
 
 return CameraObject

@@ -7,6 +7,7 @@
 local bit = require("bit")
 
 local Assets = require("src.render.Assets")
+local PixelCanvas = require("src.render.PixelCanvas")
 local Chrome = require("src.ui.gen2.Chrome")
 local GbcPalette = require("src.render.GbcPalette")
 local Logger = require("src.core.Logger")
@@ -1091,9 +1092,9 @@ local function bakeLayers(self)
   end
   local G = love.graphics
   if not self.backdropCanvas then
-    local ok, a = pcall(G.newCanvas, BG_PIXELS, BG_PIXELS)
-    local ok2, b = pcall(G.newCanvas, BG_PIXELS, BG_PIXELS)
-    local ok3, c = pcall(G.newCanvas, BG_PIXELS, BG_PIXELS)
+    local ok, a = pcall(PixelCanvas.new, BG_PIXELS, BG_PIXELS)
+    local ok2, b = pcall(PixelCanvas.new, BG_PIXELS, BG_PIXELS)
+    local ok3, c = pcall(PixelCanvas.new, BG_PIXELS, BG_PIXELS)
     if not (ok and ok2 and ok3) then return false end
     for _, canvas in ipairs({ a, b, c }) do
       canvas:setFilter("nearest", "nearest")
@@ -1224,7 +1225,7 @@ function CrystalIntro:renderFrame()
   local G = love.graphics
   local baked = bakeLayers(self)
   if not self.frameCanvas then
-    local ok, canvas = pcall(G.newCanvas, SCREEN_W, SCREEN_H)
+    local ok, canvas = pcall(PixelCanvas.new, SCREEN_W, SCREEN_H)
     if not ok then return nil end
     canvas:setFilter("nearest", "nearest")
     self.frameCanvas = canvas

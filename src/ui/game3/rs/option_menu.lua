@@ -7,6 +7,7 @@ local Pal = require("src.core.game3.pal_fade")
 local Kit = require("src.ui.game3.rse.scene_kit")
 local Rows = require("src.ui.game3.option_rows")
 local ShaderFXMenu = require("src.ui.game3.shaderfx_menu")
+local PixelCanvas = require("src.render.PixelCanvas")
 
 local Menu = {isMenu = true, open = false, cursor = 1}
 local KEYS = {"textSpeed", "battleScene", "battleStyle", "sound", "buttonMode", "frameType"}
@@ -264,7 +265,7 @@ local canvas, shader
 function Menu.draw()
   if not Menu.open then return end
   if ShaderFXMenu.isOpen() then return ShaderFXMenu.draw() end
-  canvas = canvas or love.graphics.newCanvas(240, 160)
+  canvas = canvas or PixelCanvas.new(240, 160)
   canvas:setFilter("nearest", "nearest")
   love.graphics.push("all")
   love.graphics.setCanvas(canvas)

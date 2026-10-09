@@ -47,6 +47,25 @@ local PHONE_CONTACT_GOT, PHONE_CONTACTS_FULL, PHONE_CONTACT_REFUSED = 0, 1, 2
 local MAX_MONEY, MAX_COINS = 999999, 9999
 -- constants/sfx_constants.asm
 local SFX_ITEM, SFX_HANG_UP = 0x01, 0x6b
+
+local STAYS_UNDER = {}
+for op in ([[
+  writetext farwritetext rawtext repeattext itemnotify pocketisfull
+  verbosegiveitem verbosegiveitemvar jumptext farjumptext jumptextfaceplayer
+  opentext closetext waitbutton promptbutton yesorno
+  playsound waitsfx specialsound cry pause playmusic musicfadeout
+  setevent clearevent setflag clearflag checkevent checkflag
+  readvar writevar loadvar setval addval random readmem writemem loadmem
+  giveitem takeitem checkitem givemoney takemoney checkmoney
+  givecoins takecoins checkcoins addcellnum delcellnum checkcellnum
+  setscene setmapscene checkscene checkmapscene checktime checkver checkpoke
+  getmonname getitemname getstring getname gettrainername
+  gettrainerclassname getcurlandmarkname getlandmarkname getnum getcoins
+  getmoney setlasttalked specialphonecall faceplayer turnobject faceobject
+  iftrue iffalse ifequal ifnotequal ifgreater ifless
+  sjump scall farsjump farscall jumpstd callstd memcall memjump
+  end endall endcallback
+]]):gmatch("%a+") do STAYS_UNDER[op] = true end
 -- constants/script_constants.asm: EMOTE_FROM_MEM is -1, i.e. the byte $ff.
 local EMOTE_FROM_MEM = 0xff
 -- constants/item_constants.asm:300 DEF ITEM_FROM_MEM EQU $ff
@@ -227,7 +246,13 @@ local function runCmd(self, cmd, op)
   elseif op == "opentext" or op == "closetext"
       or op == "promptbutton" or op == "closepokepic" then
     -- UI framing / pokepic teardown handled by hooks or TextBox.
-    if op == "closepokepic" then
+    if op == "promptbutton" then
+      -- engine/overworld/scripting.asm:374
+      self:holdStayed("prompt")
+    elseif op == "closetext" then
+      -- engine/overworld/scripting.asm:2208
+      self:closeStayed()
+    elseif op == "closepokepic" then
       -- Script_closepokepic is CloseWindow on the window Script_pokepic
       -- opened, so the pic-window flag `waitbutton` reads goes down with it.
       self.picOpen = false
@@ -245,8 +270,9 @@ local function runCmd(self, cmd, op)
     self.picOpen = false
     if self.hidePicFn then self.hidePicFn() end
   elseif op == "writetext" or op == "farwritetext" then
-    self:showText(cmd.text)
-    if self.nextOp == "playsound" then
+    -- engine/overworld/scripting.asm:329
+    local flowed = self:showText(cmd.text, true)
+    if not flowed and self.nextOp == "playsound" then
       -- pokegold home/joypad.asm PromptButton: the real press this box's
       -- own close absorbed plays SFX_READ_TEXT_2; drain it before the
       -- script's own playsound or Sound.lua's priority gate drops it.
@@ -270,7 +296,7 @@ local function runCmd(self, cmd, op)
     -- commands has to say so, and Vm:textStays' one-command lookahead cannot
     -- work it out.  `hold` is the cart `pause` those commands contain, in
     -- Script_pause's own doubled frames (Vm:pauseFrames).
-    self:showRaw(Strings(cmd.text), cmd.stay,
+    self:showRaw(Strings(cmd.text), cmd.stay or self:textJingle(),
       cmd.hold and Vm.pauseLength(cmd.hold) or nil)
   elseif op == "waitbutton" then
     -- Script_waitbutton (engine/overworld/scripting.asm) is WaitButton, i.e.
@@ -286,7 +312,9 @@ local function runCmd(self, cmd, op)
     -- ONLY thing holding the pic up: skipping it ran pokepic and closepokepic
     -- inside a single Vm:resume, so the starter's pic was built and thrown
     -- away without one frame ever drawing it (#911).
-    if self.picOpen and self.waitButtonFn then
+    if self:holdStayed("button") then
+      return
+    elseif self.picOpen and self.waitButtonFn then
       coroutine.yield({ kind = "waitbutton" })
     end
   elseif op == "checkevent" then
@@ -375,7 +403,10 @@ local function runCmd(self, cmd, op)
       return "end"
     end
   elseif op == "pause" then
-    self:pauseFrames(cmd.frames or cmd.length or 0)
+    local n = cmd.frames or cmd.length or 0
+    if not self:holdStayed("frames", Vm.pauseLength(n)) then
+      self:pauseFrames(n)
+    end
   elseif op == "setscene" then
     local scene = cmd.scene or arg1(cmd) or 0
     if self.setSceneFn then self.setSceneFn(scene) end
@@ -664,55 +695,28 @@ local function runCmd(self, cmd, op)
     if op == "verbosegiveitem" or op == "verbosegiveitemvar" then
       local name = self.getItemNameFn and self.getItemNameFn(item) or "?"
       self:setStringBuffer(name)
-      -- GiveItemScript (engine/overworld/scripting.asm:441-449), command for
-      -- command: `writetext .ReceivedItemText / iffalse .Full / waitsfx /
-      -- specialsound / waitbutton / itemnotify`.  Both messages print into the
-      -- ONE MapTextbox the caller's `opentext` opened; it comes down at the
-      -- caller's `closetext` and at no point in between.
-      --
-      -- The `waitsfx` sits ABOVE `specialsound` -- it drains whatever sfx was
-      -- already sounding so the item jingle starts clean -- and the port had
-      -- it BELOW, parking the script on the jingle's full length.  The port's
-      -- box waits for its own button and pops itself, so that park happened
-      -- with NOTHING on the stack: the text box visibly tore down and rebuilt
-      -- around a second of silence, and Game2's play clock (which only ticks
-      -- while the overworld is the top state) came off pause for the gap.
-      -- With the wait back on the cart's side of the sound, the second box is
-      -- pushed inside the same frame the first one pops -- no frame ever
-      -- renders the bare overworld, which is the closest this port's
-      -- box-per-message shape gets to the cart's single MapTextbox.
-      self:showRaw(Strings("{PLAYER} received\n%s.", name))
+      -- engine/overworld/scripting.asm:467
+      self:showRaw(Strings("{PLAYER} received\n%s.", name),
+        ok or self:canHoldStayed())
       if ok then
-        -- GiveItemScript's `waitsfx` is NOT ported as a park, and that is the
-        -- fix rather than an omission.  On the cart it drains whatever channel
-        -- the script before it left sounding, and it runs while the received
-        -- line is still on screen -- the box has not been touched yet, because
-        -- the button press is one command further down at `waitbutton`.  This
-        -- port's box takes that press itself and pops on it, so by the time
-        -- the VM gets here the ONLY thing still sounding is the box's own
-        -- Press_AB blip, and parking on it left the bare overworld drawing for
-        -- the length of the blip -- exactly the seam the cart never opens.
-        -- The received box's typing and its press are the drain point here.
-        if self.specialSoundFn then
-          self.specialSoundFn(item)
-        elseif self.playSoundFn then
-          self.playSoundFn(1) -- SFX_ITEM
-        end
+        self:specialSound(item)
+        local held = self:holdStayed("sfx")
+        if held then self:holdStayed("button") end
         -- _PutItemInPocketText's second blank is wStringBuffer3, which
         -- GetPocketName fills from ItemPocketNames: KEY ITEMs, BALLs and TMs
         -- name their own pocket, not the ITEM one (data/text/common_2.asm
         -- :1351, data/items/pocket_names.asm:10-13).
-        -- Script_specialsound's WaitSFX (scripting.asm:485): the box holds
-        -- its press until the jingle ends.
         self:showRaw(Strings("{PLAYER} put the\n%s in\nthe %s.",
-          name, self:pocketName(item)), nil, nil, true)
+          name, self:pocketName(item)), nil, nil, not held)
       else
+        -- engine/overworld/scripting.asm:477
+        self:holdStayed("prompt")
         self:showRaw(Strings("The %s\nis full…", self:pocketName(item)))
       end
     end
   elseif op == "itemnotify" then
     -- Script_itemnotify is GetPocketName + CurItemName, both of which read
-    -- wCurItem (engine/overworld/scripting.asm:460).  It touches no string
+    -- wCurItem (../pokecrystal/engine/overworld/scripting.asm:512).  It touches no string
     -- buffer, so the shared stand-in for wStringBuffer1..5 must not be read
     -- here: it is stale by design and a plain `giveitem` / `itemnotify` pair
     -- would print the last name any script happened to leave in it.  Nor is
@@ -726,7 +730,7 @@ local function runCmd(self, cmd, op)
     end
   elseif op == "pocketisfull" then
     -- Script_pocketisfull reads wCurItem exactly as Script_itemnotify does
-    -- (engine/overworld/scripting.asm:468).
+    -- (../pokecrystal/engine/overworld/scripting.asm:520).
     self:showRaw(Strings("The %s\nis full…", self:pocketName(self.curItem)))
   -- ---- bag, money and coins (engine/events/money.asm) --------------------
   elseif op == "checkitem" then
@@ -829,6 +833,8 @@ local function runCmd(self, cmd, op)
     self.scriptVar = has and 1 or 0
   elseif op == "cry" then
     if self.cryFn then self.cryFn(cmd.id) end
+    -- home/pokemon.asm:124
+    self:holdStayed("cry")
   elseif op == "playsound" then
     if self.playSoundFn then self.playSoundFn(cmd.id) end
   elseif op == "playmusic" then
@@ -868,17 +874,15 @@ local function runCmd(self, cmd, op)
     -- player decides, and the World owns that tile.
     if self.warpSoundFn then self.warpSoundFn() end
   elseif op == "waitsfx" then
-    coroutine.yield({ kind = "waitsfx" })
-  elseif op == "specialsound" then
-    -- Script_specialsound (scripting.asm:476) is `farcall CheckItemPocket`
-    -- over wCurItem, so the TM/HM jingle or SFX_ITEM is picked from the item
-    -- the last giveitem parked there -- the opcode itself carries nothing.
-    if self.specialSoundFn then
-      self.specialSoundFn(self.curItem)
-    elseif self.playSoundFn then
-      self.playSoundFn(1) -- SFX_ITEM
+    if not self:holdStayed("sfx") then
+      coroutine.yield({ kind = "waitsfx" })
     end
-    coroutine.yield({ kind = "waitsfx" })
+  elseif op == "specialsound" then
+    -- ../pokecrystal/engine/overworld/scripting.asm:528
+    self:specialSound(self.curItem)
+    if not self:holdStayed("sfx") then
+      coroutine.yield({ kind = "waitsfx" })
+    end
   elseif op == "readvar" then
     local id = cmd.var or arg1(cmd) or 0
     if self.readVarFn then
@@ -1513,30 +1517,18 @@ local function runCmd(self, cmd, op)
       self:showRaw(Strings("But the PACK is\nfull…"))
       return "end"
     end
-    self:showRaw(Strings("Obtained\n%s!", name))
+    -- engine/events/fruit_trees.asm:21
+    self:showRaw(Strings("Obtained\n%s!", name), true)
     -- callasm PickedFruitTree: the flag is set AFTER the fruit is banked, so
     -- a full pack leaves the tree pickable.
     if self.fruitTreePickFn then self.fruitTreePickFn(tree) end
-    if self.specialSoundFn then
-      self.specialSoundFn(item)
-    elseif self.playSoundFn then
-      self.playSoundFn(SFX_ITEM)
-    end
-    -- FruitTreeScript's tail is `specialsound / itemnotify` with NOTHING
-    -- between them (engine/events/fruit_trees.asm:23-24);
-    -- Script_specialsound ends PlaySFX / WaitSFX (scripting.asm:484-485)
-    -- The port used to park here on a `waitsfx`, which is the same seam
-    -- GiveItemScript's did: this port's box takes its own button and pops on
-    -- it, so the park ran with an EMPTY state stack and the bare overworld
-    -- drew for the length of the jingle (163 frames measured) between the two
-    -- pages of what the cart prints into ONE MapTextbox -- with Game2's play
-    -- clock, which only pauses while a state is on the stack, running for
-    -- every one of them.  The obtained box's own press is the drain point.
+    self:specialSound(item)
+    local held = self:holdStayed("sfx")
     -- itemnotify.  Berries are all ITEM pocket, so nothing here moves; the
     -- noun still comes from ItemPocketNames rather than from a third copy of
     -- the literal (data/items/pocket_names.asm:10-13).
     self:showRaw(Strings("{PLAYER} put the\n%s in\nthe %s.",
-      name, self:pocketName(item)), nil, nil, true)
+      name, self:pocketName(item)), nil, nil, not held)
     return "end"
   elseif op == "describedecoration" then
     -- `describedecoration byte` picks one of five DECODESC_* arms
@@ -1826,14 +1818,11 @@ function runList(self, key)
     -- "unknown" / "truncated" pair), so a row without one is never the cart's
     -- and the two shapes cannot be confused.  Vm:runModCommand has the contract.
     if op == nil and type(cmd[1]) == "string" then op = MOD_COMMAND end
-    -- One-command lookahead, for `writetext`'s missing terminator.  A text that
-    -- ends in `done` (home/text.asm:484) has no PromptButton, one that ends in
-    -- `prompt` (:470) does, and the extractor throws the terminator away -- so
-    -- the box cannot tell the two apart on its own.  What FOLLOWS the writetext
-    -- can: a `yesorno` on the next row is InitYesNoTextBoxParameters going up
-    -- over the box that is still holding the question, which the cart never
-    -- closed.  Vm:showText reads this to keep that box standing.
+    -- ../pokecrystal/home/text.asm:548
+    -- ../pokecrystal/home/text.asm:566
     self.nextOp = list[i + 1] and list[i + 1].op or nil
+    self.cmdList, self.cmdIndex = list, i
+    if not STAYS_UNDER[op] then self:closeStayed() end
     local jump
     if Runtime.wantsHook("script.command") then
       -- The SAME hook name and the same (ctx, name, args) argument list the
@@ -1945,6 +1934,8 @@ function Vm.new(scripts, text, events, hooks)
     playSoundFn = hooks.playSound,
     playMusicFn = hooks.playMusic,
     specialSoundFn = hooks.specialSound,
+    hasStayedFn = hooks.hasStayedText,
+    holdStayedFn = hooks.holdStayedText,
     waitSfxFn = hooks.waitSfx,
     waitSfxCapFn = hooks.waitSfxCap,
     -- StartAutoInput, by script pointer (`autoinput`) and by stream name
@@ -2398,7 +2389,7 @@ function Vm:setStringBuffer(value)
   if self.setStringBufferFn then self.setStringBufferFn(self.stringBuffer) end
 end
 
--- CurItemName (engine/overworld/scripting.asm:507).  It reads wCurItem and
+-- CurItemName (../pokecrystal/engine/overworld/scripting.asm:559).  It reads wCurItem and
 -- NOTHING else: the name in the "put the ... in" box comes from the item the
 -- last giveitem banked, never from a string buffer.  Reading self.stringBuffer
 -- there instead was what made Mr. Pokemon's MYSTERY EGG hand-over print
@@ -2409,9 +2400,7 @@ function Vm:curItemName()
   return self.getItemNameFn(self.curItem) or ""
 end
 
--- GetPocketName (engine/overworld/scripting.asm:488).  A VM built without the
--- hook (drivers, tests) keeps printing ITEM POCKET, which is the pocket the
--- overwhelming majority of the items these boxes name really live in.
+-- ../pokecrystal/engine/overworld/scripting.asm:540
 function Vm:pocketName(item)
   local pocket = self.getItemPocketFn and item and self.getItemPocketFn(item)
   return POCKET_NAMES[pocket] or POCKET_NAMES.ITEM
@@ -2421,13 +2410,81 @@ function Vm:emitFace(doFace)
   if doFace and self.facePlayerFn then self.facePlayerFn() end
 end
 
--- True when the command after the one being run is the cart's YES/NO prompt,
--- i.e. this box must not pop before the prompt goes up over it.  `promptbutton`
--- is deliberately NOT included: its own arm is a no-op here, so a box held open
--- for it would never be taken down, and the player presses A exactly once
--- either way.
 function Vm:textStays()
   return self.nextOp == "yesorno"
+end
+
+local JINGLE_SKIP = {
+  giveitem = true, iffalse = true, iftrue = true,
+  setevent = true, clearevent = true, waitsfx = true,
+}
+
+-- engine/events/hidden_item.asm:5
+function Vm:textJingle()
+  local list, i = self.cmdList, self.cmdIndex
+  if not (list and i) then return false end
+  for n = i + 1, #list do
+    local op = type(list[n]) == "table" and list[n].op or nil
+    if op == "specialsound" then return true end
+    if not JINGLE_SKIP[op] then return false end
+  end
+  return false
+end
+
+-- engine/overworld/scripting.asm:528
+function Vm:specialSound(item)
+  if self.specialSoundFn then
+    self.specialSoundFn(item)
+  elseif self.playSoundFn then
+    self.playSoundFn(SFX_ITEM)
+  end
+end
+
+local TEXT_FLOWS = {
+  playsound = true, waitsfx = true, specialsound = true, cry = true,
+  pause = true,
+}
+
+local TEXT_SILENT = {
+  readmem = true, writemem = true, loadmem = true, setval = true,
+  readvar = true, writevar = true, loadvar = true,
+  setevent = true, clearevent = true, setflag = true, clearflag = true,
+  getmonname = true, getitemname = true, getstring = true, getname = true,
+  gettrainername = true, gettrainerclassname = true, getnum = true,
+}
+
+function Vm:canHoldStayed()
+  return not not (self.holdStayedFn and self.hasStayedFn)
+end
+
+-- engine/overworld/scripting.asm:329
+-- ../pokecrystal/home/text.asm:566
+function Vm:textFlows(body)
+  if not self:canHoldStayed() then return false end
+  if type(body) == "string" and body:find("{PROMPT}%s*$") then return false end
+  local list, i = self.cmdList, self.cmdIndex
+  if not (list and i) then return TEXT_FLOWS[self.nextOp] or false end
+  for n = i + 1, #list do
+    local op = type(list[n]) == "table" and list[n].op or nil
+    if TEXT_FLOWS[op] then return true end
+    if not TEXT_SILENT[op] then return false end
+  end
+  return false
+end
+
+function Vm:holdStayed(kind, frames)
+  if not (self:canHoldStayed() and self.hasStayedFn()) then
+    return false
+  end
+  coroutine.yield({ kind = "stayed", hold = kind, frames = frames })
+  return true
+end
+
+-- engine/overworld/scripting.asm:2208
+function Vm:closeStayed()
+  if self:canHoldStayed() and self.hasStayedFn() then
+    self.holdStayedFn("close")
+  end
 end
 
 -- ../pokecrystal/engine/overworld/scripting.asm:374 Script_promptbutton
@@ -2459,14 +2516,14 @@ function Vm:showRaw(body, stay, hold, sfxWait)
       text = body,
       stay = (stay or self:textStays()) and true or false,
       hold = hold,
-      -- pokegold engine/overworld/scripting.asm:485 WaitSFX
+      -- ../pokecrystal/engine/overworld/scripting.asm:537
       sfxWait = sfxWait and true or nil,
       arrows = self:textArrows(),
     })
   end
 end
 
-function Vm:showText(textKey)
+function Vm:showText(textKey, flows)
   local body = textKey and self.text[textKey]
   -- wScriptTextAddr: jumptext / jumptextfaceplayer park their pointer there and
   -- JumpTextScript's `repeattext -1, -1` is what actually prints it.
@@ -2480,10 +2537,13 @@ function Vm:showText(textKey)
     -- extracted `received` text is complete, marker or literal.
     body = body:gsub("{STRBUF}", self.stringBuffer)
   end
+  local flowed = flows and self.showTextFn and self:textFlows(body) or false
   if self.showTextFn then
-    coroutine.yield({ kind = "text", text = body, stay = self:textStays(),
+    coroutine.yield({ kind = "text", text = body,
+                      stay = flowed or self:textStays(),
                       arrows = self:textArrows() })
   end
+  return flowed
 end
 
 -- Script_pause's frame count, and the same hold `earthquake`, `showemote` and
@@ -2653,6 +2713,7 @@ function Vm:resume(resumeValue)
     self.busy = false
     self.co = nil
     self.pending = nil
+    self:closeStayed()
     -- A whiteout unwound the list rather than running it out, so `aborted` is
     -- exactly the completed = false case.  Emitted BEFORE runDeferred, which
     -- starts a whole new run and would otherwise nest this run's `ended`
@@ -2660,6 +2721,10 @@ function Vm:resume(resumeValue)
     self:emitScriptEnded(not self.aborted)
     self:runDeferred()
     return
+  end
+  if req and req.kind ~= "text" and req.kind ~= "stayed"
+      and req.kind ~= "yesorno" then
+    self:closeStayed()
   end
   self.pending = req
   if req and req.kind == "text" and self.showTextFn then
@@ -2672,6 +2737,11 @@ function Vm:resume(resumeValue)
     -- Only yielded when the hook exists (see the opcode), so no fallback arm:
     -- an arm that resumed immediately would put the bug straight back.
     self.waitButtonFn(function() self:resume() end)
+  elseif req and req.kind == "stayed" then
+    if not self.holdStayedFn(req.hold, function() self:resume() end,
+        req.frames) then
+      self:resume()
+    end
   elseif req and req.kind == "yesorno" and self.yesornoFn then
     self.yesornoFn(function(yes)
       self:resume(yes and true or false)

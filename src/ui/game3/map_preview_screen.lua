@@ -6,6 +6,7 @@ local Extract = require("src.import.gba.extract_island1")
 local MapPreviewExtract = require("src.import.gba.map_preview_extract")
 local Strings = require("src.core.Strings")
 local CacheBlob = require("src.import.CacheBlob")
+local PixelCanvas = require("src.render.PixelCanvas")
 
 local MapPreviewScreen = {}
 
@@ -555,7 +556,7 @@ end
 local function ensureCanvas()
   if not (love and love.graphics and love.graphics.newCanvas) then return nil end
   if MapPreviewScreen._canvas then return MapPreviewScreen._canvas end
-  local ok, canvas = pcall(love.graphics.newCanvas, MapPreviewExtract.WIDTH, MapPreviewExtract.HEIGHT)
+  local ok, canvas = pcall(PixelCanvas.new, MapPreviewExtract.WIDTH, MapPreviewExtract.HEIGHT)
   if not ok or not canvas then return nil end
   if canvas.setFilter then canvas:setFilter("nearest", "nearest") end
   MapPreviewScreen._canvas = canvas

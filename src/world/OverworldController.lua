@@ -5,6 +5,7 @@
 
 local Assets = require("src.render.Assets")
 local Camera = require("src.render.Camera")
+local PixelCanvas = require("src.render.PixelCanvas")
 local Collision = require("src.world.Collision")
 local Encounter = require("src.world.Encounter")
 local FieldDefaults = require("src.world.FieldDefaults")
@@ -5829,7 +5830,7 @@ function OverworldState:drawWorldFaded()
     scratch, self.fadeCanvas = nil, nil
   end
   if not scratch then
-    local ok, made = pcall(love.graphics.newCanvas, w, h)
+    local ok, made = pcall(PixelCanvas.new, w, h)
     if not ok or not made then return false end
     made:setFilter("nearest", "nearest")
     scratch = made

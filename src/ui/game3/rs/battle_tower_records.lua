@@ -2,6 +2,7 @@ local Kit = require("src.ui.game3.rse.scene_kit")
 local Font = require("src.ui.game3.frlg_font")
 local Chrome = require("src.ui.game3.chrome")
 local Data = require("src.ui.game3.rs.battle_tower_records_data")
+local PixelCanvas = require("src.render.PixelCanvas")
 local Board = {visible = false}
 local st = {}
 local function fieldOwner()
@@ -62,7 +63,7 @@ local function contents()
 end
 function Board.draw()
   if not Board.isVisible() then return end
-  if not st.canvas then st.canvas = love.graphics.newCanvas(240, 160); st.canvas:setFilter("nearest", "nearest") end
+  if not st.canvas then st.canvas = PixelCanvas.new(240, 160); st.canvas:setFilter("nearest", "nearest") end
   if st.dirty then
     love.graphics.push("all")
     love.graphics.setCanvas(st.canvas); love.graphics.origin(); love.graphics.setShader()

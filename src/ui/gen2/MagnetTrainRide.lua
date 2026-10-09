@@ -32,6 +32,7 @@
 --    shade 0 is transparent and solid train tiles mask the sprite.
 
 local Assets = require("src.render.Assets")
+local PixelCanvas = require("src.render.PixelCanvas")
 local Chrome = require("src.ui.gen2.Chrome")
 local FieldMoves = require("src.world.gen2.FieldMoves")
 local GbcPalette = require("src.render.GbcPalette")
@@ -237,11 +238,11 @@ function MagnetTrainRide:backgrounds()
   local sheet = self:tileSheet()
   if not (rows and sheet) then return nil, nil end
 
-  local ok1, baseCanvas = pcall(love.graphics.newCanvas, BG_W, SCREEN_H)
+  local ok1, baseCanvas = pcall(PixelCanvas.new, BG_W, SCREEN_H)
   if not ok1 then return nil, nil end
   baseCanvas:setFilter("nearest", "nearest")
 
-  local ok2, overlayCanvas = pcall(love.graphics.newCanvas, BG_W, SCREEN_H)
+  local ok2, overlayCanvas = pcall(PixelCanvas.new, BG_W, SCREEN_H)
   if ok2 and overlayCanvas then
     overlayCanvas:setFilter("nearest", "nearest")
   else

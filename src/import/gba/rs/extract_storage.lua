@@ -1,10 +1,10 @@
 local K = require("src.import.gba.rse.boot_gfx")
 local A = require("src.import.gba.rs.assets")
-local M = {SUB = "pokemon/storage", VERSION = 5}
+local M = {SUB = "pokemon/storage", VERSION = 6}
 M.WALLPAPERS = {"forest", "city", "desert", "savanna", "crag", "volcano", "snow", "cave",
   "beach", "seafloor", "river", "sky", "polkadot", "pokecenter", "machine", "plain"}
 M.FILES = {"header.png", "party_drawer.png", "button_party.png", "button_close.png", "scrolling_bg.png",
-  "cursor.png", "cursor_alt.png", "cursor_shadow.png", "box_scroll_arrow.png", "waveform.png", "box_popup_center.png", "box_popup_sides.png", "pc_screen_bar.png"}
+  "cursor.png", "cursor_alt.png", "cursor_shadow.png", "box_scroll_arrow.png", "waveform.png", "box_popup_center.png", "box_popup_sides.png", "pc_screen_bar.png", "markings.png"}
 for _, wp in ipairs(M.WALLPAPERS) do M.FILES[#M.FILES + 1] = "wallpapers/" .. wp .. ".png" end
 M.REQUIRED = K.required(M.SUB, M.FILES)
 local function relativeMap(raw, tileBase, paletteBase)
@@ -122,6 +122,9 @@ function M.run(rom, cache, opts)
     openingCallback = "sub_80C60CC", closingCallback = "sub_80C6130",
     source = {file = "src/pc_screen_effect.c", caller = "src/pokemon_storage_system_2.c:418-419",
       gfx = gfxSource, palette = palSource, oam = oamSource, animTable = animTableSource, anim = animSource}}
+  -- pokeruby/src/pokemon_storage_system_2.c:1464
+  manifest.sprites.markings = c:strip("markings", c:raw("gUnknown_083E4A14"), 32, 8, 16, c:pal("gUnknown_083E49F4", 16))
+  manifest.textures.markings = "markings.png"
   local pp = c:pal("gBoxSelectionPopupPalette", 16)
   manifest.sprites.box_popup_center = c:strip("box_popup_center", c:raw("gBoxSelectionPopupCenterTiles"), 64, 64, 1, pp)
   manifest.sprites.box_popup_sides = c:atlas("box_popup_sides", c:raw("gBoxSelectionPopupSidesTiles"), {
