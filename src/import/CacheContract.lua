@@ -19,7 +19,7 @@ CacheContract.VERSION_FORMAT = {
   -- data/items/catch_rate_items.asm:5
   gold = "rom-cache-v15:",
   silver = "rom-cache-v15:",
-  crystal = "rom-cache-v15-crystal6:",
+  crystal = "rom-cache-v15-crystal7:",
   -- engine/overworld/map_sprites.asm:181, engine/battle/animations.asm:2600
   -- data/pikachu/pikachu_pic_animation.asm:340, engine/movie/title.asm:76
   -- engine/pikachu/pikachu_pic_animation.asm:412, engine/battle/core.asm:2135-2138
@@ -814,6 +814,11 @@ function CacheContract.requiredFilesFor(version)
   return CacheContract.REQUIRED_FILES, false
 end
 
+function CacheContract.presenceFilesFor(version)
+  if planComposed(version) then return CacheContract.PLAN_CORE_FILES end
+  return (CacheContract.requiredFilesFor(version))
+end
+
 -- A detached, version-specific inventory for read-only consumers. Semantic
 -- consumers additionally require every generated module that backs the public
 -- registry surface; optional semantic roots are discovered lazily.
@@ -1000,8 +1005,17 @@ function CacheContract.sourceTreeHasData(version)
     return false
   end
   local prefix = version == "red" and "" or GameVersion.cachePrefix(version)
-  local required, isOverride = CacheContract.requiredFilesFor(version)
   local source = love.filesystem.getSource()
+  if planComposed(version) then
+    for _, path in ipairs(CacheContract.presenceFilesFor(version)) do
+      local fullPath = prefix .. path
+      if love.filesystem.getInfo(fullPath, "file") == nil
+          or love.filesystem.getRealDirectory(fullPath) ~= source then
+        return false
+      end
+    end
+  end
+  local required, isOverride = CacheContract.requiredFilesFor(version)
   for _, path in ipairs(required) do
     local fullPath = prefix .. path
     if love.filesystem.getInfo(fullPath, "file") == nil
