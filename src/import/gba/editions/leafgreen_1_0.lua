@@ -1385,6 +1385,7 @@ return {
   [0x1C6787] = 0x1C6763, -- :Pokedude_Text_CantDoubleUpOnStatus + 0
   [0x1C684B] = 0x1C6827, -- :Pokedude_Text_LetMeThrowBall + 0
   [0x1C686C] = 0x1C6848, -- :Pokedude_Text_PickBestKindOfBall + 0
+  [0x1C68EC] = 0x1C68C8, -- :gMovesWithQuietBGM + 0
   [0x1C68F4] = 0x1C68D0, -- :gBattleAnims_Moves + 0
   [0x1C6E84] = 0x1C6E60, -- :gBattleAnims_StatusConditions + 0
   [0x1C6EA8] = 0x1C6E84, -- :gBattleAnims_General + 0
@@ -1681,6 +1682,8 @@ return {
   [0x3CD3A0] = 0x3CD1DC, -- trainer_card.o:sHoennTrainerCardBadges_Gfx + 0
   [0x3CD5E8] = 0x3CD424, -- trainer_card.o:sKantoTrainerCardBadges_Gfx + 0
   [0x3CD944] = 0x3CD780, -- trainer_card.o:sLinkTrainerCardRecordStrings + 0
+  [0x3CDAB8] = 0x3CD8F4, -- pokemon_storage_system_menu.o:sChooseBoxMenuCenter_Gfx + 0
+  [0x3CE2B8] = 0x3CE0F4, -- pokemon_storage_system_menu.o:sChooseBoxMenuCorners_Gfx + 0
   [0x3CE438] = 0x3CE274, -- pokemon_storage_system_tasks.o:sScrollingBg_Gfx + 0
   [0x3CE5DC] = 0x3CE418, -- pokemon_storage_system_tasks.o:sMenu_Pal + 0
   [0x3CE5FC] = 0x3CE438, -- pokemon_storage_system_tasks.o:sMenu_Tilemap + 0
@@ -3981,6 +3984,8 @@ return {
   [0x452EB8] = 0x4528D8, -- item_menu.o:sItemMenuContextActions + 0
   [0x452F60] = 0x452980, -- item_menu.o:sListItemTextColor_RegularItem + 0
   [0x452F66] = 0x452986, -- item_menu.o:sListItemTextColor_TmCase_BerryPouch + 0
+  [0x452F7C] = 0x45299C, -- item_menu.o:sBlit_SelectButton + 0
+  [0x453098] = 0x452AB8, -- bag.o:sBagWindowPalF + 0
   [0x453F74] = 0x453994, -- item_pc.o:sItemPcSubmenuOptions + 0
   [0x456ACC] = 0x4564EC, -- quest_log_events.o:sDefeatedOpponentFlavorTexts + 0
   [0x456AD8] = 0x4564F8, -- quest_log_events.o:sDefeatedChampionFlavorTexts + 0
@@ -4365,6 +4370,7 @@ return {
   [0x466620] = 0x465F00, -- slot_machine.o:sCombosWindow_Tiles + 0
   [0x466998] = 0x466278, -- slot_machine.o:sCombosWindow_Tilemap + 0
   [0x466C40] = 0x46651C, -- slot_machine.o:sReelButtonMapTileIdxs + 0
+  [0x466C58] = 0x466534, -- roamer.o:sRoamerLocations + 0
   [0x466D10] = 0x4665EC, -- mystery_gift_menu.o:sTextboxBorder_Pal + 0
   [0x466D30] = 0x46660C, -- mystery_gift_menu.o:sTextboxBorder_Gfx + 0
   [0x466DD0] = 0x4666AC, -- mystery_gift_menu.o:sListMenuItems_CardsOrNews + 0

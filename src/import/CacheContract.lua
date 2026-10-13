@@ -295,6 +295,7 @@ CacheContract.VERSION_REQUIRED_FILES_OVERRIDE = {
     "data/generated/gba/pokemon/learnsets.lua",
     "data/generated/gba/pokemon/move_names.lua",
     "data/generated/gba/pokemon/battle_moves.lua",
+    "data/generated/gba/pokemon/battle_anims/pack.lua",
     "data/generated/gba/pokemon/battle/manifest.lua",
     "data/generated/gba/pokemon/battle/healthbox_player.rgba",
     "data/generated/gba/pokemon/battle/healthbox_doubles_player.rgba",
@@ -330,6 +331,7 @@ CacheContract.VERSION_REQUIRED_FILES_OVERRIDE = {
     "data/generated/gba/items/bag/list_blank_female.rgba",
     "data/generated/gba/items/bag/desc_sel.rgba",
     "data/generated/gba/items/bag/red_arrow.rgba",
+    "data/generated/gba/items/bag/select_button.rgba",
     -- src/item_menu.c:569, src/item_menu_icons.c:150
     "data/generated/gba/items/bag/bg_itempc.rgba",
     "data/generated/gba/items/bag/bg_itempc_female.rgba",
@@ -358,6 +360,11 @@ CacheContract.VERSION_REQUIRED_FILES_OVERRIDE = {
     "data/generated/gba/pokemon/summary/progress_moves_info_select.rgba",
     "data/generated/gba/pokemon/summary/markings.rgba",
     "data/generated/gba/pokemon/storage/manifest.lua",
+    -- src/pokemon_storage_system_menu.c:659-660
+    "data/generated/gba/pokemon/storage/choose_box_center.png",
+    "data/generated/gba/pokemon/storage/choose_box_sides.png",
+    -- src/roamer.c:36
+    "data/generated/gba/roamer/locations.lua",
     "data/generated/gba/pokedex/manifest.lua",
     "data/generated/gba/chrome/manifest.lua",
     "data/generated/gba/chrome/menu_message_rgba.rgba",

@@ -204,18 +204,13 @@ function Warp.startDoorEntrance(mod, game, destMap, destX, destY, doorX, doorY)
   local sound = Doors.getSoundForWarp(curMap, doorX, doorY, destMap, true)
   local toMode, fromMode = warpFadeModes(Fade, game, destMap)
 
-  -- Step 1: Animate door open (Frame 0 -> 1 -> 2)
+  -- pokefirered/src/field_fadetransition.c:743
   Doors.open(curMap, doorX, doorY, { sound = sound, destMap = destMap }, function()
-    -- Step 2: Door is fully open. Walk player 1 step UP into the doorway.
     Player.forceStep("up", function()
-      -- Step 3: Player arrived at (doorX, doorY). Immediately hide player sprite!
+      -- pokefirered/src/field_fadetransition.c:765
       Player.setVisible(false)
-
-      -- Step 4: Short beat, then door animates closed (Frame 2 -> 1 -> 0)
-      Doors.closeAfterDelay(curMap, doorX, doorY, 8, { sound = sound, playSound = false }, function()
-        -- Step 5: Screen fades to black
+      Doors.close(curMap, doorX, doorY, { sound = sound, playSound = false }, function()
         ordinaryFadeOut(Fade, game, destMap, destX, destY, toMode, nil, function() Warp.mapTransition(game, destMap, function()
-          -- Step 6: Inside black, load the indoor map
           local Map = require("src.core.game3.map")
           Map.load(mod, game, destMap, {
             x = destX,
@@ -225,8 +220,6 @@ function Warp.startDoorEntrance(mod, game, destMap, destX, destY, doorX, doorY)
           })
           Player.setVisible(true)
           Doors.reset()
-
-          -- Step 7: Fade screen back in from black inside the building
           Fade.begin(fromMode, 1, function()
             Warp._busy = false
             releaseField(Field)
@@ -899,17 +892,48 @@ function warpExitArrival(game, destMap, x, y, fromMode, finish)
   local Fade = require("src.ui.game3.fade")
   local Task = require("src.core.game3.task")
   local beh = Collision.behavior(x, y)
+  if Collision.isWarpDoor(beh) and isRse() then
+    -- pokeemerald/src/field_screen_effect.c:317
+    local Doors = require("src.core.game3.doors")
+    Player.facing = "down"
+    Player.setVisible(false)
+    Doors.holdOpen(destMap, x, y)
+    Fade.begin(fromMode, 1, function() end)
+    local stepping, stepDone, closing, closed = false, false, false, false
+    Task.spawn(function()
+      if not stepping then
+        if Fade.isActive() then return false end
+        stepping = true
+        Player.setVisible(true)
+        if not Player.forceStep("down", function() stepDone = true end) then stepDone = true end
+        return false
+      end
+      if stepDone and not closing then
+        -- pokeemerald/src/field_screen_effect.c:342
+        closing = true
+        Doors.close(destMap, x, y, { playSound = false }, function() closed = true end)
+      end
+      if closed then
+        finish()
+        return true
+      end
+      return false
+    end)
+    return
+  end
   if Collision.isWarpDoor(beh) then
     -- pokefirered/src/field_fadetransition.c:335
     local Doors = require("src.core.game3.doors")
     Player.facing = "down"
     Player.setVisible(false)
-    Fade.begin(fromMode, 4, function() end)
+    Fade.beginOutwardBarnDoorWipe()
+    -- pokefirered/src/field_fadetransition.c:71
+    Fade.begin(fromMode, 2.5, function() end)
     local t, stepT, stepDone, closed = 0, nil, false, false
     Task.spawn(function()
       t = t + 1
       if t == 25 then
-        Doors.open(destMap, x, y, { playSound = not isRse() }, function()
+        Doors.open(destMap, x, y, {}, function()
           Player.setVisible(true)
           stepT = 0
           if not Player.forceStep("down", function() stepDone = true end) then stepDone = true end
@@ -922,7 +946,8 @@ function warpExitArrival(game, destMap, x, y, fromMode, finish)
           Doors.close(destMap, x, y, { playSound = false }, function() closed = true end)
         end
       end
-      if closed and stepDone and not Fade.isActive() then
+      -- pokefirered/src/field_fadetransition.c:370
+      if closed and stepDone and not Fade.isActive() and not Fade.barnDoorWipeActive() then
         finish()
         return true
       end
@@ -1107,8 +1132,7 @@ end
 
 local function ashEffect(name, cx, cy)
   local FieldEffects = require("src.core.game3.field_effects")
-  local fn = FieldEffects[name]
-  if type(fn) == "function" then pcall(fn, cx, cy) end
+  return assert(FieldEffects[name](cx, cy), name .. " field effect sheet missing")
 end
 
 local function camPan(y)
@@ -1139,6 +1163,7 @@ function Warp.startLavaridge1F(mod, game, destMap, destX, destY, srcX, srcY)
         return false
       end
       -- pokeemerald/src/field_effect.c:2163
+      -- pokeruby/src/field_effect.c:1778
       if t.count > 3 then
         ashEffect("startAshPuff", Player.cellX, Player.cellY)
         t.state = "disappear"
@@ -1191,6 +1216,7 @@ function Warp.startLavaridgeB1F(mod, game, destMap, destX, destY, srcX, srcY)
       Field.lock()
       if e.state == "wait" then return false end
       if e.state == "puff" then
+        -- pokeruby/src/field_effect.c:1693
         ashEffect("startAshPuff", Player.cellX, Player.cellY)
         e.state = "popping"
         return false
@@ -1226,6 +1252,7 @@ function Warp.startLavaridgeB1F(mod, game, destMap, destX, destY, srcX, srcY)
       return false
     elseif d.state == "launch" then
       -- pokeemerald/src/field_effect.c:1983
+      -- pokeruby/src/field_effect.c:1590
       Player.spriteYOffset = 0
       d.d3 = 1
       ashEffect("startAshLaunch", Player.cellX, Player.cellY)

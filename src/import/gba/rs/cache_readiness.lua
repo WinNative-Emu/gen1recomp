@@ -21,7 +21,7 @@ local PACKS = {
   {"rse/trendy_phrase"}, {"rse/easy_chat_editor", {editorVersion = 2}}, {"rse/rs_egg_hatch"},
   {"pokemon/storage", {version = 6}}, {"rse/pokedex", {packVersion = 1}}, {"rse/pokedex_detail"}, {"rse/diploma"},
   {"rse/trainer_card"}, {"rse/trade"}, {"rse/pokenav"}, {"rse/pokenav_detail"},
-  {"rse/pokenav_shell"}, {"rse/pokenav_condition"}, {"rse/pokenav_ribbons"}, {"rs/assets"},
+  {"rse/pokenav_shell"}, {"rse/pokenav_condition", {packVersion = 1}}, {"rse/pokenav_ribbons"}, {"rs/assets"},
 }
 
 local MODULES = {
@@ -33,7 +33,7 @@ local MODULES = {
   {"easy_chat/words.lua", {assetLayout = "rs", format_version = 1}},
   {"wild_extra.lua", {assetLayout = "rs"}},
   {"region_map/map_sections.lua", {layout = "rs", format_version = 1}},
-  {"pokemon/battle_anims/pack.lua", {assetLayout = "rs", version = 5}},
+  {"pokemon/battle_anims/pack.lua", {assetLayout = "rs", version = 6}},
   {"pokemon/battle_transition/manifest.lua", {assetLayout = "rs", gameLayout = "rs", format = 1}},
   {"intro/rs/manifest.lua", {layout = "rs", format = 1}, true},
   {"intro/rs/scenery/manifest.lua", {layout = "rs", format = 1}, true},

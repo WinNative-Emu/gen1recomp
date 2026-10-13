@@ -222,7 +222,10 @@ local function writeback(session, battleParty, remap, result, save, opts)
         moves = src.moves,
         species = src.species or src.speciesId,
         speciesId = src.speciesId or src.species,
+        speciesNumbering = src.speciesNumbering,
+        -- pokefirered/src/evolution_scene.c:781
         name = src.name,
+        nickname = src.nickname,
         growthRate = src.growthRate,
         evs = src.evs,
         friendship = src.friendship,
@@ -458,9 +461,11 @@ function BattleBridge.start(mod, game, foe, opts)
       if okR and Roamer and Roamer.onBattleEnd then
         local st = package.loaded["src.core.game3.battle"] and package.loaded["src.core.game3.battle"].getState and package.loaded["src.core.game3.battle"].getState()
         local enemyMon = (st and st.enemy and st.enemy.mon) or foe
-        Roamer.onBattleEnd(session, enemyMon, result, st and st.endReason)
+        Roamer.onBattleEnd(session, enemyMon, result, st and st.endReason, st and st.enemy)
       end
     end
+    -- pokeemerald/src/overworld.c:2149
+    require("src.core.game3.ambient_cry").resetTask()
     -- pokefirered/src/battle_main.c:3861
     if ModRuntime.wants("battle.ended") then
       local B = package.loaded["src.core.game3.battle"]

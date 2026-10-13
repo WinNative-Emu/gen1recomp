@@ -94,6 +94,15 @@ end
 
 SpriteRenderer.obpImage = getObpImage
 
+-- any OBJ-palette bake exists for the sheet (obpByPath indexes every one)
+function SpriteRenderer.hasObp(path) return obpByPath[path] ~= nil end
+
+-- the sheet's Image and an OBJ bake are both held, keyed by the RAW def.image
+-- path (no Assets.resolve, so mod overrides / derived paths still match)
+function SpriteRenderer.isBaked(path)
+  return obpByPath[path] ~= nil and imageCache[path] ~= nil
+end
+
 -- hot reload drops the sheets; live instances hold their own image, so
 -- the world rebuilds them (MapLoader.invalidateAll) rather than this
 function SpriteRenderer.invalidate()
@@ -163,12 +172,23 @@ local function pose(self, facing, walkPhase, stepFlip)
   return frame, flip
 end
 
+-- The image path SpriteRenderer.new loads for a sprite def (nil when the def
+-- names none, or carries an in-memory ImageData/Image as mods build at
+-- runtime -- nothing to prefetch then).  Pure: the prefetch code asks this
+-- instead of re-deriving the path.
+function SpriteRenderer.imagePath(spriteDef)
+  local path = spriteDef and spriteDef.image
+  if type(path) == "string" then return path end
+  return nil
+end
+
 -- seed: any stable per-instance value (e.g. an NPC's `id`) used to resolve
 -- RED++'s per-instance "random" OBP sentinel (PaletteFX.spriteObp)
 function SpriteRenderer.new(spriteDef, seed)
   local self = setmetatable({}, SpriteRenderer)
   self.def = spriteDef
   self.seed = seed
+  -- raw def.image: a mod may hand over an ImageData instead of a path
   self.image = getImage(spriteDef.image)
   self.frameCount = positiveInteger(spriteDef.frames, 1)
   self.frameWidth = positiveInteger(spriteDef.frameWidth, DEFAULT_FRAME_WIDTH)
