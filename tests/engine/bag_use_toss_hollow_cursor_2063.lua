@@ -26,6 +26,11 @@ local Bag = require("src.inventory.Bag")
 local Data = Fixtures.fresh()
 Data.items.BICYCLE = { id = "BICYCLE", index = 6, name = "BICYCLE", price = 0,
                        keyItem = true }
+Data.text = Data.text or {}
+Data.text._GotOnBicycleText1 = "{PLAYER} got on the{DONE}"
+Data.text._GotOnBicycleText2 = "{RAM:wStringBuffer}!{PROMPT}"
+Data.text._GotOffBicycleText1 = "{PLAYER} got off{DONE}"
+Data.text._GotOffBicycleText2 = "the {RAM:wStringBuffer}.{PROMPT}"
 Data.items.FIX_POTION = Data.items.FIX_POTION
   or { id = "FIX_POTION", index = 20, name = "FIX POTION", price = 300 }
 local tmMove = next(Data.moves)
@@ -207,14 +212,14 @@ do
   end
 end
 
--- the in-battle bag has no option box either (core.asm:2210-2234)
+-- core.asm:2210-2234
 do
   local game = freshGame()
   local battle = { isBattle = true }
   local list = openOn(game, byId("FIX_TM"), { battle = battle })
   if check(list ~= nil, "the bag opened mid-battle") then
     pressA(game, list)
-    check(list.hollowIndex == nil, "the in-battle row keeps the filled '▶'")
+    eq(list.hollowIndex, list.index, "the in-battle row goes hollow '▷'")
     check(getmetatable(game.stack:top()) ~= Menu, "and no USE/TOSS box appeared")
   end
 end

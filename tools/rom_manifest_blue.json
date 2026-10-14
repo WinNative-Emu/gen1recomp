@@ -5169,7 +5169,30 @@
           "lines": [],
           "mon": "PARASECT"
         }
-      ]
+      ],
+      "theEnd": {
+        "display": "T H E  E N D",
+        "height": 16,
+        "letterHeight": 16,
+        "letterWidth": 8,
+        "letters": "THEND",
+        "path": "assets/generated/credits/the_end.png",
+        "pattern": [
+          0,
+          -1,
+          1,
+          -1,
+          2,
+          -1,
+          -1,
+          2,
+          -1,
+          3,
+          -1,
+          4
+        ],
+        "width": 40
+      }
     },
     "cutTreeSwaps": [
       {
@@ -9808,22 +9831,22 @@
           "y": 9
         },
         "POKEMON_MANSION_1F": {
-          "name": "POK\u00e9MON MANSION",
+          "name": "<PK><MN> MANSION",
           "x": 2,
           "y": 15
         },
         "POKEMON_MANSION_2F": {
-          "name": "POK\u00e9MON MANSION",
+          "name": "<PK><MN> MANSION",
           "x": 2,
           "y": 15
         },
         "POKEMON_MANSION_3F": {
-          "name": "POK\u00e9MON MANSION",
+          "name": "<PK><MN> MANSION",
           "x": 2,
           "y": 15
         },
         "POKEMON_MANSION_B1F": {
-          "name": "POK\u00e9MON MANSION",
+          "name": "<PK><MN> MANSION",
           "x": 2,
           "y": 15
         },
@@ -20311,6 +20334,34 @@
       9,
       20950
     ],
+    "AnimationFlashScreen": [
+      30,
+      20926
+    ],
+    "AnimationIdSpecialEffects": [
+      30,
+      20213
+    ],
+    "DoBlizzardSpecialEffects": [
+      30,
+      20502
+    ],
+    "DoExplodeSpecialEffects": [
+      30,
+      20489
+    ],
+    "DoRockSlideSpecialEffects": [
+      30,
+      20441
+    ],
+    "FlashScreenEveryEightFrameBlocks": [
+      30,
+      20471
+    ],
+    "FlashScreenEveryFourFrameBlocks": [
+      30,
+      20480
+    ],
     "FallingObjects_DeltaXs": [
       30,
       23821
@@ -20646,6 +20697,10 @@
     "ItemPrices": [
       1,
       17928
+    ],
+    "ItemUseMedicine.emptyPartyText": [
+      3,
+      23273
     ],
     "IvysaurPicBack": [
       9,
@@ -21146,6 +21201,10 @@
     "OnixPicFront": [
       10,
       16740
+    ],
+    "PTile": [
+      4,
+      27356
     ],
     "PalletTown_h": [
       6,
@@ -32858,6 +32917,42 @@
     "_ZubatDexEntry": [
       43,
       24717
+    ],
+    "CancelTextString": [
+      1,
+      22464
+    ],
+    "DrawText": [
+      4,
+      30820
+    ],
+    "TradeCanceled": [
+      1,
+      23098
+    ],
+    "TradeCenter_SelectMon.statsTrade": [
+      1,
+      22303
+    ],
+    "TradeCompleted": [
+      1,
+      23081
+    ],
+    "TwoOptionMenuStrings.TradeCancelMenu": [
+      1,
+      30408
+    ],
+    "WaitingText": [
+      1,
+      19496
+    ],
+    "YouLoseText": [
+      4,
+      30811
+    ],
+    "YouWinText": [
+      4,
+      30803
     ]
   },
   "text": {

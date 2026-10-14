@@ -53,10 +53,8 @@ local STAT_LABEL = {
 -- ---------------------------------------------------------------------
 
 local function changeStage(battle, who, stat, delta, fromEnemy)
+  -- engine/battle/core.asm:5285
   if fromEnemy and (who.substituteHP or who.mist) then
-    if who.mist then
-      return { Strings("%s is\nprotected by MIST!", displayName(who)), failed = true }
-    end
     return butItFailed(battle)
   end
   local cur = who.stages[stat] or 0
@@ -262,15 +260,17 @@ MoveEffects.primary = {
       mon.sleepTurns = 2
       if not Status.toxicSurvivesCure(battle) then user.toxicCounter = nil end
       -- engine/battle/move_effects/heal.asm:35
-      if hadStatus then
-        return { romText(battle.data, "_FellAsleepBecameHealthyText",
-          "%s\nfell asleep and\nbecame healthy!", displayName(user)) }
-      end
-      return { romText(battle.data, "_StartedSleepingEffect", "%s\nstarted sleeping!", displayName(user)) }
+      local lead = hadStatus
+        and romText(battle.data, "_FellAsleepBecameHealthyText",
+          "%s\nfell asleep and\nbecame healthy!", displayName(user))
+        or romText(battle.data, "_StartedSleepingEffect", "%s\nstarted sleeping!", displayName(user))
+      return { lead, romText(battle.data, "_RegainedHealthText", "%s\nregained health!", displayName(user)),
+               restLead = true, hpBarFirst = true }
     end
     if healFails(battle, mon) then return butItFailed(battle) end
     mon.hp = math.min(mon.stats.hp, mon.hp + math.floor(mon.stats.hp / 2))
-    return { romText(battle.data, "_RegainedHealthText", "%s\nregained health!", displayName(user)) }
+    return { romText(battle.data, "_RegainedHealthText", "%s\nregained health!", displayName(user)),
+             hpBarFirst = true }
   end,
 
   LIGHT_SCREEN_EFFECT = function(battle, user)
@@ -347,15 +347,14 @@ MoveEffects.primary = {
                failed = true }
     end
     local cost = math.floor(user.mon.stats.hp / 4)
-    -- A Substitute costs one quarter of max HP, rounded down. Do not let
-    -- the cost consume the user's last HP: the move must fail at the exact
-    -- boundary as well as below it, or the next turn's HP guard can leave a
-    -- trainer battle unable to progress.
-    if user.mon.hp <= cost then
+    -- ../pokered/engine/battle/move_effects/substitute.asm:34-40
+    local zeroHpBug = not (battle.ruleset and battle.ruleset.substituteZeroHpBug == false)
+    if user.mon.hp < cost or (not zeroHpBug and user.mon.hp == cost) then
       return { romText(battle.data, "_TooWeakSubstituteText", "Too weak to make\na SUBSTITUTE!"),
                failed = true }
     end
     user.mon.hp = user.mon.hp - cost
+    -- ../pokered/engine/battle/core.asm:4874-4877
     user.substituteHP = cost + 1
     -- ../pokered/engine/battle/move_effects/substitute.asm:47-55
     user.substitutePending = true

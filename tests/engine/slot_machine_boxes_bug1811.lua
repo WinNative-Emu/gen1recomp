@@ -73,6 +73,9 @@ eq(betBox and (betBox[3] + betBox[5]), 18, "so its bottom edge is the screen bot
 local x3 = drawn(bet, "×3")
 eq(x3 and x3[3], 16 * 8, "the multipliers print at column 16")
 eq(x3 and x3[4], 12 * 8, "on row 12")
+local x2, x1 = drawn(bet, "×2"), drawn(bet, "×1")
+eq(x2 and x2[4], 14 * 8, "×2 two rows down (engine/slots/slot_machine.asm:150-153)")
+eq(x1 and x1[4], 16 * 8, "×1 two rows further")
 local betCursor = cursor(bet)
 eq(betCursor and betCursor[3], 15 * 8, "the cursor sits at column 15")
 eq(betCursor and betCursor[4], 12 * 8, "on the ×3 row by default")
@@ -88,13 +91,32 @@ check(box(more, 13, 12) == nil, "and not one column left of that")
 local yes, no = drawn(more, "YES"), drawn(more, "NO")
 eq(yes and yes[3], 16 * 8, "YES prints at column 16")
 eq(yes and yes[4], 13 * 8, "on row 13")
-eq(no and no[4], 14 * 8, "NO one row below it")
+eq(no and no[4], 15 * 8, "NO two rows below it (engine/slots/slot_machine.asm:136-138)")
 local moreCursor = cursor(more)
 eq(moreCursor and moreCursor[3], 15 * 8, "its cursor sits at column 15")
 eq(moreCursor and moreCursor[4], 13 * 8, "starting on YES")
 
 slots.yesno = 2
 local onNo = record(function() slots:drawBottom() end)
-eq(cursor(onNo) and cursor(onNo)[4], 14 * 8, "and moves to the NO row")
+eq(cursor(onNo) and cursor(onNo)[4], 15 * 8, "and moves to the NO row")
+
+local function arrow(list)
+  for _, c in ipairs(list) do
+    if c[1] == "code" and c[2] == 0xEE then return c end
+  end
+end
+
+-- engine/slots/slot_machine.asm:631-632
+slots:resolveWin({ symbol = "CHERRY", payout = 8 })
+slots.flashLeft = 1
+slots.flashTimer = 4
+game.input = { wasPressed = function() return false end }
+slots:update(1 / 60)
+eq(slots.stage, "message", "the flash ends on the lined-up message")
+local won = record(function() slots:drawBottom() end)
+local wonArrow = arrow(won)
+check(wonArrow ~= nil, "the lined-up text shows the down arrow")
+eq(wonArrow and wonArrow[3], 18 * 8, "at column 18")
+eq(wonArrow and wonArrow[4], 16 * 8, "on row 16")
 
 T.finish()

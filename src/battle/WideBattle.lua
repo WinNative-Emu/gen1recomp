@@ -206,7 +206,7 @@ local function drawCommandMenu(battle)
   if battle.safari then
     Font.drawBox(0, 13, 38, 5)
     love.graphics.setColor(0, 0, 0, 1)
-    Font.draw(Strings("BALLx"), 16, 112)
+    Font.draw(Strings("BALL") .. "\xc3\x97", 16, 112) -- data/text_boxes.asm:73
     -- wNumSafariBalls immediately after the label, as at hlcoord 7,14
     -- (engine/battle/core.asm:2074-2079) (#540)
     Font.draw(("%2d"):format(battle.safari.balls), 56, 112)
@@ -251,7 +251,7 @@ local function drawMoveDetails(battle, move)
   if not move then return end
   local def = battle.data.moves[move.id]
   if not def then return end
-  local maxPP = def.pp + (move.ppUps or 0) * math.floor(def.pp / 5)
+  local maxPP = require("src.pokemon.Pokemon").maxPP(def.pp, move.ppUps)
   love.graphics.setColor(0, 0, 0, 1)
   Font.draw(("PP %2d/%2d"):format(move.pp or 0, maxPP), 232, 112)
   -- battle.data is game.data by reference (BattleState:startBattle sets it
@@ -366,7 +366,7 @@ function WideBattle.draw(battle)
     g.rectangle("fill", 0, 0, WideBattle.WIDTH, WideBattle.HEIGHT)
   end
   -- AskName clears the field the same way the classic layout does
-  if battle.blankForAskName or coveredByOpaqueState(battle) then return end
+  if battle.blankForAskName or battle.blackoutBlank or coveredByOpaqueState(battle) then return end
 
   local fx = battle.fx
   local sx = (fx and fx.shakeX) or 0

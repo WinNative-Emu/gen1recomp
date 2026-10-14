@@ -303,13 +303,10 @@ T.eq(Timing.SHAKE_HORIZ_SLOW, 48, "type 3 slow horizontal, lb bc, 6, 2")
 T.eq(Timing.SHAKE_HORIZ_LIGHT, 18, "type 5 fast horizontal b=2")
 T.eq(Timing.SHAKE_HORIZ_SLOW2, 24, "type 6 slow horizontal, lb bc, 3, 2")
 
--- Type 4 is the player's plain damaging move -- the most-seen animation in
--- the game.  AnimationBlinkMon is `ld c, 6` of hide/DelayFrames 5/show/
--- DelayFrames 5 (animations.asm:1360-1376): 60 frames, not the 20 the port
--- used to run.
-T.eq(Timing.BLINK_MON, 60, "AnimationBlinkMon is 6 x (5 hidden + 5 shown)")
-T.eq(Timing.BLINK_MON % 10, 0,
-  "and divides into whole 10-frame blinks, matching fxHidden's period")
+-- engine/battle/animations.asm:1360
+T.eq(Timing.BLINK_MON, 78, "AnimationBlinkMon is 6 x (5 hidden + 8 shown)")
+T.eq(Timing.BLINK_MON % 13, 0,
+  "and divides into whole 13-frame blinks, matching fxHidden's period")
 
 -- SlideDownFaintedMonPic: b = PIC_HEIGHT slide steps of DelayFrames 2
 T.eq(Timing.FAINT_SLIDE, 14, "the faint slide is 7 steps x 2 frames")
@@ -384,6 +381,13 @@ do
   T.eq(b.waitFrames, Timing.BLINK_MON,
     "the enemy blink still runs with animations off (#1384)")
   T.check(b.fx and b.fx.blink ~= nil, "and it targets the enemy pic")
+  local pattern = {}
+  for _ = 1, 13 do
+    pattern[#pattern + 1] = b:fxHidden(b.enemy) and "h" or "s"
+    b.fx.blink.frames = b.fx.blink.frames - 1
+  end
+  T.eq(table.concat(pattern), "hhhhhssssssss",
+    "each blink is 5 frames hidden then 8 shown")
 end
 
 -- animations.asm:415-419
@@ -657,6 +661,21 @@ do
   -- degenerate grids must not hang or error
   T.eq(#BT.gridOrder("spiralin", 1, 1), 1, "a 1x1 grid is one tile")
   T.eq(#BT.gridOrder("spiralout", 3, 1), 3, "a single-row grid walks straight")
+
+  -- engine/battle/battle_transitions.asm:243-260
+  local Renderer = require("src.render.Renderer")
+  local g = love.graphics
+  local saved = { g.rectangle, g.setScissor, g.setColor }
+  local inside = 0
+  g.rectangle = function(_, x, y)
+    if x >= 80 and x < 240 and y >= 40 and y < 184 then inside = inside + 1 end
+  end
+  g.setScissor, g.setColor = function() end, function() end
+  Renderer.drawBattleWipe(nil, { style = "spiralin", prog = 0.5 },
+    320, 224, 80, 40, 160, 144, 1, 1, 0, 0)
+  g.rectangle, g.setScissor, g.setColor = saved[1], saved[2], saved[3]
+  T.eq(inside, 180,
+    "an extended inward spiral keeps the letterbox at the ROM's cadence")
 end
 
 -- SlidePlayerAndEnemySilhouettesOnScreen: 144 px at 2 px/frame
@@ -781,5 +800,29 @@ T.check(rephasedMargin > 0.002,
   "and the re-phase sets the residual instead of walking it onto the boundary")
 
 T.eq(FixedStep.refreshPeriod, nil, "and the period is left nil for everyone else")
+
+-- engine/battle/animations.asm:1564-1615
+local squish = BattleState._squishColumns
+T.check(squish ~= nil, "AnimationSquishMonPic is modeled per tile column")
+if squish then
+  local function shown(passes, lo, hi)
+    local cols = squish(passes)
+    for d = 1, 7 do
+      local s = cols[d]
+      if s and s >= lo and s <= hi then return true end
+    end
+    return false
+  end
+  local cols = squish(2)
+  T.eq(table.concat({ tostring(cols[1]), cols[2], cols[3], cols[4], cols[5],
+    cols[6], tostring(cols[7]) }, ","), "nil,1,2,3,6,7,nil",
+    "two passes drop the middle columns and push the outer ones inward")
+  T.check(shown(4, 2, 6) and not shown(5, 2, 6),
+    "a 5-column front pic is gone after the fourth pass (12 frames)")
+  T.check(shown(6, 1, 7) and not shown(7, 1, 7),
+    "a full 7-column pic lasts six passes")
+end
+T.eq(Timing.SEND_OUT_PIC_LOAD, 27,
+  "LoadMonBackPic holds the poof 27 frames after Go! (core.asm:1732)")
 
 T.finish("timing parity")

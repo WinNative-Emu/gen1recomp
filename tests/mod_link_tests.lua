@@ -342,7 +342,7 @@ eq(revlessGame.data.link_fields, nil, "and leaves no residue")
 
 local helloA = Handshake.hello(fakeGame(vanilla, "RED"), "trade")
 local helloB = Handshake.hello(fakeGame(cloneData(Data), "BLUE"), nil)
-eq(helloA.protocol, 2, "hello announces the protocol revision")
+eq(helloA.protocol, 3, "hello announces the protocol revision")
 eq(helloA.apiVersion, require("src.core.Version").modApi, "hello carries the api version")
 eq(helloA.linkModified, false, "no mods means an unmodified link surface")
 eq(helloA.fingerprint, helloB.fingerprint, "identical data fingerprints alike")
@@ -498,7 +498,7 @@ sessionB:handle(wire(sessionA:confirm(true)))
 eq(sessionA.stage, "done", "the subset trade completes")
 local received = sessionA:apply(nil)
 eq(received.species, "PIDGEY", "the vanilla game received the agreed mon")
-eq(partyVanilla[1], received, "and it landed in the slot that was given")
+eq(partyVanilla[#partyVanilla], received, "and it was appended after the slot that was given")
 
 -- a full-verdict session sends the whole party and indexes it directly
 local fullSession = Protocol.TradeSession.new(Data, partyVanilla, { strict = true })
@@ -563,7 +563,7 @@ local host, guest = pairStates(gameHost, gameGuest)
 pump(host, guest, gameHost, gameGuest, 2)
 eq(host.stage, "modeSelect", "the host reaches mode select")
 eq(guest.stage, "waitMode", "the guest waits for the mode")
-check(guest.myHello ~= nil and guest.myHello.protocol == 2,
+check(guest.myHello ~= nil and guest.myHello.protocol == 3,
       "the guest announces itself the moment it pairs")
 check(host.peerHello ~= nil, "the host has the peer hello before it picks")
 

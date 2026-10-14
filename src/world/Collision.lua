@@ -52,6 +52,7 @@ local function pairBlocked(map, mover, sx, sy, tx, ty)
   end
   return false
 end
+Collision.pairBlocked = pairBlocked
 
 local function verdict(map, entities, mover, dir, tx, ty)
   if not map:inBounds(tx, ty) then

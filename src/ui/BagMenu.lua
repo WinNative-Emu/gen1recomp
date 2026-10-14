@@ -2,6 +2,7 @@
 -- opts.battle = BattleState when opened mid-battle (balls throwable,
 -- using an item consumes the turn).
 
+local GameVersion = require("src.core.GameVersion")
 local ItemEffects = require("src.inventory.ItemEffects")
 local ListMenu = require("src.ui.ListMenu")
 local Runtime = require("src.mods.Runtime")
@@ -51,8 +52,13 @@ local function consume(game, id, list)
   end
 end
 
-local function save_name(game)
-  return game.save.player.name
+-- engine/items/item_effects.asm:2359-2369
+local function bicycleText(game, on)
+  local t = game.data.text
+  game.stringBuffer = game.data.items.BICYCLE.name
+  local first = on and t._GotOnBicycleText1 or t._GotOffBicycleText1
+  local second = on and t._GotOnBicycleText2 or t._GotOffBicycleText2
+  return first:gsub("{DONE}$", "") .. "\n" .. second
 end
 
 local function showMessages(game, msgs, onDone, opts)
@@ -205,12 +211,12 @@ local function vanillaUseOn(game, battle, id, target, list, moveIndex, picker)
       closeBag()
       game.save.onBike = false
       Music.playMap(game.data, ow and ow.map.id, false)
-      showMessages(game, { Strings("%s got off\nthe BICYCLE.", save_name(game)) })
+      showMessages(game, { bicycleText(game, false) })
     elseif bikeAllowed() then
       closeBag()
       game.save.onBike = true
       Music.playMap(game.data, ow.map.id, true)
-      showMessages(game, { Strings("%s got on\nthe BICYCLE!", save_name(game)) })
+      showMessages(game, { bicycleText(game, true) })
     else
       -- NoCyclingAllowedHere -> ItemUseFailed zeroes the result byte and
       -- .useItem_closeMenu loops back (item_effects.asm:2305-2319)
@@ -297,12 +303,34 @@ local function vanillaUseOn(game, battle, id, target, list, moveIndex, picker)
   if result == "itemfinder" then
     local ow = game.overworld
     local t = game.data.text
+    -- engine/items/item_effects.asm:1925
+    closeBag()
     if ow and ow:hasHiddenItemLeft() then
-      showMessages(game, { t._ItemfinderFoundItemText
-        or Strings("Yes! ITEMFINDER\nindicates there's\nan item nearby.") })
+      -- engine/items/item_effects.asm:1929-1936
+      local Sound = require("src.core.Sound")
+      local names = {}
+      for _ = 1, 4 do
+        names[#names + 1] = "Healing_Machine"
+        names[#names + 1] = "Purchase"
+      end
+      local loop = { game = game, at = 0, src = nil, isOpaque = false }
+      function loop:update()
+        if self.src then
+          local ok, playing = pcall(self.src.isPlaying, self.src)
+          if ok and playing then return end
+        end
+        self.at = self.at + 1
+        self.src = Sound.play(game.data, names[self.at])
+        if self.at >= #names then
+          game.stack:pop()
+          -- engine/items/item_effects.asm:1937-1939
+          showMessages(game, { t._ItemfinderFoundItemText })
+        end
+      end
+      function loop:draw() end
+      game.stack:push(loop)
     else
-      showMessages(game, { t._ItemfinderFoundNothingText
-        or Strings("Nope! ITEMFINDER\nisn't responding.") })
+      showMessages(game, { t._ItemfinderFoundNothingText })
     end
     return
   end
@@ -376,7 +404,8 @@ local function vanillaUseOn(game, battle, id, target, list, moveIndex, picker)
       showUseMessages(game, payload, removeUsed, extra)
       return
     end
-    removeUsed()
+    local removeLater = battle and not picker
+    if not removeLater then removeUsed() end
     if extra and extra.evolveTo then
       -- engine/menus/start_sub_menus.asm:408 .useItem_partyMenu
       local Evolution = require("src.pokemon.Evolution")
@@ -487,10 +516,21 @@ local function vanillaUseOn(game, battle, id, target, list, moveIndex, picker)
       end)
       return
     end
-    if battle then
-      closePicker()
-      list:close()
-      showUseMessages(game, payload, function() spent({}) end, extra)
+    -- engine/items/item_effects.asm:1656-1663
+    if battle and extra and extra.battleAnim then
+      showMessages(game, payload, function()
+        if removeLater then removeUsed() end
+        closePicker()
+        list:close()
+        spent(extra.afterMessages or {}, { anim = extra.battleAnim })
+      end, TextBox.soundOpts(game, "Heal_Ailment"))
+    elseif battle then
+      showUseMessages(game, payload, function()
+        if removeLater then removeUsed() end
+        closePicker()
+        list:close()
+        spent(extra and extra.afterMessages or {})
+      end, extra and { useJingle = extra.useJingle } or nil)
     else
       showUseMessages(game, payload, closePicker, extra)
     end
@@ -545,6 +585,7 @@ local function pickTargetAndUse(game, battle, id, list)
     -- engine/items/item_effects.asm:805 ItemUseMedicine, :1244 .done
     -- engine/items/item_effects.asm:1959
     keepOpen = ItemEffects.isBattleMedicine(id) or wantsMove
+      or id == "ELIXER" or id == "MAX_ELIXER"
       or ((not battle)
           and (ItemEffects.keepsPartyMenuOpen(id) or (def and def.machine ~= nil))),
     onSwitch = function(mon, picker)
@@ -580,7 +621,9 @@ end
 local function useItem(game, battle, id, list)
   local def = game.data.items[id]
   -- ItemUseTMHM checks wIsInBattle before BootedUpTMText
-  if battle and def and def.machine then
+  -- engine/items/item_effects.asm:803
+  if battle and def and (def.machine
+      or (not def.effect and ItemEffects.notTimeInBattle(id, def))) then
     local _, payload = ItemEffects.use(game.data, game.save, id, nil, battle)
     showMessages(game, payload)
     return
@@ -601,6 +644,13 @@ local function useItem(game, battle, id, list)
         nil, { choice = function(yes)
           if yes then pickTargetAndUse(game, battle, id, list) end
         end })
+      return
+    end
+    -- engine/items/item_effects.asm:823-828
+    if #game.save.party == 0 and ItemEffects.usesMedicineMenu(id) then
+      local t = game.data.text
+      showMessages(game, { GameVersion.isYellow() and t._DontHavePokemonText
+        or t["ItemUseMedicine.emptyPartyText"] })
       return
     end
     pickTargetAndUse(game, battle, id, list)
@@ -656,6 +706,7 @@ function BagMenu.new(game, opts)
         return
       end
       if battle then -- no tossing mid-battle
+        list.hollowIndex = list.index -- home/list_menu.asm:91
         useItem(game, battle, id, list)
         return
       end

@@ -316,6 +316,8 @@ function PartyMenu.drawIcon(game, mon, x, y, selected, counter, forceAlt, obp)
   if selected then
     local px = math.floor(mon.hp * 48 / math.max(1, mon.stats.hp))
     local speed = px >= 27 and 5 or px >= 10 and 16 or 32
+    -- engine/gfx/mon_icons.asm:24
+    if PaletteFX.runsNotSGB() then speed = speed + 1 end
     alt = math.floor(counter / speed) % 2 == 1
   end
   if alt and (name == "BALL" or name == "HELIX") then
@@ -479,8 +481,24 @@ function PartyMenu:eraseCursors()
   self.cursorsErased = true
 end
 
+-- engine/menus/text_box.asm:397-440
+local function submenuBox(self)
+  local n = #self.subItems
+  local lx = 12
+  for _, entry in ipairs(self.subItems) do
+    local mx = FIELD_MOVE_X[entry.move or entry.action]
+    if mx and mx < lx then lx = mx end
+  end
+  return lx, n > 3 and math.max(0, 16 - n * 2) or 11
+end
+
 -- engine/battle/core.asm:2329
 function PartyMenu:refuse(text)
+  -- engine/battle/core.asm:2404-2408
+  if self.submenu then
+    local lx, top = submenuBox(self)
+    self.subEdge = { lx = lx, top = top }
+  end
   self.submenu = nil
   self.subIndex = 1
   local TextBox = require("src.render.TextBox")
@@ -533,6 +551,7 @@ function PartyMenu:update(dt)
   -- home/window.asm:119
   self.cursorsErased = nil
   self.chosenHollow = nil
+  self.subEdge = nil
   local input = self.game.input
   local party = self.party or self.game.save.party
 
@@ -546,10 +565,11 @@ function PartyMenu:update(dt)
 
   if self.submenu then
     local n = #self.subItems
+    -- home/window.asm:46
     if input:wasPressed("up") then
-      self.subIndex = self.subIndex > 1 and self.subIndex - 1 or n
+      self.subIndex = math.max(1, self.subIndex - 1)
     elseif input:wasPressed("down") then
-      self.subIndex = self.subIndex < n and self.subIndex + 1 or 1
+      self.subIndex = math.min(n, self.subIndex + 1)
     elseif input:wasPressed("b") then
       self.submenu = nil
       self.blink = 0 -- home/window.asm:16
@@ -607,8 +627,10 @@ function PartyMenu:update(dt)
           self.game.stack:push(TextBox.new(self.game, txt))
           return -- .loop: submenu stays open behind the message
         end
-        self.game.stack:pop() -- close the party menu
+        -- engine/menus/start_sub_menus.asm:144-151
+        self.submenu = nil
         Screens.push(self.game, "TownMap", { fly = true, onFly = function(mapId)
+          if self.game.stack:top() == self then self.game.stack:pop() end
           if ow then ow:flyTo(mapId) end
         end })
         return
@@ -730,6 +752,13 @@ function PartyMenu:update(dt)
       elseif action == "softboiled" then
         -- field SOFTBOILED (StartMenu_Pokemon .softboiled): transfer
         -- 1/5 of the user's max HP to a chosen teammate
+        -- engine/menus/start_sub_menus.asm:236-258
+        if mon.stats and mon.hp <= math.floor(mon.stats.hp / 5) then
+          local TextBox = require("src.render.TextBox")
+          self.game.stack:push(TextBox.new(self.game,
+            self.game.data.text._NotHealthyEnoughText))
+          return
+        end
         self.softboiledFrom = self.index
       elseif action == "escape" then
         -- DIG / TELEPORT warp to the last Pokémon Center TOWN (wLastBlackoutMap,
@@ -765,6 +794,16 @@ function PartyMenu:update(dt)
             or Strings("OAK: %s!\nThis isn't the\ntime to use that!",
                        self.game.save.player.name)))
           return -- .loop: submenu stays open behind the message
+        end
+        if entry.move == "TELEPORT" then
+          -- engine/menus/start_sub_menus.asm:215-226
+          local TextBox = require("src.render.TextBox")
+          self.game.stack:push(TextBox.new(self.game,
+            self.game.data.text._WarpToLastPokemonCenterText, function()
+              self.game.stack:pop()
+              if ow then ow:beginTeleportOut() end
+            end, { auto = { wait = false, delay = 60 } }))
+          return
         end
         self.game.stack:pop()
         if ow then ow:beginTeleportOut() end
@@ -806,6 +845,8 @@ function PartyMenu:update(dt)
       return
     end
     if self.softboiledFrom then
+      -- engine/items/item_effects.asm:854-857
+      if self.softboiledFrom == self.index then return end
       local user = party[self.softboiledFrom]
       self.softboiledFrom = nil
       self.game.overworld:useSoftboiledFieldMove(user, mon)
@@ -1068,6 +1109,10 @@ function PartyMenu:draw()
     end
     end
   end
+  local edge = self.subEdge
+  if edge then
+    Font.drawBox(edge.lx - 1, edge.top, 21 - edge.lx, 18 - edge.top)
+  end
   -- every message id prints through PrintText, so it lands in the standard
   -- bottom text box, rows 12-17 (party_menu.asm:174). #147 #210 #1610
   Font.drawBox(0, 12, 20, 6)
@@ -1079,13 +1124,7 @@ function PartyMenu:draw()
   end
   if self.submenu then
     local n = #self.subItems
-    -- engine/menus/text_box.asm:397-440, data/text_boxes.asm:33 #1819
-    local lx = 12
-    for _, entry in ipairs(self.subItems) do
-      local mx = FIELD_MOVE_X[entry.move or entry.action]
-      if mx and mx < lx then lx = mx end
-    end
-    local top = n > 3 and math.max(0, 16 - n * 2) or 11
+    local lx, top = submenuBox(self)
     Font.drawBox(lx - 1, top, 21 - lx, 18 - top)
     local y0 = (18 - n * 2) * 8
     for si, entry in ipairs(self.subItems) do
