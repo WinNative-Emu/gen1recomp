@@ -14,11 +14,11 @@ local TYPES = {
 
 local MOVES = {
   TACKLE = { id = "TACKLE", name = "TACKLE", power = 35, type = "NORMAL",
-    accuracy = 100, pp = 35, effect = "EFFECT_NORMAL_HIT" },
+    accuracy = 100, accuracyRaw = 255, pp = 35, effect = "EFFECT_NORMAL_HIT" },
   DIG = { id = "DIG", name = "DIG", power = 60, type = "GROUND",
-    accuracy = 100, pp = 10, effect = "EFFECT_FLY" },
+    accuracy = 100, accuracyRaw = 255, pp = 10, effect = "EFFECT_FLY" },
   FLY = { id = "FLY", name = "FLY", power = 70, type = "FLYING",
-    accuracy = 95, pp = 15, effect = "EFFECT_FLY" },
+    accuracy = 95, accuracyRaw = 242, pp = 15, effect = "EFFECT_FLY" },
 }
 
 local POKEMON = {
@@ -35,7 +35,7 @@ local POKEMON = {
 }
 
 local DATA = { pokemon = POKEMON, moves = MOVES,
-  type_chart = { types = TYPES, matchups = {} }, items = {} }
+  text = require("tests.gen2_battle_text_fixture")(), type_chart = { battleRules = require("tests.gen2_battle_rules_fixture")(), types = TYPES, matchups = {} }, items = {} }
 
 local perfect = { attack = 15, defense = 15, speed = 15, special = 15 }
 perfect.hp = Mon.hpDV(perfect)

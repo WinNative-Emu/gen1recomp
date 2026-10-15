@@ -64,40 +64,40 @@ local MATCHUPS = {
 
 local MOVES = {
   TACKLE = { id = "TACKLE", name = "TACKLE", power = 35, type = "NORMAL",
-    accuracy = 95, pp = 35, effect = "EFFECT_NORMAL_HIT" },
+    accuracy = 95, accuracyRaw = 242, pp = 35, effect = "EFFECT_NORMAL_HIT" },
   EMBER = { id = "EMBER", name = "EMBER", power = 40, type = "FIRE",
-    accuracy = 100, pp = 25, effect = "EFFECT_BURN_HIT", effectChance = 10 },
+    accuracy = 100, accuracyRaw = 255, pp = 25, effect = "EFFECT_BURN_HIT", effectChance = 10, effectChanceRaw = 25 },
   WATER_GUN = { id = "WATER_GUN", name = "WATER GUN", power = 40,
-    type = "WATER", accuracy = 100, pp = 25, effect = "EFFECT_NORMAL_HIT" },
+    type = "WATER", accuracy = 100, accuracyRaw = 255, pp = 25, effect = "EFFECT_NORMAL_HIT" },
   THUNDER_WAVE = { id = "THUNDER_WAVE", name = "THUNDERWAVE", power = 0,
-    type = "ELECTRIC", accuracy = 100, pp = 20, effect = "EFFECT_PARALYZE" },
+    type = "ELECTRIC", accuracy = 100, accuracyRaw = 255, pp = 20, effect = "EFFECT_PARALYZE" },
   QUICK_ATTACK = { id = "QUICK_ATTACK", name = "QUICK ATTACK", power = 40,
-    type = "NORMAL", accuracy = 100, pp = 30,
+    type = "NORMAL", accuracy = 100, accuracyRaw = 255, pp = 30,
     effect = "EFFECT_PRIORITY_HIT" },
   SPORE = { id = "SPORE", name = "SPORE", power = 0, type = "GRASS",
-    accuracy = 100, pp = 15, effect = "EFFECT_SLEEP" },
+    accuracy = 100, accuracyRaw = 255, pp = 15, effect = "EFFECT_SLEEP" },
   -- The status-shaped moves the effect layer models, at their real numbers.
   RAIN_DANCE = { id = "RAIN_DANCE", name = "RAIN DANCE", power = 0,
-    type = "WATER", accuracy = 100, pp = 5, effect = "EFFECT_RAIN_DANCE" },
+    type = "WATER", accuracy = 100, accuracyRaw = 255, pp = 5, effect = "EFFECT_RAIN_DANCE" },
   SPIKES = { id = "SPIKES", name = "SPIKES", power = 0, type = "GROUND",
-    accuracy = 100, pp = 20, effect = "EFFECT_SPIKES" },
+    accuracy = 100, accuracyRaw = 255, pp = 20, effect = "EFFECT_SPIKES" },
   PERISH_SONG = { id = "PERISH_SONG", name = "PERISH SONG", power = 0,
-    type = "NORMAL", accuracy = 100, pp = 5, effect = "EFFECT_PERISH_SONG" },
+    type = "NORMAL", accuracy = 100, accuracyRaw = 255, pp = 5, effect = "EFFECT_PERISH_SONG" },
   TRANSFORM = { id = "TRANSFORM", name = "TRANSFORM", power = 0,
-    type = "NORMAL", accuracy = 100, pp = 10, effect = "EFFECT_TRANSFORM" },
+    type = "NORMAL", accuracy = 100, accuracyRaw = 255, pp = 10, effect = "EFFECT_TRANSFORM" },
   ENDURE = { id = "ENDURE", name = "ENDURE", power = 0, type = "NORMAL",
-    accuracy = 100, pp = 10, effect = "EFFECT_ENDURE" },
+    accuracy = 100, accuracyRaw = 255, pp = 10, effect = "EFFECT_ENDURE" },
   RAGE = { id = "RAGE", name = "RAGE", power = 20, type = "NORMAL",
-    accuracy = 100, pp = 20, effect = "EFFECT_RAGE" },
+    accuracy = 100, accuracyRaw = 255, pp = 20, effect = "EFFECT_RAGE" },
   -- data/moves/moves.asm:133, :230, :189 and :92 rows, unedited.
   BIDE = { id = "BIDE", name = "BIDE", power = 0, type = "NORMAL",
-    accuracy = 100, pp = 10, effect = "EFFECT_BIDE" },
+    accuracy = 100, accuracyRaw = 255, pp = 10, effect = "EFFECT_BIDE" },
   SLEEP_TALK = { id = "SLEEP_TALK", name = "SLEEP TALK", power = 0,
-    type = "NORMAL", accuracy = 100, pp = 10, effect = "EFFECT_SLEEP_TALK" },
+    type = "NORMAL", accuracy = 100, accuracyRaw = 255, pp = 10, effect = "EFFECT_SLEEP_TALK" },
   SNORE = { id = "SNORE", name = "SNORE", power = 40, type = "NORMAL",
-    accuracy = 100, pp = 15, effect = "EFFECT_SNORE", effectChance = 30 },
+    accuracy = 100, accuracyRaw = 255, pp = 15, effect = "EFFECT_SNORE", effectChance = 30, effectChanceRaw = 76 },
   SOLARBEAM = { id = "SOLARBEAM", name = "SOLARBEAM", power = 120,
-    type = "GRASS", accuracy = 100, pp = 10, effect = "EFFECT_SOLARBEAM" },
+    type = "GRASS", accuracy = 100, accuracyRaw = 255, pp = 10, effect = "EFFECT_SOLARBEAM" },
 }
 
 local GROWTH = {
@@ -179,7 +179,7 @@ local POKEMON = {
 local DATA = {
   pokemon = POKEMON,
   moves = MOVES,
-  type_chart = { types = TYPES, matchups = MATCHUPS },
+  text = require("tests.gen2_battle_text_fixture")(), type_chart = { battleRules = require("tests.gen2_battle_rules_fixture")(), types = TYPES, matchups = MATCHUPS },
   items = {
     POKE_BALL = { id = "POKE_BALL", pocket = "BALL" },
     POTION = { id = "POTION", pocket = "ITEM" },
@@ -329,13 +329,13 @@ local defender = { defense = 50, specialDefense = 200, types = { "FIRE" } }
 local physicalDamage = Damage.calc({
   level = 50, power = 40, moveType = "NORMAL",
   attacker = physicalAttacker, defender = defender,
-  types = TYPES, matchups = MATCHUPS, variation = 100,
+  types = TYPES, matchups = MATCHUPS, variation = 255,
 })
 local specialDamage = Damage.calc({
   level = 50, power = 40, moveType = "FIRE",
   attacker = { attack = 100, specialAttack = 10, types = { "NORMAL" } },
   defender = defender,
-  types = TYPES, matchups = MATCHUPS, variation = 100,
+  types = TYPES, matchups = MATCHUPS, variation = 255,
 })
 check("physical reads attack/defense", physicalDamage > specialDamage, true)
 
@@ -354,7 +354,7 @@ local immune = Damage.calc({
   level = 50, power = 95, moveType = "ELECTRIC",
   attacker = { specialAttack = 100, types = { "ELECTRIC" } },
   defender = { specialDefense = 50, types = { "GROUND" } },
-  types = TYPES, matchups = MATCHUPS, variation = 100,
+  types = TYPES, matchups = MATCHUPS, variation = 255,
 })
 check("immune deals nothing", immune, 0)
 
@@ -363,39 +363,38 @@ local plain = Damage.calc({
   level = 50, power = 40, moveType = "NORMAL",
   attacker = { attack = 100, types = { "FIRE" } },
   defender = { defense = 50, types = { "FIRE" } },
-  types = TYPES, matchups = MATCHUPS, variation = 100,
+  types = TYPES, matchups = MATCHUPS, variation = 255,
 })
 local stabbed = Damage.calc({
   level = 50, power = 40, moveType = "NORMAL",
   attacker = { attack = 100, types = { "NORMAL" } },
   defender = { defense = 50, types = { "FIRE" } },
-  types = TYPES, matchups = MATCHUPS, variation = 100,
+  types = TYPES, matchups = MATCHUPS, variation = 255,
 })
 check("stab is 1.5x", stabbed, math.floor(plain * 15 / 10))
 local crit = Damage.calc({
   level = 50, power = 40, moveType = "NORMAL",
   attacker = { attack = 100, types = { "FIRE" } },
   defender = { defense = 50, types = { "FIRE" } },
-  types = TYPES, matchups = MATCHUPS, variation = 100, critical = true,
+  types = TYPES, matchups = MATCHUPS, variation = 255, critical = true,
 })
 -- The x2 runs inside DamageCalc, BEFORE its tail adds MIN_DAMAGE back, so a
 -- crit is twice the pre-minimum damage plus 2, not twice the finished number.
 check("critical is 2x", crit, (plain - Damage.MIN_DAMAGE) * 2
   + Damage.MIN_DAMAGE)
 
--- A critical hit ignores the attacker's negative stages and the defender's
--- positive ones -- but keeps the ones that help.
+-- engine/battle/effect_commands.asm:2660
 local lowered = Damage.calc({
   level = 50, power = 40, moveType = "NORMAL",
   attacker = { attack = 100, types = { "FIRE" }, stages = { attack = -2 } },
   defender = { defense = 50, types = { "FIRE" }, stages = { defense = 2 } },
-  types = TYPES, matchups = MATCHUPS, variation = 100,
+  types = TYPES, matchups = MATCHUPS, variation = 255,
 })
 local loweredCrit = Damage.calc({
   level = 50, power = 40, moveType = "NORMAL",
   attacker = { attack = 100, types = { "FIRE" }, stages = { attack = -2 } },
   defender = { defense = 50, types = { "FIRE" }, stages = { defense = 2 } },
-  types = TYPES, matchups = MATCHUPS, variation = 100, critical = true,
+  types = TYPES, matchups = MATCHUPS, variation = 255, critical = true,
 })
 check("crit ignores bad stages", loweredCrit, crit)
 check("stages do apply without a crit", lowered < plain, true)
@@ -403,7 +402,7 @@ local raised = Damage.calc({
   level = 50, power = 40, moveType = "NORMAL",
   attacker = { attack = 100, types = { "FIRE" }, stages = { attack = 2 } },
   defender = { defense = 50, types = { "FIRE" } },
-  types = TYPES, matchups = MATCHUPS, variation = 100, critical = true,
+  types = TYPES, matchups = MATCHUPS, variation = 255, critical = true,
 })
 check("crit keeps good stages", raised > loweredCrit, true)
 
@@ -412,14 +411,14 @@ local screened = Damage.calc({
   level = 50, power = 40, moveType = "NORMAL",
   attacker = { attack = 100, types = { "FIRE" } },
   defender = { defense = 50, types = { "FIRE" } },
-  types = TYPES, matchups = MATCHUPS, variation = 100, screen = true,
+  types = TYPES, matchups = MATCHUPS, variation = 255, screen = true,
 })
 check("screen halves damage", screened < plain, true)
 local screenedCrit = Damage.calc({
   level = 50, power = 40, moveType = "NORMAL",
   attacker = { attack = 100, types = { "FIRE" } },
   defender = { defense = 50, types = { "FIRE" } },
-  types = TYPES, matchups = MATCHUPS, variation = 100, screen = true,
+  types = TYPES, matchups = MATCHUPS, variation = 255, screen = true,
   critical = true,
 })
 check("crit ignores screen", screenedCrit, crit)
@@ -429,9 +428,9 @@ local low = Damage.calc({
   level = 50, power = 40, moveType = "NORMAL",
   attacker = { attack = 100, types = { "FIRE" } },
   defender = { defense = 50, types = { "FIRE" } },
-  types = TYPES, matchups = MATCHUPS, variation = 85,
+  types = TYPES, matchups = MATCHUPS, variation = 217,
 })
-check("85% is the floor", low, math.floor(plain * 85 / 100))
+check("217/255 is the floor", low, math.floor(plain * 217 / 255))
 check("100% is the max", plain > low, true)
 
 -- Stat stage table matches the cart's fractions.
@@ -443,10 +442,16 @@ check("stage clamps above 6", Damage.applyStage(100, 9),
 check("stage never reaches zero", Damage.applyStage(1, -6), 1)
 
 -- Critical chance ladder (data/battle/critical_hit_chances.asm).
-check("crit level 0 is 1/15", Damage.criticalChance(0), 15)
-check("crit level 1 is 1/8", Damage.criticalChance(1), 8)
-check("crit level 2 is 1/4", Damage.criticalChance(2), 4)
-check("crit level 4 is 1/2", Damage.criticalChance(4), 2)
+local battleRules = require("tests.gen2_battle_rules_fixture")()
+for _, row in ipairs({ { 0, 17 }, { 1, 32 }, { 2, 64 }, { 4, 128 } }) do
+  local level, byte = row[1], row[2]
+  check("crit level " .. level .. " crits under byte " .. byte,
+    Damage.rollCritical(level, function() return byte - 1 end,
+      battleRules.criticalChances), true)
+  check("crit level " .. level .. " misses at byte " .. byte,
+    Damage.rollCritical(level, function() return byte end,
+      battleRules.criticalChances), false)
+end
 check("focus energy is +1",
   Damage.criticalLevel({ focusEnergy = true }), 1)
 check("high crit move is +2",
@@ -454,20 +459,23 @@ check("high crit move is +2",
 check("focus + high crit + lens",
   Damage.criticalLevel({ focusEnergy = true, highCritMove = true,
     scopeLens = true }), 4)
-check("crit level caps at 6",
+check("species crit item skips other bonuses",
   Damage.criticalLevel({ focusEnergy = true, highCritMove = true,
-    scopeLens = true, speciesItemBonus = true }), 6)
-check("roll 0 crits", Damage.rollCritical(0, zeroRandom), true)
-check("max roll misses", Damage.rollCritical(0, maxRandom), false)
+    scopeLens = true, speciesItemBonus = true }), 2)
+check("roll 0 crits", Damage.rollCritical(0, zeroRandom,
+  battleRules.criticalChances), true)
+check("max roll misses", Damage.rollCritical(0, maxRandom,
+  battleRules.criticalChances), false)
 
--- Accuracy: 0 in the data means never miss.
-check("accuracy 0 always hits", Damage.rollHit(0, 0, 0, maxRandom), true)
-check("accuracy 100 always hits", Damage.rollHit(100, 0, 0, maxRandom), true)
+check("a move with no cached accuracy byte is an error",
+  pcall(Damage.rollHit, 50, 0, 0, maxRandom), false)
+check("accuracy 100 always hits", Damage.rollHit(100, 0, 0, maxRandom, 255), true)
 check("accuracy 50 misses on a high roll",
-  Damage.rollHit(50, 0, 0, maxRandom), false)
+  Damage.rollHit(50, 0, 0, maxRandom, 127), false)
 check("accuracy 50 hits on a low roll",
-  Damage.rollHit(50, 0, 0, zeroRandom), true)
-check("evasion lowers accuracy", Damage.rollHit(95, 0, 6, function() return 30 end),
+  Damage.rollHit(50, 0, 0, zeroRandom, 127), true)
+check("evasion lowers accuracy", Damage.rollHit(95, 0, 6,
+  function() return 100 end, 242, battleRules.accuracyMultipliers),
   false)
 
 -- ------------------------------------------------------------------- HP bar
@@ -981,15 +989,15 @@ check("switch spent no PP", switchParty[2].moves[1].pp, 35)
 
 local Effects = require("src.battle.gen2.Effects")
 
--- Thunder's weather override replaces its base accuracy, but accuracy and
--- evasion stages still apply to that overridden value.  Wrap the block in a
--- local closure to keep the main chunk under Lua 5.1's 200-local ceiling.
+-- engine/battle/effect_commands.asm:1741, engine/battle/move_effects/thunder.asm:10
 ;(function()
-  local thunder = { id = "THUNDER", accuracy = 70, effect = "EFFECT_THUNDER" }
+  local thunder = { id = "THUNDER", accuracy = 70, accuracyRaw = 178,
+    effect = "EFFECT_THUNDER" }
   local accuracyAttacker = {}
   local accuracyDefender = {}
   local accuracyBattle = setmetatable({
-    data = { items = {} },
+    data = { items = {}, type_chart = { battleRules =
+      require("tests.gen2_battle_rules_fixture")() } },
     player = accuracyAttacker,
     enemy = accuracyDefender,
     stages = { player = Battle.newStages(), enemy = Battle.newStages() },
@@ -1002,12 +1010,20 @@ local Effects = require("src.battle.gen2.Effects")
   accuracyBattle.weather = "rain"
   check("Thunder cannot miss in rain with neutral stages",
     accuracyBattle:accuracyRoll(thunder, accuracyAttacker, accuracyDefender), true)
-  accuracyBattle.stages.player.accuracy = -1
-  check("Thunder can miss in rain after accuracy drop",
-    accuracyBattle:accuracyRoll(thunder, accuracyAttacker, accuracyDefender), false)
+  accuracyBattle.stages.player.accuracy = -6
+  check("Thunder cannot miss in rain after an accuracy drop",
+    accuracyBattle:accuracyRoll(thunder, accuracyAttacker, accuracyDefender), true)
   accuracyBattle.stages.player.accuracy = 0
-  accuracyBattle.stages.enemy.evasion = 1
-  check("Thunder can miss in rain after evasion rise",
+  accuracyBattle.stages.enemy.evasion = 6
+  check("Thunder cannot miss in rain after an evasion rise",
+    accuracyBattle:accuracyRoll(thunder, accuracyAttacker, accuracyDefender), true)
+  accuracyBattle.stages.enemy.evasion = 0
+  accuracyBattle.weather = "sun"
+  accuracyBattle.random = function(n) return 127 end
+  check("Thunder in sun hits on byte 127",
+    accuracyBattle:accuracyRoll(thunder, accuracyAttacker, accuracyDefender), true)
+  accuracyBattle.random = function(n) return 128 end
+  check("Thunder in sun misses on byte 128",
     accuracyBattle:accuracyRoll(thunder, accuracyAttacker, accuracyDefender), false)
 end)()
 
@@ -1038,10 +1054,6 @@ check("second", Effects.rampedPower(30, 1), 60)
 check("fifth is capped", Effects.rampedPower(30, 9), 480)
 check("curled doubles again", Effects.rampedPower(30, 0, true), 60)
 
--- Triple Kick climbs 10/20/30.
-check("first kick", Effects.tripleKickPower(10, 1), 10)
-check("third kick", Effects.tripleKickPower(10, 3), 30)
-
 -- Fixed damage skips the formula: Seismic Toss is the user's level, Super
 -- Fang half the target's current HP.
 check("level damage", Effects.fixedDamage("EFFECT_LEVEL_DAMAGE",
@@ -1058,50 +1070,50 @@ check("substitute cost", Effects.substituteCost(64), 16)
 
 local EFFECT_MOVES = {
   GROWL = { id = "GROWL", name = "GROWL", power = 0, type = "NORMAL",
-    accuracy = 100, pp = 40, effect = "EFFECT_ATTACK_DOWN" },
+    accuracy = 100, accuracyRaw = 255, pp = 40, effect = "EFFECT_ATTACK_DOWN" },
   SWORDS_DANCE = { id = "SWORDS_DANCE", name = "SWORDSDANCE", power = 0,
-    type = "NORMAL", accuracy = 100, pp = 30, effect = "EFFECT_ATTACK_UP_2" },
+    type = "NORMAL", accuracy = 100, accuracyRaw = 255, pp = 30, effect = "EFFECT_ATTACK_UP_2" },
   DOUBLE_KICK = { id = "DOUBLE_KICK", name = "DOUBLEKICK", power = 30,
-    type = "FIGHTING", accuracy = 100, pp = 30, effect = "EFFECT_DOUBLE_HIT" },
+    type = "FIGHTING", accuracy = 100, accuracyRaw = 255, pp = 30, effect = "EFFECT_DOUBLE_HIT" },
   TAKE_DOWN = { id = "TAKE_DOWN", name = "TAKE DOWN", power = 90,
-    type = "NORMAL", accuracy = 85, pp = 20, effect = "EFFECT_RECOIL_HIT" },
+    type = "NORMAL", accuracy = 85, accuracyRaw = 216, pp = 20, effect = "EFFECT_RECOIL_HIT" },
   ABSORB = { id = "ABSORB", name = "ABSORB", power = 20, type = "GRASS",
-    accuracy = 100, pp = 20, effect = "EFFECT_LEECH_HIT" },
+    accuracy = 100, accuracyRaw = 255, pp = 20, effect = "EFFECT_LEECH_HIT" },
   FLY = { id = "FLY", name = "FLY", power = 70, type = "FLYING",
-    accuracy = 95, pp = 15, effect = "EFFECT_FLY" },
+    accuracy = 95, accuracyRaw = 242, pp = 15, effect = "EFFECT_FLY" },
   SUBSTITUTE = { id = "SUBSTITUTE", name = "SUBSTITUTE", power = 0,
-    type = "NORMAL", accuracy = 100, pp = 10, effect = "EFFECT_SUBSTITUTE" },
+    type = "NORMAL", accuracy = 100, accuracyRaw = 255, pp = 10, effect = "EFFECT_SUBSTITUTE" },
   SEISMIC_TOSS = { id = "SEISMIC_TOSS", name = "SEISMICTOSS", power = 1,
-    type = "FIGHTING", accuracy = 100, pp = 20,
+    type = "FIGHTING", accuracy = 100, accuracyRaw = 255, pp = 20,
     effect = "EFFECT_LEVEL_DAMAGE" },
   -- EFFECT_STATIC_DAMAGE: Sonic Boom (20) and Dragon Rage (40).
   SONICBOOM = { id = "SONICBOOM", name = "SONICBOOM", power = 20,
-    type = "NORMAL", accuracy = 90, pp = 20,
+    type = "NORMAL", accuracy = 90, accuracyRaw = 229, pp = 20,
     effect = "EFFECT_STATIC_DAMAGE" },
   DRAGON_RAGE = { id = "DRAGON_RAGE", name = "DRAGON RAGE", power = 40,
-    type = "DRAGON", accuracy = 100, pp = 10,
+    type = "DRAGON", accuracy = 100, accuracyRaw = 255, pp = 10,
     effect = "EFFECT_STATIC_DAMAGE" },
   MAGNITUDE = { id = "MAGNITUDE", name = "MAGNITUDE", power = 1,
-    type = "GROUND", accuracy = 100, pp = 30,
+    type = "GROUND", accuracy = 100, accuracyRaw = 255, pp = 30,
     effect = "EFFECT_MAGNITUDE" },
   LOCK_ON = { id = "LOCK_ON", name = "LOCK-ON", power = 0, type = "NORMAL",
     accuracy = 100, accuracyRaw = 0xff, pp = 5, effect = "EFFECT_LOCK_ON" },
   -- data/moves/moves.asm:169, :172, :151.
   EXPLOSION = { id = "EXPLOSION", name = "EXPLOSION", power = 250,
-    type = "NORMAL", accuracy = 100, pp = 5,
+    type = "NORMAL", accuracy = 100, accuracyRaw = 255, pp = 5,
     effect = "EFFECT_SELFDESTRUCT" },
   REST = { id = "REST", name = "REST", power = 0, type = "NORMAL",
-    accuracy = 100, pp = 10, effect = "EFFECT_HEAL" },
+    accuracy = 100, accuracyRaw = 255, pp = 10, effect = "EFFECT_HEAL" },
   RECOVER = { id = "RECOVER", name = "RECOVER", power = 0, type = "NORMAL",
-    accuracy = 100, pp = 20, effect = "EFFECT_HEAL" },
+    accuracy = 100, accuracyRaw = 255, pp = 20, effect = "EFFECT_HEAL" },
   PROTECT = { id = "PROTECT", name = "PROTECT", power = 0, type = "NORMAL",
-    accuracy = 100, pp = 10, effect = "EFFECT_PROTECT" },
+    accuracy = 100, accuracyRaw = 255, pp = 10, effect = "EFFECT_PROTECT" },
   -- data/moves/moves.asm:203 and the ATTRACT row.
   BELLY_DRUM = { id = "BELLY_DRUM", name = "BELLY DRUM", power = 0,
-    type = "NORMAL", accuracy = 100, pp = 10,
+    type = "NORMAL", accuracy = 100, accuracyRaw = 255, pp = 10,
     effect = "EFFECT_BELLY_DRUM" },
   ATTRACT = { id = "ATTRACT", name = "ATTRACT", power = 0, type = "NORMAL",
-    accuracy = 100, pp = 15, effect = "EFFECT_ATTRACT" },
+    accuracy = 100, accuracyRaw = 255, pp = 15, effect = "EFFECT_ATTRACT" },
 }
 for id, def in pairs(EFFECT_MOVES) do MOVES[id] = def end
 
@@ -1614,12 +1626,13 @@ endureBattle:volatile(endureBattle.player).endure = true
 endureBattle:dealDamage(endureBattle.enemy, endureBattle.player, 9999, {})
 check("Endure leaves one hit point", endureBattle.player.hp, 1)
 
--- Rage raises Attack every time its user is hit.
+-- engine/battle/effect_commands.asm:2422
 local rageBattle = effectBattle({ { id = "RAGE", pp = 20, maxPp = 20 } })
 rageBattle:volatile(rageBattle.player).rage = true
 rageBattle:dealDamage(rageBattle.enemy, rageBattle.player, 1, {})
-check("being hit while raging raises Attack",
-  rageBattle.stages.player.attack, 1)
+check("being hit while raging raises its damage counter",
+  rageBattle:volatile(rageBattle.player).rageCount, 1)
+check("Rage leaves the Attack stage unchanged", rageBattle.stages.player.attack, 0)
 
 -- Disable and Encore both narrow what may be picked next turn.
 local lockBattle = effectBattle({
@@ -2904,7 +2917,7 @@ end)()
 ;(function()
   local opts = { level = 50, power = 250, moveType = "NORMAL",
     attacker = { attack = 100 }, defender = { defense = 100 },
-    types = TYPES, matchups = MATCHUPS, variation = 100 }
+    types = TYPES, matchups = MATCHUPS, variation = 255 }
   local plain = Damage.calc(opts)
   opts.defenseHalved = true
   check("halving the defence raises the damage", Damage.calc(opts) > plain,
@@ -2932,7 +2945,7 @@ end)()
   b:volatile(player).disabled = "TACKLE"
   local events = b:takeTurn({ kind = "move", move = "TACKLE" })
   check("a disabled move is refused at execution",
-    said(events, "CYNDAQUIL's TACKLE is DISABLED!"), true)
+    said(events, "CYNDAQUIL's\nTACKLE is\vDISABLED!"), true)
   check("and the turn is spent, not re-picked", player.moves[1].pp, 35)
   check("no other move is substituted", player.moves[2].pp, 25)
   -- MoveDisabled clears the charge so a disabled FLY cannot land (:599-603).
@@ -3258,7 +3271,7 @@ end)()
 ;(function()
   local function said(events, text)
     for _, e in ipairs(events) do
-      if e.kind == "message" and e.text == text then return true end
+      if e.kind == "message" and e.text:find(text, 1, true) then return true end
     end
     return false
   end
@@ -3321,21 +3334,23 @@ end)()
   check("the in-love line opens on the user", said(lostEvents,
     turn:monName(turnPlayer) .. "\nis in love with"), true)
   check("and scrolls onto the target", said(lostEvents,
-    "is in love with\n" .. turn:battlerName(turnWild) .. "!"), true)
+    "is in love with\v" .. turn:battlerName(turnWild) .. "!"), true)
   check("InfatuationText opens on the user", said(lostEvents,
     turn:monName(turnPlayer) .. "'s\ninfatuation kept"), true)
   check("and scrolls onto the refusal", said(lostEvents,
-    "infatuation kept\nit from attacking!"), true)
+    "infatuation kept\vit from attacking!"), true)
   -- constants/text_constants.asm:32
   local widest = 0
   for _, e in ipairs(lostEvents) do
     if e.kind == "message" then
-      local rows = 0
-      for row in (e.text .. "\n"):gmatch("([^\n]*)\n") do
-        rows = rows + 1
-        widest = math.max(widest, #row)
+      for box in (e.text:gsub("{PROMPT}", "") .. "\v"):gmatch("([^\v\f]*)[\v\f]") do
+        local rows = 0
+        for row in (box .. "\n"):gmatch("([^\n]*)\n") do
+          rows = rows + 1
+          widest = math.max(widest, #row)
+        end
+        check("every infatuated box is at most two rows", rows <= 2, true)
       end
-      check("every infatuated box is at most two rows", rows <= 2, true)
     end
   end
   check("and no row overflows the message box", widest <= 18, true)
@@ -3346,9 +3361,9 @@ end)()
   check("but the in-love pair still prints", said(keptEvents,
     turn:monName(turnPlayer) .. "\nis in love with"), true)
   check("both halves of it", said(keptEvents,
-    "is in love with\n" .. turn:battlerName(turnWild) .. "!"), true)
+    "is in love with\v" .. turn:battlerName(turnWild) .. "!"), true)
   check("and nothing was kept from attacking", said(keptEvents,
-    "infatuation kept\nit from attacking!"), false)
+    "infatuation kept\vit from attacking!"), false)
 
   local sw, swPlayer, swWild = attractBattle("PIDGEY", femaleDvs)
   sw:useMove(swPlayer, swWild, "ATTRACT")

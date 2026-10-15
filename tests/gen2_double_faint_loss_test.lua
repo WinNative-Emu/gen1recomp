@@ -14,11 +14,11 @@ local TYPES = {
 
 local MOVES = {
   TACKLE = { id = "TACKLE", name = "TACKLE", power = 35, type = "NORMAL",
-    accuracy = 100, pp = 35, effect = "EFFECT_NORMAL_HIT" },
+    accuracy = 100, accuracyRaw = 255, pp = 35, effect = "EFFECT_NORMAL_HIT" },
   SELFDESTRUCT = { id = "SELFDESTRUCT", name = "SELFDESTRUCT", power = 200,
-    type = "NORMAL", accuracy = 100, pp = 5, effect = "EFFECT_SELFDESTRUCT" },
+    type = "NORMAL", accuracy = 100, accuracyRaw = 255, pp = 5, effect = "EFFECT_SELFDESTRUCT" },
   EXPLOSION = { id = "EXPLOSION", name = "EXPLOSION", power = 250,
-    type = "NORMAL", accuracy = 100, pp = 5, effect = "EFFECT_SELFDESTRUCT" },
+    type = "NORMAL", accuracy = 100, accuracyRaw = 255, pp = 5, effect = "EFFECT_SELFDESTRUCT" },
 }
 
 local GROWTH = {
@@ -46,7 +46,7 @@ local DATA = {
     GOLEM = species("GOLEM", 76, 200),
   },
   moves = MOVES,
-  type_chart = { types = TYPES, matchups = {} },
+  text = require("tests.gen2_battle_text_fixture")(), type_chart = { battleRules = require("tests.gen2_battle_rules_fixture")(), types = TYPES, matchups = {} },
   items = {},
 }
 

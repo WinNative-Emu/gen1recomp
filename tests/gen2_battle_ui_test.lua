@@ -46,11 +46,11 @@ local MATCHUPS = {
 
 local MOVES = {
   TACKLE = { id = "TACKLE", name = "TACKLE", power = 35, type = "NORMAL",
-    accuracy = 95, pp = 35, effect = "EFFECT_NORMAL_HIT" },
+    accuracy = 95, accuracyRaw = 242, pp = 35, effect = "EFFECT_NORMAL_HIT" },
   GROWL = { id = "GROWL", name = "GROWL", power = 0, type = "NORMAL",
-    accuracy = 100, pp = 40, effect = "EFFECT_ATTACK_DOWN" },
+    accuracy = 100, accuracyRaw = 255, pp = 40, effect = "EFFECT_ATTACK_DOWN" },
   THUNDER_WAVE = { id = "THUNDER_WAVE", name = "THUNDERWAVE", power = 0,
-    type = "ELECTRIC", accuracy = 100, pp = 20, effect = "EFFECT_PARALYZE" },
+    type = "ELECTRIC", accuracy = 100, accuracyRaw = 255, pp = 20, effect = "EFFECT_PARALYZE" },
 }
 
 local GROWTH = {
@@ -97,7 +97,7 @@ local POKEMON = {
 local DATA = {
   pokemon = POKEMON,
   moves = MOVES,
-  type_chart = { types = TYPES, matchups = MATCHUPS },
+  text = require("tests.gen2_battle_text_fixture")(), type_chart = { battleRules = require("tests.gen2_battle_rules_fixture")(), types = TYPES, matchups = MATCHUPS },
   items = {
     -- `index` is the ROM item id, which is what wBattleAnimParam carries.
     MASTER_BALL = { id = "MASTER_BALL", pocket = "BALL", name = "MASTER BALL",
@@ -113,10 +113,10 @@ local DATA = {
 local perfect = { attack = 15, defense = 15, speed = 15, special = 15 }
 perfect.hp = Mon.hpDV(perfect)
 
--- Deterministic and range-respecting: the smallest roll that is neither a
--- critical hit (rollCritical wants 0) nor a miss.
+-- engine/battle/effect_commands.asm:1201
 local function detRandom(n)
   if (n or 1) <= 1 then return 0 end
+  if n == 256 then return 128 end
   return 1
 end
 
@@ -128,7 +128,7 @@ do
     level = 5, power = 35, moveType = "NORMAL",
     attacker = { attack = 6, types = { "FIRE" } },
     defender = { defense = 40, types = { "WATER" } },
-    types = TYPES, matchups = MATCHUPS, variation = 100,
+    types = TYPES, matchups = MATCHUPS, variation = 255,
   })
   eq(weak, Damage.MIN_DAMAGE,
     "a hit whose stat math floors to nothing still deals MIN_DAMAGE")
@@ -139,14 +139,14 @@ do
     level = 5, power = 35, moveType = "NORMAL",
     attacker = { attack = 6, types = { "FIRE" } },
     defender = { defense = 40, types = { "ROCK" } },
-    types = TYPES, matchups = MATCHUPS, variation = 100,
+    types = TYPES, matchups = MATCHUPS, variation = 255,
   })
   check(resisted >= 1, "a resisted hit that lands deals at least 1")
   local _, info = Damage.calc({
     level = 5, power = 35, moveType = "NORMAL",
     attacker = { attack = 6, types = { "FIRE" } },
     defender = { defense = 40, types = { "ROCK" } },
-    types = TYPES, matchups = MATCHUPS, variation = 100,
+    types = TYPES, matchups = MATCHUPS, variation = 255,
   })
   eq(info.effectiveness, 5, "and still reports not-very-effective")
 
@@ -155,7 +155,7 @@ do
     level = 50, power = 95, moveType = "ELECTRIC",
     attacker = { specialAttack = 100, types = { "ELECTRIC" } },
     defender = { specialDefense = 50, types = { "GROUND" } },
-    types = TYPES, matchups = MATCHUPS, variation = 100,
+    types = TYPES, matchups = MATCHUPS, variation = 255,
   })
   eq(immune, 0, "an immune matchup still deals nothing at all")
 end
@@ -1690,17 +1690,17 @@ do
   local battle = screen.battle
   local moves = battle.data.moves
   moves.VITAL_THROW = { id = "VITAL_THROW", name = "VITALTHROW", power = 70,
-    type = "NORMAL", accuracy = 100, pp = 10, effect = "EFFECT_ALWAYS_HIT" }
+    type = "NORMAL", accuracy = 100, accuracyRaw = 255, pp = 10, effect = "EFFECT_ALWAYS_HIT" }
   moves.SWIFT = { id = "SWIFT", name = "SWIFT", power = 60, type = "NORMAL",
-    accuracy = 100, pp = 20, effect = "EFFECT_ALWAYS_HIT" }
+    accuracy = 100, accuracyRaw = 255, pp = 20, effect = "EFFECT_ALWAYS_HIT" }
   moves.QUICK_ATTACK = { id = "QUICK_ATTACK", name = "QUICKATTACK", power = 40,
-    type = "NORMAL", accuracy = 100, pp = 30, effect = "EFFECT_PRIORITY_HIT" }
+    type = "NORMAL", accuracy = 100, accuracyRaw = 255, pp = 30, effect = "EFFECT_PRIORITY_HIT" }
   eq(battle:movePriority("VITAL_THROW"), -1, "VITAL_THROW goes last")
   eq(battle:movePriority("SWIFT"), 0,
     "while SWIFT, which shares its effect, keeps BASE_PRIORITY")
   eq(battle:movePriority("QUICK_ATTACK"), 1, "and the table still reads")
   moves.ROAR_FIX = { id = "ROAR_FIX", name = "ROAR", power = 0,
-    type = "NORMAL", accuracy = 100, pp = 20, effect = "EFFECT_FORCE_SWITCH" }
+    type = "NORMAL", accuracy = 100, accuracyRaw = 255, pp = 20, effect = "EFFECT_FORCE_SWITCH" }
   -- MoveEffectPriorities: EFFECT_FORCE_SWITCH is 0, below BASE_PRIORITY
   -- (data/moves/effects_priorities.asm:5)
   eq(battle:movePriority("ROAR_FIX"), -1,

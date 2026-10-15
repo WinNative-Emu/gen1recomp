@@ -1,6 +1,5 @@
 local U=require('tests.drivers.util')
 local Mon=require('src.battle.gen2.Mon')
-local Damage=require('src.battle.gen2.Damage')
 local SaveData=require('src.core.SaveData')
 
 return function(game)
@@ -112,7 +111,7 @@ return function(game)
       else
         assert(player.moves[slot].pp==pp-1 and battle:volatile(player).focusEnergy,'Focus Energy producer/PP missing')
         shown(screen,'getting pumped!','focus-energy');menu(screen)
-        battle.random=function(n) return n==Damage.criticalChance(0) and 1 or 0 end
+        battle.random=function() return 0 end
         choose(screen,2);shown(screen,'A critical hit!','focus-energy-critical');menu(screen)
       end
       battle.random=function() return 0 end

@@ -6,7 +6,6 @@
 -- rather than a Gen 1 learnset table.
 --
 -- Stat formula is unchanged from Gen 1 (data/pokemon/base_stats + DVs):
---   stat = floor((base * 2 + DV * 2 + floor(sqrt(statExp) / 4)) * level / 100) + 5
 --   HP is the same but + level + 10
 -- with the Gen 2 twist that a mon's SpA and SpD share one Special DV, which is
 -- why a high-Special DV raises both.
@@ -171,8 +170,13 @@ function Mon.hpDV(dvs)
     + bit(dvs.speed) * 2 + bit(dvs.special)
 end
 
+-- engine/math/get_square_root.asm:3
+local function statExpBonus(statExp)
+  return math.floor(math.min(255, math.ceil(math.sqrt(math.max(0, statExp or 0)))) / 4)
+end
+
 local function statValue(base, dv, level, statExp)
-  local exp = math.floor(math.sqrt(statExp or 0) / 4)
+  local exp = statExpBonus(statExp)
   return math.floor((((base or 1) * 2 + (dv or 0) * 2 + exp) * level) / 100) + 5
 end
 
@@ -192,7 +196,7 @@ function Mon.stats(baseStats, dvs, level, statExp)
     speed = dvs.speed, special = specialDv,
   })
   local hp = math.floor((((baseStats.hp or 1) * 2 + hpDv * 2
-    + math.floor(math.sqrt(statExp.hp or 0) / 4)) * level) / 100)
+    + statExpBonus(statExp.hp)) * level) / 100)
     + level + 10
   return {
     hp = hp,

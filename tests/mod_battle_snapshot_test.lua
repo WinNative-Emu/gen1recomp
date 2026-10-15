@@ -9,7 +9,7 @@ check(Gen1BattleState.isBattleState == true,
   "Gen 1 battle states carry the discovery marker")
 
 local TypeChart = require("src.battle.TypeChart")
-TypeChart.load({ type_chart = {
+TypeChart.load({ text = require("tests.gen2_battle_text_fixture")(), type_chart = { battleRules = require("tests.gen2_battle_rules_fixture")(),
   types = { NORMAL = { name = "NORMAL", category = "physical" } },
   matchups = {},
 } })

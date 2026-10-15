@@ -36,13 +36,13 @@ local TYPES = {
 
 local MOVES = {
   TACKLE = { id = "TACKLE", name = "TACKLE", power = 35, type = "NORMAL",
-    accuracy = 95, pp = 35, effect = "EFFECT_NORMAL_HIT" },
+    accuracy = 95, accuracyRaw = 242, pp = 35, effect = "EFFECT_NORMAL_HIT" },
   ROAR = { id = "ROAR", name = "ROAR", power = 0, type = "NORMAL",
-    accuracy = 100, pp = 20, effect = "EFFECT_FORCE_SWITCH" },
+    accuracy = 100, accuracyRaw = 255, pp = 20, effect = "EFFECT_FORCE_SWITCH" },
   ENDURE = { id = "ENDURE", name = "ENDURE", power = 0, type = "NORMAL",
-    accuracy = 100, pp = 10, effect = "EFFECT_ENDURE" },
+    accuracy = 100, accuracyRaw = 255, pp = 10, effect = "EFFECT_ENDURE" },
   SPIKES = { id = "SPIKES", name = "SPIKES", power = 0, type = "NORMAL",
-    accuracy = 100, pp = 20, effect = "EFFECT_SPIKES" },
+    accuracy = 100, accuracyRaw = 255, pp = 20, effect = "EFFECT_SPIKES" },
 }
 
 local GROWTH = {
@@ -97,7 +97,7 @@ local ITEMS = {
 local DATA = {
   pokemon = POKEMON,
   moves = MOVES,
-  type_chart = { types = TYPES, matchups = {} },
+  text = require("tests.gen2_battle_text_fixture")(), type_chart = { battleRules = require("tests.gen2_battle_rules_fixture")(), types = TYPES, matchups = {} },
   items = ITEMS,
 }
 

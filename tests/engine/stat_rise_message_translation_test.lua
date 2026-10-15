@@ -96,7 +96,7 @@ local GEN2_DATA = {
     TACKLE = { id = "TACKLE", name = "TACKLE", power = 35, type = "NORMAL",
       accuracy = 95, pp = 35, effect = "EFFECT_NORMAL_HIT" },
   },
-  type_chart = { types = { NORMAL = { id = "NORMAL", index = 0,
+  text = require("tests.gen2_battle_text_fixture")(), type_chart = { battleRules = require("tests.gen2_battle_rules_fixture")(), types = { NORMAL = { id = "NORMAL", index = 0,
     category = "physical" } }, matchups = {} },
   items = {},
 }

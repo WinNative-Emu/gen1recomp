@@ -24,7 +24,7 @@ local POKEMON = {
 }
 
 local battle = setmetatable({
-  data = { type_chart = { matchups = MATCHUPS }, pokemon = POKEMON },
+  data = { text = require("tests.gen2_battle_text_fixture")(), type_chart = { battleRules = require("tests.gen2_battle_rules_fixture")(), matchups = MATCHUPS }, pokemon = POKEMON },
 }, { __index = Battle })
 
 local function mon(species) return { species = species, hp = 20 } end

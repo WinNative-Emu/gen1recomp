@@ -4681,6 +4681,56 @@ function RomExtractorGen2:extractMoves()
       category = (value < specialBoundary) and "physical" or "special",
     }
   end
+  -- data/battle/critical_hit_chances.asm:1
+  local rules = { criticalChances = {}, accuracyMultipliers = {},
+    highCriticalMoves = {}, moveScripts = {}, flailPower = {}, presentPower = {} }
+  local critical = self:symbol("CriticalHitChances")
+  for stage = 0, 6 do
+    rules.criticalChances[stage] = self.rom:byte(critical.bank, critical.address + stage)
+  end
+  -- data/battle/accuracy_multipliers.asm:4
+  local accuracy = self:symbol("AccuracyLevelMultipliers")
+  for stage = -6, 6 do
+    local address = accuracy.address + (stage + 6) * 2
+    rules.accuracyMultipliers[stage] = {
+      self.rom:byte(accuracy.bank, address), self.rom:byte(accuracy.bank, address + 1) }
+  end
+  -- data/moves/critical_hit_moves.asm:1
+  local highCritical = self:symbol("CriticalHitMoves")
+  for index = 0, #order do
+    local move = self.rom:byte(highCritical.bank, highCritical.address + index)
+    if move == 255 then break end
+    rules.highCriticalMoves[assert(order[move])] = true
+  end
+  -- data/moves/flail_reversal_power.asm:1
+  local flail = self:symbol("FlailReversalPower")
+  for index = 0, 5 do
+    rules.flailPower[#rules.flailPower + 1] = {
+      self.rom:byte(flail.bank, flail.address + index * 2),
+      self.rom:byte(flail.bank, flail.address + index * 2 + 1) }
+  end
+  -- data/moves/present_power.asm:1
+  local present = self:symbol("PresentPower")
+  for index = 0, 3 do
+    local threshold = self.rom:byte(present.bank, present.address + index * 2)
+    if threshold == 255 then break end
+    rules.presentPower[#rules.presentPower + 1] = { threshold,
+      self.rom:byte(present.bank, present.address + index * 2 + 1) }
+  end
+  -- data/moves/effects_pointers.asm:1
+  local pointers = self:symbol("MoveEffectsPointers")
+  local scripts = self:symbol("MoveEffects")
+  local commands = assert(consts.battleCommandOrder)
+  for index, effect in ipairs(effects) do
+    local address = self.rom:word(pointers.bank, pointers.address + (index - 1) * 2)
+    local script = {}
+    for offset2 = 0, 255 do
+      local command = self.rom:byte(scripts.bank, address + offset2)
+      if command >= 254 then break end
+      script[#script + 1] = assert(commands[command], "unknown battle command")
+    end
+    rules.moveScripts[effect] = script
+  end
   self:write("type_chart", {
     generation = 2,
     source = "ROM:TypeMatchups + TypeNames",
@@ -4688,6 +4738,7 @@ function RomExtractorGen2:extractMoves()
     types = records,
     matchups = matchups,
     foresightMatchups = foresight,
+    battleRules = rules,
   })
   self:tick("Moves", #order, #order)
   return out

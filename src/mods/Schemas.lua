@@ -1860,10 +1860,35 @@ R.pokemon = {
     .. '{ baseStats = { specialAttack = 120 } })',
 }
 
+-- macros/data.asm:23
+local GEN2_MOVE_RAW = { accuracy = "accuracyRaw", effectChance = "effectChanceRaw" }
+
+local function movesGen2Write(target, registry)
+  local tombstones = {}
+  for id in pairs(registry.ops) do
+    local value = registry:get(id)
+    if value == nil then
+      tombstones[#tombstones + 1] = id
+    else
+      local record = {}
+      for key, v in pairs(value) do record[key] = v end
+      for percentKey, rawKey in pairs(GEN2_MOVE_RAW) do
+        local percent, raw = record[percentKey], record[rawKey]
+        if percent ~= nil
+            and (raw == nil or math.floor(raw * 100 / 255 + 0.5) ~= percent) then
+          record[rawKey] = math.floor(percent * 255 / 100)
+        end
+      end
+      target[id] = record
+    end
+  end
+  for _, id in ipairs(tombstones) do target[id] = nil end
+end
+
 R.moves = {
   semantics = "record", target = "moves",
   gen2BaseAt = movesGen2BaseAt, gen2BaseIds = movesGen2BaseIds,
-  gen2ReservedIds = movesGen2ReservedIds,
+  gen2ReservedIds = movesGen2ReservedIds, gen2Write = movesGen2Write,
   fields = {
     id = f.str, name = f.str,
     index = f.opt(f.int(0, 255)),

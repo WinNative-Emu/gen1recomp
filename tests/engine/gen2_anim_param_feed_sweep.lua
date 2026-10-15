@@ -16,9 +16,10 @@ for i, id in ipairs({ "NORMAL", "GHOST", "GROUND", "FLYING", "FIGHTING",
       and "special" or "physical" }
 end
 
-local function move(id, effect, power, type, accuracy)
+local function move(id, effect, power, type, accuracy, accuracyRaw)
   return { id = id, name = id, power = power, type = type,
-    accuracy = accuracy or 100, pp = 20, effect = effect }
+    accuracy = accuracy or 100, accuracyRaw = accuracyRaw or 255, pp = 20,
+    effect = effect, effectChanceRaw = 0 }
 end
 
 local MOVES = {
@@ -35,21 +36,21 @@ local MOVES = {
   BIDE = move("BIDE", "EFFECT_BIDE", 0, "NORMAL"),
   ROAR = move("ROAR", "EFFECT_FORCE_SWITCH", 0, "NORMAL"),
   WHIRLWIND = move("WHIRLWIND", "EFFECT_FORCE_SWITCH", 0, "NORMAL"),
-  PRESENT = move("PRESENT", "EFFECT_PRESENT", 1, "NORMAL", 90),
-  HI_JUMP_KICK = move("HI_JUMP_KICK", "EFFECT_JUMP_KICK", 85, "FIGHTING", 90),
-  JUMP_KICK = move("JUMP_KICK", "EFFECT_JUMP_KICK", 70, "FIGHTING", 95),
-  COMET_PUNCH = move("COMET_PUNCH", "EFFECT_MULTI_HIT", 18, "NORMAL", 85),
-  DOUBLESLAP = move("DOUBLESLAP", "EFFECT_MULTI_HIT", 15, "NORMAL", 85),
-  FURY_SWIPES = move("FURY_SWIPES", "EFFECT_MULTI_HIT", 18, "NORMAL", 80),
+  PRESENT = move("PRESENT", "EFFECT_PRESENT", 1, "NORMAL", 90, 229),
+  HI_JUMP_KICK = move("HI_JUMP_KICK", "EFFECT_JUMP_KICK", 85, "FIGHTING", 90, 229),
+  JUMP_KICK = move("JUMP_KICK", "EFFECT_JUMP_KICK", 70, "FIGHTING", 95, 242),
+  COMET_PUNCH = move("COMET_PUNCH", "EFFECT_MULTI_HIT", 18, "NORMAL", 85, 216),
+  DOUBLESLAP = move("DOUBLESLAP", "EFFECT_MULTI_HIT", 15, "NORMAL", 85, 216),
+  FURY_SWIPES = move("FURY_SWIPES", "EFFECT_MULTI_HIT", 18, "NORMAL", 80, 204),
   DOUBLE_KICK = move("DOUBLE_KICK", "EFFECT_DOUBLE_HIT", 30, "FIGHTING"),
-  TRIPLE_KICK = move("TRIPLE_KICK", "EFFECT_TRIPLE_KICK", 10, "FIGHTING", 90),
+  TRIPLE_KICK = move("TRIPLE_KICK", "EFFECT_TRIPLE_KICK", 10, "FIGHTING", 90, 229),
   DESTINY_BOND = move("DESTINY_BOND", "EFFECT_DESTINY_BOND", 0, "GHOST"),
   BEAT_UP = move("BEAT_UP", "EFFECT_BEAT_UP", 10, "DARK"),
-  FURY_CUTTER = move("FURY_CUTTER", "EFFECT_FURY_CUTTER", 10, "BUG", 95),
+  FURY_CUTTER = move("FURY_CUTTER", "EFFECT_FURY_CUTTER", 10, "BUG", 95, 242),
   MOONLIGHT = move("MOONLIGHT", "EFFECT_MOONLIGHT", 0, "NORMAL"),
   MORNING_SUN = move("MORNING_SUN", "EFFECT_MORNING_SUN", 0, "NORMAL"),
   SYNTHESIS = move("SYNTHESIS", "EFFECT_SYNTHESIS", 0, "GRASS"),
-  OCTAZOOKA = move("OCTAZOOKA", "EFFECT_ACCURACY_DOWN_HIT", 65, "WATER", 85),
+  OCTAZOOKA = move("OCTAZOOKA", "EFFECT_ACCURACY_DOWN_HIT", 65, "WATER", 85, 216),
   PURSUIT = move("PURSUIT", "EFFECT_PURSUIT", 40, "DARK"),
   SUBSTITUTE = move("SUBSTITUTE", "EFFECT_SUBSTITUTE", 0, "NORMAL"),
 }
@@ -68,7 +69,7 @@ local POKEMON = {
 }
 
 local DATA = { pokemon = POKEMON, moves = MOVES,
-  type_chart = { types = TYPES, matchups = {} }, items = {} }
+  text = require("tests.gen2_battle_text_fixture")(), type_chart = { battleRules = require("tests.gen2_battle_rules_fixture")(), types = TYPES, matchups = {} }, items = {} }
 
 local perfect = { attack = 15, defense = 15, speed = 15, special = 15 }
 perfect.hp = Mon.hpDV(perfect)
@@ -104,6 +105,10 @@ local function once(moveId, random)
 end
 
 local ENFORCED = {
+  HI_JUMP_KICK = { param = 1, cite = "effect_commands.asm:2246",
+    run = once("HI_JUMP_KICK", function(n) return (n or 256) - 1 end) },
+  JUMP_KICK = { param = 1, cite = "effect_commands.asm:2246",
+    run = once("JUMP_KICK", function(n) return (n or 256) - 1 end) },
   CURSE = { param = 1, cite = "move_effects/curse.asm:39", run = once("CURSE") },
   DIG = { param = 1, cite = "effect_commands.asm:5500", charge = true },
   FLY = { param = 1, cite = "effect_commands.asm:5500", charge = true },
@@ -132,10 +137,6 @@ local KNOWN_MISSING = {
     run = once("WHIRLWIND") },
   PRESENT = { param = 3, cite = "move_effects/present.asm:42",
     run = once("PRESENT") },
-  HI_JUMP_KICK = { param = 1, cite = "effect_commands.asm:2246",
-    run = once("HI_JUMP_KICK", function(n) return (n or 256) - 1 end) },
-  JUMP_KICK = { param = 1, cite = "effect_commands.asm:2246",
-    run = once("JUMP_KICK", function(n) return (n or 256) - 1 end) },
   COMET_PUNCH = { param = 1, cite = "effect_commands.asm:1994",
     run = once("COMET_PUNCH") },
   DOUBLESLAP = { param = 1, cite = "effect_commands.asm:1994",

@@ -72,9 +72,9 @@ end
 eq(size(crystal.maps), 388, "388 maps")
 eq(size(crystal.tilesets), 36, "36 tilesets")
 eq(size(crystal.pokemonAssets), 251, "251 pokemon asset rows")
-eq(size(crystal.constants), 50, "50 constants keys")
+eq(size(crystal.constants), 51, "51 constants keys")
 eq(type(crystal.constants.engineFlagOrder), "table",
-  "the 50th is engineFlagOrder, the key Gold has no counterpart for")
+  "engineFlagOrder is the key Gold has no counterpart for")
 check(size(crystal.symbols) > 2000,
   ("symbols table is populated (%d)"):format(size(crystal.symbols)))
 check(size(crystal.charmap) > 200,

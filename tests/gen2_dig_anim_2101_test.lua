@@ -17,9 +17,9 @@ local TYPES = {
 
 local MOVES = {
   DIG = { id = "DIG", name = "DIG", power = 60, type = "GROUND",
-    accuracy = 100, pp = 10, effect = "EFFECT_FLY" },
+    accuracy = 100, accuracyRaw = 255, pp = 10, effect = "EFFECT_FLY" },
   TACKLE = { id = "TACKLE", name = "TACKLE", power = 35, type = "NORMAL",
-    accuracy = 95, pp = 35, effect = "EFFECT_NORMAL_HIT" },
+    accuracy = 95, accuracyRaw = 242, pp = 35, effect = "EFFECT_NORMAL_HIT" },
 }
 
 local GROWTH = {
@@ -52,7 +52,7 @@ local POKEMON = {
 local DATA = {
   pokemon = POKEMON,
   moves = MOVES,
-  type_chart = { types = TYPES, matchups = {} },
+  text = require("tests.gen2_battle_text_fixture")(), type_chart = { battleRules = require("tests.gen2_battle_rules_fixture")(), types = TYPES, matchups = {} },
   items = {},
 }
 

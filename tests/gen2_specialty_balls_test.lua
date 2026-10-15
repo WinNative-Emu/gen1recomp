@@ -145,7 +145,7 @@ do
   local DATA = {
     pokemon = POKEMON,
     moves = MOVES,
-    type_chart = { types = TYPES, matchups = {} },
+    text = require("tests.gen2_battle_text_fixture")(), type_chart = { battleRules = require("tests.gen2_battle_rules_fixture")(), types = TYPES, matchups = {} },
     items = {
       FRIEND_BALL = { id = "FRIEND_BALL", name = "FRIEND BALL",
         pocket = "BALL" },

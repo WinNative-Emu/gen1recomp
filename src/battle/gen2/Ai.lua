@@ -796,10 +796,7 @@ function Ai.lockOnPostPass(scores, defs)
   if rounds == 0 then return scores end
   for i = 1, #scores do
     local def = defs[i]
-    -- accuracyRaw is the cart's own byte; the percentage is the fallback for a
-    -- caller that only has the human-readable number.
-    local raw = def and (def.accuracyRaw
-      or (def.accuracy and math.floor(def.accuracy * 255 / 100)))
+    local raw = def and def.accuracyRaw
     if raw and raw < Ai.LOCK_ON_ACCURACY then
       scores[i] = scores[i] - 2 * rounds
     end

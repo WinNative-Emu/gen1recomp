@@ -665,7 +665,7 @@ do
     pokemon = DATA.pokemon,
     moves = DATA.moves,
     items = { POTION = { id = "POTION", name = "POTION" } },
-    type_chart = { types = {}, matchups = {} },
+    text = require("tests.gen2_battle_text_fixture")(), type_chart = { battleRules = require("tests.gen2_battle_rules_fixture")(), types = {}, matchups = {} },
   }
   local function fighter(level)
     local mon = Mon.new(data, "SEEDMON", level,

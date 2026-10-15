@@ -43,9 +43,9 @@ local TYPES = {
 
 local MOVES = {
   TACKLE = { id = "TACKLE", name = "TACKLE", power = 35, type = "NORMAL",
-    accuracy = 95, pp = 35, effect = "EFFECT_NORMAL_HIT" },
+    accuracy = 95, accuracyRaw = 242, pp = 35, effect = "EFFECT_NORMAL_HIT" },
   SCRATCH = { id = "SCRATCH", name = "SCRATCH", power = 40, type = "NORMAL",
-    accuracy = 100, pp = 35, effect = "EFFECT_NORMAL_HIT" },
+    accuracy = 100, accuracyRaw = 255, pp = 35, effect = "EFFECT_NORMAL_HIT" },
 }
 
 local GROWTH = {
@@ -96,7 +96,7 @@ end
 local DATA = {
   pokemon = POKEMON,
   moves = MOVES,
-  type_chart = { types = TYPES, matchups = {} },
+  text = require("tests.gen2_battle_text_fixture")(), type_chart = { battleRules = require("tests.gen2_battle_rules_fixture")(), types = TYPES, matchups = {} },
   items = {
     POTION = item("POTION"),
     ANTIDOTE = item("ANTIDOTE"),

@@ -1250,6 +1250,23 @@ do
   T.check(ok, "Gen 2: a numeric effect byte with no manifest name does not crash the boot")
 end
 
+do
+  local data = gen2Fixtures()
+  data.moves.FIX_TACKLE.effect = "EFFECT_NORMAL_HIT"
+  data.moves.FIX_TACKLE.accuracy, data.moves.FIX_TACKLE.accuracyRaw = 100, 255
+  local run = T.sdk.loadMods({ "mods/fix_refs" }, {
+    fs = T.sdk.memfs(refsFixture([[
+      local mod = ...
+      mod.content.moves:patch("FIX_TACKLE", { accuracy = 70 })
+    ]])),
+    data = data,
+    generation = 2,
+  })
+  T.eq(run.data.moves.FIX_TACKLE.accuracyRaw, 178,
+    "Gen 2: a mod accuracy patch rewrites the cart byte the roll reads")
+  run.release()
+end
+
 -- Without this the file printed its FAILs and exited 0, so the runner marked
 -- the gate "ok" while it was red -- a gate that cannot fail is not a gate.
 T.finish("gate_gen2_mod_api")

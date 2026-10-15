@@ -27,14 +27,14 @@ local MATCHUPS = {}
 
 local MOVES = {
   TACKLE = { id = "TACKLE", name = "TACKLE", power = 35, type = "NORMAL",
-    accuracy = 100, pp = 35, effect = "EFFECT_NORMAL_HIT" },
+    accuracy = 100, accuracyRaw = 255, pp = 35, effect = "EFFECT_NORMAL_HIT" },
   -- data/moves/moves.asm: SPORE and HYPNOSIS are both EFFECT_SLEEP.
   SPORE = { id = "SPORE", name = "SPORE", power = 0, type = "GRASS",
-    accuracy = 100, pp = 15, effect = "EFFECT_SLEEP" },
+    accuracy = 100, accuracyRaw = 255, pp = 15, effect = "EFFECT_SLEEP" },
   HYPNOSIS = { id = "HYPNOSIS", name = "HYPNOSIS", power = 0,
-    type = "PSYCHIC", accuracy = 100, pp = 20, effect = "EFFECT_SLEEP" },
+    type = "PSYCHIC", accuracy = 100, accuracyRaw = 255, pp = 20, effect = "EFFECT_SLEEP" },
   REST = { id = "REST", name = "REST", power = 0, type = "PSYCHIC",
-    accuracy = 100, pp = 10, effect = "EFFECT_HEAL" },
+    accuracy = 100, accuracyRaw = 255, pp = 10, effect = "EFFECT_HEAL" },
 }
 
 local GROWTH = {
@@ -66,7 +66,7 @@ local POKEMON = {
 local DATA = {
   pokemon = POKEMON,
   moves = MOVES,
-  type_chart = { types = TYPES, matchups = MATCHUPS },
+  text = require("tests.gen2_battle_text_fixture")(), type_chart = { battleRules = require("tests.gen2_battle_rules_fixture")(), types = TYPES, matchups = MATCHUPS },
   items = {},
 }
 
@@ -185,7 +185,7 @@ do
   eq(wild.status, nil, "a zero roll thaws the target")
   local seen = false
   for _, event in ipairs(events) do
-    if event.text and event.text:find("thawed out!", 1, true) then
+    if event.text and event.text:find("was defrosted!", 1, true) then
       seen = true
       eq(event.kind, "status", "the thaw line rides a status event")
       eq(event.status, nil, "carrying the cleared byte")

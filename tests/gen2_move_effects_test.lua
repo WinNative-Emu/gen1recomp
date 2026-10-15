@@ -33,57 +33,57 @@ local TYPES = {
 
 local MOVES = {
   TACKLE = { id = "TACKLE", name = "TACKLE", power = 35, type = "NORMAL",
-    accuracy = 95, pp = 35, effect = "EFFECT_NORMAL_HIT" },
+    accuracy = 95, accuracyRaw = 242, pp = 35, effect = "EFFECT_NORMAL_HIT" },
   CONFUSE_RAY = { id = "CONFUSE_RAY", name = "CONFUSE RAY", power = 0,
-    type = "GHOST", accuracy = 100, pp = 10, effect = "EFFECT_CONFUSE" },
+    type = "GHOST", accuracy = 100, accuracyRaw = 255, pp = 10, effect = "EFFECT_CONFUSE" },
   CURSE = { id = "CURSE", name = "CURSE", power = 0, type = "NORMAL",
-    accuracy = 0, pp = 10, effect = "EFFECT_CURSE" },
+    accuracy = 0, accuracyRaw = 255, pp = 10, effect = "EFFECT_CURSE" },
   REFLECT = { id = "REFLECT", name = "REFLECT", power = 0, type = "NORMAL",
-    accuracy = 0, pp = 20, effect = "EFFECT_REFLECT" },
+    accuracy = 0, accuracyRaw = 255, pp = 20, effect = "EFFECT_REFLECT" },
   LIGHT_SCREEN = { id = "LIGHT_SCREEN", name = "LIGHT SCREEN", power = 0,
-    type = "NORMAL", accuracy = 0, pp = 30, effect = "EFFECT_LIGHT_SCREEN" },
+    type = "NORMAL", accuracy = 0, accuracyRaw = 255, pp = 30, effect = "EFFECT_LIGHT_SCREEN" },
   LEECH_SEED = { id = "LEECH_SEED", name = "LEECH SEED", power = 0,
-    type = "GRASS", accuracy = 90, pp = 10, effect = "EFFECT_LEECH_SEED" },
+    type = "GRASS", accuracy = 90, accuracyRaw = 229, pp = 10, effect = "EFFECT_LEECH_SEED" },
   ROCK_SLIDE = { id = "ROCK_SLIDE", name = "ROCK SLIDE", power = 75,
-    type = "ROCK", accuracy = 90, pp = 10, effect = "EFFECT_FLINCH_HIT",
-    effectChance = 30 },
+    type = "ROCK", accuracy = 90, accuracyRaw = 229, pp = 10, effect = "EFFECT_FLINCH_HIT",
+    effectChance = 30, effectChanceRaw = 76 },
   WRAP = { id = "WRAP", name = "WRAP", power = 15, type = "NORMAL",
-    accuracy = 85, pp = 20, effect = "EFFECT_TRAP_TARGET" },
+    accuracy = 85, accuracyRaw = 216, pp = 20, effect = "EFFECT_TRAP_TARGET" },
   FIRE_SPIN = { id = "FIRE_SPIN", name = "FIRE SPIN", power = 15,
-    type = "FIRE", accuracy = 70, pp = 15, effect = "EFFECT_TRAP_TARGET" },
+    type = "FIRE", accuracy = 70, accuracyRaw = 178, pp = 15, effect = "EFFECT_TRAP_TARGET" },
   SOLARBEAM = { id = "SOLARBEAM", name = "SOLARBEAM", power = 120,
-    type = "GRASS", accuracy = 100, pp = 10, effect = "EFFECT_SOLARBEAM" },
+    type = "GRASS", accuracy = 100, accuracyRaw = 255, pp = 10, effect = "EFFECT_SOLARBEAM" },
   SUNNY_DAY = { id = "SUNNY_DAY", name = "SUNNY DAY", power = 0,
-    type = "FIRE", accuracy = 0, pp = 5, effect = "EFFECT_SUNNY_DAY" },
+    type = "FIRE", accuracy = 0, accuracyRaw = 255, pp = 5, effect = "EFFECT_SUNNY_DAY" },
   FALSE_SWIPE = { id = "FALSE_SWIPE", name = "FALSE SWIPE", power = 40,
-    type = "NORMAL", accuracy = 100, pp = 40, effect = "EFFECT_FALSE_SWIPE" },
+    type = "NORMAL", accuracy = 100, accuracyRaw = 255, pp = 40, effect = "EFFECT_FALSE_SWIPE" },
   EMBER = { id = "EMBER", name = "EMBER", power = 40, type = "FIRE",
-    accuracy = 100, pp = 25, effect = "EFFECT_BURN_HIT", effectChance = 100 },
+    accuracy = 100, accuracyRaw = 255, pp = 25, effect = "EFFECT_BURN_HIT", effectChance = 100, effectChanceRaw = 255 },
   -- data/moves/moves.asm: SPLASH is power 0, MAGNITUDE is stored at power 1
   -- because getmagnitude overwrites it, SPITE is power 0.
   SPLASH = { id = "SPLASH", name = "SPLASH", power = 0, type = "NORMAL",
-    accuracy = 100, pp = 40, effect = "EFFECT_SPLASH" },
+    accuracy = 100, accuracyRaw = 255, pp = 40, effect = "EFFECT_SPLASH" },
   MAGNITUDE = { id = "MAGNITUDE", name = "MAGNITUDE", power = 1,
-    type = "GROUND", accuracy = 100, pp = 30, effect = "EFFECT_MAGNITUDE" },
+    type = "GROUND", accuracy = 100, accuracyRaw = 255, pp = 30, effect = "EFFECT_MAGNITUDE" },
   SPITE = { id = "SPITE", name = "SPITE", power = 0, type = "GHOST",
-    accuracy = 100, pp = 10, effect = "EFFECT_SPITE" },
+    accuracy = 100, accuracyRaw = 255, pp = 10, effect = "EFFECT_SPITE" },
   DREAM_EATER = { id = "DREAM_EATER", name = "DREAM EATER", power = 100,
-    type = "PSYCHIC", accuracy = 100, pp = 15,
+    type = "PSYCHIC", accuracy = 100, accuracyRaw = 255, pp = 15,
     effect = "EFFECT_DREAM_EATER" },
   TRANSFORM = { id = "TRANSFORM", name = "TRANSFORM", power = 0,
-    type = "NORMAL", accuracy = 0, pp = 10, effect = "EFFECT_TRANSFORM" },
+    type = "NORMAL", accuracy = 0, accuracyRaw = 255, pp = 10, effect = "EFFECT_TRANSFORM" },
   SWORDS_DANCE = { id = "SWORDS_DANCE", name = "SWORDS DANCE", power = 0,
-    type = "NORMAL", accuracy = 0, pp = 30, effect = "EFFECT_ATTACK_UP_2" },
+    type = "NORMAL", accuracy = 0, accuracyRaw = 255, pp = 30, effect = "EFFECT_ATTACK_UP_2" },
   RECOVER = { id = "RECOVER", name = "RECOVER", power = 0, type = "NORMAL",
-    accuracy = 0, pp = 20, effect = "EFFECT_HEAL" },
+    accuracy = 0, accuracyRaw = 255, pp = 20, effect = "EFFECT_HEAL" },
   SAFEGUARD = { id = "SAFEGUARD", name = "SAFEGUARD", power = 0,
-    type = "NORMAL", accuracy = 0, pp = 25, effect = "EFFECT_SAFEGUARD" },
+    type = "NORMAL", accuracy = 0, accuracyRaw = 255, pp = 25, effect = "EFFECT_SAFEGUARD" },
   EARTHQUAKE = { id = "EARTHQUAKE", name = "EARTHQUAKE", power = 100,
-    type = "GROUND", accuracy = 100, pp = 10, effect = "EFFECT_EARTHQUAKE" },
+    type = "GROUND", accuracy = 100, accuracyRaw = 255, pp = 10, effect = "EFFECT_EARTHQUAKE" },
   -- STRUGGLE is in the move table like any other move and in nobody's move
   -- list, which is the whole of what makes Battle.STRUGGLE work.
   STRUGGLE = { id = "STRUGGLE", name = "STRUGGLE", power = 50, type = "NORMAL",
-    accuracy = 100, pp = 1, effect = "EFFECT_RECOIL_HIT" },
+    accuracy = 100, accuracyRaw = 255, pp = 1, effect = "EFFECT_RECOIL_HIT" },
 }
 
 -- pokecrystal/data/growth_rates.asm
@@ -145,7 +145,7 @@ local POKEMON = {
 local DATA = {
   pokemon = POKEMON,
   moves = MOVES,
-  type_chart = { types = TYPES, matchups = {} },
+  text = require("tests.gen2_battle_text_fixture")(), type_chart = { battleRules = require("tests.gen2_battle_rules_fixture")(), types = TYPES, matchups = {} },
   items = {},
 }
 
@@ -185,7 +185,7 @@ end
 -- ---- confusion: a volatile with a 2-5 turn count --------------------------
 do
   -- accuracy roll 0 hits; the count roll 1 -> and %11 = 1, plus 2 = 3 turns.
-  local battle, player, wild = newBattle({ random = rolls({ 0, 1 }, 0) })
+  local battle, player, wild = newBattle({ random = rolls({ 1 }, 0) })
   battle:useMove(player, wild, "CONFUSE_RAY")
   eq(wild.volatile.confuseCount, 3,
     "FinishConfusingTarget: `and %11` plus two turns")
@@ -206,7 +206,7 @@ do
   eq(wild.volatile.confuseCount, 2, "the count decrements first")
   check(wild.hp < before, "HitConfusion's typeless 40-power hit landed")
   check(findText(battle:takeEvents(),
-    "It hurt itself in its confusion!"), "with the cart's line")
+    "It hurt itself in\nits confusion!"), "with the cart's line")
 
   -- A byte at or above 128 lets the mon act.
   battle.random = rolls({ 200 }, 0)
@@ -220,7 +220,7 @@ do
 
   -- The status byte stayed free the whole time: a burn lands on a mon that
   -- is confused (the old status-slot storage shielded it).
-  battle.random = rolls({ 0, 1, 0, 0 }, 0)
+  battle.random = rolls({ 1, 0, 0 }, 0)
   battle:useMove(player, wild, "CONFUSE_RAY")
   battle:useMove(player, wild, "EMBER")
   eq(wild.status, "burn", "a confused mon can still be burned")
@@ -450,13 +450,13 @@ end
 do
   -- Reflect doubles Defense against a physical hit: with the seeded
   -- variation the halving is exact enough to compare two identical hits.
-  local battle, player, wild = newBattle({ random = rolls({}, 1) })
+  local battle, player, wild = newBattle({ random = rolls({}, 128) })
   local bare = wild.hp
   battle:useMove(player, wild, "TACKLE")
   local plainDamage = bare - wild.hp
   check(plainDamage > 2, "the unscreened tackle deals real damage")
 
-  battle, player, wild = newBattle({ random = rolls({}, 1) })
+  battle, player, wild = newBattle({ random = rolls({}, 128) })
   battle:useMove(wild, player, "REFLECT")
   eq(battle.screens.enemy.reflect, 5, "BattleCommand_Screen: five turns")
   check(findText(battle:takeEvents(), "Enemy MACHOP's DEFENSE rose!"),
@@ -475,19 +475,19 @@ do
     "one Reflect at a time per side")
 
   -- A special hit sails through Reflect (Light Screen's business).
-  battle, player, wild = newBattle({ random = rolls({}, 1) })
+  battle, player, wild = newBattle({ random = rolls({}, 128) })
   bare = wild.hp
   battle:useMove(player, wild, "EMBER")
   local emberPlain = bare - wild.hp
   wild.status = nil
-  battle, player, wild = newBattle({ random = rolls({}, 1) })
+  battle, player, wild = newBattle({ random = rolls({}, 128) })
   battle:useMove(wild, player, "REFLECT")
   screened = wild.hp
   battle:useMove(player, wild, "EMBER")
   eq(screened - wild.hp, emberPlain, "Reflect ignores special moves")
 
   -- HandleScreens: the count ticks each turn and the screen falls at zero.
-  battle, player, wild = newBattle({ random = rolls({}, 1) })
+  battle, player, wild = newBattle({ random = rolls({}, 128) })
   battle:useMove(wild, player, "LIGHT_SCREEN")
   eq(battle.screens.enemy.lightScreen, 5, "Light Screen is five turns too")
   for _ = 1, 4 do battle:tickScreens() end
@@ -495,7 +495,7 @@ do
   battle:takeEvents()
   battle:tickScreens()
   eq(battle.screens.enemy.lightScreen, nil, "the fifth drops it")
-  check(findText(battle:takeEvents(), "Enemy POKéMON's LIGHT SCREEN fell!"),
+  check(findText(battle:takeEvents(), "Enemy POKéMON's\nLIGHT SCREEN fell!"),
     "BattleText_MonsLightScreenFell")
 end
 
@@ -543,7 +543,7 @@ do
   eq(wild.volatile.flinched, true,
     "BattleCommand_FlinchTarget: the effect chance landed")
   eq(battle:canAct(wild), false, "the flinched mon loses its turn")
-  check(findText(battle:takeEvents(), "Enemy MACHOP flinched!"), "FlinchedText")
+  check(findText(battle:takeEvents(), "Enemy MACHOP\nflinched!"), "FlinchedText")
 
   -- A roll past the chance leaves no flinch.
   battle, player, wild = newBattle({
@@ -674,7 +674,7 @@ do
   -- TARGET used last.  `and %11` plus two is 2-5, clamped to what is left.
   local battle, player, wild = newBattle({
     playerMoves = { { id = "SPITE", pp = 10, maxPp = 10 } },
-    random = rolls({ 0, 3 }, 0) })
+    random = rolls({ 3 }, 0) })
   battle:volatile(wild).lastMove = "TACKLE"
   battle:useMove(player, wild, "SPITE")
   eq(wild.moves[1].pp, 30, "a roll of 3 takes five PP")
@@ -684,7 +684,7 @@ do
   -- The clamp: never more than the slot still holds.
   battle, player, wild = newBattle({
     playerMoves = { { id = "SPITE", pp = 10, maxPp = 10 } },
-    random = rolls({ 0, 3 }, 0) })
+    random = rolls({ 3 }, 0) })
   battle:volatile(wild).lastMove = "TACKLE"
   wild.moves[1].pp = 3
   battle:useMove(player, wild, "SPITE")

@@ -30,11 +30,11 @@ local TYPES = {
 
 local MOVES = {
   TACKLE = { id = "TACKLE", name = "TACKLE", power = 35, type = "NORMAL",
-    accuracy = 100, pp = 35, effect = "EFFECT_NORMAL_HIT" },
+    accuracy = 100, accuracyRaw = 255, pp = 35, effect = "EFFECT_NORMAL_HIT" },
   ROCK_THROW = { id = "ROCK_THROW", name = "ROCK THROW", power = 50,
-    type = "ROCK", accuracy = 100, pp = 15, effect = "EFFECT_NORMAL_HIT" },
+    type = "ROCK", accuracy = 100, accuracyRaw = 255, pp = 15, effect = "EFFECT_NORMAL_HIT" },
   GUST = { id = "GUST", name = "GUST", power = 40, type = "FLYING",
-    accuracy = 100, pp = 35, effect = "EFFECT_NORMAL_HIT" },
+    accuracy = 100, accuracyRaw = 255, pp = 35, effect = "EFFECT_NORMAL_HIT" },
 }
 
 local GROWTH = {
@@ -65,11 +65,17 @@ local POKEMON = {
 local DATA = {
   pokemon = POKEMON,
   moves = MOVES,
-  type_chart = { types = TYPES, matchups = {} },
+  text = require("tests.gen2_battle_text_fixture")(), type_chart = { battleRules = require("tests.gen2_battle_rules_fixture")(), types = TYPES, matchups = {} },
   items = {},
 }
 
 local perfect = { attack = 15, defense = 15, speed = 15, special = 15 }
+
+local function hitStat(battle, mon, key)
+  local value = mon.stats[key]
+  if battle:battleBadgeBoosts(mon)[key] then return Battle.boostStat(value) end
+  return value
+end
 perfect.hp = Mon.hpDV(perfect)
 
 local function newBattle(badges, kantoBadges)
@@ -100,39 +106,39 @@ end
 do
   local battle, player = newBattle({})
   local base = player.stats.attack
-  eq(battle:battleStat(player, "attack"), base,
+  eq(hitStat(battle, player, "attack"), base,
     "no badge, no boost")
 
   battle, player = newBattle({ ZEPHYR = true })
-  eq(battle:battleStat(player, "attack"), Battle.boostStat(base),
+  eq(hitStat(battle, player, "attack"), Battle.boostStat(base),
     "ZEPHYRBADGE boosts Attack by 1/8")
-  eq(battle:battleStat(player, "defense"), player.stats.defense,
+  eq(hitStat(battle, player, "defense"), player.stats.defense,
     "and only Attack")
 
   battle, player = newBattle({ MINERAL = true })
-  eq(battle:battleStat(player, "defense"),
+  eq(hitStat(battle, player, "defense"),
     Battle.boostStat(player.stats.defense),
     "MINERALBADGE lands on Defense (the PlainBadge bit swap)")
 
   battle, player = newBattle({ PLAIN = true })
-  eq(battle:battleStat(player, "speed"),
+  eq(hitStat(battle, player, "speed"),
     Battle.boostStat(player.stats.speed),
     "PLAINBADGE lands on Speed")
 
   battle, player = newBattle({ GLACIER = true })
-  eq(battle:battleStat(player, "specialAttack"),
+  eq(hitStat(battle, player, "specialAttack"),
     Battle.boostStat(player.stats.specialAttack),
     "GLACIERBADGE boosts Special Attack")
 
   -- The ENEMY never gets badge boosts: BadgeStatBoosts runs against
   -- wBattleMon only.
   local wild = battle.enemy
-  eq(battle:battleStat(wild, "attack"), wild.stats.attack,
+  eq(hitStat(battle, wild, "attack"), wild.stats.attack,
     "the enemy's stats are never badge boosted")
 
   -- Positional keying, the same fallback FieldMoves.hasBadge accepts.
   battle, player = newBattle({ true })
-  eq(battle:battleStat(player, "attack"), Battle.boostStat(base),
+  eq(hitStat(battle, player, "attack"), Battle.boostStat(base),
     "badges keyed by bit position read the same")
 end
 
@@ -160,11 +166,11 @@ do
   local want = Battle.glacierBoostsSpDef(spAtk)
     and Battle.boostStat(player.stats.specialDefense)
     or player.stats.specialDefense
-  eq(battle:battleStat(player, "specialDefense"), want,
-    "battleStat routes SpDef through the buggy re-check")
+  eq(hitStat(battle, player, "specialDefense"), want,
+    "the hit stat routes SpDef through the buggy re-check")
 
   battle, player = newBattle({})
-  eq(battle:battleStat(player, "specialDefense"),
+  eq(hitStat(battle, player, "specialDefense"),
     player.stats.specialDefense,
     "no Glacier, no SpDef boost ever (the srl lands on a zero bit)")
 end
@@ -186,7 +192,7 @@ do
     attacker = { attack = 50, types = {}, stages = {} },
     defender = { defense = 40, types = {}, stages = {} },
     types = TYPES, matchups = {},
-    variation = 100,
+    variation = 255,
   }
   local plain = Damage.calc(args)
   eq(plain, 8, "the unboosted pipe leaves 8")

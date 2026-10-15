@@ -14,14 +14,14 @@ local TYPES = {
 
 local MOVES = {
   TACKLE = { id = "TACKLE", name = "TACKLE", power = 35, type = "NORMAL",
-    accuracy = 100, pp = 35, effect = "EFFECT_NORMAL_HIT" },
+    accuracy = 100, accuracyRaw = 255, pp = 35, effect = "EFFECT_NORMAL_HIT" },
   SAFEGUARD = { id = "SAFEGUARD", name = "SAFEGUARD", power = 0,
-    type = "NORMAL", accuracy = 100, pp = 25, effect = "EFFECT_SAFEGUARD" },
+    type = "NORMAL", accuracy = 100, accuracyRaw = 255, pp = 25, effect = "EFFECT_SAFEGUARD" },
   THUNDER_WAVE = { id = "THUNDER_WAVE", name = "THUNDER WAVE", power = 0,
-    type = "ELECTRIC", accuracy = 100, pp = 20, effect = "EFFECT_PARALYZE" },
+    type = "ELECTRIC", accuracy = 100, accuracyRaw = 255, pp = 20, effect = "EFFECT_PARALYZE" },
   SACRED_FIRE = { id = "SACRED_FIRE", name = "SACRED FIRE", power = 100,
-    type = "FIRE", accuracy = 95, pp = 5, effect = "EFFECT_SACRED_FIRE",
-    effectChance = 50 },
+    type = "FIRE", accuracy = 95, accuracyRaw = 242, pp = 5, effect = "EFFECT_SACRED_FIRE",
+    effectChance = 50, effectChanceRaw = 127 },
 }
 
 local POKEMON = {
@@ -38,7 +38,7 @@ local POKEMON = {
 }
 
 local DATA = { pokemon = POKEMON, moves = MOVES,
-  type_chart = { types = TYPES, matchups = {} }, items = {} }
+  text = require("tests.gen2_battle_text_fixture")(), type_chart = { battleRules = require("tests.gen2_battle_rules_fixture")(), types = TYPES, matchups = {} }, items = {} }
 
 local perfect = { attack = 15, defense = 15, speed = 15, special = 15 }
 perfect.hp = Mon.hpDV(perfect)

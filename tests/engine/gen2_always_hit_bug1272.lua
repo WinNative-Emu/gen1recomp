@@ -14,11 +14,11 @@ local TYPES = {
 
 local MOVES = {
   TACKLE = { id = "TACKLE", name = "TACKLE", power = 35, type = "NORMAL",
-    accuracy = 100, pp = 35, effect = "EFFECT_NORMAL_HIT" },
+    accuracy = 100, accuracyRaw = 255, pp = 35, effect = "EFFECT_NORMAL_HIT" },
   SWIFT = { id = "SWIFT", name = "SWIFT", power = 60, type = "NORMAL",
-    accuracy = 100, pp = 20, effect = "EFFECT_ALWAYS_HIT" },
+    accuracy = 100, accuracyRaw = 255, pp = 20, effect = "EFFECT_ALWAYS_HIT" },
   VITAL_THROW = { id = "VITAL_THROW", name = "VITAL THROW", power = 70,
-    type = "FIGHTING", accuracy = 100, pp = 10,
+    type = "FIGHTING", accuracy = 100, accuracyRaw = 255, pp = 10,
     effect = "EFFECT_ALWAYS_HIT" },
 }
 
@@ -40,7 +40,7 @@ local POKEMON = {
 local DATA = {
   pokemon = POKEMON,
   moves = MOVES,
-  type_chart = { types = TYPES, matchups = {} },
+  text = require("tests.gen2_battle_text_fixture")(), type_chart = { battleRules = require("tests.gen2_battle_rules_fixture")(), types = TYPES, matchups = {} },
   items = {
     BRIGHTPOWDER = { id = "BRIGHTPOWDER", name = "BRIGHTPOWDER",
       heldEffect = "HELD_BRIGHTPOWDER", heldParameter = 51 },
@@ -51,7 +51,7 @@ local perfect = { attack = 15, defense = 15, speed = 15, special = 15 }
 perfect.hp = Mon.hpDV(perfect)
 
 local function alwaysHighRoll(n)
-  return 99 % math.max(1, n or 1)
+  return math.max(1, n or 1) - 1
 end
 
 local function newBattle()

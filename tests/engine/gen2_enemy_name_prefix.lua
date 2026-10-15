@@ -26,19 +26,19 @@ local TYPES = {
 
 local MOVES = {
   TACKLE = { id = "TACKLE", name = "TACKLE", power = 35, type = "NORMAL",
-    accuracy = 95, pp = 35, effect = "EFFECT_NORMAL_HIT" },
+    accuracy = 95, accuracyRaw = 242, pp = 35, effect = "EFFECT_NORMAL_HIT" },
   GROWL = { id = "GROWL", name = "GROWL", power = 0, type = "NORMAL",
-    accuracy = 100, pp = 40, effect = "EFFECT_ATTACK_DOWN" },
+    accuracy = 100, accuracyRaw = 255, pp = 40, effect = "EFFECT_ATTACK_DOWN" },
   CONFUSE_RAY = { id = "CONFUSE_RAY", name = "CONFUSE RAY", power = 0,
-    type = "GHOST", accuracy = 100, pp = 10, effect = "EFFECT_CONFUSE" },
+    type = "GHOST", accuracy = 100, accuracyRaw = 255, pp = 10, effect = "EFFECT_CONFUSE" },
   EMBER = { id = "EMBER", name = "EMBER", power = 40, type = "FIRE",
-    accuracy = 100, pp = 25, effect = "EFFECT_BURN_HIT", effectChance = 100 },
+    accuracy = 100, accuracyRaw = 255, pp = 25, effect = "EFFECT_BURN_HIT", effectChance = 100, effectChanceRaw = 255 },
   WRAP = { id = "WRAP", name = "WRAP", power = 15, type = "NORMAL",
-    accuracy = 85, pp = 20, effect = "EFFECT_TRAP_TARGET" },
+    accuracy = 85, accuracyRaw = 216, pp = 20, effect = "EFFECT_TRAP_TARGET" },
   THIEF = { id = "THIEF", name = "THIEF", power = 40, type = "DARK",
-    accuracy = 100, pp = 10, effect = "EFFECT_THIEF", effectChance = 100 },
+    accuracy = 100, accuracyRaw = 255, pp = 10, effect = "EFFECT_THIEF", effectChance = 100, effectChanceRaw = 255 },
   STRUGGLE = { id = "STRUGGLE", name = "STRUGGLE", power = 50, type = "NORMAL",
-    accuracy = 100, pp = 1, effect = "EFFECT_RECOIL_HIT" },
+    accuracy = 100, accuracyRaw = 255, pp = 1, effect = "EFFECT_RECOIL_HIT" },
 }
 
 local GROWTH = {
@@ -65,7 +65,7 @@ local DATA = {
     GEODUDE = species("GEODUDE", 74),
   },
   moves = MOVES,
-  type_chart = { types = TYPES, matchups = {} },
+  text = require("tests.gen2_battle_text_fixture")(), type_chart = { battleRules = require("tests.gen2_battle_rules_fixture")(), types = TYPES, matchups = {} },
   items = {
     METAL_COAT = { id = "METAL_COAT", name = "METAL COAT", pocket = "ITEM" },
     BERRY = { id = "BERRY", name = "BERRY", pocket = "ITEM",
@@ -182,7 +182,7 @@ do
   battle:tickStatus(player)
   T.check(has(battle:takeEvents(), "MACHOP is hurt by its burn!"), "player's residual line is bare")
   T.eq(battle:canAct(wild, "TACKLE") ~= nil, true, "canAct runs")
-  T.check(has(battle:takeEvents(), "Enemy PIDGEY is confused!"), "IsConfusedText (battle.asm:398)")
+  T.check(has(battle:takeEvents(), "Enemy PIDGEY\nis confused!"), "IsConfusedText (battle.asm:398)")
 end
 
 -- ---- partial trap: WrappedByText / UsersHurtByStringBuffer1 --------------
@@ -204,7 +204,7 @@ do
   local evs = battle:takeEvents()
   local ok = false
   for _, t in ipairs(texts(evs)) do
-    if t:find("^Enemy PIDGEY ") then ok = true end
+    if t:find("^Enemy PIDGEY%s") then ok = true end
   end
   T.check(ok, "the foe's berry line carries the prefix")
 end

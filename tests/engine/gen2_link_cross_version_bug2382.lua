@@ -51,9 +51,9 @@ local function goldData()
     },
     moves = {
       TACKLE = { id = "TACKLE", name = "TACKLE", power = 35, type = "NORMAL",
-        accuracy = 100, pp = 35, effect = "EFFECT_NORMAL_HIT" },
+        accuracy = 100, accuracyRaw = 255, pp = 35, effect = "EFFECT_NORMAL_HIT" },
     },
-    type_chart = { generation = 2, types = deepCopy(TYPES), matchups = {} },
+    text = require("tests.gen2_battle_text_fixture")(), type_chart = { battleRules = require("tests.gen2_battle_rules_fixture")(), generation = 2, types = deepCopy(TYPES), matchups = {} },
     gen2HeldItems = {
       ITEM_46 = { heldEffect = "HELD_NONE", heldParameter = 0 },
       ITEM_73 = { heldEffect = "HELD_NONE", heldParameter = 0 },

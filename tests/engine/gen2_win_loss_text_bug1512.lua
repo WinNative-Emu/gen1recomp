@@ -35,7 +35,7 @@ local POKEMON = {
 local DATA = {
   pokemon = POKEMON,
   moves = MOVES,
-  type_chart = { types = { NORMAL = { id = "NORMAL", index = 0,
+  type_chart = { battleRules = require("tests.gen2_battle_rules_fixture")(), types = { NORMAL = { id = "NORMAL", index = 0,
     category = "physical" } }, matchups = {} },
   items = {},
 }

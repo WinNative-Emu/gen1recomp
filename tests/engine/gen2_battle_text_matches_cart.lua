@@ -44,13 +44,13 @@ local MATCHUPS = {
 
 local MOVES = {
   TACKLE = { id = "TACKLE", name = "TACKLE", power = 35, type = "NORMAL",
-    accuracy = 100, pp = 35, effect = "EFFECT_NORMAL_HIT" },
+    accuracy = 100, accuracyRaw = 255, pp = 35, effect = "EFFECT_NORMAL_HIT" },
   WATER_GUN = { id = "WATER_GUN", name = "WATER GUN", power = 40,
-    type = "WATER", accuracy = 100, pp = 25, effect = "EFFECT_NORMAL_HIT" },
+    type = "WATER", accuracy = 100, accuracyRaw = 255, pp = 25, effect = "EFFECT_NORMAL_HIT" },
   DOUBLESLAP = { id = "DOUBLESLAP", name = "DOUBLESLAP", power = 15,
-    type = "NORMAL", accuracy = 100, pp = 10, effect = "EFFECT_MULTI_HIT" },
+    type = "NORMAL", accuracy = 100, accuracyRaw = 255, pp = 10, effect = "EFFECT_MULTI_HIT" },
   PERISH_SONG = { id = "PERISH_SONG", name = "PERISH SONG", power = 0,
-    type = "NORMAL", accuracy = 100, pp = 5, effect = "EFFECT_PERISH_SONG" },
+    type = "NORMAL", accuracy = 100, accuracyRaw = 255, pp = 5, effect = "EFFECT_PERISH_SONG" },
 }
 
 local GROWTH = {
@@ -74,7 +74,7 @@ local POKEMON = {
 }
 
 local DATA = { pokemon = POKEMON, moves = MOVES,
-  type_chart = { types = TYPES, matchups = MATCHUPS }, items = {} }
+  text = require("tests.gen2_battle_text_fixture")(), type_chart = { battleRules = require("tests.gen2_battle_rules_fixture")(), types = TYPES, matchups = MATCHUPS }, items = {} }
 
 local perfect = { attack = 15, defense = 15, speed = 15, special = 15 }
 perfect.hp = Mon.hpDV(perfect)

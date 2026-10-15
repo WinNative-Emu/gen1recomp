@@ -75,15 +75,15 @@ local TYPES = {
 }
 local MOVES = {
   TACKLE = { id = "TACKLE", name = "TACKLE", power = 35, type = "NORMAL",
-    accuracy = 95, pp = 35, effect = "EFFECT_NORMAL_HIT" },
+    accuracy = 95, accuracyRaw = 242, pp = 35, effect = "EFFECT_NORMAL_HIT" },
   GROWL = { id = "GROWL", name = "GROWL", power = 0, type = "NORMAL",
-    accuracy = 100, pp = 40, effect = "EFFECT_ATTACK_DOWN" },
+    accuracy = 100, accuracyRaw = 255, pp = 40, effect = "EFFECT_ATTACK_DOWN" },
   CURSE = { id = "CURSE", name = "CURSE", power = 0, type = "NORMAL",
-    accuracy = 0, pp = 10, effect = "EFFECT_CURSE" },
+    accuracy = 0, accuracyRaw = 255, pp = 10, effect = "EFFECT_CURSE" },
   SPLASH = { id = "SPLASH", name = "SPLASH", power = 0, type = "NORMAL",
-    accuracy = 100, pp = 40, effect = "EFFECT_SPLASH" },
+    accuracy = 100, accuracyRaw = 255, pp = 40, effect = "EFFECT_SPLASH" },
   SWORDS_DANCE = { id = "SWORDS_DANCE", name = "SWORDS DANCE", power = 0,
-    type = "NORMAL", accuracy = 0, pp = 30, effect = "EFFECT_ATTACK_UP_2" },
+    type = "NORMAL", accuracy = 0, accuracyRaw = 255, pp = 30, effect = "EFFECT_ATTACK_UP_2" },
 }
 local POKEMON = {
   growthRates = { GROWTH_MEDIUM_FAST = { numerator = 1, denominator = 1,
@@ -98,7 +98,7 @@ local POKEMON = {
   },
 }
 local DATA = { pokemon = POKEMON, moves = MOVES,
-  type_chart = { types = TYPES, matchups = {} }, items = {} }
+  text = require("tests.gen2_battle_text_fixture")(), type_chart = { battleRules = require("tests.gen2_battle_rules_fixture")(), types = TYPES, matchups = {} }, items = {} }
 local dvs = { attack = 15, defense = 15, speed = 15, special = 15 }
 dvs.hp = Mon.hpDV(dvs)
 

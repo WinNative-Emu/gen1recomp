@@ -26,7 +26,9 @@ local TYPES = {
 
 local MOVES = {
   TACKLE = { id = "TACKLE", name = "TACKLE", power = 35, type = "NORMAL",
-    accuracy = 95, pp = 35, effect = "EFFECT_NORMAL_HIT" },
+    accuracy = 95, accuracyRaw = 242, pp = 35, effect = "EFFECT_NORMAL_HIT" },
+  SWIFT = { id = "SWIFT", name = "SWIFT", power = 60, type = "NORMAL",
+    accuracy = 100, accuracyRaw = 255, pp = 20, effect = "EFFECT_ALWAYS_HIT" },
 }
 
 local GROWTH = {
@@ -74,7 +76,7 @@ local ITEMS = {
 local DATA = {
   pokemon = POKEMON,
   moves = MOVES,
-  type_chart = { types = TYPES, matchups = {} },
+  text = require("tests.gen2_battle_text_fixture")(), type_chart = { battleRules = require("tests.gen2_battle_rules_fixture")(), types = TYPES, matchups = {} },
   items = ITEMS,
 }
 
@@ -177,31 +179,31 @@ do
   -- Rolls in useMove order: accuracy, crit, variation, then the flinch
   -- byte.  A fill of 1 hits, never crits, and lands 1 < 30 on the flinch.
   local battle, player, wild = newBattle({ playerItem = "KINGS_ROCK",
-    random = rolls({}, 1) })
+    random = rolls({ 1, 128, 1, 1 }, 1) })
   battle:useMove(player, wild, "TACKLE")
   eq(battle:volatile(wild).flinched, true,
     "a damaging hit with the rock held sets the flinch, silently")
   eq(battle:canAct(wild), false, "the target's turn is eaten")
-  check(findText(battle:takeEvents(), "Enemy PIDGEY flinched!"),
+  check(findText(battle:takeEvents(), "Enemy PIDGEY\nflinched!"),
     "with FlinchedText at the moment it tries to move")
   eq(battle:volatile(wild).flinched, nil, "and the flag is consumed")
 
   -- Roll at the parameter: no flinch.
   battle, player, wild = newBattle({ playerItem = "KINGS_ROCK",
-    random = rolls({ 1, 1, 1, 30 }) })
+    random = rolls({ 1, 128, 1, 30 }) })
   battle:useMove(player, wild, "TACKLE")
   eq(battle:volatile(wild).flinched, nil, "a roll at 30 does nothing")
 
   -- A Substitute blocks it (CheckSubstituteOpp).
   battle, player, wild = newBattle({ playerItem = "KINGS_ROCK",
-    random = rolls({}, 1) })
+    random = rolls({ 1, 128, 1, 1 }, 1) })
   battle:volatile(wild).substitute = 20
   battle:useMove(player, wild, "TACKLE")
   eq(battle:volatile(wild).flinched, nil,
     "the substitute soaks the hit and the rock with it")
 
   -- Bare hands: nothing.
-  battle, player, wild = newBattle({ random = rolls({}, 1) })
+  battle, player, wild = newBattle({ random = rolls({ 1, 128, 1, 1 }, 1) })
   battle:useMove(player, wild, "TACKLE")
   eq(battle:volatile(wild).flinched, nil, "no rock, no flinch")
 end
@@ -209,23 +211,31 @@ end
 -- ---- BrightPowder ---------------------------------------------------------
 do
   local battle, player, wild = newBattle({ wildItem = "BRIGHTPOWDER" })
-  -- 20/256 scaled into the percent domain: floor(20 * 100 / 256) = 7.
-  eq(battle:moveAccuracy(95, wild), 88,
-    "the powder takes 7 points off a 95 accuracy move")
-  eq(battle:moveAccuracy(95, player), 95,
+  local tackle = battle:moveDef("TACKLE")
+  local raw = tackle.accuracyRaw
+  battle.random = function() return raw - 21 end
+  eq(battle:accuracyRoll(tackle, player, wild), true,
+    "the powder leaves raw - 20 to roll under")
+  battle.random = function() return raw - 20 end
+  eq(battle:accuracyRoll(tackle, player, wild), false,
+    "the powder takes 20 off the accuracy byte")
+  eq(battle:accuracyRoll(tackle, wild, player), true,
     "a bare defender changes nothing")
-  eq(battle:moveAccuracy(nil, wild), nil,
-    "a sure-hit move (accuracy nil) stays sure")
+  player.moves = { { id = "SWIFT", pp = 20, maxPp = 20 } }
+  battle.random = function(n) return (n or 256) - 1 end
+  local swiftBefore = wild.hp
+  battle:useMove(player, wild, "SWIFT")
+  check(wild.hp < swiftBefore, "a sure-hit move stays sure against the powder")
 
   -- Through the real roll: 90 hits a bare PIDGEY (90 < 95) and misses a
   -- powdered one (90 >= 88).
-  battle, player, wild = newBattle({ random = rolls({ 90 }, 1) })
+  battle, player, wild = newBattle({ random = rolls({ 230 }, 1) })
   local before = wild.hp
   battle:useMove(player, wild, "TACKLE")
   check(wild.hp < before, "roll 90 connects without the powder")
 
   battle, player, wild = newBattle({ wildItem = "BRIGHTPOWDER",
-    random = rolls({ 90 }, 1) })
+    random = rolls({ 230 }, 1) })
   before = wild.hp
   battle:useMove(player, wild, "TACKLE")
   eq(wild.hp, before, "and misses against it")

@@ -332,7 +332,8 @@ check("a healthy mon reads OK at hlcoord 6,13", at(pink, 6, 13), "OK")
 -- 17 up onto row 16 -- so the second type ends one row under the first.
 check("type 1 at hlcoord 1,15", at(pink, 1, 15), "FIRE")
 check("a single-typed mon has no second type", at(pink, 1, 16), nil)
-DATA.type_chart = { types = { FIRE = { name = "FEU" } } }
+DATA.text = require("tests.gen2_battle_text_fixture")()
+DATA.type_chart = { battleRules = require("tests.gen2_battle_rules_fixture")(), types = { FIRE = { name = "FEU" } } }
 check("the Gen 2 summary uses the type registry's display name",
   at(screen:pinkPlacements(), 1, 15), "FEU")
 DATA.type_chart = nil

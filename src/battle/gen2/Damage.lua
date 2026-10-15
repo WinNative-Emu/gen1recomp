@@ -1,26 +1,3 @@
--- Gen 2 damage.
---
--- Ported from engine/battle/effect_commands.asm, in the order the cart's move
--- sequence runs them: damagestats -> damagecalc -> stab -> damagevariation.
---
--- What differs from Gen 1 (src/battle/Damage.lua), and why this is its own
--- module rather than a flag on that one:
---   * Special is split into Special Attack and Special Defense, so a special
---     move reads the attacker's SpA against the defender's SpD instead of both
---     sides' single `special`.
---   * Critical hits are a *chance ladder* (data/battle/critical_hit_chances.asm
---     1/15, 1/8, 1/4, 1/3, 1/2) indexed by a "critical level" that Focus
---     Energy, a high-crit move, Scope Lens, and the Lucky Punch / Stick raise.
---     Gen 1 instead derived the chance from base Speed.
---   * A critical hit is a flat x2 and, unlike Gen 1, ignores the attacker's
---     *negative* stat stages rather than all stages.
---   * Type-boost held items (Charcoal, Mystic Water, ...) multiply before the
---     crit, and Steel and Dark exist in the matchup table.
---
--- Whether a move is physical or special is still decided by its *type*, not
--- per-move as in Gen 4: type ids below FIRE are physical.  type_chart.lua's
--- records carry that as `category`.
-
 local GameVersion = require("src.core.GameVersion")
 
 local Damage = {}
@@ -28,12 +5,9 @@ local Damage = {}
 -- ../pokecrystal/constants/battle_constants.asm:78
 Damage.MAX_STAT_VALUE = 999
 
--- data/battle/critical_hit_chances.asm, as "1 in N".
-Damage.CRITICAL_CHANCES = { [0] = 15, 8, 4, 3, 2, 2, 2 }
-
--- Gen 2's damage spread: 85% to 100% inclusive.
-Damage.MIN_VARIATION = 85
-Damage.MAX_VARIATION = 100
+-- engine/battle/effect_commands.asm:1523
+Damage.MIN_VARIATION = 217
+Damage.MAX_VARIATION = 255
 
 -- The cart caps a single hit at 999 (DAMAGE_CAP + MIN_DAMAGE in
 -- BattleCommand_DamageCalc).
@@ -45,8 +19,7 @@ Damage.MAX_DAMAGE = 999
 -- a resisted hit from flooring to zero once the type matchup halves it.
 Damage.MIN_DAMAGE = 2
 
--- Stat stage multipliers (numerator, denominator), -6..+6.  Same table as
--- Gen 1; a critical hit skips only the negative half for the attacker.
+-- data/battle/stat_multipliers.asm:1
 local STAGE = {
   [-6] = { 25, 100 }, [-5] = { 28, 100 }, [-4] = { 33, 100 },
   [-3] = { 40, 100 }, [-2] = { 50, 100 }, [-1] = { 66, 100 },
@@ -97,37 +70,32 @@ function Damage.isPhysical(moveType, types)
   return PHYSICAL[moveType] == true
 end
 
--- The 1-in-N chance for a critical level.
-function Damage.criticalChance(level)
-  local capped = math.max(0, math.min(6, level or 0))
-  return Damage.CRITICAL_CHANCES[capped]
-end
-
--- BattleCommand_Critical, as a level rather than a roll:
---   +1 Focus Energy, +2 a high-crit move, +1 Scope Lens,
---   +2 Lucky Punch on Chansey / Stick on Farfetch'd.
+-- engine/battle/effect_commands.asm:1120
 function Damage.criticalLevel(opts)
+  -- engine/battle/effect_commands.asm:1142
+  if opts.speciesItemBonus then return 2 end
   local level = 0
   if opts.focusEnergy then level = level + 1 end
   if opts.highCritMove then level = level + 2 end
   if opts.scopeLens then level = level + 1 end
-  if opts.speciesItemBonus then level = level + 2 end
   return math.min(6, level)
 end
 
 -- Roll a critical hit.  `random(n)` must return 0..n-1 (the cart compares a
 -- BattleRandom byte against the chance), and defaults to love/math random.
-function Damage.rollCritical(criticalLevel, random)
-  local chance = Damage.criticalChance(criticalLevel)
+function Damage.rollCritical(criticalLevel, random, criticalChances)
+  local level = math.max(0, math.min(6, criticalLevel or 0))
+  local chance = assert(criticalChances and criticalChances[level],
+    "missing cached critical hit threshold")
   local roll
   if random then
-    roll = random(chance)
+    roll = random(256)
   elseif love and love.math then
-    roll = love.math.random(chance) - 1
+    roll = love.math.random(256) - 1
   else
-    roll = math.random(chance) - 1
+    roll = math.random(256) - 1
   end
-  return roll == 0
+  return roll < chance
 end
 
 -- The x10 type multiplier of a move against a defender, applying each matchup
@@ -186,7 +154,6 @@ end
 --                             applied ahead of the badge boost and STAB
 --   badgeTypeBoost         -- DoBadgeTypeBoosts: the player owns the badge
 --                             matching the move's type, +1/8 before STAB
---   variation              -- 85..100; omit to roll
 --   random(n)              -- 0..n-1, for the variation roll
 --   screen                 -- Reflect/Light Screen active on the defender
 --   defenseHalved          -- EFFECT_SELFDESTRUCT's srl c
@@ -211,27 +178,45 @@ function Damage.calc(opts)
   local stageD = physical and (stagesD.defense or 0)
     or (stagesD.specialDefense or 0)
 
-  -- A critical hit ignores stat changes that would *lower* the damage: the
-  -- attacker's negative stages and the defender's positive ones.
-  if opts.critical then
-    if stageA < 0 then stageA = 0 end
-    if stageD > 0 then stageD = 0 end
+  -- engine/battle/effect_commands.asm:2660
+  local bypass = opts.critical and stageA <= stageD
+  local attack, defense = rawAttack, rawDefense
+  if not bypass then
+    attack = Damage.applyStage(rawAttack, stageA)
+    defense = Damage.applyStage(rawDefense, stageD)
+    -- engine/battle/effect_commands.asm:4778
+    local attackKey = physical and "attack" or "specialAttack"
+    local defenseKey = physical and "defense" or "specialDefense"
+    if attacker.badgeStatBoosts and attacker.badgeStatBoosts[attackKey] then
+      attack = math.min(Damage.MAX_STAT_VALUE, attack + math.floor(attack / 8))
+    end
+    if defender.badgeStatBoosts and defender.badgeStatBoosts[defenseKey] then
+      defense = math.min(Damage.MAX_STAT_VALUE, defense + math.floor(defense / 8))
+    end
+    local penalty = attacker.attackPenalty
+    if physical and penalty then
+      attack = math.max(1, math.floor(attack * penalty[1] / penalty[2]))
+    end
+    if opts.screen then defense = defense * 2 end
   end
 
-  local attack = Damage.applyStage(rawAttack, stageA)
-  local defense = Damage.applyStage(rawDefense, stageD)
-
-  -- Reflect and Light Screen double the matching defence, and are the one
-  -- multiplier a critical hit also ignores.
-  if opts.screen and not opts.critical then
-    defense = defense * 2
-  end
+  -- engine/battle/effect_commands.asm:2706
+  if opts.attackDoubled then attack = (attack * 2) % 65536 end
 
   -- PlayerAttackDamage hands DamageCalc one-byte stats
   -- (../pokecrystal/engine/battle/effect_commands.asm:2604).
   local fixed = opts.reflectOverflowFixed
   if fixed == nil then fixed = GameVersion.fixes().reflectOverflow == true end
   attack, defense = Damage.truncateStats(attack, defense, fixed)
+
+  -- engine/battle/effect_commands.asm:2488
+  if opts.metalPowder then
+    defense = defense + math.floor(defense / 2)
+    if defense > 255 then
+      attack = math.max(1, math.floor(attack / 2))
+      defense = math.floor(defense / 2)
+    end
+  end
 
   -- BattleCommand_DamageCalc (effect_commands.asm:2905-2913): Selfdestruct and
   -- Explosion halve the defence, never below 1.
@@ -255,6 +240,11 @@ function Damage.calc(opts)
   damage = math.min(damage, Damage.MAX_DAMAGE - Damage.MIN_DAMAGE)
     + Damage.MIN_DAMAGE
 
+  -- engine/battle/move_effects/triple_kick.asm:1
+  if opts.damageMultiplier then
+    damage = math.min(65535, math.floor(damage * opts.damageMultiplier))
+  end
+
   -- DoWeatherModifiers (engine/battle/misc.asm:102-140), farcalled by
   -- BattleCommand_Stab as its very FIRST act (effect_commands.asm:1254): it
   -- sits ahead of the badge boost, the STAB x1.5, the type rows and
@@ -262,21 +252,22 @@ function Damage.calc(opts)
   -- values are tenths (weather_modifiers.asm: MORE_EFFECTIVE 15,
   -- NOT_VERY_EFFECTIVE 05), and .ApplyModifier's zero-quotient arm forces the
   -- result back to 1, so a weather-halved hit never falls to nothing.
-  if opts.weatherPercent and opts.weatherPercent ~= 10 then
+  if not opts.skipStab and opts.weatherPercent and opts.weatherPercent ~= 10 then
     damage = math.max(1, math.floor(damage * opts.weatherPercent / 10))
   end
 
   -- DoBadgeTypeBoosts (engine/battle/misc.asm:146), farcalled from
   -- BattleCommand_Stab ahead of the STAB multiply: a matching owned badge
   -- adds an eighth of the running damage, at least 1, on the player's turn.
-  if opts.badgeTypeBoost then
+  if not opts.skipStab and opts.badgeTypeBoost then
     damage = damage + math.max(1, math.floor(damage / 8))
   end
 
   -- STAB, then each type row.  BattleCommand_Stab does STAB first, so a
   -- resisted same-type move floors after the x1.5.
   local stab = false
-  for _, attackerType in ipairs(attacker.types or {}) do
+  -- engine/battle/effect_commands.asm:1216
+  for _, attackerType in ipairs(opts.skipStab and {} or attacker.types or {}) do
     if attackerType == opts.moveType then stab = true break end
   end
   if stab then damage = math.floor(damage * 15 / 10) end
@@ -285,9 +276,9 @@ function Damage.calc(opts)
   -- BattleCommand_Stab's .TypesLoop does -- and its zero-quotient check forces
   -- the damage back to 1 whenever a non-immune row floors it to nothing, so a
   -- resisted hit that lands always deals at least 1 HP.
-  local effectiveness = Damage.typeMultiplier(
+  local effectiveness = opts.skipStab and 10 or Damage.typeMultiplier(
     opts.moveType, defender.types, opts.matchups)
-  for _, row in ipairs(opts.matchups or {}) do
+  for _, row in ipairs(not opts.skipStab and opts.matchups or {}) do
     if row.attacker == opts.moveType then
       for _, defenderType in ipairs(defender.types or {}) do
         if row.defender == defenderType then
@@ -306,10 +297,15 @@ function Damage.calc(opts)
     })
   end
 
+  -- data/moves/effects.asm:1120
+  if opts.rageMultiplier then
+    damage = math.min(65535, math.floor(damage * opts.rageMultiplier))
+  end
+
   -- Damage variation last, and only when the running damage is 2 or more
   -- (BattleCommand_DamageVariation returns early below that).
   local variation = opts.variation
-  if not variation then
+  if not variation and not opts.noVariation and damage >= 2 then
     if opts.random then
       variation = Damage.MIN_VARIATION
         + opts.random(Damage.MAX_VARIATION - Damage.MIN_VARIATION + 1)
@@ -319,11 +315,16 @@ function Damage.calc(opts)
       variation = math.random(Damage.MIN_VARIATION, Damage.MAX_VARIATION)
     end
   end
-  if damage >= 2 then
-    damage = math.floor(damage * variation / 100)
+  if damage >= 2 and not opts.noVariation then
+    damage = math.floor(damage * variation / 255)
   end
 
-  damage = math.max(1, math.min(Damage.MAX_DAMAGE, damage))
+  -- data/moves/effects.asm:1956
+  if opts.finalMultiplier then
+    damage = math.min(65535, math.floor(damage * opts.finalMultiplier))
+  end
+
+  damage = math.max(1, math.min(65535, damage))
   return damage, withGen1Names({
     effectiveness = effectiveness,
     critical = opts.critical or false,
@@ -333,23 +334,30 @@ function Damage.calc(opts)
   })
 end
 
--- Accuracy check.  Gen 2 rolls one byte against accuracy scaled by the
--- attacker's accuracy stage and the defender's evasion stage; accuracy of 0 in
--- the data means "never misses" (Swift and friends).
-function Damage.rollHit(accuracy, accuracyStage, evasionStage, random)
-  if not accuracy or accuracy <= 0 then return true end
-  local numerator, denominator = Damage.stageMultiplier(accuracyStage or 0)
-  local value = math.floor(accuracy * numerator / denominator)
-  numerator, denominator = Damage.stageMultiplier(-(evasionStage or 0))
-  value = math.floor(value * numerator / denominator)
-  value = math.max(1, math.min(100, value))
+-- engine/battle/effect_commands.asm:1546
+function Damage.rollHit(accuracy, accuracyStage, evasionStage, random,
+    accuracyRaw, accuracyMultipliers, accuracyPenalty)
+  local value = assert(accuracyRaw, "missing cached accuracy byte")
+  -- engine/battle/effect_commands.asm:1758
+  for _, stage in ipairs({ accuracyStage or 0, -(evasionStage or 0) }) do
+    stage = math.max(-6, math.min(6, stage))
+    if stage ~= 0 then
+      local ratio = assert(accuracyMultipliers and accuracyMultipliers[stage],
+        "missing cached accuracy multiplier")
+      value = math.max(1, math.floor(value * ratio[1] / ratio[2]))
+    end
+  end
+  value = math.max(1, math.min(255, value))
+  -- engine/battle/effect_commands.asm:1584
+  value = math.max(0, value - (accuracyPenalty or 0))
+  if value == 255 then return true end
   local roll
   if random then
-    roll = random(100)
+    roll = random(256)
   elseif love and love.math then
-    roll = love.math.random(100) - 1
+    roll = love.math.random(256) - 1
   else
-    roll = math.random(100) - 1
+    roll = math.random(256) - 1
   end
   return roll < value
 end

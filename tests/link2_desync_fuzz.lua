@@ -63,9 +63,10 @@ local MATCHUPS = {
   { attacker = "NORMAL", defender = "GHOST", multiplier = 0 },
 }
 
-local function move(id, kind, power, effect, chance)
+local function move(id, kind, power, effect, chance, chanceRaw)
   return { id = id, name = id, power = power, type = kind,
-    accuracy = 95, pp = 15, effect = effect, effectChance = chance }
+    accuracy = 95, accuracyRaw = 242, pp = 15, effect = effect, effectChance = chance,
+    effectChanceRaw = chanceRaw or 0 }
 end
 
 local MOVES = {
@@ -78,11 +79,11 @@ local MOVES = {
   MULTI = move("MULTI", "NORMAL", 15, "EFFECT_MULTI_HIT"),
   DRAIN = move("DRAIN", "GRASS", 30, "EFFECT_LEECH_HIT"),
   RECOIL = move("RECOIL", "NORMAL", 60, "EFFECT_RECOIL_HIT"),
-  FLINCHER = move("FLINCHER", "NORMAL", 25, "EFFECT_FLINCH_HIT", 30),
-  POISON_JAB = move("POISON_JAB", "NORMAL", 25, "EFFECT_POISON_HIT", 40),
-  BURNER = move("BURNER", "FIRE", 25, "EFFECT_BURN_HIT", 40),
-  ZAPPER = move("ZAPPER", "NORMAL", 25, "EFFECT_PARALYZE_HIT", 40),
-  MUDDLER = move("MUDDLER", "WATER", 25, "EFFECT_CONFUSE_HIT", 40),
+  FLINCHER = move("FLINCHER", "NORMAL", 25, "EFFECT_FLINCH_HIT", 30, 76),
+  POISON_JAB = move("POISON_JAB", "NORMAL", 25, "EFFECT_POISON_HIT", 40, 102),
+  BURNER = move("BURNER", "FIRE", 25, "EFFECT_BURN_HIT", 40, 102),
+  ZAPPER = move("ZAPPER", "NORMAL", 25, "EFFECT_PARALYZE_HIT", 40, 102),
+  MUDDLER = move("MUDDLER", "WATER", 25, "EFFECT_CONFUSE_HIT", 40, 102),
   SLEEPER = move("SLEEPER", "NORMAL", 0, "EFFECT_SLEEP"),
   VENOM = move("VENOM", "NORMAL", 0, "EFFECT_TOXIC"),
   SCARE = move("SCARE", "GHOST", 0, "EFFECT_CONFUSE"),
@@ -171,8 +172,10 @@ table.sort(ITEM_POOL)
 local DATA = {
   pokemon = POKEMON,
   moves = MOVES,
-  type_chart = { types = TYPES, matchups = MATCHUPS },
+  type_chart = { types = TYPES, matchups = MATCHUPS,
+    battleRules = require("tests.gen2_battle_rules_fixture")() },
   items = ITEMS,
+  text = require("tests.gen2_battle_text_fixture")(),
 }
 
 -- ---------------------------------------------------------------- harness

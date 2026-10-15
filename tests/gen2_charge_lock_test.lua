@@ -103,10 +103,12 @@ end
 local function actorStub(vol, status)
   local said = {}
   local self_ = {
+    data = { text = require("tests.gen2_battle_text_fixture")() },
     mon = { status = status },
     volatile = function() return vol end,
     monName = function() return "DRAGONITE" end,
     battlerName = function() return "DRAGONITE" end,
+    romText = Battle.romText,
     emit = function(_, ev) said[#said + 1] = ev.text end,
     random = function() return 1 end,
   }
@@ -118,7 +120,7 @@ do
   local self_, said = actorStub(vol)
   local acted = Battle.canAct(self_, self_.mon)
   eq(acted, false, "a recharging mon loses its turn")
-  eq(said[1], "DRAGONITE must recharge!", "and says so")
+  eq(said[1], "DRAGONITE\nmust recharge!", "and says so")
   check(vol.recharge == nil, "the flag is consumed, not sticky")
   -- The very next turn it is free again: this is the half that makes it cost
   -- one turn rather than end the mon's participation.

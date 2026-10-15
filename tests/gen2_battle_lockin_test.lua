@@ -38,25 +38,25 @@ local MATCHUPS = {
 
 local MOVES = {
   TACKLE = { id = "TACKLE", name = "TACKLE", power = 35, type = "NORMAL",
-    accuracy = 100, pp = 35, effect = "EFFECT_NORMAL_HIT" },
+    accuracy = 100, accuracyRaw = 255, pp = 35, effect = "EFFECT_NORMAL_HIT" },
   ROLLOUT = { id = "ROLLOUT", name = "ROLLOUT", power = 30, type = "ROCK",
-    accuracy = 90, pp = 20, effect = "EFFECT_ROLLOUT" },
+    accuracy = 90, accuracyRaw = 229, pp = 20, effect = "EFFECT_ROLLOUT" },
   THRASH = { id = "THRASH", name = "THRASH", power = 90, type = "NORMAL",
-    accuracy = 100, pp = 20, effect = "EFFECT_RAMPAGE" },
+    accuracy = 100, accuracyRaw = 255, pp = 20, effect = "EFFECT_RAMPAGE" },
   LEECH_SEED = { id = "LEECH_SEED", name = "LEECH SEED", power = 0,
-    type = "GRASS", accuracy = 90, pp = 10, effect = "EFFECT_LEECH_SEED" },
+    type = "GRASS", accuracy = 90, accuracyRaw = 229, pp = 10, effect = "EFFECT_LEECH_SEED" },
   TOXIC = { id = "TOXIC", name = "TOXIC", power = 0, type = "POISON",
-    accuracy = 85, pp = 10, effect = "EFFECT_TOXIC" },
+    accuracy = 85, accuracyRaw = 216, pp = 10, effect = "EFFECT_TOXIC" },
   POISONPOWDER = { id = "POISONPOWDER", name = "POISONPOWDER", power = 0,
-    type = "GRASS", accuracy = 75, pp = 35, effect = "EFFECT_POISON" },
+    type = "GRASS", accuracy = 75, accuracyRaw = 191, pp = 35, effect = "EFFECT_POISON" },
   GROWL = { id = "GROWL", name = "GROWL", power = 0, type = "NORMAL",
-    accuracy = 100, pp = 40, effect = "EFFECT_ATTACK_DOWN" },
+    accuracy = 100, accuracyRaw = 255, pp = 40, effect = "EFFECT_ATTACK_DOWN" },
   -- An *_HIT twin: the drop rides a hit that already animated, so a refused
   -- drop must leave the move event unmarked (data/moves/effects.asm,
   -- AttackDownHit puts `attackdown` after `moveanim`).
   AURORA_BEAM = { id = "AURORA_BEAM", name = "AURORA BEAM", power = 65,
-    type = "WATER", accuracy = 100, pp = 20,
-    effect = "EFFECT_ATTACK_DOWN_HIT", effectChance = 100 },
+    type = "WATER", accuracy = 100, accuracyRaw = 255, pp = 20,
+    effect = "EFFECT_ATTACK_DOWN_HIT", effectChance = 100, effectChanceRaw = 255 },
 }
 
 local GROWTH = {
@@ -95,7 +95,7 @@ local POKEMON = {
 local DATA = {
   pokemon = POKEMON,
   moves = MOVES,
-  type_chart = { types = TYPES, matchups = MATCHUPS },
+  text = require("tests.gen2_battle_text_fixture")(), type_chart = { battleRules = require("tests.gen2_battle_rules_fixture")(), types = TYPES, matchups = MATCHUPS },
   items = {},
 }
 
@@ -165,7 +165,7 @@ do
     attacker = { attack = 10, specialAttack = 10, types = { "WATER" },
       stages = {} },
     defender = { defense = 10, specialDefense = 10, types = {}, stages = {} },
-    types = TYPES, matchups = {}, variation = 85,
+    types = TYPES, matchups = {}, variation = 217,
   }
   opts.weatherPercent = nil
   local clear = Damage.calc(opts)
@@ -179,7 +179,7 @@ do
   -- The .ApplyModifier zero-quotient arm forces the result back to 1, so a
   -- halved hit never falls to nothing (misc.asm:129-136).
   opts.weatherPercent = 5
-  opts.variation = 100
+  opts.variation = 255
   local weak = Damage.calc(opts)
   check(weak >= 1, "a weather-halved hit still deals at least 1")
 end
@@ -353,7 +353,7 @@ do
   battle:takeEvents()
   eq(battle:forcedMove(player), "ROLLOUT", "the first hit locks")
   -- 99 against ROLLOUT's 90 accuracy is a miss on every roll of the turn.
-  battle.random = rolls({}, 99)
+  battle.random = rolls({}, 255)
   battle:useMove(player, wild, "ROLLOUT")
   check(findText(battle:takeEvents(), "MACHOP's attack missed!"), "a miss")
   eq(battle:forcedMove(player), nil, "and the miss releases the lock")

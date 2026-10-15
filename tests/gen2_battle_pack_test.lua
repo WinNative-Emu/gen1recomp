@@ -42,11 +42,11 @@ local TYPES = { NORMAL = { id = "NORMAL", index = 0, category = "physical" } }
 
 local MOVES = {
   TACKLE = { id = "TACKLE", name = "TACKLE", power = 35, type = "NORMAL",
-    accuracy = 95, pp = 35, effect = "EFFECT_NORMAL_HIT" },
+    accuracy = 95, accuracyRaw = 242, pp = 35, effect = "EFFECT_NORMAL_HIT" },
   -- The move id and the printed name differ, which is the whole reason the TM
   -- row resolves one to the other.
   ROCK_SMASH = { id = "ROCK_SMASH", name = "ROCK SMASH", power = 20,
-    type = "NORMAL", accuracy = 100, pp = 15,
+    type = "NORMAL", accuracy = 100, accuracyRaw = 255, pp = 15,
     effect = "EFFECT_DEFENSE_DOWN_HIT" },
 }
 
@@ -111,7 +111,7 @@ local ITEMS = {
 local DATA = {
   pokemon = POKEMON,
   moves = MOVES,
-  type_chart = { types = TYPES, matchups = {} },
+  text = require("tests.gen2_battle_text_fixture")(), type_chart = { battleRules = require("tests.gen2_battle_rules_fixture")(), types = TYPES, matchups = {} },
   items = ITEMS,
 }
 

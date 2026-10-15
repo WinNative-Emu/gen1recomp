@@ -18,9 +18,10 @@ CacheContract.VERSION_FORMAT = {
   -- such an export is refused until the ROM re-imports.
   -- gfx/sgb/predef.pal:28
   -- data/items/catch_rate_items.asm:5
-  gold = "rom-cache-v15:",
-  silver = "rom-cache-v15:",
-  crystal = "rom-cache-v15-crystal7:",
+  -- data/battle/accuracy_multipliers.asm:4, data/moves/effects_pointers.asm:1
+  gold = "rom-cache-v16:",
+  silver = "rom-cache-v16:",
+  crystal = "rom-cache-v16-crystal8:",
   -- engine/overworld/map_sprites.asm:181, engine/battle/animations.asm:2600
   -- data/pikachu/pikachu_pic_animation.asm:340, engine/movie/title.asm:76
   -- engine/pikachu/pikachu_pic_animation.asm:412, engine/battle/core.asm:2135-2138

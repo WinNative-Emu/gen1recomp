@@ -29,9 +29,9 @@ local TYPES = {
 
 local MOVES = {
   TACKLE = { id = "TACKLE", name = "TACKLE", power = 35, type = "NORMAL",
-    accuracy = 95, pp = 35, effect = "EFFECT_NORMAL_HIT" },
+    accuracy = 95, accuracyRaw = 242, pp = 35, effect = "EFFECT_NORMAL_HIT" },
   GROWL = { id = "GROWL", name = "GROWL", power = 0, type = "NORMAL",
-    accuracy = 100, pp = 40, effect = "EFFECT_ATTACK_DOWN" },
+    accuracy = 100, accuracyRaw = 255, pp = 40, effect = "EFFECT_ATTACK_DOWN" },
 }
 
 local GROWTH = {
@@ -72,7 +72,7 @@ local ITEMS = {
 local DATA = {
   pokemon = POKEMON,
   moves = MOVES,
-  type_chart = { types = TYPES, matchups = {} },
+  text = require("tests.gen2_battle_text_fixture")(), type_chart = { battleRules = require("tests.gen2_battle_rules_fixture")(), types = TYPES, matchups = {} },
   items = ITEMS,
 }
 
@@ -140,25 +140,26 @@ do
   eq(save.inventory.DIRE_HIT, 1, "without spending the item")
   eq(battle.turn, turn1, "or the turn")
 
-  -- And the bit feeds the crit ladder: the roll asks 1-in-8, not 1-in-15.
+  -- engine/battle/effect_commands.asm:1201
   eq(Damage.criticalLevel({ focusEnergy = true }), 1, "+1 critical level")
-  local asked
-  battle.random = function(n) asked = asked or n return 1 end
-  battle:hitOnce(player, battle.enemy, MOVES.TACKLE)
-  eq(asked, Damage.criticalChance(1),
-    "hitOnce rolls the boosted ladder rung for the holder")
+  battle.random = function(n) return n == 256 and 31 or 0 end
+  local _, info = battle:hitOnce(player, battle.enemy, MOVES.TACKLE)
+  eq(info.critical, true, "Dire Hit crits on byte 31 (threshold 32)")
+  battle.random = function(n) return n == 256 and 32 or 0 end
+  _, info = battle:hitOnce(player, battle.enemy, MOVES.TACKLE)
+  eq(info.critical, false, "and not on byte 32")
 end
 
 -- ---- X Accuracy: the roll bypass ------------------------------------------
 do
-  -- Roll 96 misses a 95-accuracy move; with the substatus up it cannot.
+  -- engine/battle/effect_commands.asm:1605
   local screen, battle, player, wild = newScreen({
-    random = rolls({}, 96) })
+    random = rolls({}, 244) })
   local before = wild.hp
   battle:useMove(player, wild, "TACKLE")
-  eq(wild.hp, before, "roll 96 misses TACKLE bare")
+  eq(wild.hp, before, "roll 244 misses TACKLE bare")
 
-  screen, battle, player, wild = newScreen({ random = rolls({}, 96) })
+  screen, battle, player, wild = newScreen({ random = rolls({}, 244) })
   screen:useItem("X_ACCURACY")
   eq(battle:volatile(player).xAccuracy, true, "the bit is set")
   before = wild.hp

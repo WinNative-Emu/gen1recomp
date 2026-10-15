@@ -163,7 +163,7 @@ for _,version in ipairs({'gold','silver','crystal'}) do
   end
   do
     local b,p,e=make('RATTATA',{'FOCUS_ENERGY','TACKLE'})
-    b.random=function(n) return n==Damage.criticalChance(0) and 1 or 0 end
+    b.random=function(n) return n==256 and 20 or 0 end
     b:useMove(p,e,'FOCUS_ENERGY');local events=b:takeEvents()
     eq('focus-energy',b:volatile(p).focusEnergy,true,version..' actual Focus Energy sets canonical volatile')
     eq('focus-energy',has(events,'message','pumped'),true,version..' source Focus Energy success message')
@@ -171,6 +171,10 @@ for _,version in ipairs({'gold','silver','crystal'}) do
     eq('focus-energy',level,1,version..' actual consumer critical level increment')
     local _,info=b:hitOnce(p,e,data.moves.TACKLE)
     eq('focus-energy',info.critical,true,version..' actual hitOnce chosen rung produces critical')
+    local base,bp,be=make('RATTATA',{'TACKLE'})
+    base.random=b.random
+    local _,baseInfo=base:hitOnce(bp,be,data.moves.TACKLE)
+    eq('focus-energy',baseInfo.critical,false,version..' same roll is not critical without Focus Energy')
     b:takeEvents();b:useMove(p,e,'FOCUS_ENERGY')
     eq('focus-energy',has(b:takeEvents(),'message','failed'),true,version..' repeated Focus Energy source refusal')
     local control,cp,ce=make('RATTATA',{'TACKLE'})
@@ -581,7 +585,7 @@ for _,version in ipairs({'gold','silver','crystal'}) do
         screen:chooseMenu('fight');screen:chooseMove(1);observed()
         eq(saw('But it failed!'),true,version..' actual driver repeated Mist refusal')
       else
-        b.random=function(n) return n==require('src.battle.gen2.Damage').criticalChance(0) and 1 or 0 end
+        b.random=function(n) return n==256 and 20 or 0 end
         screen:chooseMenu('fight');screen:chooseMove(2);observed()
         eq(saw('A critical hit!'),true,version..' actual driver Focus critical consumer')
       end

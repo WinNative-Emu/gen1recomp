@@ -30,7 +30,7 @@ local function hit(version, defense, screen)
     level = 50, power = 100, moveType = "NORMAL",
     attacker = { attack = 200 },
     defender = { defense = defense },
-    screen = screen, variation = 100,
+    screen = screen, variation = 255,
   }))
 end
 
@@ -150,14 +150,14 @@ do
   local bugged = Damage.calc({
     level = 50, power = 100, moveType = "NORMAL",
     attacker = { attack = 200 }, defender = { defense = 512 },
-    screen = true, variation = 100, reflectOverflowFixed = false,
+    screen = true, variation = 255, reflectOverflowFixed = false,
   })
   eq(bugged, 999, "Crystal forced onto the bugged arm matches Gold")
   GameVersion.set("gold")
   local fixed = Damage.calc({
     level = 50, power = 100, moveType = "NORMAL",
     attacker = { attack = 200 }, defender = { defense = 512 },
-    screen = true, variation = 100, reflectOverflowFixed = true,
+    screen = true, variation = 255, reflectOverflowFixed = true,
   })
   eq(fixed, 10, "Gold forced onto the fixed arm matches Crystal")
 end

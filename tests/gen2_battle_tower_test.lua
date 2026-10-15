@@ -589,13 +589,19 @@ do
         growthRate = "GROWTH_MEDIUM_FAST", genderRatio = 127,
         levelMoves = { { level = 1, move = "TACKLE" } }, evolutions = {} },
     },
-    moves = {}, type_chart = { types = {}, matchups = {} }, items = {},
+    moves = {}, text = require("tests.gen2_battle_text_fixture")(), type_chart = { battleRules = require("tests.gen2_battle_rules_fixture")(), types = {}, matchups = {} }, items = {},
   }
   local perfect = { attack = 15, defense = 15, speed = 15, special = 15 }
   perfect.hp = Mon.hpDV(perfect)
 
   local BADGES = { ZEPHYR = true, HIVE = true, PLAIN = true, FOG = true,
     MINERAL = true, STORM = true, GLACIER = true, RISING = true }
+
+  local function hitStat(battle, mon, key)
+    local value = mon.stats[key]
+    if battle:battleBadgeBoosts(mon)[key] then return Battle.boostStat(value) end
+    return value
+  end
 
   local function newBattle(tower)
     local player = Mon.new(BATTLE_DATA, "MACHOP", 40, { dvs = perfect })
@@ -608,25 +614,25 @@ do
 
   local outside, player = newBattle(false)
   eq(outside.inBattleTowerBattle, false, "an ordinary battle is not a Tower one")
-  eq(outside:battleStat(player, "attack"),
+  eq(hitStat(outside, player, "attack"),
     Battle.boostStat(player.stats.attack),
     "outside the Tower ZEPHYRBADGE still boosts Attack")
-  eq(outside:battleStat(player, "speed"),
+  eq(hitStat(outside, player, "speed"),
     Battle.boostStat(player.stats.speed), "and PLAINBADGE Speed")
   eq(outside:badgeTypeBoost(player, "FLYING"), true,
     "and DoBadgeTypeBoosts still fires")
 
   local inside, towerPlayer = newBattle(true)
   eq(inside.inBattleTowerBattle, true, "the Tower battle sets it")
-  eq(inside:battleStat(towerPlayer, "attack"), towerPlayer.stats.attack,
+  eq(hitStat(inside, towerPlayer, "attack"), towerPlayer.stats.attack,
     "BadgeStatBoosts' second early return drops the Attack boost")
-  eq(inside:battleStat(towerPlayer, "defense"), towerPlayer.stats.defense,
+  eq(hitStat(inside, towerPlayer, "defense"), towerPlayer.stats.defense,
     "and Defense")
-  eq(inside:battleStat(towerPlayer, "speed"), towerPlayer.stats.speed,
+  eq(hitStat(inside, towerPlayer, "speed"), towerPlayer.stats.speed,
     "and Speed")
-  eq(inside:battleStat(towerPlayer, "specialAttack"),
+  eq(hitStat(inside, towerPlayer, "specialAttack"),
     towerPlayer.stats.specialAttack, "and Special Attack")
-  eq(inside:battleStat(towerPlayer, "specialDefense"),
+  eq(hitStat(inside, towerPlayer, "specialDefense"),
     towerPlayer.stats.specialDefense,
     "and GLACIERBADGE's buggy Special Defense re-check with it")
   eq(inside:badgeTypeBoost(towerPlayer, "FLYING"), false,

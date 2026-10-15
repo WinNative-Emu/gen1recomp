@@ -937,3 +937,10 @@ tests/engine/pc_item_box_order_bug2840.lua
 tests/engine/town_map_og_obp0_bug2841.lua
 tests/engine/stick_rebind_isolation_test.lua
 tests/engine/game3_sweet_scent_fallback_test.lua
+tests/engine/gen2_crystal_math_test.lua
+tests/engine/gen2_crystal_moves_test.lua
+tests/engine/gen2_crystal_move_rules_test.lua
+tests/engine/gen2_crystal_integration_test.lua
+tests/engine/gen2_crystal_rules_extract_test.lua
+tests/engine/gen2_crystal_status_test.lua
+tests/engine/gen2_crystal_battle_text_test.lua

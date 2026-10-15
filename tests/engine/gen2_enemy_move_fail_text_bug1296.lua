@@ -17,11 +17,11 @@ local TYPES = {
 
 local MOVES = {
   TACKLE = { id = "TACKLE", name = "TACKLE", power = 35, type = "NORMAL",
-    accuracy = 100, pp = 35, effect = "EFFECT_NORMAL_HIT" },
+    accuracy = 100, accuracyRaw = 255, pp = 35, effect = "EFFECT_NORMAL_HIT" },
   GROWL = { id = "GROWL", name = "GROWL", power = 0, type = "NORMAL",
-    accuracy = 100, pp = 40, effect = "EFFECT_ATTACK_DOWN" },
+    accuracy = 100, accuracyRaw = 255, pp = 40, effect = "EFFECT_ATTACK_DOWN" },
   THUNDER_WAVE = { id = "THUNDER_WAVE", name = "THUNDER WAVE", power = 0,
-    type = "ELECTRIC", accuracy = 100, pp = 20, effect = "EFFECT_PARALYZE" },
+    type = "ELECTRIC", accuracy = 100, accuracyRaw = 255, pp = 20, effect = "EFFECT_PARALYZE" },
 }
 
 local POKEMON = {
@@ -38,7 +38,7 @@ local POKEMON = {
 }
 
 local DATA = { pokemon = POKEMON, moves = MOVES,
-  type_chart = { types = TYPES, matchups = {} }, items = {} }
+  text = require("tests.gen2_battle_text_fixture")(), type_chart = { battleRules = require("tests.gen2_battle_rules_fixture")(), types = TYPES, matchups = {} }, items = {} }
 
 local perfect = { attack = 15, defense = 15, speed = 15, special = 15 }
 perfect.hp = Mon.hpDV(perfect)
@@ -94,7 +94,7 @@ do
     { { id = "TACKLE", pp = 35, maxPp = 35 } },
     { { id = "GROWL", pp = 40, maxPp = 40 } })
   battle.events = {}
-  rolls = { 0, 200 } -- AI roll passes (>=64): lands
+  rolls = { 200 }
   battle:useMove(wild, player, "GROWL")
   T.check(not findText(battle.events, "But it failed!"),
     "the same move lands when the AI roll passes")

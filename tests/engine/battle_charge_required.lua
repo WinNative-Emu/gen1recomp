@@ -41,15 +41,15 @@ local function gen1Data()
   local data = T.fixtures.fresh()
   data.moves.SOLARBEAM = {
     id = "SOLARBEAM", index = 80, name = "SOLARBEAM", type = "GRASS",
-    power = 120, accuracy = 100, pp = 10, effect = "CHARGE_EFFECT",
+    power = 120, accuracy = 100, accuracyRaw = 255, pp = 10, effect = "CHARGE_EFFECT",
   }
   data.moves.FLY = {
     id = "FLY", index = 81, name = "FLY", type = "FLYING",
-    power = 70, accuracy = 95, pp = 15, effect = "FLY_EFFECT",
+    power = 70, accuracy = 95, accuracyRaw = 242, pp = 15, effect = "FLY_EFFECT",
   }
   data.moves.DIG = {
     id = "DIG", index = 82, name = "DIG", type = "GROUND",
-    power = 100, accuracy = 100, pp = 10, effect = "FLY_EFFECT",
+    power = 100, accuracy = 100, accuracyRaw = 255, pp = 10, effect = "FLY_EFFECT",
   }
   Font.load(data)
   TypeChart.load(data)
@@ -82,15 +82,15 @@ local G2_TYPES = {
 
 local G2_MOVES = {
   TACKLE = { id = "TACKLE", name = "TACKLE", power = 35,
-    type = "NORMAL", accuracy = 100, pp = 35,
+    type = "NORMAL", accuracy = 100, accuracyRaw = 255, pp = 35,
     effect = "EFFECT_NORMAL_HIT" },
   SOLARBEAM = { id = "SOLARBEAM", name = "SOLARBEAM", power = 120,
-    type = "GRASS", accuracy = 100, pp = 10,
+    type = "GRASS", accuracy = 100, accuracyRaw = 255, pp = 10,
     effect = "EFFECT_SOLARBEAM" },
   FLY = { id = "FLY", name = "FLY", power = 70, type = "FLYING",
-    accuracy = 95, pp = 15, effect = "EFFECT_FLY" },
+    accuracy = 95, accuracyRaw = 242, pp = 15, effect = "EFFECT_FLY" },
   DIG = { id = "DIG", name = "DIG", power = 60, type = "GROUND",
-    accuracy = 100, pp = 10, effect = "EFFECT_FLY" },
+    accuracy = 100, accuracyRaw = 255, pp = 10, effect = "EFFECT_FLY" },
 }
 
 local G2_DATA = {
@@ -109,7 +109,7 @@ local G2_DATA = {
     },
   },
   moves = G2_MOVES,
-  type_chart = { types = G2_TYPES, matchups = {} },
+  text = require("tests.gen2_battle_text_fixture")(), type_chart = { battleRules = require("tests.gen2_battle_rules_fixture")(), types = G2_TYPES, matchups = {} },
   items = {},
 }
 
