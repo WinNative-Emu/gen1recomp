@@ -26,6 +26,7 @@ local Logger = require("src.core.Logger")
 local Runtime = require("src.mods.Runtime")
 local Sound = require("src.core.Sound")
 local Strings = require("src.core.Strings")
+local Typer = require("src.ui.gen2.Typer")
 
 local StartMenu = {}
 StartMenu.__index = StartMenu
@@ -258,12 +259,14 @@ function StartMenu:choose(id, index)
     -- default, the way the Gen 1 port's QUIT is.
     self.phase = "confirm"
     self.confirmChoice = 2
+    self:beginPrompt()
     return
   end
   if id == "quitContest" then
     -- pokecrystal engine/menus/start_menu.asm:411
     self.phase = "confirmContest"
     self.confirmChoice = 1
+    self:beginPrompt()
     return
   end
   if self.onChoose then self.onChoose(id) end
@@ -295,6 +298,9 @@ function StartMenu:update(_dt)
   local input = self.game and self.game.input
   if not input then return end
   if self.phase == "confirm" or self.phase == "confirmContest" then
+    if self.typedPhase ~= self.phase then self:beginPrompt() end
+    Typer.step(self)
+    if Typer.typing(self) then return end
     if input:wasPressed("up") or input:wasPressed("down") then
       self.confirmChoice = self.confirmChoice == 1 and 2 or 1
     elseif input:wasPressed("a") then
@@ -310,6 +316,7 @@ function StartMenu:update(_dt)
     end
     return
   end
+  self.typedPhase = nil
   -- START closes the menu as well as opening it.
   if input:wasPressed("start") then
     self:close()
@@ -318,27 +325,43 @@ function StartMenu:update(_dt)
   self.list:update(input)
 end
 
--- pokecrystal engine/menus/menu_2.asm:145
--- The box is two rows tall (y 14/16, step 2), which the cart's own line
--- break fills exactly. A translation can need a third line, and printWrapped
--- would drop it without a word, so say so once instead of shipping a prompt
--- that reads as a sentence cut in half.
--- The confirmation box at (0, 12, 18, 4) holds exactly two rows, which the
--- cart's own line break fills.  A translation can need a third, which would be
--- dropped without a word, so this says so once per prompt.  printWrapped
--- returns the line count it wrapped to, so the box's own draw is what reports
--- the overflow: no second wrap, and no way for the two to disagree on the
--- width later.  It also wraps on pixel width, unlike a `\n`-only splitter,
--- which would hand Font.draw an embedded break -- rendered as a space -- and
--- run a long translated row past the box edge.
 local promptWarned = {}
 local function twoRowPrompt(text, what)
-  local lines = Chrome.printWrapped(text, 1, 14, 18, 2, 2)
-  if lines > 2 and not promptWarned[what] then
+  local lines = Chrome.wrap(text, 18)
+  if #lines > 2 and not promptWarned[what] then
     promptWarned[what] = true
     Logger.warn("%s prompt needs %d lines, the box holds 2: %s",
-      what, lines, tostring(text))
+      what, #lines, tostring(text))
   end
+  return { lines[1] or "", lines[2] }
+end
+
+function StartMenu:promptText()
+  if self.phase == "confirmContest" then
+    -- pokecrystal data/text/common_2.asm:1381
+    return Strings("Would you like to\nend the Contest?"), "contest end"
+  end
+  return Strings(Strings.source("Return to the\ntitle screen?")), "title screen"
+end
+
+-- pokecrystal engine/pokemon/mon_menu.asm:441
+function StartMenu:beginPrompt()
+  self.typedPhase = self.phase
+  self.promptLines = twoRowPrompt(self:promptText())
+  self.typer = Typer.new(self.game)
+  self.typer:start(self.promptLines)
+end
+
+function StartMenu:promptTyping()
+  return self.typedPhase ~= self.phase or Typer.typing(self)
+end
+
+function StartMenu:drawPrompt()
+  Chrome.textbox(0, 12, 18, 4)
+  if self.typedPhase ~= self.phase then return end
+  local lines = Typer.text(self, self.promptLines)
+  Chrome.print(lines[1] or "", 1, 14)
+  Chrome.print(lines[2] or "", 1, 16)
 end
 
 -- pokecrystal data/text/common_2.asm ContestStatus: the labels and the
@@ -384,16 +407,9 @@ function StartMenu:draw()
   self.list:draw()
 
   if self.phase == "confirmContest" then
-    -- pokecrystal data/text/common_2.asm:1381
-    Chrome.textbox(0, 12, 18, 4)
-    -- One catalog key ("Would you like to" alone has no stable translation
-    -- out of context), matching every other confirmation prompt in this
-    -- port (src/ui/StartMenu.lua, src/ui/gen2/SaveMenu.lua). Printed via
-    -- Chrome.printWrapped, same as InitClock.lua's own call: this box only
-    -- has room for two rows (y 14/16, step 2), and printWrapped wraps by
-    -- both the translated \n and pixel width, unlike a hand-rolled
-    -- \n-only splitter.
-    twoRowPrompt(Strings("Would you like to\nend the Contest?"), "contest end")
+    self:drawPrompt()
+    -- pokecrystal engine/pokemon/mon_menu.asm:442
+    if self:promptTyping() then return end
     -- pokecrystal home/menu.asm:418
     Chrome.box(14, 7, 6, 5)
     Chrome.print(Strings("YES"), 16, 8)
@@ -403,9 +419,8 @@ function StartMenu:draw()
   end
 
   if self.phase == "confirm" then
-    Chrome.textbox(0, 12, 18, 4)
-    twoRowPrompt(Strings(Strings.source("Return to the\ntitle screen?")),
-      "title screen")
+    self:drawPrompt()
+    if self:promptTyping() then return end
     Chrome.box(YESNO_X, YESNO_Y, YESNO_W, YESNO_H)
     Chrome.print(Strings("YES"), YESNO_X + 2, YESNO_Y + 1)
     Chrome.print(Strings("NO"), YESNO_X + 2, YESNO_Y + 3)

@@ -19,8 +19,6 @@ return function(game)
     return pred()
   end
   local ok, err = xpcall(function()
-    local identity = os.getenv("POKEPORT_IDENTITY") or ""
-    if not check(identity:match("^bsa0930%-") ~= nil, "isolated campaign identity") then return end
     if not check(waitUntil(function() return game.boot ~= nil end, 5), "Emerald boot ready") then return end
     local Boot = require("src.ui.game3.boot")
     local StartMenu = require("src.ui.game3.start_menu")
@@ -69,14 +67,18 @@ return function(game)
         U.tap(game, "down")
       end
       U.tap(game, "a")
+      local function printed() return waitUntil(function() return not StartMenu.promptTyping() end, 3) end
+      printed()
       check(StartMenu._confirmExit and StartMenu._confirmCursor == 2, prefix .. " EXIT confirmation defaults NO")
       check(U.still(game, DIR .. "/" .. string.format("%02d", (caseIndex - 1) * 3 + 1) .. "_" .. prefix .. "_exit_default_no.png"), prefix .. " default NO screenshot")
       U.tap(game, "b")
       check(StartMenu.isOpen() and game.session == session, prefix .. " EXIT B preserves field session")
       U.tap(game, "a")
+      printed()
       U.tap(game, "a")
       check(StartMenu.isOpen() and game.session == session, prefix .. " EXIT NO preserves field session")
       U.tap(game, "a")
+      printed()
       U.tap(game, "up")
       U.tap(game, "a")
       local direct = game.boot and game.boot.phase == Boot.PHASE.TITLE and game.boot.custom.title

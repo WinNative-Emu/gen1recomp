@@ -46,6 +46,8 @@ local function promptText()
   menu.phase = "confirmContest"
   menu.confirmChoice = 1
   menu.list = { draw = function() end }
+  menu:beginPrompt()
+  menu.typer.shown = menu.typer.total
   drawn = {}
   menu:draw()
   return drawnText()

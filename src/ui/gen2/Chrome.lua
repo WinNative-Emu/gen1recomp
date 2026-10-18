@@ -120,8 +120,10 @@ function Chrome.positionLift(winW, winH, scale)
   local ok, ScreenPosition = pcall(require, "src.core.ScreenPosition")
   if not ok or ScreenPosition.skinActive(winW, winH) then return 0 end
   local _, _, _, h = playfieldRect(winW, winH)
+  local okp, Playfield = pcall(require, "src.render.Playfield")
+  local d = okp and Playfield.ratio and Playfield.ratio() or 1
   return ScreenPosition.lift(h, Chrome.SCREEN_H * 8 * (scale
-    or Chrome.fitScale(winW, winH)), ScreenPosition.safeTop())
+    or Chrome.fitScale(winW, winH)), ScreenPosition.safeTop() * d)
 end
 
 -- pokegold engine/battle/core.asm:8646, engine/events/halloffame.asm:270

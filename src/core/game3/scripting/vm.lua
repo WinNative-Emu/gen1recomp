@@ -55,6 +55,10 @@ function Vm:halt(aborted)
       a.unfreezeLocal(lid, snap)
     end
   end
+  if ctx.waitButtonArmed then
+    ctx.waitButtonArmed = nil
+    if a and a.clearWaitButton then a.clearWaitButton() end
+  end
   local wasLocked = (ctx.lockKind ~= nil or ctx.fieldControlsLocked) and not aborted
   Ctx.haltCleanup(self.ctx)
   if wasLocked then

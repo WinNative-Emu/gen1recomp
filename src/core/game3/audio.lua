@@ -604,9 +604,6 @@ function Audio.specialMapSong(sectionId)
       and Audio.canOverrideMapMusic(Audio.MUS_SURF, sectionId) then
     return Audio.MUS_SURF
   end
-  if P and P.biking and Audio.canOverrideMapMusic(Audio.MUS_CYCLING, sectionId) then
-    return Audio.MUS_CYCLING
-  end
   return Audio._mapSong
 end
 
@@ -627,10 +624,12 @@ function Audio.fadeOutAndPlay(id, speed, fadeInSpeed)
   if not (Audio._currentSong and Audio._bgmSource) then
     return Audio.playSong(id)
   end
-  Audio.fadeOutBgm(speed)
+  -- pokefirered/src/sound.c:145
+  if not (Audio._fadeOut and Audio._fadeOut.mapMusic) then Audio.fadeOutBgm(speed) end
   if Audio._fadeOut then
     Audio._fadeOut.nextSong = id
     Audio._fadeOut.fadeIn = fadeInSpeed
+    Audio._fadeOut.mapMusic = true
   end
   return true
 end

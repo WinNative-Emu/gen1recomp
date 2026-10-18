@@ -370,7 +370,12 @@ check(type(Field.metatileOverrideAt) == "function"
 print("[test] 10. a new session in the same process sees a fresh, sealed gym")
 startSession(CITY, 12, 20, "new_game")
 draws = 0
-enterGym()
+warpTo(CITY, 12, 20)
+-- pokefirered/src/overworld.c:802
+-- pokefirered/src/wild_encounter.c:548
+check(draws == 1, "the water-only city spends one Random draw on the ambient cry, got " .. draws)
+draws = 0
+warpTo(GYM, 5, 18)
 local rerollN = beamCellsTouched()
 check(rerollN == 0, "ON_LOAD leaves the beams sealed for an unsolved gym, got " .. rerollN)
 check(layout:midAt(5, 6) == sealedTop, "the layout is fresh: (5,6) is the full beam again")

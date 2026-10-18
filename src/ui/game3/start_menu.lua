@@ -23,6 +23,67 @@ StartMenu._confirmExit = false
 StartMenu._confirmCursor = 2 -- 1=YES, 2=NO (default NO)
 StartMenu.MAX_VISIBLE = 8
 StartMenu._scrollOffset = 0
+StartMenu._prompt = nil
+
+-- pokeemerald/src/menu.c:77
+local SPEED_DELAYS = { 8, 4, 1 }
+
+local function exit_prompt_text()
+  return Strings("RETURN TO MAIN\nMENU?")
+end
+
+-- pokefirered/src/start_menu.c:632
+local function begin_exit_prompt()
+  local ok, Options = pcall(require, "src.core.game3.options")
+  local speed = ok and Options.textSpeed(StartMenu._session) or 1
+  StartMenu._prompt = {
+    revealed = 0,
+    total = FrlgFont.countChars(exit_prompt_text()),
+    delay = 0,
+    speedIdx = speed,
+    spedUp = false,
+    delayTick = false,
+  }
+end
+
+function StartMenu.promptTyping()
+  local p = StartMenu._prompt
+  return StartMenu._confirmExit and p ~= nil and p.revealed < p.total
+end
+
+-- pokeemerald/src/text.c:950
+local function speed_up_prompt()
+  local p = StartMenu._prompt
+  if not p.delayTick then return end
+  p.spedUp = true
+  p.delay = 0
+end
+
+-- pokeemerald/src/text.c:944
+local function tick_prompt()
+  local p = StartMenu._prompt
+  if not (StartMenu._confirmExit and p) or p.revealed >= p.total then return end
+  local input = StartMenu._game and StartMenu._game.input
+  if p.spedUp and input and input.isDown then
+    local ok, held = pcall(function() return input:isDown("a") or input:isDown("b") end)
+    if ok and held then p.delay = 0 end
+  end
+  if p.delay > 0 then
+    p.delay = p.delay - 1
+    p.delayTick = true
+    return
+  end
+  p.delayTick = false
+  p.revealed = p.revealed + 1
+  if p.revealed < p.total then
+    -- pokeemerald/src/text.c:296
+    p.delay = math.max(0, (SPEED_DELAYS[p.speedIdx + 1] or 4) - 1)
+  end
+end
+
+function StartMenu.update()
+  tick_prompt()
+end
 
 local function player_label(session)
   local name = (session and (session.name or session.playerName)) or "PLAYER"
@@ -161,6 +222,7 @@ function StartMenu.show(opts)
   opts = opts or {}
   StartMenu.open = true
   StartMenu._confirmExit = false
+  StartMenu._prompt = nil
   StartMenu._confirmCursor = 2
   StartMenu._session = opts.session
   StartMenu._game = opts.game
@@ -196,6 +258,7 @@ end
 function StartMenu.close(silent)
   StartMenu.open = false
   StartMenu._confirmExit = false
+  StartMenu._prompt = nil
   StartMenu._tutorial = false
   StartMenu._onTutorialSelect = nil
   Stack.pop("start")
@@ -206,8 +269,13 @@ function StartMenu.close(silent)
 end
 
 function StartMenu.cancel()
+  if StartMenu.promptTyping() then
+    speed_up_prompt()
+    return
+  end
   if StartMenu._confirmExit then
     StartMenu._confirmExit = false
+    StartMenu._prompt = nil
     -- pokefirered/src/menu.c:381
     return
   end
@@ -221,6 +289,7 @@ function StartMenu.cancel()
 end
 
 function StartMenu.move(delta)
+  if StartMenu.promptTyping() then return end
   if StartMenu._confirmExit then
     StartMenu._confirmCursor = (StartMenu._confirmCursor == 1) and 2 or 1
     se("SE_SELECT")
@@ -235,6 +304,10 @@ function StartMenu.move(delta)
 end
 
 function StartMenu.confirm()
+  if StartMenu.promptTyping() then
+    speed_up_prompt()
+    return
+  end
   se("SE_SELECT")
   if StartMenu._tutorial then
     local sel = StartMenu.cursor - 1
@@ -247,6 +320,7 @@ function StartMenu.confirm()
     if StartMenu._confirmCursor == 1 then -- YES
       StartMenu.open = false
       StartMenu._confirmExit = false
+      StartMenu._prompt = nil
       Stack.pop("start")
       local Runtime = package.loaded["src.core.game3.runtime"]
       local game = (StartMenu._session and StartMenu._session.game)
@@ -257,6 +331,7 @@ function StartMenu.confirm()
       end
     else -- NO
       StartMenu._confirmExit = false
+      StartMenu._prompt = nil
     end
     return
   end
@@ -272,7 +347,8 @@ function StartMenu.confirm()
   elseif e.id == "exit" then
     if d.exitConfirms then
       StartMenu._confirmExit = true
-      StartMenu._confirmCursor = 2 -- Default to NO
+      StartMenu._confirmCursor = 2
+      begin_exit_prompt()
     else
       StartMenu.close(true) -- pokeemerald/src/start_menu.c:747
     end
@@ -427,12 +503,13 @@ function StartMenu.draw()
   end
 
   if StartMenu._confirmExit then
-    -- Bottom Dialogue Window
     Chrome.dialogueFrame()
-    local prompt = Strings("RETURN TO MAIN\nMENU?")
-    FrlgFont.draw(prompt, 2 * 8 + 4, 15 * 8 + 2, { linePitch = 15, colors = FrlgFont.COLOR.NORMAL })
+    local p = StartMenu._prompt
+    FrlgFont.draw(exit_prompt_text(), 2 * 8 + 4, 15 * 8 + 2, { linePitch = 15,
+      colors = FrlgFont.COLOR.NORMAL, limitChars = p and p.revealed or nil })
+    -- pokefirered/src/start_menu.c:719
+    if StartMenu.promptTyping() then return end
 
-    -- Right YES/NO Window
     local popX = 21
     local popY = 9
     local popW = 6

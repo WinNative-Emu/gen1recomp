@@ -432,6 +432,8 @@ function Game:update(dt)
   -- Give the accumulator room for one full frame at the current speed,
   -- or the anti-spiral clamp quietly caps every level above ~15X.
   DeferredWrite.tick()
+  local ChipAudio = package.loaded["src.core.ChipAudio"]
+  if ChipAudio then ChipAudio.pumpEffects() end
   local speed = self:logicSpeed()
   self._frameSpeed = speed
   FixedStep.maxAccum = FixedStep.catchupLimit(speed, dt)

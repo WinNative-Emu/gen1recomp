@@ -625,7 +625,9 @@ local function dispatch(vm, row)
       ctx.nativePoll = function()
         if not armed then
           armed = true
+          ctx.waitButtonArmed = true
           a.armWaitButton(function()
+            ctx.waitButtonArmed = nil
             pressed = true
           end)
         end

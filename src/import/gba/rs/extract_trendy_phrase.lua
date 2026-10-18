@@ -12,7 +12,7 @@ function M.run(rom, cache, opts)
     frame = {x = 3, y = 2, sourceX = 0, sourceY = 32, w = 24, h = 4},
     wordPens = {{x = 48, y = 24}, {x = 136, y = 24}},
     wordCursors = {{x = 44, y = 32}, {x = 132, y = 32}},
-    footer = {x = 28, y = 96, stride = 56}, titleFont = 1, titleWidth = 240,
+    footer = {x = 28, y = 96, stride = 56}, titlePalette = 1, titleWidth = 240,
     prompt = {x = 32, y = 120, width = 176, linePitch = 16}, texts = {}}
   local ids = c:off("gUnknown_083DB7C0") + 9 * 2
   local prompts = c:off("gUnknown_083DB6F4")

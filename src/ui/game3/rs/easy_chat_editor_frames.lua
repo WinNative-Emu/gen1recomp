@@ -109,7 +109,7 @@ function F.begin(route, alpha)
 end
 function F.step(t, map, man)
   local s, e, done = t.state, {}, false
-  local groupAnimation = t.alpha and 3 or 4
+  local groupAnimation = t.alpha and 4 or 3 -- src/easy_chat_2.c:917
   if t.route == "groups" then -- easy_chat_1.c:sub_80E6F68
     if s == 0 then t.state = 1
     elseif controller(t, "groups", map, man, e) then e.indicator = groupAnimation; done = true end

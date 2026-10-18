@@ -284,18 +284,24 @@ do
   function world:atlasFor() return atlas, tileset end
   function world:mapCacheKey() return "TEST|DAY" end
 
+  local origTransformPoint = love.graphics.transformPoint
+  local tx, ty = 0, 0
+  love.graphics.transformPoint = function(x, y) return x + tx, y + ty end
+  tx, ty = 48, 32
   Playfield.enter(48, 32, 160, 144)
   world:drawGrassOver(
     { px = 0, py = 0, inGrass = true, grassShake = false, moving = false },
     10, 20, 2)
   Playfield.leave()
+  tx, ty = 0, 0
 
   check(#scissorCalls > 0, "scissor set under Playfield offset")
-  eq(scissorCalls[1].x, 48 + 10, "scissor x includes Playfield.box.x")
-  eq(scissorCalls[1].y, 32 + 20 + 4 * 2, "scissor y includes Playfield.box.y")
+  eq(scissorCalls[1].x, 48 + 10, "scissor x includes the playfield translate")
+  eq(scissorCalls[1].y, 32 + 20 + 4 * 2, "scissor y includes the playfield translate")
   eq(scissorCalls[1].h, 16, "scissor height scaled")
 
   love.graphics.setScissor = origScissor
+  love.graphics.transformPoint = origTransformPoint
 end
 
 -- IN_GRASS uses screen-space compositing (bottom OAM, keyed grass, top OAM).

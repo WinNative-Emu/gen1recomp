@@ -9237,13 +9237,14 @@ function World:bgTileAttrAt(map, tileset, mx, my)
   return { tileId = tileId, rawTileId = tile, attr = attr }
 end
 
--- LÖVE scissor is window/canvas space; Playfield.push translates draws but not
--- scissor rects.  Map-local (ox, oy, s) feet/bbox regions must be lifted.
-local function playfieldOrigin()
-  if Playfield.entered and Playfield.box then
-    return Playfield.box.x or 0, Playfield.box.y or 0
-  end
-  return 0, 0
+local function scissorRect(x, y, w, h)
+  local G = love.graphics
+  if not G.transformPoint then return x, y, w, h end
+  local x1, y1 = G.transformPoint(x, y)
+  local x2, y2 = G.transformPoint(x + w, y + h)
+  local sx, sy = math.floor(math.min(x1, x2) + 0.5), math.floor(math.min(y1, y2) + 0.5)
+  return sx, sy, math.floor(math.max(x1, x2) + 0.5) - sx,
+    math.floor(math.max(y1, y2) + 0.5) - sy
 end
 
 local function intersectScissor(x, y, w, h, px, py, pw, ph)
@@ -9428,11 +9429,9 @@ end
 -- BG_PRIO tiles draw fully opaque.
 function World:blitBgOverRegion(mapDef, ox, oy, s, rx0, ry0, rx1, ry1, keyed, tileFilter)
   local G = love.graphics
-  local pfX, pfY = playfieldOrigin()
-  local scissorX = pfX + math.floor(ox + rx0 * s)
-  local scissorY = pfY + math.floor(oy + ry0 * s)
-  local scissorW = math.ceil((rx1 - rx0) * s)
-  local scissorH = math.ceil((ry1 - ry0) * s)
+  local scissorX, scissorY, scissorW, scissorH = scissorRect(
+    math.floor(ox + rx0 * s), math.floor(oy + ry0 * s),
+    math.ceil((rx1 - rx0) * s), math.ceil((ry1 - ry0) * s))
   local psx, psy, psw, psh
   if G.getScissor then psx, psy, psw, psh = G.getScissor() end
   local clipX, clipY, clipW, clipH =
@@ -9471,6 +9470,7 @@ function World:drawFeetComposite(entity, ox, oy, s, drawBottomOam)
   local prev = G.getCanvas()
   G.push("all")
   G.origin()
+  G.setScissor()
   G.setCanvas(canvas)
   G.clear(0, 0, 0, 0)
   G.translate(-x0, -y0)
@@ -11605,7 +11605,9 @@ function World:drawGround(s)
     -- the map grid as the camera moved.
     local canvas = G.getCanvas()
     local bw, bh
-    if canvas then
+    if canvas and canvas.getPixelDimensions then
+      bw, bh = canvas:getPixelDimensions()
+    elseif canvas then
       bw, bh = canvas:getDimensions()
     else
       bw, bh = Playfield.dimensions()
@@ -12045,16 +12047,16 @@ function World:drawFadeRemap(s, w, h)
     self.fadeCanvas = nil
   end
   if not canvas then
-    local ok, made = pcall(love.graphics.newCanvas, w, h)
+    local ok, made = pcall(PixelCanvas.new, w, h, "nearest")
     if not ok or not made then return false end
-    made:setFilter("nearest", "nearest")
     canvas = made
     self.fadeCanvas = canvas
   end
   local G = love.graphics
   local previous = G.getCanvas()
-  G.push()
+  G.push("all")
   G.origin()
+  G.setScissor()
   G.setCanvas(canvas)
   G.clear(0, 0, 0, 1)
   self:drawWorldBody(s)
@@ -12120,7 +12122,7 @@ function World:draw()
   local posLift = 0
   if not ScreenPosition.skinActive(w, h) then
     posLift = ScreenPosition.lift(h, 144 * self:fitScale(),
-      ScreenPosition.safeTop())
+      ScreenPosition.safeTop() * Playfield.ratio())
   end
   if posLift > 0 then
     self.camera.y = self.camera.y + posLift / s

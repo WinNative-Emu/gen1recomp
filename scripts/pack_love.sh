@@ -52,7 +52,7 @@ rm -f "$OUTPUT"
   tools/rom_manifest_yellow.json tools/rom_manifest_gold.json \
   tools/rom_manifest_silver.json tools/rom_manifest_crystal.json \
   tools/rom_manifest_firered.json tools/rom_manifest_leafgreen.json tools/rom_manifest_emerald.json tools/rom_manifest_ruby.json tools/rom_manifest_sapphire.json \
-  -x '*.DS_Store' 'data/generated/*' 'assets/generated/*')
+  -x '*.DS_Store' '*.psd' 'data/generated/*' 'assets/generated/*')
 if [ -f "$ROOT/PATCH_NOTES.md" ]; then
   (cd "$ROOT" && zip -q "$OUTPUT" PATCH_NOTES.md)
 fi

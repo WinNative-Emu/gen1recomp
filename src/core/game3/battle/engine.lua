@@ -693,6 +693,8 @@ local function canceller(M)
   if ad:status(user) == "PAR" and roll(ad, 0, 3) == 0 then
     M:sayId("STRINGID_PKMNISPARALYZED", { atk = user })
     ad:statusAnim(user, "PAR")
+    -- pokefirered/data/battle_scripts_1.s:3717
+    Engine.cancelMultiTurnMoves(user)
     user.expUnableToMove = true
     return false
   end

@@ -342,7 +342,7 @@ do
   check(Ops.nicknameUsable(S, "Nidoking"), "lower case is renderable")
   check(Ops.nicknameUsable(S, "é") == true, "a charmap glyph is renderable")
   check(Ops.nicknameUsable(S, "PIKA€") == false, "a non-charmap glyph is not renderable")
-  check(Ops.nicknameUsable(S, "🤖") == false, "an emoji is not renderable")
+  check(Ops.nicknameUsable(S, "😀") == false, "an emoji is not renderable")
   -- "@" is the Gen1 string terminator: the codec has an entry for it but the
   -- game font has no tile, so Font.encode draws it as a space in-game
   check(Ops.nicknameUsable(S, "POKE@MON") == false,
@@ -1633,6 +1633,54 @@ do
 
   love.graphics.getDimensions = oldDimensions
   love.window.getSafeArea = oldSafe
+end
+
+do
+  local tmpPath = os.tmpname() .. "-fix-all-names.lua"
+  local f = io.open(tmpPath, "wb")
+  f:write(SaveData.encode(SaveData.newGame()))
+  f:close()
+  App.load(tmpPath, { version = "blue" })
+  local S = App.getState()
+  Ops.partyAdd(S)
+  Ops.partyAdd(S)
+  Ops.partyAdd(S)
+  Ops.boxAdd(S)
+  local plain, named, pk = S.save.party[1], S.save.party[2], S.save.party[3]
+  local boxed = S.save.boxes[S.selectedBox or 1][1]
+  check(plain.nickname == nil, "fix-all setup: party 1 is un-nicknamed")
+  Ops.setNickname(S, named, "SPARKY")
+  pk.nickname = "<PK><MN>"
+  boxed.nickname = nil
+  plain.otName, plain.ot = nil, nil
+  for _, mon in ipairs({ plain, named, pk, boxed }) do
+    mon.level = -2
+  end
+  check(Ops.fixAllErrors(S), "fix all repairs nicknamed and plain mons: " .. tostring(S.status))
+  eq(require("Legality").save(S).errors, 0, "fix all leaves no errors")
+  eq(plain.nickname, nil, "fix all keeps an un-nicknamed party mon un-nicknamed")
+  eq(boxed.nickname, nil, "fix all keeps an un-nicknamed box mon un-nicknamed")
+  eq(named.nickname, "SPARKY", "fix all keeps a nickname")
+  eq(pk.nickname, "<PK><MN>", "fix all keeps naming-screen <PK><MN> glyphs")
+  eq(plain.otName, nil, "fix all does not blank a missing OT name")
+  eq(Ops.nicknameLength("<PK><MN>", S), 2, "<PK> and <MN> count as one character each")
+  plain.level = -2
+  check(Ops.fixMonErrors(S, plain), "fix one repairs an un-nicknamed mon")
+  eq(plain.nickname, nil, "fix one keeps the mon un-nicknamed")
+
+  local GenSave = require("src.save_convert.GenSave")
+  GenSave.setCharmap(loadfile("src/save_convert/data/charmap.lua")())
+  local bytes = GenSave.encode(S.save, S.data)
+  local back = GenSave.decode(bytes, S.data)
+  eq(back.party[1].nickname, nil, "the fixed un-nicknamed mon exports with its species name")
+  eq(back.party[2].nickname, "SPARKY", "the fixed nickname exports")
+  eq(back.party[3].nickname, "<PK><MN>", "the fixed <PK><MN> nickname exports")
+
+  local S3 = { save = {}, version = "firered", data = {} }
+  check(Ops.nicknameUsable(S3, "Zoë&Glüh"), "Gen 3 names may hold the Gen 3 charmap's glyphs")
+  eq(Ops.nicknameSanitize(S3, "¡Hola+50%!"), "¡Hola+50%!", "Gen 3 sanitize keeps Gen 3 charmap glyphs")
+  check(not Ops.nicknameUsable(S3, "FARFETCH’D"), "Gen 3 names refuse a glyph the Gen 3 codec cannot store")
+  os.remove(tmpPath)
 end
 
 do

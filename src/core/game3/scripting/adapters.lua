@@ -560,6 +560,10 @@ function Adapters.host(mod, game, world)
       if cb then cb() end
       tick_vm()
     end,
+    clearWaitButton = function()
+      local Hud = package.loaded["src.ui.game3.hud"]
+      if Hud and Hud.clearWaitButton then Hud.clearWaitButton() end
+    end,
     -- Gen1 pokecenter uses HEAL/CANCEL; Gen2 askYesNo is YES/NO over stayed text.
     askYesNo = function(cb, layout)
       local function finish(yes)
@@ -573,7 +577,7 @@ function Adapters.host(mod, game, world)
         Hud.ensure(resolveGame(), "message")
         a.log("[game3] yes/no via game3 Choice (not Gen2 askYesNo)")
         Choice.yesNo(finish, layout)
-        -- Do NOT autoPick — player must answer on HUD.
+        -- Do NOT autoPick: player must answer on HUD.
         return
       end
       local w = resolveWorld()
@@ -692,7 +696,7 @@ function Adapters.host(mod, game, world)
         tick_vm()
       end
       -- pret special HealPlayerParty is silent (no nurse dialogue). Dialogue
-      -- lives in the surrounding script; never call Gen1 OC.nurseHeal here —
+      -- lives in the surrounding script; never call Gen1 OC.nurseHeal here:
       -- that method needs an OverworldState self + Game upvalue.
       local Runtime = package.loaded["src.core.game3.runtime"]
       if Runtime and Runtime.isActive and Runtime.isActive() then
@@ -954,7 +958,7 @@ function Adapters.host(mod, game, world)
       end
     end,
     applyMovement = function(localId, stream, done)
-      -- On Sevii, always drive game3 EventObjects / Player — never host scriptStep.
+      -- On Sevii, always drive game3 EventObjects / Player: never host scriptStep.
       local Runtime = package.loaded["src.core.game3.runtime"]
       if Runtime and Runtime.isActive and Runtime.isActive() then
         local Objects = require("src.core.game3.objects")
@@ -987,7 +991,7 @@ function Adapters.host(mod, game, world)
       advanceMoveTracks()
     end,
     pollMovement = function(localId, _entry)
-      -- Prefer EventObjects whenever they own the map — not only when a track
+      -- Prefer EventObjects whenever they own the map: not only when a track
       -- is already active (hasActiveTracks false → moveTracks treated missing
       -- as done and skipped Bill / Oak waits).
       local okO, Objects = pcall(require, "src.core.game3.objects")
@@ -1305,7 +1309,7 @@ function Adapters.host(mod, game, world)
         finish()
         return
       end
-      -- Gen2 World:setMap(mapId, cx, cy, facing) — coords required (nil cx crashes).
+      -- Gen2 World:setMap(mapId, cx, cy, facing): coords required (nil cx crashes).
       local function as_coord(v)
         v = tonumber(v)
         if not v then return nil end

@@ -58,8 +58,9 @@ package.loaded["src.core.game3.battle_transition"] = { draw = function() end }
 
 local bytes, scripts = {}, {}
 for species, name in pairs({ [141] = "kabutops", [142] = "aerodactyl" }) do
-  local f = assert(io.open(root .. "/museum/" .. name .. ".rgba", "rb"))
-  bytes[species] = f:read("*a"); f:close()
+  local path = root .. "/museum/" .. name .. ".rgba"
+  local f = assert(io.open(path, "rb"))
+  bytes[species] = require("src.import.CacheBlob").decode(path, f:read("*a")); f:close()
   T.eq(#bytes[species], 16384, name .. " required actual imported art size")
 end
 T.check(bytes[141] ~= bytes[142], "both exhibits have distinct imported fossil art")
@@ -221,10 +222,13 @@ end
 Version.set("firered"); Extract.CACHE_ROOT = root; Dataset.cacheRootOverride = root
 local Game3 = require("src.core.Game3")
 local clearFieldScreens
-for i = 1, 100 do
-  local name, fn = debug.getupvalue(Game3.returnToTitle, i)
-  if not name then break end
-  if name == "clearFieldScreens" then clearFieldScreens = fn; break end
+for _, owner in ipairs({ Game3.returnToTitle, Game3._tearDownField }) do
+  for i = 1, 100 do
+    local name, fn = debug.getupvalue(owner, i)
+    if not name then break end
+    if name == "clearFieldScreens" then clearFieldScreens = fn; break end
+  end
+  if clearFieldScreens then break end
 end
 T.check(type(clearFieldScreens) == "function", "actual title transition exposes screen teardown")
 setup(); open(141)

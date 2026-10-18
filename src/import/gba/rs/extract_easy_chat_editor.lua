@@ -50,8 +50,7 @@ local function indexedBlueFrame(c)
     frames[#frames + 1] = base
     for layer = 1, 3 do masks[layer][#masks[layer] + 1] = layers[layer] end
   end
-  local sourcePal, pal = c:pal("gMenuWordGroupFrame1_Pal", 32), {}
-  for index = 0, 15 do pal[index] = sourcePal[index + 16] end
+  local pal = c:pal("gMenuWordGroupFrame2_Pal", 16)
   local idx, w, h = K.stack(frames, 8, 8)
   local out = {bank = 5, count = count, w = w, h = h, indices = {81, 82, 83},
     source = "gMenuWordGroupFrame_Gfx", base = c:png("frame_blue_base.png", w, h, idx, pal, true), masks = {}}
@@ -65,7 +64,7 @@ end
 function M.run(rom, cache, opts)
   local c = A.context(rom, cache, opts, M.SUB)
   local man = {screen = "easy_chat_editor", editorVersion = M.VERSION, assets = "rse/easy_chat", types = {}, sprites = {},
-    titleFont = 1, titleMeasureFont = 3, titleWidth = 240, titleY = 0,
+    titlePalette = 1, titleWidth = 240, titleY = 0,
     footer = {x = 28, y = 96, stride = 56},
     prompt = {x = 32, y = 120, width = 176, linePitch = 16}, texts = {},
     controls = Contracts.CONTROLS, errors = Contracts.ERRORS}

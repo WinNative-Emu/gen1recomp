@@ -73,7 +73,7 @@ function L.mon(S, mon)
   local Ops = require("Ops")
   if
     mon.nickname
-    and (Ops.nicknameLength(mon.nickname) > 10 or not Ops.nicknameUsable(S, mon.nickname))
+    and (Ops.nicknameLength(mon.nickname, S) > 10 or not Ops.nicknameUsable(S, mon.nickname))
   then
     add(
       "error",
@@ -84,7 +84,7 @@ function L.mon(S, mon)
   for _, d in ipairs(Properties.all(S)) do
     local v = Properties.get(mon, d)
     if d.text then
-      if Ops.nicknameLength(v) > d.max or not Ops.nicknameUsable(S, v) then
+      if Ops.nicknameLength(v, S) > d.max or not Ops.nicknameUsable(S, v) then
         add("error", d.key, d.label .. " contains an invalid name")
       end
     else

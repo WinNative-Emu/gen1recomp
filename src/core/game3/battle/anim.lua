@@ -18,7 +18,7 @@ local Anim = {}
 Anim.Z = AnimVm.Z
 Anim.Coords = AnimCoords
 
--- pret sBattlerCoords (singles) — CreateSprite CENTER
+-- pret sBattlerCoords (singles): CreateSprite CENTER
 Anim.ENEMY_MON = { x = 176, y = 40 }
 Anim.PLAYER_MON = { x = 72, y = 80 }
 
@@ -430,8 +430,8 @@ function Anim.introSlideDone()
 end
 
 --- Pret faint presentation: SE_FAINT + sink/slide off, then hide mon + healthbox.
--- Opponent: SpriteCB_AnimFaintOpponent — +8px every 2 frames, ~8 steps.
--- Player: SpriteCB_FaintSlideAnim — +5px/frame until below screen.
+-- Opponent: SpriteCB_AnimFaintOpponent: +8px every 2 frames, ~8 steps.
+-- Player: SpriteCB_FaintSlideAnim: +5px/frame until below screen.
 function Anim.faintMon(key, opts)
   opts = opts or {}
   local id = Anim.idOf(key or "enemy") or 1
@@ -532,7 +532,7 @@ function Anim.syncDisplayFromState(st)
       p.displayHp = tonumber(b.mon.hp) or 0
       p.displayMaxHp = tonumber(b.mon.maxHp) or 1
       p.displayLevel = tonumber(b.mon.level) or 1
-      p.displayStatus = b.status or (b.mon and (b.mon.status or b.mon.status1))
+      p.displayStatus = b.status or (b.mon and (b.mon.status or b.mon.status1)) or false
       local prog = Experience.progress(b.mon)
       p.displayExp = prog.progressPercent or 0
     end
@@ -661,7 +661,7 @@ function Anim.displayHpRatio(side, battler)
 end
 
 --- GBA indexed sheets store transparent as palette index 0 (often magenta #6229FF).
--- Love2D expands that to opaque pixels — punch them to alpha 0.
+-- Love2D expands that to opaque pixels: punch them to alpha 0.
 local function punch_gba_transparent(imageData)
   if not imageData or not imageData.mapPixel then return imageData end
   -- Exact pret key color and near-matches (98/255, 41/255, 1)

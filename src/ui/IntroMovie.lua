@@ -240,6 +240,12 @@ function IntroMovie.new(game, onDone)
   self.gengarPose, self.nidoFrame = 1, 1
   self.opIndex, self.opTimer = 1, 0
   self.fadeStep = nil
+  if not self.skipAll then
+    Sound.prewarmSfx(game.data, "Shooting_Star")
+    for _, op in ipairs(FIGHT_SCRIPT) do
+      if op.sfx then Sound.prewarmSfx(game.data, op.sfx) end
+    end
+  end
   return self
 end
 

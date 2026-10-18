@@ -40,8 +40,6 @@ return function(game)
     return pred()
   end
   local ok, err = xpcall(function()
-    if not check((os.getenv("POKEPORT_IDENTITY") or ""):match("^bsa0930%-") ~= nil,
-      "isolated campaign identity") then return end
     game.driverSpeed = 1
     game.speedOverride = 1
     if not check(waitUntil(function() return game.boot ~= nil end, 4), "Gen3 boot ready") then return end
@@ -147,8 +145,12 @@ return function(game)
       local from = #captured
       Audio.fadeOutAndPlay(b, 1)
       if not emerald then
-        Audio.fadeDefaultBgm(1)
-        check(Audio._fadeOut == nil and Audio._currentSong.id == a, prefix .. " default map replaces pending B fade")
+        local pending = Audio._fadeOut
+        -- pokefirered/src/overworld.c:1089
+        Audio.fadeDefaultBgm()
+        check(pending ~= nil and Audio._fadeOut == pending and pending.nextSong == a
+          and math.abs(pending.dur - 16 / 60) < 1e-9 and Audio.currentMapMusic() == a,
+          prefix .. " default map replaces pending B fade")
       end
       check(go(mapA), prefix .. " reenters A during pending fade to B")
       if not pcm(prefix .. "_fade_return", from) then return end

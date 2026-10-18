@@ -468,7 +468,7 @@ pack_game_love() {
     tools/rom_manifest_yellow.json tools/rom_manifest_gold.json \
     tools/rom_manifest_silver.json tools/rom_manifest_crystal.json \
     tools/rom_manifest_firered.json tools/rom_manifest_leafgreen.json tools/rom_manifest_emerald.json tools/rom_manifest_ruby.json tools/rom_manifest_sapphire.json \
-    -x '*.DS_Store' -x '*/.git/*' -x '*/.DS_Store' \
+    -x '*.DS_Store' -x '*/.git/*' -x '*/.DS_Store' -x '*.psd' \
     -x 'data/generated/*' -x 'assets/generated/*')
   # List once and match against the captured text: piping unzip straight into
   # grep under `set -o pipefail` SIGPIPEs unzip as soon as grep exits early,

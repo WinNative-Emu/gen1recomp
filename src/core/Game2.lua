@@ -1448,8 +1448,9 @@ end
 -- (Renderer:endFrame's Sp).  Following the zoom used to shrink the LCD grid to
 -- one screen pixel a cell out at survey range.
 function Game2:pixelScale(w, h)
+  local d = Playfield.ratio()
   local _, _, pw, ph = Playfield.rect(w, h)
-  return math.max(1, math.floor(math.min(pw / 160, ph / 144)))
+  return math.max(1, math.floor(math.min(pw * d / 160, ph * d / 144) + 1e-9))
 end
 
 -- A window-sized canvas the whole frame is composed into, so the post passes
@@ -1472,30 +1473,31 @@ function Game2:presentCanvas(index, w, h)
   return canvas
 end
 
+function Game2:pixelFrame(w, h)
+  local d = Playfield.ratio()
+  local x, y, pw, ph = Playfield.rect(w, h)
+  return d, math.floor(x * d + 0.5), math.floor(y * d + 0.5),
+    math.floor(pw * d + 0.5), math.floor(ph * d + 0.5)
+end
+
 -- The letterbox this frame is being drawn in, in the terms Gen 1's
 -- Renderer:endFrame reports it: the integer fit scale, the centred origin that
 -- goes with it, the window in LOVE units and in framebuffer pixels, and the DPI
--- scale between the two.
---
--- One difference from Gen 1 has to be named, because two payload fields carry
--- it.  Gen 1 fits in FRAMEBUFFER pixels and divides back into units, so its
--- `scale` is framebuffer-pixels-per-GB-pixel; Gold fits in LOVE units
--- throughout (Chrome.fitScale takes love.graphics.getDimensions), so `scale`
--- here is units-per-GB-pixel.  They are the same number on every 1x display,
--- which is where Gen 1 mods are written and verified, and on a HiDPI display
--- this is the one that actually describes Gold's picture -- `gameX + x * scale`
--- lands on GB pixel x either way.  The rect fields (gameX/gameY/gameWidth/
--- gameHeight, ox/oy/vpw/vph) are LOVE units in both generations.
+-- scale between the two.  `scale` and the rect fields are LOVE units.
 function Game2:frameFit(w, h)
-  local scale = Chrome.fitScale(w, h)
-  local ox, oy = Chrome.fitOrigin(w, h, scale)
-  local dpi = 1
-  if love.window and love.window.getDPIScale then
-    dpi = tonumber(love.window.getDPIScale()) or 1
+  local d, fx, fy, fw, fh = self:pixelFrame(w, h)
+  local bx, by, bw, bh = Game2.faithfulBox(fw, fh, d)
+  if bx then fx, fy, fw, fh = fx + bx, fy + by, bw, bh end
+  local k = math.max(1, math.floor(math.min(fw / 160, fh / 144)))
+  local lift = 0
+  local ScreenPosition = require("src.core.ScreenPosition")
+  if not ScreenPosition.skinActive(w, h) then
+    lift = ScreenPosition.lift(fh, 144 * k, ScreenPosition.safeTop() * d)
   end
-  local pw, ph = w * dpi, h * dpi
-  pw, ph = GameViewport.pixelDimensions()
-  return scale, ox, oy, dpi, pw, ph
+  local ox = fx + math.floor((fw - 160 * k) / 2)
+  local oy = fy + math.floor((fh - 144 * k) / 2) - lift
+  local pw, ph = GameViewport.pixelDimensions()
+  return k / d, ox / d, oy / d, d, pw, ph
 end
 
 -- render.hud's payload (src/core/Game.lua:521), which is what Renderer:endFrame
@@ -1541,11 +1543,16 @@ end
 -- Payload is Gen 1's table field for field (Renderer.lua:840).
 function Game2:letterbox(w, h, worldActive)
   if not ModRuntime.wantsHook("render.letterbox") then return end
-  local scale, ox, oy, dpi, pw, ph = self:frameFit(w, h)
+  local dpi = self.pixelRatio or 1
+  local scale = Chrome.fitScale(w, h)
+  local ox, oy = Chrome.fitOrigin(w, h, scale)
+  scale, ox, oy = scale / dpi, ox / dpi, oy / dpi
+  local pw, ph = GameViewport.pixelDimensions()
   local G = love.graphics
   G.push("all")
+  G.scale(dpi, dpi)
   ModRuntime.call("render.letterbox", noop, {
-    ww = w, wh = h, pw = pw, ph = ph,
+    ww = w / dpi, wh = h / dpi, pw = pw, ph = ph,
     ox = ox, oy = oy, vpw = 160 * scale, vph = 144 * scale,
     scale = scale, dpiX = dpi, dpiY = dpi,
     worldActive = worldActive and true or false,
@@ -1639,8 +1646,8 @@ end
 function Game2:fxWorldOrigin(w, h, scale)
   local cam = self.world and self.world.camera
   if not cam then return nil end
-  local fx, fy, fw, fh = Playfield.rect(w, h)
-  local bx, by = Game2.faithfulBox(fw, fh)
+  local d, fx, fy, fw, fh = self:pixelFrame(w, h)
+  local bx, by = Game2.faithfulBox(fw, fh, d)
   if bx then fx, fy = fx + bx, fy + by end
   return fx + math.floor(-cam.x * scale), fy + math.floor(-cam.y * scale)
 end
@@ -1652,7 +1659,8 @@ function Game2:fxSplitsUi(w, h)
   if world:zoomScale() ~= fs then return true end
   local wx, wy = self:fxWorldOrigin(w, h, fs)
   if not wx then return false end
-  local ox, oy = Chrome.fitOrigin(w, h, fs)
+  local _, ox, oy, d = self:frameFit(w, h)
+  ox, oy = math.floor(ox * d + 0.5), math.floor(oy * d + 0.5)
   return (ox - wx) % fs ~= 0 or (oy - wy) % fs ~= 0
 end
 
@@ -1817,12 +1825,12 @@ function Game2:drawViewportFrame()
       if shaderfx then
         -- Whole window, matching Renderer.lua: the world at its zoom scale
         -- when the UI was split off, otherwise everything at FIT.
-        local s = scale * dpi
-        local ws = uiLayer and self.world:zoomScale() * dpi or s
+        local s = math.floor(scale * dpi + 0.5)
+        local ws = uiLayer and self.world:zoomScale() or s
         local wox, woy = ox * dpi, oy * dpi
         if self.frameWorldActive then
-          local wx, wy = self:fxWorldOrigin(w, h, ws / dpi)
-          if wx then wox, woy = wx * dpi, wy * dpi end
+          local wx, wy = self:fxWorldOrigin(w, h, ws)
+          if wx then wox, woy = wx, wy end
         end
         ShaderFX.render(source, { x = 0, y = 0, w = pw, h = ph, scale = ws },
           { w = pw / ws, h = ph / ws }, dpi, dpi, { originX = wox, originY = woy })
@@ -1870,32 +1878,56 @@ function Game2:textboxPaper()
   return nil
 end
 
-function Game2.faithfulBox(w, h)
+function Game2.faithfulBox(w, h, d)
   if not require("src.core.FaithfulRes").scaleCap() then return nil end
   local s = math.max(1, math.floor(math.min(w / 160, h / 144)))
   local bw, bh = 160 * s, 144 * s
   local lift = 0
   local ScreenPosition = require("src.core.ScreenPosition")
   if not ScreenPosition.skinActive(w, h) then
-    lift = ScreenPosition.lift(h, bh, ScreenPosition.safeTop())
+    lift = ScreenPosition.lift(h, bh, ScreenPosition.safeTop() * (d or 1))
   end
   return math.floor((w - bw) / 2), math.floor((h - bh) / 2) - lift, bw, bh
 end
 
+local function maskOutside(w, h, bx, by, bw, bh)
+  local G = love.graphics
+  G.push("all")
+  G.setShader()
+  G.setBlendMode("alpha")
+  G.setColor(0, 0, 0, 1)
+  if bx > 0 then G.rectangle("fill", 0, 0, bx, h) end
+  if bx + bw < w then G.rectangle("fill", bx + bw, 0, w - bx - bw, h) end
+  if by > 0 then G.rectangle("fill", bx, 0, bw, by) end
+  if by + bh < h then G.rectangle("fill", bx, by + bh, bw, h - by - bh) end
+  G.pop()
+end
+
 function Game2:drawContained(w, h)
-  local pw, ph, px, py = Playfield.push(w, h)
-  local bx, by, bw, bh = Game2.faithfulBox(pw, ph)
+  local _, _, px, py = Playfield.push(w, h)
+  local G = love.graphics
+  local d, _, _, pw, ph = self:pixelFrame(w, h)
+  G.scale(1 / d, 1 / d)
+  px, py = px * d, py * d
+  Playfield.enter(px, py, pw, ph)
+  local fw, fh = pw, ph
+  local bx, by, bw, bh = Game2.faithfulBox(pw, ph, d)
   if bx then
-    local G = love.graphics
     G.setColor(0, 0, 0, 1)
     G.rectangle("fill", 0, 0, pw, ph)
     G.setColor(1, 1, 1, 1)
-    G.setScissor(px + bx, py + by, bw, bh)
+    G.push()
     G.translate(bx, by)
     Playfield.enter(px + bx, py + by, bw, bh)
     pw, ph = bw, bh
   end
+  self.pixelRatio = d
   local ok, err = pcall(self.drawScene, self, pw, ph)
+  self.pixelRatio = nil
+  if bx then
+    G.pop()
+    if ok then maskOutside(fw, fh, bx, by, bw, bh) end
+  end
   Playfield.pop()
   if not ok then error(err, 0) end
 end

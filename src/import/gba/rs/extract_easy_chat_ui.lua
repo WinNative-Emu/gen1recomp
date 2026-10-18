@@ -32,7 +32,9 @@ function M.run(rom, cache, opts)
   c:pal("gUnknown_083DBDFC", 16, pal, 16)
   c:pal("gUnknown_083DBE40", 16, pal, 32)
   pal[63], pal[49], pal[56] = 32767, 27 + 26 * 32 + 27 * 1024, 28 + 28 * 32 + 28 * 1024
-  c:pal("gMenuWordGroupFrame1_Pal", 32, pal, 64)
+  -- src/easy_chat_2.c:970
+  c:pal("gMenuWordGroupFrame1_Pal", 16, pal, 64)
+  c:pal("gMenuWordGroupFrame2_Pal", 16, pal, 80)
   local gfx = c:lz("gMenuWordGroupFrame_Gfx")
   local tileCount, frames = #gfx / 32, {}
   assert(tileCount % 1 == 0, "native Easy Chat tile alignment")
@@ -44,7 +46,7 @@ function M.run(rom, cache, opts)
     end
   end
   local atlas, aw, ah = K.stack(frames, 8, 8)
-  local man = {screen = "easy_chat_mail", width = 240, height = 160, type = 4, variant = 3,
+  local man = {screen = "easy_chat_mail", width = 240, height = 160, type = 4, variant = 3, titlePalette = 1,
     wordCount = 9, columns = 2, rows = 5, tiles = {count = tileCount, w = aw, h = ah,
       png = c:png("frame_tiles.png", aw, ah, atlas, pal, true)},
     maps = {base = words(c:raw("gUnknown_08E945D0")), shapes = words(c:raw("gUnknown_08E94AD0")), picker = words(c:lz("gUnknown_08E953D0"))},

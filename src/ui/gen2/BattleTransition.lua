@@ -796,7 +796,9 @@ function BattleTransition:drawBgLayer(s)
   local G = love.graphics
   local canvas = G.getCanvas()
   local bw, bh
-  if canvas then
+  if canvas and canvas.getPixelDimensions then
+    bw, bh = canvas:getPixelDimensions()
+  elseif canvas then
     bw, bh = canvas:getDimensions()
   else
     bw, bh = Playfield.dimensions()
@@ -949,12 +951,12 @@ function BattleTransition:capture(w, h)
     local G = love.graphics
     local previous = G.getCanvas()
     -- A canvas does not reset the transform.
-    G.push()
+    G.push("all")
     G.origin()
+    G.setScissor()
     G.setCanvas(self.canvas)
     G.clear(0, 0, 0, 1)
     self.captureLayered = self:drawWorld()
-    G.setCanvas(previous)
     G.pop()
     self.captured = true
   end

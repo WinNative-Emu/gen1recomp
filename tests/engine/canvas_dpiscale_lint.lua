@@ -6,7 +6,6 @@ local ALLOW = {
   { "src/render/Renderer.lua", "self.presentCanvas = love.graphics.newCanvas(ww, wh)" },
   { "src/render/Renderer.lua", "self.uiLayerCanvas = love.graphics.newCanvas(ww, wh)" },
   { "src/core/Game2.lua", "pcall(love.graphics.newCanvas, w, h)" },
-  { "src/world/gen2/World.lua", "pcall(love.graphics.newCanvas, w, h)" },
   { "src/ui/gen2/BattleTransition.lua", "pcall(love.graphics.newCanvas, w, h)" },
   { "src/render/GameViewport.lua", "love.graphics.newCanvas(rect.width, rect.height)" },
   { "src/render/ShaderFX.lua", "love.graphics.newCanvas(dims.w, dims.h)" },

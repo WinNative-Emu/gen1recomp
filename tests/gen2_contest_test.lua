@@ -1281,10 +1281,24 @@ do
   check(quitIndex ~= nil, "the QUIT row is findable")
   eq(menu.items[quitIndex].label, "QUIT", "and is labeled QUIT")
 
+  local function settle(m)
+    game.input = fakeInput(nil)
+    for _ = 1, 600 do
+      if not m:promptTyping() then break end
+      m:update(0)
+    end
+  end
+
   menu.list.index = quitIndex
   game.input = fakeInput("a")
   menu:update(0)
   eq(menu.phase, "confirmContest", "QUIT asks before ending the Contest")
+  check(menu:promptTyping(), "the question prints before the YesNoBox opens")
+  game.input = fakeInput("b")
+  menu:update(0)
+  eq(menu.phase, "confirmContest", "B while it prints does not answer it")
+  settle(menu)
+  check(not menu:promptTyping(), "the question finishes printing")
   eq(menu.confirmChoice, 1, "with the YesNoBox open on YES")
   eq(warped, 0, "and nothing has ended yet")
 
@@ -1297,6 +1311,7 @@ do
   menu.list.index = quitIndex
   game.input = fakeInput("a")
   menu:update(0)
+  settle(menu)
   game.input = fakeInput("a")
   menu:update(0)
   eq(warped, 1, "YES hands control to BugContestResultsWarpScript")
@@ -1307,6 +1322,8 @@ do
   menu.list.index = quitIndex
   game.input = fakeInput("start")
   down.phase = "confirmContest"
+  settle(down)
+  game.input = fakeInput("start")
   down:update(0)
   eq(down.phase, nil, "START backs out of the confirmation too")
 

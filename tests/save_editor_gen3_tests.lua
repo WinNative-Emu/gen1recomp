@@ -145,6 +145,7 @@ local _, caughtMeta = SaveData.slotSummary(caughtSave)
 checkEq(caughtMeta.dexCount, 2, "slotSummary derives dex count from dex.caught")
 
 local mockData = {}
+GameVersion.set("firered")
 Gen.bindGame3Data(mockData)
 
 do
@@ -595,6 +596,13 @@ do
   check(pcall(Ops.pcCanMax, S), "Ops.pcCanMax handles table entries in pcItems without error")
   local okT, errT = pcall(App.draw)
   check(okT, "App.draw renders with table-typed items: " .. tostring(errT))
+  local numeric = true
+  for _, pc in ipairs({ false, true }) do
+    for _, r in ipairs(Ops.stackRows(S, pc)) do
+      if type(r.count) ~= "number" then numeric = false end
+    end
+  end
+  check(numeric, "Ops.stackRows reports numeric counts for table-typed items")
 
   App.unload()
 end

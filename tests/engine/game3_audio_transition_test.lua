@@ -169,6 +169,19 @@ for _, version in ipairs({ "emerald", "firered", "leafgreen" }) do
     eq(Audio._currentSong and Audio._currentSong.id, a, version .. " fadeDefaultBgm replaces pending B with map A")
 
     a, b = setup(version)
+    Audio.fadeOutAndPlay(b, 1)
+    Audio.update(8 / 60)
+    local pending = Audio._fadeOut
+    local progress = pending and pending.t
+    -- pokefirered/src/sound.c:145
+    Audio.fadeOutAndPlay(a, 8)
+    check(Audio._fadeOut == pending and pending.t == progress and math.abs(pending.dur - 16 / 60) < 1e-9,
+      version .. " replacing a pending map fade keeps its speed and progress")
+    eq(Audio.currentMapMusic(), a, version .. " replacing a pending map fade queues A")
+    Audio.update(9 / 60)
+    eq(Audio._currentSong and Audio._currentSong.id, a, version .. " A starts when the original speed 1 fade ends")
+
+    a, b = setup(version)
     Audio._currentSong, Audio._bgmGen = { id = b }, b
     Audio.fadeDefaultBgm()
     eq(Audio._currentSong and Audio._currentSong.id, b, version .. " fadeDefaultBgm keeps B playing while it fades")

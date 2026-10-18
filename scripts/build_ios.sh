@@ -44,9 +44,9 @@ DISPLAY_NAME="gen1recomp++"
 PRODUCT_NAME="gen1recomp++"
 # Bundle ID resolution, most specific wins:
 #   1. GEN1_BUNDLE_ID env var
-#   2. mobile/ios/bundle_id.local (one line, gitignored — pins YOUR install
+#   2. mobile/ios/bundle_id.local (one line, gitignored: pins YOUR install
 #      so rebuilds keep updating the same app on your phone)
-#   3. device builds: com.gen1recomp.t<your team id> — explicit App IDs are
+#   3. device builds: com.gen1recomp.t<your team id>: explicit App IDs are
 #      globally unique across ALL Apple accounts (and required once
 #      capabilities like HealthKit are involved), so a per-team default
 #      lets anyone build without colliding with someone else's app
@@ -351,9 +351,9 @@ pack_game_love() {
   (cd "$ROOT" && zip -q -9 -r "$LOVE_FILE" \
     main.lua conf.lua src data assets tools/save-editor \
     $MANIFESTS \
-    -x '*.DS_Store' -x '*/.git/*' -x '*/.DS_Store' \
+    -x '*.DS_Store' -x '*/.git/*' -x '*/.DS_Store' -x '*.psd' \
     -x 'data/generated/*' -x 'assets/generated/*')
-  # NOTE: grep -q here would race pipefail — it exits on first match, unzip
+  # NOTE: grep -q here would race pipefail: it exits on first match, unzip
   # dies of SIGPIPE (141), and the pipeline "fails" nondeterministically.
   # >/dev/null keeps grep reading the whole stream instead.
   if unzip -Z1 "$LOVE_FILE" \

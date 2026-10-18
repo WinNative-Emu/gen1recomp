@@ -200,7 +200,7 @@ function Util.newGame(sess)
   Util.clearRankingHallRecords(sess)
 end
 
-Util.SAVE_FIELDS = { "frontier", "hallRecords1P", "hallRecords2P", "savedPlayerParty" }
+Util.SAVE_FIELDS = { "frontier", "hallRecords1P", "hallRecords2P", "savedPlayerParty", "recordedBattle" }
 
 local okS, SaveSections = pcall(require, "src.core.game3.save_sections")
 if okS and SaveSections then

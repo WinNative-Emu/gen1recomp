@@ -45,6 +45,10 @@ TextAliases.gText_CantUseHere = "OtherText_CantUseThatHere"
 TextAliases.gText_InUseAlready_PM = "OtherText_CantUseThatHere"
 TextAliases.gText_NotEnoughHp = "OtherText_NotEnoughHP"
 TextAliases.gText_CantUseUntilNewBadge = "gOtherText_CantBeUsedBadge"
+-- pokeruby/src/field_player_avatar.c:1684
+TextAliases.gText_PokemonOnHook = "gOtherText_PokeOnHook"
+-- pokeruby/src/field_player_avatar.c:1730
+TextAliases.gText_NotEvenANibble = "gOtherText_NotEvenANibble"
 -- pokeruby/data/field_move_scripts.inc:10
 TextAliases.Text_WantToCut = "UseCutPromptText"
 TextAliases.Text_MonUsedFieldMove = "UsedCutRockSmashText"

@@ -119,6 +119,7 @@ function BorderFill.bake(atlas, tileset, blockId, bgSet, waterFrame)
   local canvas = PixelCanvas.new(BorderFill.SIZE, BorderFill.SIZE, "nearest")
   if not canvas then return nil end
   love.graphics.push("all")
+  love.graphics.setScissor()
   love.graphics.setCanvas(canvas)
   love.graphics.clear(0, 0, 0, 1)
   love.graphics.setColor(1, 1, 1, 1)

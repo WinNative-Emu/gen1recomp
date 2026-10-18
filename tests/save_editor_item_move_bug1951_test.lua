@@ -257,6 +257,7 @@ else
     return true
   end
   local mock = {}
+  require("src.core.GameVersion").set("firered")
   Gen.bindGame3Data(mock)
   local function fire()
     local save = Schema.newGame({ name = "RED" })

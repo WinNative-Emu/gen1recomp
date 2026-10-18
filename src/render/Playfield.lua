@@ -48,11 +48,23 @@ function Playfield.leave()
   Playfield.box = nil
 end
 
+function Playfield.ratio()
+  local G = love and love.graphics
+  if not G then return 1 end
+  local d = G.getDPIScale and tonumber(G.getDPIScale()) or nil
+  if (not d or d <= 0) and G.getDimensions then
+    local w = GameViewport.dimensions()
+    local pw = GameViewport.pixelDimensions()
+    d = (w and w > 0 and pw and pw > 0) and pw / w or 1
+  end
+  return d or 1
+end
+
 function Playfield.dimensions()
   if Playfield.entered and Playfield.box then
     return Playfield.box.w, Playfield.box.h
   end
-  return GameViewport.dimensions()
+  return GameViewport.pixelDimensions()
 end
 
 function Playfield.push(sw, sh)

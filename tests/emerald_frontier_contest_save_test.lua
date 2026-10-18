@@ -4,10 +4,24 @@ local GV = require("src.core.GameVersion")
 require("src.core.game3.profile").reset()
 GV.set("emerald")
 local Dataset = require("src.core.game3.dataset")
-if not Dataset.cache():read("data/generated/gba/rse/contest_gfx/manifest.lua") then
-  print("SKIP Emerald cache required: emerald_frontier_contest_save_test")
+local function emeraldRoot()
+  local explicit = os.getenv("POKEPORT_GBA_CACHE")
+  if explicit and explicit ~= "" then return explicit end
+  local home, id = os.getenv("HOME"), os.getenv("POKEPORT_IDENTITY")
+  if not (home and id and id ~= "") then return nil end
+  for _, base in ipairs({ home .. "/Library/Application Support/LOVE/", home .. "/.local/share/love/" }) do
+    local root = base .. id .. "/emerald/data/generated/gba"
+    local f = io.open(root .. "/rse/contest_gfx/manifest.lua", "rb")
+    if f then f:close() return root end
+  end
+  return nil
+end
+local cacheRoot = emeraldRoot()
+if not cacheRoot then
+  print("[skip] Emerald cache required: emerald_frontier_contest_save_test")
   os.exit(0)
 end
+Dataset.cacheRootOverride = cacheRoot
 love = require("tests.love_stub")
 require("src.import.gba.versions").select("emerald")
 local C = require("src.core.game3.constants").of("emerald")
@@ -115,7 +129,8 @@ local oldYield, oldCL, oldLink = Natives.yieldHost, package.loaded["src.core.gam
 Natives.yieldHost = function() return true end
 local code, aborted = 0, 0
 local transport = { RESULT = { OK = 0, ERROR = 1 }, FLAG = { IS_LINK = 1, IS_WIRELESS = 2 },
-  newSession = function(_, opts) return { flags = opts.flags, abort = function() aborted = aborted + 1 end } end }
+  newSession = function(_, opts) return { flags = opts.flags, abort = function() aborted = aborted + 1 end } end,
+  flagsFor = require("src.core.game3.link.contest_link").flagsFor }
 transport.beginTransfer = function(opts)
   return { session = opts.session, contest = { category = 1, rank = 0 }, step = function() return code end }
 end

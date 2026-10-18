@@ -304,9 +304,9 @@ local function color(value, bank)
   end
   result[4] = 1; return result
 end
-function C.textOptions(kind)
+function C.textOptions(kind, paletteNum)
   local w = assert(C._man.windows[kind or "phrase"])
-  local p, bank = C._man.palettes.bg, w.paletteNum
+  local p, bank = C._man.palettes.bg, paletteNum or w.paletteNum
   return {font = "native_" .. w.fontNum, textMode = w.textMode, letterSpacing = w.spacing, linePitch = 16,
     colors = {fg = color(p[bank * 16 + w.foregroundColor + 1], bank),
       shadow = color(p[bank * 16 + w.shadowColor + 1], bank), bg = color(p[bank * 16 + w.backgroundColor + 1], bank)}}
@@ -380,6 +380,12 @@ local function pickerText()
   local scroll = C._scroll
   local offset = scroll and (scroll.distance - scroll.offset) or 0
   love.graphics.setScissor(0, 88, 240, 64)
+  love.graphics.setColor(C.textOptions("picker").colors.bg)
+  if view == "groups" and not state.alpha then
+    love.graphics.rectangle("fill", 16, 88, 224, 64) -- src/easy_chat_2.c:1397
+  else
+    love.graphics.rectangle("fill", 0, 88, 240, 64) -- src/easy_chat_2.c:1534
+  end
   if view == "groups" and state.alpha then
     for row = 0, 3 do
       local value = C._man.alphabetText[row + 1]
@@ -430,9 +436,8 @@ local function pickerSprites()
   elseif view == "words" then
     local w = C._word
     triangle(w.col * 88 + 44, (w.row - w.top) * 16 + 96)
-    if w.top > 0 then sprite(art.arrows, 4, 120, 84, 16) end
-    if w.top < math.ceil(#C._list / 2) - 4 then sprite(art.arrows, 4, 120, 156, 16, true) end
-    sprite(art.buttons, 0, 142, 88, 16); sprite(art.buttons, 4, 182, 88, 16)
+    if w.top > 0 then sprite(art.arrows, 4, 120, 84, 16); sprite(art.buttons, 0, 142, 88, 16) end -- src/easy_chat_2.c:700
+    if w.top < math.ceil(#C._list / 2) - 4 then sprite(art.arrows, 4, 120, 156, 16, true); sprite(art.buttons, 4, 182, 88, 16) end
   end
 end
 local function nativeSprites()
@@ -482,10 +487,15 @@ function C.draw()
   local bg2 = assert(C._man.backdrop, "native Easy Chat BG2 metadata missing")
   love.graphics.setColor(color(C._man.palettes.bg[bg2.color + 1], 0))
   love.graphics.rectangle("fill", 0, 0, 240, bg2.height)
+  local titleOpts = C.textOptions("phrase", assert(C._man.titlePalette, "native Easy Chat title palette missing"))
+  love.graphics.setColor(titleOpts.colors.bg)
   if C._man.texts.title then
-    local titleOpts = C.textOptions("phrase"); titleOpts.font = "native_" .. C._man.titleFont
-    local titleWidth = Font.measure(C._man.texts.title, C.textOptions("phrase"))
+    love.graphics.rectangle("fill", 0, C._man.titleY, C._man.titleWidth, 16) -- src/easy_chat_2.c:1185
+    local titleWidth = Font.measure(C._man.texts.title, titleOpts)
     Font.draw(C._man.texts.title, math.max(0, math.floor((C._man.titleWidth - titleWidth) / 2)), C._man.titleY, titleOpts)
+  else
+    love.graphics.rectangle("fill", 0, C._man.titleY, 16, 16) -- src/easy_chat_2.c:1197
+    love.graphics.rectangle("fill", 224, C._man.titleY, 16, 16)
   end
   phraseWords(); pickerText()
   for y = 0, 19 do for x = 0, 29 do tile(C._map[y * 32 + x + 1], x * 8, y * 8) end end

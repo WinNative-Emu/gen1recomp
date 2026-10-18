@@ -28,7 +28,7 @@ local function rs_layout()
   return _rsLayout
 end
 
--- pret InitBattlerHealthboxCoords (singles) — sprite CENTER of left half
+-- pret InitBattlerHealthboxCoords (singles): sprite CENTER of left half
 Healthbox.ENEMY_CENTER = { x = 44, y = 30 }
 Healthbox.PLAYER_CENTER = { x = 158, y = 88 }
 
@@ -152,6 +152,19 @@ local function display_hp_nums(side, battler)
   local hp, maxHp = hp_values(side, battler)
   return math.floor(hp), math.floor(maxHp)
 end
+
+-- pokefirered/src/battle_interface.c:1594
+local function shown_ailment(p, battler)
+  local s
+  if p and p.displayStatus ~= nil then
+    s = p.displayStatus
+  else
+    s = battler.status or (battler.mon and (battler.mon.status or battler.mon.status1))
+  end
+  if s == false or s == 0 then s = nil end
+  return require("src.core.game3.summary_data").statusAilment({ status = s })
+end
+Healthbox.shownAilment = shown_ailment
 
 -- One read-only FrlgFont opts table per colour set (FrlgFont never writes
 -- to opts), so per-frame healthbox text does not allocate.
@@ -496,11 +509,8 @@ local function draw_doubles(id, battler, st, opts)
   erase_placeholder_ink(tlX, tlY, isPlayer and PLAYER_PLACEHOLDER_INK or ENEMY_PLACEHOLDER_INK)
 
   local SummaryChrome = require("src.ui.game3.summary_chrome")
-  local SummaryData = require("src.core.game3.summary_data")
   local p = Anim.present and Anim.present(id)
-  local stObj = (p and p.displayStatus ~= nil) and p.displayStatus or (battler.status or (battler.mon and (battler.mon.status or battler.mon.status1)))
-  if stObj == false or stObj == 0 then stObj = nil end
-  local ailment = SummaryData.statusAilment({ status = stObj, hp = battler.mon and battler.mon.hp })
+  local ailment = shown_ailment(p, battler)
   local statused = ailment >= 1 and ailment <= 6
   local hpText = isPlayer and Healthbox.hpTextShown(st, id)
 
@@ -614,10 +624,7 @@ function Healthbox.draw(side, battler, opts)
   local bx, by = hp_bar_top_left(barCx, barCy)
   local statusBorder = false
   if not isPlayer then
-    local SummaryData = require("src.core.game3.summary_data")
-    local st1 = (p and p.displayStatus ~= nil) and p.displayStatus or (battler.status or (battler.mon and (battler.mon.status or battler.mon.status1)))
-    if st1 == false or st1 == 0 then st1 = nil end
-    local a = SummaryData.statusAilment({ status = st1, hp = battler.mon and battler.mon.hp })
+    local a = shown_ailment(p, battler)
     -- pokefirered/src/battle_interface.c:1668
     statusBorder = a >= 1 and a <= 6
   end
@@ -646,10 +653,7 @@ function Healthbox.draw(side, battler, opts)
   end
 
   local SummaryChrome = require("src.ui.game3.summary_chrome")
-  local SummaryData = require("src.core.game3.summary_data")
-  local stObj = (p and p.displayStatus ~= nil) and p.displayStatus or (battler.status or (battler.mon and (battler.mon.status or battler.mon.status1)))
-  if stObj == false or stObj == 0 then stObj = nil end
-  local ailment = SummaryData.statusAilment({ status = stObj, hp = battler.mon and battler.mon.hp })
+  local ailment = shown_ailment(p, battler)
 
   if isPlayer then
     draw_name_gender(name, gender, tlX + 16, ty)

@@ -17,6 +17,12 @@ local check, eq = T.check, T.eq
 love = love or require("tests.love_stub")
 
 local StartMenu = require("src.ui.game3.start_menu")
+local function settle()
+  for _ = 1, 600 do
+    if not StartMenu.promptTyping() then break end
+    StartMenu.update()
+  end
+end
 local Stack = require("src.ui.game3.stack")
 local Boot = require("src.ui.game3.boot")
 local Game3 = require("src.core.Game3")
@@ -56,6 +62,16 @@ do
   StartMenu.confirm()
   check(StartMenu._confirmExit, "Now in confirm exit mode")
   eq(StartMenu._confirmCursor, 2, "Default confirm cursor is 2 (NO)")
+  check(StartMenu.promptTyping(), "The question prints before YES/NO opens")
+  for _ = 1, 6 do StartMenu.update() end
+  local p = StartMenu._prompt
+  check(p and p.revealed > 0 and p.revealed < p.total, "A few frames in, only part of the question is shown")
+  StartMenu.move(1)
+  eq(StartMenu._confirmCursor, 2, "Moving while it prints does nothing")
+  StartMenu.cancel()
+  check(StartMenu._confirmExit, "B while it prints does not back out")
+  settle()
+  check(not StartMenu.promptTyping(), "The question finishes printing")
 
   -- Move toggles between 1 (YES) and 2 (NO)
   StartMenu.move(1)
@@ -72,6 +88,7 @@ do
   -- Re-enter confirm mode and confirm NO
   StartMenu.confirm()
   check(StartMenu._confirmExit, "Re-entered confirm exit mode")
+  settle()
   eq(StartMenu._confirmCursor, 2, "Defaulted to NO")
   StartMenu.confirm()
   check(not StartMenu._confirmExit, "Confirming NO exited confirm mode")
@@ -81,6 +98,7 @@ do
   -- Re-enter confirm mode, switch to YES, and confirm
   StartMenu.confirm()
   check(StartMenu._confirmExit, "Re-entered confirm exit mode")
+  settle()
   StartMenu.move(1)
   eq(StartMenu._confirmCursor, 1, "Moved cursor to YES")
   StartMenu.confirm()
@@ -301,12 +319,15 @@ do
   end
   StartMenu.confirm()
   eq(StartMenu._confirmCursor, 2, "Emerald EXIT defaults to NO")
+  settle()
   StartMenu.cancel()
   eq(game.phase, "field", "Emerald EXIT B preserves field")
   StartMenu.confirm()
+  settle()
   StartMenu.confirm()
   eq(game.phase, "field", "Emerald EXIT NO preserves field")
   StartMenu.confirm()
+  settle()
   StartMenu.move(1)
   StartMenu.confirm()
   eq(game.phase, "boot", "Emerald EXIT tears down field")

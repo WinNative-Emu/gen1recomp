@@ -20,14 +20,14 @@ local function replace(mon, staged)
 	end
 end
 local function cleanName(S, name, max)
-	local nameClean = require("Ops").nicknameSanitize(S, tostring(name or ""))
-	local chars = {}
-	for ch in nameClean:gmatch("[%z\1-\127\194-\244][\128-\191]*") do
-		if #chars < max then
-			chars[#chars + 1] = ch
-		end
+	if name == nil then
+		return nil
 	end
-	return table.concat(chars)
+	local clean = require("Ops").nicknameSanitize(S, tostring(name), max)
+	if clean == "" and tostring(name) ~= "" then
+		return nil
+	end
+	return clean
 end
 function A.repair(S, original)
 	local Ops, L = require("Ops"), require("Legality")
@@ -47,7 +47,11 @@ function A.repair(S, original)
 	for _, d in ipairs(P.all(S)) do
 		local v = P.get(mon, d)
 		if d.text then
-			v = cleanName(S, v, d.max)
+			local raw = mon[d.key]
+			if raw == nil and d.alias then
+				raw = mon[d.alias]
+			end
+			v = cleanName(S, raw, d.max)
 		elseif d.toggle then
 			v = v == true or v == 1
 		else

@@ -71,12 +71,16 @@ return function(game)
   U.tap(game, "a")
   U.wait(5)
   ok(menu and menu.phase == "confirmContest", "QUIT asks to end the Contest")
+  for _ = 1, 300 do
+    if not (menu and menu:promptTyping()) then break end
+    U.wait(1)
+  end
   U.shot(game, SHOT_DIR .. "/crystal_bug2086_confirm.png")
   U.tap(game, "a")
   U.wait(30)
   ok(world.vm:running(), "YES starts BugContestResultsWarpScript")
-  for _ = 1, 600 do
-    if not world.vm:running() then break end
+  local deadline = love.timer.getTime() + 20
+  while world.vm:running() and love.timer.getTime() < deadline do
     U.tap(game, "a")
     U.wait(4)
   end

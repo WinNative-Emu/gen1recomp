@@ -799,7 +799,7 @@ end
 function Ops.setTrainerProperty(S, key, value)
   if key == "name" then
     value = tostring(value or "")
-    if value == "" or Ops.nicknameLength(value) > 7 or not Ops.nicknameUsable(S,value) then
+    if value == "" or Ops.nicknameLength(value, S) > 7 or not Ops.nicknameUsable(S,value) then
       return Ops.say(S,"Trainer name must contain 1-7 game characters")
     end
     S.save.player = S.save.player or {}
@@ -905,7 +905,7 @@ function Ops.setMonProperty(S, mon, key, value)
   if not d then return Ops.say(S, "That property is unavailable in this generation") end
   local parsed, err = P.parse(d, value)
   if parsed == nil then return Ops.say(S, err) end
-  if d.text and (Ops.nicknameLength(parsed) > d.max or not Ops.nicknameUsable(S, parsed)) then
+  if d.text and (Ops.nicknameLength(parsed, S) > d.max or not Ops.nicknameUsable(S, parsed)) then
     return Ops.say(S, "Trainer name must use game characters and fit in " .. d.max .. " characters")
   end
   if P.get(mon, d) == parsed then return Ops.say(S, d.label .. " is unchanged", "info") end
@@ -1118,11 +1118,22 @@ end
 -- visited.  The single place that walks a name, so the count / validate /
 -- sanitize paths cannot drift apart (a glyph is "é" or "♂", not one of its
 -- bytes, exactly as the naming screen counts its grid cells).
-local function eachGlyph(name, fn)
+local function tokenized(S)
+  return S == nil or Gen.ofState(S) ~= 3
+end
+
+local function eachGlyph(name, fn, tokens)
   local i, n = 1, #name
   while i <= n do
     local b = name:byte(i)
-    local ch = name:sub(i, i + glyphByteLen(b) - 1)
+    local ch
+    if tokens and b == 0x3C then
+      local bracket = name:match("^<[^<>]*>", i)
+      if bracket and (Charmap.byToken[bracket] or bracket:match("^<%$%x%x>$")) then ch = bracket end
+    elseif tokens and b == 0x27 and Charmap.byToken[name:sub(i, i + 1)] then
+      ch = name:sub(i, i + 1)
+    end
+    ch = ch or name:sub(i, i + glyphByteLen(b) - 1)
     if fn(ch) == false then return false end
     i = i + #ch
   end
@@ -1132,9 +1143,9 @@ end
 -- Glyph count, not byte count: "é" or "♂" is ONE game character, exactly as
 -- the naming screen counts its grid cells and GenSave.encodeName counts a
 -- charmap sequence.
-function Ops.nicknameLength(name)
+function Ops.nicknameLength(name, S)
   local n = 0
-  eachGlyph(tostring(name or ""), function() n = n + 1 end)
+  eachGlyph(tostring(name or ""), function() n = n + 1 end, tokenized(S))
   return n
 end
 
@@ -1143,22 +1154,31 @@ end
 -- charmap (so it actually draws).  The codec alone is not enough: "@" is the
 -- string-terminator byte, and "#" plus the dakuten kana have codec entries
 -- but no font tile, so Font.encode (src/render/Font.lua) draws them as a
--- space -- an invisible nickname.  Only single-codepoint entries qualify:
--- multi-character macros ("<PK>", the 'd ligature) cannot be typed one
--- character at a time, so they have no place in the input gate.
+-- space -- an invisible nickname.
 -- Built once per loaded font table (a mod replacing the font rebuilds it);
 -- falls back to the codec-only set when no font data is loaded (headless
 -- suites that never call Data:load).
-local glyphCache, glyphCacheFont
+local glyphCache, glyphCacheFont, gen3Glyphs
 local function nameGlyphSet(S)
+  if not tokenized(S) then
+    if not gen3Glyphs then
+      gen3Glyphs = {}
+      for _, map in ipairs({ require("src.core.game3.scripting.text_ir").CHARMAP,
+          require("src.save_convert.gen3_layouts.common").CHARMAP_LATIN }) do
+        for _, ch in pairs(map) do
+          if type(ch) == "string" and ch ~= "" and #ch == glyphByteLen(ch:byte(1)) then gen3Glyphs[ch] = true end
+        end
+      end
+    end
+    return gen3Glyphs
+  end
   local font = S and S.data and S.data.font
   if not (font and font.charmap) then return Charmap.byToken end
   if glyphCache and glyphCacheFont == font then return glyphCache end
   local set = {}
   for _, e in ipairs(font.charmap) do
     local s = e.seq
-    if type(s) == "string" and s ~= "" and Charmap.byToken[s]
-        and #s == glyphByteLen(s:byte(1)) then
+    if type(s) == "string" and s ~= "" and Charmap.byToken[s] then
       set[s] = true
     end
   end
@@ -1174,7 +1194,7 @@ function Ops.nicknameUsable(S, name)
   local set = nameGlyphSet(S)
   return eachGlyph(tostring(name or ""), function(ch)
     return set[ch] ~= nil
-  end)
+  end, tokenized(S))
 end
 
 -- The input gate for the inspector's nickname field.  Given the whole draft
@@ -1185,15 +1205,15 @@ end
 -- of the string, so a paste of "PIKA€CHU" lands as "PIKACHU".  The field runs
 -- this through Kit.textfield's opts.sanitize, so a blocked character never
 -- appears at all.
-function Ops.nicknameSanitize(S, name)
+function Ops.nicknameSanitize(S, name, max)
   local set = nameGlyphSet(S)
-  local out, count = {}, 0
+  local out, count, cap = {}, 0, max or Ops.NICKNAME_MAX
   eachGlyph(tostring(name or ""), function(ch)
-    if count < Ops.NICKNAME_MAX and set[ch] then
+    if count < cap and set[ch] then
       out[#out + 1] = ch
       count = count + 1
     end
-  end)
+  end, tokenized(S))
   return table.concat(out)
 end
 
@@ -1220,7 +1240,7 @@ function Ops.setNickname(S, mon, name)
     return Ops.mark(S, ("%s matches its standard name;  nickname cleared")
       :format(name))
   end
-  if Ops.nicknameLength(name) > Ops.NICKNAME_MAX then
+  if Ops.nicknameLength(name, S) > Ops.NICKNAME_MAX then
     return Ops.say(S, ("Nicknames are capped at %d characters"):format(Ops.NICKNAME_MAX))
   end
   if not Ops.nicknameUsable(S, name) then
@@ -1683,7 +1703,7 @@ function Ops.stackRows(S, pc)
   end
   local rows = {}
   for i, id in ipairs(order) do
-    rows[i] = { id = id, slot = 1, index = i, count = store[id] }
+    rows[i] = { id = id, slot = 1, index = i, count = itemQty(store, id) }
   end
   return rows
 end

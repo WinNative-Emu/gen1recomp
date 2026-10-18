@@ -64,9 +64,22 @@ for _, missing in ipairs({ "dynamicWarp", "x", "savedPlayerParty" }) do
   T.check(ok and result == false and calls == 0, "incomplete " .. missing .. " is rejected before writing")
   T.same(s, before, "incomplete " .. missing .. " leaves concrete session state intact")
 end
-local cache = require("src.core.game3.dataset").cache()
-local hasCache = type(cache:read("data/generated/gba/rse/frontier/manifest.lua")) == "string"
+local function emeraldRoot()
+  local explicit = os.getenv("POKEPORT_GBA_CACHE")
+  if explicit and explicit ~= "" then return explicit end
+  local home, id = os.getenv("HOME"), os.getenv("POKEPORT_IDENTITY")
+  if not (home and id and id ~= "") then return nil end
+  for _, base in ipairs({ home .. "/Library/Application Support/LOVE/", home .. "/.local/share/love/" }) do
+    local root = base .. id .. "/emerald/data/generated/gba"
+    local f = io.open(root .. "/rse/frontier/manifest.lua", "rb")
+    if f then f:close() return root end
+  end
+  return nil
+end
+local cacheRoot = emeraldRoot()
+local hasCache = cacheRoot ~= nil
 if hasCache then
+  require("src.core.game3.dataset").cacheRootOverride = cacheRoot
   require("src.import.gba.versions").select("emerald")
   local C = require("src.core.game3.constants").of("emerald")
   require("src.core.game3.pokemon").install(nil)
