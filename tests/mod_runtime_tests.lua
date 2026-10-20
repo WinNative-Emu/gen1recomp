@@ -150,7 +150,7 @@ check(manifest.id == "test_mod" and manifest.path == "mods/test_mod",
 check(type(Version.engine) == "string"
   and Semver.parse(Version.engine) ~= nil,
   "engine version parses as a semver (triple, optionally with a pre-release)")
-check(Version.modApi == 2, "mod api version is 2")
+check(Version.modApi == 3, "mod api version is 3")
 check(Version.isDev() == true, "the working-tree placeholder is a dev build")
 check(Version.title("X") == "X v" .. Version.engine,
   "dev window title carries the engine version")

@@ -74,6 +74,54 @@ Field._overrideLayouts = {}
 Field._waterfall = nil
 Field._tempFlagMap = nil
 
+local runtimeTalk
+local inRuntimeTalk = false
+
+local function finishRuntimeTalk(token)
+  if not token or token.done then return end
+  token.done = true
+  if runtimeTalk == token then runtimeTalk = nil end
+  if token.scriptHandle then token.scriptHandle:cancel() end
+  Field._locks[token] = nil
+  if not token.frozen and not token.object.scriptBusy then
+    token.object.frozen = false
+  end
+  local Message = package.loaded["src.ui.game3.message"]
+  if Message and Message._done == token.finish then
+    Message._done = nil
+    Message.close()
+  end
+end
+
+local function runtimeTalkValid(token)
+  local Objects = package.loaded["src.core.game3.objects"]
+  local Compat = package.loaded["src.mods.Gen3Compat"]
+  if token.provider and (not Compat or not Compat.scriptCtx
+      or Compat.scriptCtx().game ~= token.provider) then return false end
+  return not token.done and Field.running and Field._game == token.game
+    and Field._session == token.session and ModRuntime.hooks == token.hooks
+    and (not token.game.session or token.game.session == token.session)
+    and Objects and Objects._mapId == token.mapId
+    and Objects._byId[token.localId] == token.object
+end
+
+local function pollRuntimeTalk()
+  local token = runtimeTalk
+  if not token then return end
+  if not runtimeTalkValid(token) then
+    finishRuntimeTalk(token)
+    return
+  end
+  if token.scriptHandle then
+    if not token.scriptHandle:isRunning() then finishRuntimeTalk(token) end
+    return
+  end
+  local Message = package.loaded["src.ui.game3.message"]
+  if not Message or not Message.open or Message._done ~= token.finish then
+    finishRuntimeTalk(token)
+  end
+end
+
 -- pokefirered/src/event_object_movement.c:8959
 local WALK_SLOWER_FRAMES = 32
 
@@ -99,6 +147,7 @@ function Field.holdInput(on)
 end
 
 function Field.start(mod, game, session)
+  finishRuntimeTalk(runtimeTalk)
   if session and session._continueWarpDeferred then
     lazyReq("src.core.game3.save_schema_firered").useContinueGameWarp(session)
   end
@@ -147,6 +196,7 @@ function Field.start(mod, game, session)
 end
 
 function Field.stop()
+  finishRuntimeTalk(runtimeTalk)
   local Stream = package.loaded["src.core.game3.asset_stream"]
   if Stream then Stream.cancelPending() end
   lazyReq("src.world.game3.Follower").reset()
@@ -173,6 +223,7 @@ end
 function Field.update(_dt)
   if not Field.running then return end
   local game = Field._game
+  pollRuntimeTalk()
 
   local Compat = package.loaded["src.mods.Gen3Compat"]
   if Compat and Compat.worldTick then Compat.worldTick(_dt) end
@@ -221,6 +272,7 @@ function Field.update(_dt)
   if MapMod and MapMod.stepWarm then MapMod.stepWarm(game) end
 
   Field.pollMapChange(game)
+  pollRuntimeTalk()
   -- pokefirered/src/safari_zone.c:60 CB2_EndSafariBattle
   Field.pollSafariBalls(game)
 
@@ -784,6 +836,107 @@ end
 
 local inInteract = false
 
+local function interactRuntimeNpc(game, eo, Space, facingDir)
+  if eo.moving or inRuntimeTalk then return false end
+  local Objects = lazyReq("src.core.game3.objects")
+  local Compat = package.loaded["src.mods.Gen3Compat"]
+  local d = eo.def
+  local owner = d.owner or eo.owner
+  local token = { game = game, session = Field._session, hooks = ModRuntime.hooks,
+    mapId = Objects._mapId, localId = eo.localId or d.localId or d.index,
+    object = eo, frozen = eo.frozen }
+  token.provider = Compat and Compat.scriptCtx and Compat.scriptCtx().game
+  token.finish = function() finishRuntimeTalk(token) end
+  local called, result = false, true
+  local function talk()
+    if called then return result end
+    called, result = true, false
+    if not runtimeTalkValid(token) then return false end
+    if Field.locked or (Space.vm and Space.vm:isRunning()) then return false end
+    if d.scriptKey then
+      Objects.freeze(token.localId)
+      Objects.facePlayer(token.localId, game)
+      result = Space.startScript(d.scriptKey, token.localId, facingDir) == true
+      if not result then
+        token.finish()
+        ModRuntime.reportError(owner, "runtime NPC script could not start: " .. tostring(d.scriptKey))
+      end
+      return result
+    end
+    local MapScripts = lazyReq("src.script.MapScripts")
+    local mapId = token.mapId
+    local script = MapScripts.talkScript(mapId, d.text)
+    if not script and Compat and Compat.gen1MapId then
+      mapId = Compat.gen1MapId(mapId)
+      script = MapScripts.talkScript(mapId, d.text)
+    end
+    if script then
+      local source = MapScripts.talkSource(mapId, d.text)
+      token.source = source
+      if not (Compat and Compat.runTalkScript) then
+        ModRuntime.reportError(source and source.modId or owner,
+          "runtime NPC registered talk script bridge is unavailable")
+        return false
+      end
+      local nativeMessage = lazyReq("src.ui.game3.message")
+      if nativeMessage.isOpen() then return false end
+      runtimeTalk = token
+      Field.lock(token)
+      Objects.freeze(token.localId)
+      Objects.facePlayer(token.localId, game)
+      local handle, err = Compat.runTalkScript(script, {
+        game = token.game, session = token.session, mapId = token.mapId,
+        owner = source and source.modId or owner, source = source,
+        lockToken = token, onDone = token.finish,
+      })
+      token.scriptHandle = handle
+      if not handle then
+        token.finish()
+        ModRuntime.reportError(source and source.modId or owner,
+          "runtime NPC registered talk script could not start: " .. tostring(err))
+        return false
+      end
+      result = true
+      return true
+    end
+    local data = game.data or {}
+    local text = (data.text and data.text[d.text])
+      or (data.gen3Text and data.gen3Text[d.text]) or d.text
+    if type(text) ~= "string" and type(text) ~= "table" then return false end
+    local nativeMessage = lazyReq("src.ui.game3.message")
+    if nativeMessage.isOpen() then return false end
+    runtimeTalk = token
+    Field.lock(token)
+    Objects.freeze(token.localId)
+    Objects.facePlayer(token.localId, game)
+    nativeMessage.show(text, token.finish)
+    if not nativeMessage.open or nativeMessage._done ~= token.finish then
+      token.finish()
+      ModRuntime.reportError(owner, "runtime NPC message could not open")
+      return false
+    end
+    result = true
+    return true
+  end
+  inRuntimeTalk = true
+  local ok, err = pcall(function()
+    local talkTo = Compat and Compat.talkToWrapper and Compat.talkToWrapper()
+    if talkTo and talkTo(Compat.resolve("src.world.OverworldController"), eo) then return end
+    if ModRuntime.wantsHook("world.talk") then
+      ModRuntime.call("world.talk", talk, game, eo)
+    else
+      talk()
+    end
+  end)
+  inRuntimeTalk = false
+  if not ok then
+    token.finish()
+    ModRuntime.reportError(token.source and token.source.modId or owner, err)
+    return false
+  end
+  return result
+end
+
 -- pokefirered/src/field_control_avatar.c:787
 local MB_SIGNPOST = 0x84
 local MB_POKEMON_CENTER_SIGN = 0x87
@@ -867,6 +1020,7 @@ end
 function Field.interact(game)
   game = game or Field._game
   if not Field.running then return false end
+  if inRuntimeTalk then return false end
   local Compat = package.loaded["src.mods.Gen3Compat"]
   local replaced = not inInteract and Compat and Compat.interactWrapper and Compat.interactWrapper()
   if replaced then
@@ -910,6 +1064,11 @@ function Field.interact(game)
   local ox, oy = facing_object_cell(fx, fy, P.facing)
   local eo = Objects.at(ox, oy)
   if eo and eo.def then
+    if eo.def.runtime then
+      if not interactRuntimeNpc(game, eo, Space, facingDir) then return false end
+      interacted(ox, oy, "npc", eo)
+      return true
+    end
     local gfx = eo.def.graphicsId or eo.def.gfx
     local FP = lazyReq("src.core.game3.profile").forSession(Field._session)
     local ramOnlyScript

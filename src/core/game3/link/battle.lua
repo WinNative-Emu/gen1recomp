@@ -1,6 +1,7 @@
 local Rng = require("src.core.game3.rng")
 local G3uRng = require("src.battle.g3u.Rng")
 local G3uHash = require("src.battle.g3u.Hash")
+local ModRuntime = require("src.mods.Runtime")
 
 local LB = {}
 
@@ -877,6 +878,20 @@ end
 function LB.desync(turn, component, seat)
   if LB.endReason == "desync" then return false end
   LB.endReason = "desync"
+  local remote = LB._peerHashes[seat or 1]
+  remote = remote and remote[turn]
+  local localHash = LB._myParts[turn] and LB._myParts[turn][component]
+  local remoteHash = remote and remote.parts and remote.parts[component]
+  if component == "state" then
+    localHash, remoteHash = LB._myHashes[turn], remote and remote.value
+  end
+  if localHash ~= nil and remoteHash ~= nil and localHash ~= remoteHash
+      and ModRuntime.wants("link.desync") then
+    ModRuntime.emit("link.desync", {
+      turn = turn, component = component, localHash = localHash, remoteHash = remoteHash,
+      fatal = true, seat = seat,
+    })
+  end
   note("desync turn %s component=%s seat=%s", tostring(turn), tostring(component), tostring(seat))
   local _, Battle = battleState()
   local Strings = require("src.core.Strings")
@@ -1317,6 +1332,26 @@ end
 function LB.finish(result)
   if not LB._started then return false end
   LB._started = false
+  local ended
+  if ModRuntime.wants("link.battle_ended") then
+    local st = battleState()
+    if st then
+      ended = {
+        result = result or st.result or "ended",
+        myParty = copyTable(st.playerParty), theirParty = copyTable(st.foeParty),
+        peerName = LB.peer and LB.peer.name,
+        role = LB.isMaster() and "host" or "guest",
+      }
+      local State = require("src.core.game3.battle.state")
+      for id = 0, 3 do
+        local battler = State.battler(st, id)
+        if battler then
+          State.syncBattlerToParty(battler, id % 2 == 0 and ended.myParty or ended.theirParty)
+        end
+      end
+      ended = copyTable(ended)
+    end
+  end
   LB.applyHostRules(nil)
   local L = link()
   local s = session()
@@ -1384,6 +1419,7 @@ function LB.finish(result)
     local U = union()
     if U then U.state = "main" end
   end
+  if ended then ModRuntime.emit("link.battle_ended", ended) end
   return true
 end
 

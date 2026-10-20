@@ -3,6 +3,7 @@
 
 local TextIR = require("src.core.game3.scripting.text_ir")
 local CacheBlob = require("src.import.CacheBlob")
+local FontMods = require("src.ui.game3.font_mods")
 
 local FrlgFont = {}
 
@@ -813,7 +814,7 @@ local function buildRev()
   for ch, code in pairs(FrlgFont.JAPANESE_GLYPHS) do
     if not rev[ch] then rev[ch] = FrlgFont.JAPANESE_BASE + code end
   end
-  -- ASCII digits/letters already via CHARMAP; ensure common punctuation.
+  for ch, code in pairs(FontMods.overrides() or {}) do rev[ch] = code end
   FrlgFont._rev = rev
   return rev
 end
@@ -1152,6 +1153,8 @@ end
 
 function FrlgFont.advance(glyphId, opts)
   opts = opts or {}
+  local modGlyph = FontMods.glyph(glyphId)
+  if modGlyph then return modGlyph.advance end
   local spec = sync()
   if spec and spec.nativeLayout == "rs" then
     local face = faceFor(opts, glyphId)
@@ -1218,7 +1221,11 @@ function FrlgFont.measure(text, opts)
       line = 0
     elseif ttype == "char" then
       local id = FrlgFont.glyphId(val)
-      line = line + japanese_step(id, FrlgFont.advance(id, activeOpts), minW, jpn, activeOpts, activeOpts.small)
+      if not FontMods.glyph(id) and FontMods.ttfEligible(val) then
+        line = line + FontMods.ttfAdvance(val)
+      else
+        line = line + japanese_step(id, FrlgFont.advance(id, activeOpts), minW, jpn, activeOpts, activeOpts.small)
+      end
     elseif ttype == "glyph" then
       line = line + japanese_step(val, FrlgFont.advance(val, activeOpts), minW, jpn, activeOpts, activeOpts.small)
     elseif ttype == "font" then
@@ -1423,8 +1430,15 @@ function FrlgFont.draw(text, x, y, opts)
       local id = ttype == "glyph" and val or FrlgFont.glyphId(val)
       local nativeFace = face and face.nativeIndexed and faceFor(activeOpts, id)
       local nativeId = id >= FrlgFont.JAPANESE_BASE and id - FrlgFont.JAPANESE_BASE or id
+      local modGlyph = FontMods.glyph(id)
+      local ttfChar = ttype == "char" and not modGlyph and FontMods.ttfEligible(val) and val or nil
+      if modGlyph or ttfChar then nativeFace = nil end
       local adv
-      if nativeFace then
+      if ttfChar then
+        adv = FontMods.ttfAdvance(ttfChar)
+      elseif modGlyph then
+        adv = modGlyph.advance
+      elseif nativeFace then
         adv = faceAdvance(nativeFace, nativeId)
       elseif face and id < FrlgFont.JAPANESE_BASE then
         adv = faceAdvance(face, id)
@@ -1435,7 +1449,12 @@ function FrlgFont.draw(text, x, y, opts)
         local dx, dy = x + penX, y + penY
         local gfg, gsh, q, gat = fg, sh, quads[id], atlas
         local aid = id
-        if nativeFace then
+        if ttfChar then
+          q = true
+        elseif modGlyph then
+          gfg, gsh, q, gat = modGlyph.fg, modGlyph.sh, modGlyph.quad, nil
+          dy = dy + modGlyph.dy
+        elseif nativeFace then
           gfg, gsh, q, gat = nativeFace.fg, nativeFace.sh, nativeQuad(nativeFace, nativeId, dx), nil
         elseif id >= FrlgFont.JAPANESE_BASE then
           gfg, gsh, q, gat = japanese_quad(id, useSmall)
@@ -1448,6 +1467,9 @@ function FrlgFont.draw(text, x, y, opts)
             set_col(curCol.bg)
             love.graphics.rectangle("fill", dx, dy, adv, pitch)
           end
+          if ttfChar then
+            FontMods.ttfDraw(ttfChar, dx, dy, curCol.fg, curCol.shadow, set_col)
+          else
           local aq, ash = gat and gat.fg[aid], gat and gat.sh[aid]
           -- R/S native faces pack fg, shadow and embedded colours into one
           -- texture (rs/font_faces.lua), keyed by the source quad
@@ -1479,6 +1501,7 @@ function FrlgFont.draw(text, x, y, opts)
             else
               love.graphics.draw(nativeFace.fixed, q, dx, dy)
             end
+          end
           end
         end
         penX = penX + japanese_step(id, adv, minW, jpn, activeOpts, useSmall)
@@ -1576,6 +1599,12 @@ function FrlgFont.countChars(text)
     end
   end
   return n
+end
+
+function FrlgFont.setModFont(def)
+  local changed = FontMods.install(def)
+  FrlgFont._rev = nil
+  return changed
 end
 
 function FrlgFont.invalidate()

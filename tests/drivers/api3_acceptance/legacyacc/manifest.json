@@ -1,0 +1,11 @@
+{
+  "id": "legacyacc",
+  "name": "Legacy API 2 Acceptance",
+  "version": "1.0.0",
+  "api": 2,
+  "games": ["all"],
+  "gen2compat": true,
+  "entry": "main.lua",
+  "profile": "content",
+  "description": "Driver fixture for tests/drivers/api3_acceptance.lua."
+}

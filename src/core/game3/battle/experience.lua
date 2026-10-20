@@ -5,6 +5,7 @@
 local Pokemon = require("src.core.game3.pokemon")
 local SummaryData = require("src.core.game3.summary_data")
 local ModRuntime = require("src.mods.Runtime")
+local Progression = require("src.core.game3.progression")
 
 local Experience = {}
 
@@ -20,23 +21,23 @@ end
 function Experience.growthRate(monOrSpecies)
   if type(monOrSpecies) == "table" then
     local gr = tonumber(monOrSpecies.growthRate)
-    if gr then return gr % 6 end
+    if gr then return Progression.growthKey(gr) end
     local sp = tonumber(monOrSpecies.species or monOrSpecies.speciesId)
     local meta = sp and Pokemon.speciesMeta(sp)
-    return (meta and tonumber(meta.growthRate) or 0) % 6
+    return Progression.growthKey(meta and tonumber(meta.growthRate) or 0)
   end
   local meta = Pokemon.speciesMeta(tonumber(monOrSpecies))
-  return (meta and tonumber(meta.growthRate) or 0) % 6
+  return Progression.growthKey(meta and tonumber(meta.growthRate) or 0)
 end
 
 function Experience.expForLevel(monOrGrowth, level)
-  local growth = type(monOrGrowth) == "table" and Experience.growthRate(monOrGrowth) or (tonumber(monOrGrowth) or 0) % 6
+  local growth = type(monOrGrowth) == "table" and Experience.growthRate(monOrGrowth) or Progression.growthKey(monOrGrowth)
   return SummaryData.expForLevel(growth, level)
 end
 
 --- Highest level whose threshold <= exp (pret GetLevelFromMonExp).
 function Experience.levelForExp(monOrGrowth, exp)
-  local growth = type(monOrGrowth) == "table" and Experience.growthRate(monOrGrowth) or (tonumber(monOrGrowth) or 0) % 6
+  local growth = type(monOrGrowth) == "table" and Experience.growthRate(monOrGrowth) or Progression.growthKey(monOrGrowth)
   exp = math.max(0, tonumber(exp) or 0)
   local lv = 1
   while lv < Experience.MAX_LEVEL do
@@ -309,14 +310,19 @@ function Experience.awardFoe(st, foeBattler, opts)
   local friendshipCtx = { mapSec = Pokemon.currentMapSec(st.session) }
 
   local out = {}
-  for pi = 1, 6 do
+  local function award(pi, share, split, silent)
     local mon = party[pi]
-    local share = mon and has_share(mon)
-    if mon and (sentIn[pi] or share) and (tonumber(mon.level) or 1) < Experience.MAX_LEVEL and alive(mon) then
+    if mon and (tonumber(mon.level) or 1) < Experience.MAX_LEVEL and alive(mon) then
       local per = opts.getOpts and opts.getOpts(mon, pi) or Experience.recipientOpts(st, mon)
       local function vanilla_amount()
-        local amount = sentIn[pi] and exp or 0
-        if share then amount = amount + shareExp end
+        local amount
+        if split then
+          local pool = viaExpShare > 0 and math.floor(calculated / 2) or calculated
+          amount = math.max(1, math.floor(pool / split))
+        else
+          amount = sentIn[pi] and exp or 0
+          if share then amount = amount + shareExp end
+        end
         if per.luckyEgg then amount = math.floor(amount * 150 / 100) end
         if isTrainer then amount = math.floor(amount * 150 / 100) end
         if per.traded then amount = math.floor(amount * 150 / 100) end
@@ -328,7 +334,7 @@ function Experience.awardFoe(st, foeBattler, opts)
         local G3 = require("src.mods.Gen3Compat")
         amount = ModRuntime.call("exp.gain", function() return vanilla_amount() end, {
           defeatedDef = G3.speciesView(foeSpecies), level = foeLevel, isTrainer = isTrainer,
-          participants = viaSentIn, traded = per.traded, luckyEgg = per.luckyEgg,
+          participants = split or viaSentIn, traded = per.traded, luckyEgg = per.luckyEgg,
           expShare = share and true or false, mon = mon, index = pi,
           battle = st, loser = foeBattler,
         })
@@ -371,7 +377,60 @@ function Experience.awardFoe(st, foeBattler, opts)
         boosted = per.traded and true or false,
         result = result,
       }
+      if silent then out[#out].announce = false end
     end
+  end
+  local function vanilla_award()
+    for pi = 1, 6 do
+      local mon = party[pi]
+      local share = mon and has_share(mon)
+      if mon and (sentIn[pi] or share) then award(pi, share) end
+    end
+  end
+  if ModRuntime.wantsHook("battle.exp_award") then
+    local participating, recipients, holders = {}, {}, {}
+    for pi = 1, 6 do
+      local mon = party[pi]
+      if alive(mon) then
+        if sentIn[pi] then
+          participating[#participating + 1] = mon
+          recipients[#recipients + 1] = pi
+        end
+        if has_share(mon) then holders[#holders + 1] = pi end
+      end
+    end
+    local function detached_match(record)
+      local snapshot = type(record) == "table" and record.native
+      if type(snapshot) ~= "table" then return nil end
+      for pi = 1, 6 do
+        local candidate = party[pi]
+        if type(candidate) == "table" then
+          local same = true
+          for key, value in pairs(snapshot) do
+            if type(value) ~= "table" and candidate[key] ~= value then same = false; break end
+          end
+          if same then return pi end
+        end
+      end
+    end
+    local function applyShare(mon, split, ...)
+      local silent = select("#", ...) > 0 and not (...)
+      local found
+      for pi = 1, 6 do
+        if party[pi] == mon then found = pi; break end
+      end
+      found = found or detached_match(mon)
+      if found then
+        return award(found, party[found] and has_share(party[found]), math.max(1, tonumber(split) or 1), silent)
+      end
+    end
+    ModRuntime.call("battle.exp_award", vanilla_award, {
+      battle = st, participants = viaSentIn, alive = participating,
+      applyShare = applyShare, recipients = recipients, holders = holders,
+      halved = viaExpShare > 0, loser = foeBattler,
+    })
+  else
+    vanilla_award()
   end
   return out
 end

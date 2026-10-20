@@ -499,6 +499,45 @@ function Player.updateElevation(curX, curY, prevX, prevY)
   if prev then Player.elevation = prev end
 end
 
+local bikeMovementContext
+
+local function movementFrames(frames, game, dir, input, running)
+  if not ModRuntime.wantsHook("movement.speed") then return frames end
+  if bikeMovementContext then
+    bikeMovementContext.manual = true
+    return frames
+  end
+  local Runtime = package.loaded["src.core.game3.runtime"]
+  game = game or (Runtime and Runtime._game)
+  dir = dir or Player.facing
+  local onBike = Player.biking == true and not Player.jumping
+  local slope = false
+  if onBike and dir ~= "down" then
+    local beh = Collision.behavior and Collision.behavior(Player.cellX, Player.cellY)
+    slope = (beh ~= nil and beh >= MB_CYCLING_ROAD_PULL_DOWN
+      and beh <= MB_CYCLING_ROAD_PULL_DOWN_GRASS)
+      or (Collision.isMuddySlope and Collision.isMuddySlope(beh))
+      or (Collision.isBumpySlope and Collision.isBumpySlope(beh)) or false
+  end
+  if running == nil then running = Player.running end
+  local result = ModRuntime.call("movement.speed", function(f) return f end, frames, {
+    onBike = onBike,
+    slope = slope and true or false,
+    dir = dir,
+    surfing = Player.surfing and true or false,
+    player = Player,
+    input = input or (game and game.input),
+    save = game and game.save,
+    running = running and true or false,
+    underwater = Player.underwater and true or false,
+  })
+  result = tonumber(result)
+  if not result or result ~= result or result == math.huge or result == -math.huge then
+    return frames
+  end
+  return math.max(1, math.floor(result))
+end
+
 local function beginStep(tx, ty, run, ledge)
   local mdx, mdy = tx - Player.cellX, ty - Player.cellY
   if mdx ~= 0 or mdy ~= 0 then
@@ -728,7 +767,7 @@ local function tryInterruptAction(game, dir)
   return false
 end
 
-function Player.tryMove(dir, game, run)
+function Player.tryMove(dir, game, run, input)
   if Player.moving or Player.boulderPush then return nil end
   if not DELTA[dir] then return nil end
 
@@ -760,6 +799,7 @@ function Player.tryMove(dir, game, run)
   local lx, ly = Collision.ledgeLanding(game, Player.cellX, Player.cellY, dir)
   if lx then
     beginStep(lx, ly, false, true)
+    Player.stepFrames = movementFrames(Player.stepFrames, game, dir, input)
     pcall(function()
       local Audio = lazyReq("src.core.game3.audio")
       local SE = lazyReq("src.core.game3.se_ids")
@@ -851,18 +891,24 @@ function Player.tryMove(dir, game, run)
 
   beginStep(tx, ty, run, false)
   if not Player.jumping and not Player.biking then
-    Player.stepFrames, Player.running = Player.ordinaryStepFrames(run)
+    Player.stepFrames, Player.running = Player.ordinaryStepFrames(run, game, dir, input)
+  else
+    Player.stepFrames = movementFrames(Player.stepFrames, game, dir, input)
   end
   return "step"
 end
 
 -- pokeemerald/src/field_player_avatar.c:651
-function Player.ordinaryStepFrames(run)
-  if Player.surfHopping or Player.dismounting then return WALK_FRAMES, false end
-  if Player.surfing and not Player.underwater and not Player.biking and not Player.action then
-    return RUN_FRAMES, false
+function Player.ordinaryStepFrames(run, game, dir, input)
+  local frames, running
+  if Player.surfHopping or Player.dismounting then
+    frames, running = WALK_FRAMES, false
+  elseif Player.surfing and not Player.underwater and not Player.biking and not Player.action then
+    frames, running = RUN_FRAMES, false
+  else
+    frames, running = run and RUN_FRAMES or WALK_FRAMES, run == true
   end
-  return run and RUN_FRAMES or WALK_FRAMES, run == true
+  return movementFrames(frames, game, dir, input, running), running
 end
 
 -- pokefirered/src/metatile_behavior.c:668 MetatileBehavior_IsCyclingRoadPullDownTile
@@ -931,28 +977,29 @@ local function bikeCanMove(game, dir)
 end
 
 -- pokefirered/src/bike.c:199 BikeTransition_Downhill
-local function bikeDownhill(game)
+local function bikeDownhill(game, input)
   local lx, ly = Collision.ledgeLanding(game, Player.cellX, Player.cellY, "down")
   if lx then
     Player.facing = "down"
     beginStep(lx, ly, false, true)
+    Player.stepFrames = movementFrames(Player.stepFrames, game, "down", input)
     return true
   end
   if not bikeCanMove(game, "down") then return false end
   Player.facing = "down"
   beginStep(Player.cellX, Player.cellY + 1, false, false)
-  Player.stepFrames = FASTER_FRAMES
+  Player.stepFrames = movementFrames(FASTER_FRAMES, game, "down", input)
   return true
 end
 
 -- pokefirered/src/bike.c:209 BikeTransition_Uphill
-local function bikeUphill(game, dir)
+local function bikeUphill(game, dir, input)
   local d = DELTA[dir]
   if not d then return false end
   if not bikeCanMove(game, dir) then return false end
   Player.facing = dir
   beginStep(Player.cellX + d[1], Player.cellY + d[2], false, false)
-  Player.stepFrames = WALK_FRAMES
+  Player.stepFrames = movementFrames(WALK_FRAMES, game, dir, input)
   return true
 end
 
@@ -965,11 +1012,11 @@ function Player.cyclingRoadPull(game, input, dir)
   local braking = (input and input.isDown and input:isDown("b")) and true or false
   if not braking then
     -- pokefirered/src/bike.c:65
-    if dir == nil or dir == "down" then return bikeDownhill(game) end
-    return bikeUphill(game, dir)
+    if dir == nil or dir == "down" then return bikeDownhill(game, input) end
+    return bikeUphill(game, dir, input)
   end
   -- pokefirered/src/bike.c:72
-  if dir ~= nil then return bikeUphill(game, dir) end
+  if dir ~= nil then return bikeUphill(game, dir, input) end
   return false
 end
 
@@ -1082,6 +1129,7 @@ function Player.bikeStep(tx, ty, dir, frames, opts)
   Player.jumping = opts.jump ~= nil
   Player.jumpType = opts.jump
   Player.acroAnim = opts.acroAnim
+  Player.stepFrames = movementFrames(Player.stepFrames, nil, dir)
   return true
 end
 
@@ -1449,7 +1497,19 @@ function Player.update(game, input)
   if Player.biking then
     local BikeRse = rseBike()
     -- pokeemerald/src/field_player_avatar.c:393 MovePlayerAvatarUsingKeypadInput
-    if BikeRse then return BikeRse.update(game, input) end
+    if BikeRse then
+      if not ModRuntime.wantsHook("movement.speed") then return BikeRse.update(game, input) end
+      local previous = bikeMovementContext
+      local context = {}
+      bikeMovementContext = context
+      local ok, result, dir = pcall(BikeRse.update, game, input)
+      bikeMovementContext = previous
+      if not ok then error(result, 0) end
+      if context.manual and Player.moving then
+        Player.stepFrames = movementFrames(Player.stepFrames, game, Player.moveDir, input)
+      end
+      return result, dir
+    end
   end
   local push = Player.boulderPush
   if push then
@@ -1501,7 +1561,7 @@ function Player.update(game, input)
   end
   local wantRun = input and input.isDown and input:isDown("b")
   local run = Player.biking or (wantRun and Player.canDash())
-  Player.tryMove(dir, game, run)
+  Player.tryMove(dir, game, run, input)
 end
 
 return Player

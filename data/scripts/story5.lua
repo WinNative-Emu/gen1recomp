@@ -725,13 +725,13 @@ M.MUSEUM_1F = {
     if fx == 2 and fy == 3 then
       game.stack:push(PicBox.new(game,
         "assets/generated/battle/front/fossilaerodactyl.png",
-        t._AerodactylFossilText or "AERODACTYL Fossil"))
+        t._AerodactylFossilText))
       return true
     end
     if fx == 2 and fy == 6 then
       game.stack:push(PicBox.new(game,
         "assets/generated/battle/front/fossilkabutops.png",
-        t._KabutopsFossilText or "KABUTOPS Fossil"))
+        t._KabutopsFossilText))
       return true
     end
     return false

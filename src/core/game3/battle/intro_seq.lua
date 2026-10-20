@@ -702,6 +702,7 @@ function IntroSeq.begin(st, opts)
     s.trainer.enemy.ox = -240
     s.trainer.enemy.x, s.trainer.enemy.pic2, s.trainer.enemy.x2 = nil, nil, nil
     s.trainer.player.x, s.trainer.player.gender2, s.trainer.player.x2 = nil, nil, nil
+    s.trainer.player.fronts = nil
     local pics = IntroSeq.multiTrainerPics(st, playerGender)
     if st.trainerB then
       -- pokeemerald/src/battle_controller_opponent.c:1296
@@ -718,6 +719,13 @@ function IntroSeq.begin(st, opts)
       -- pokeemerald/src/battle_controller_player_partner.c:1304
       s.trainer.player.x = 32
       s.trainer.player.gender2, s.trainer.player.x2 = st.partner.backPic, 90
+    elseif st.partner and st.partner.frontPic then
+      s.trainer.player.fronts = {
+        -- pokeemerald/src/battle_controller_player_partner.c:1309
+        { st.partner.frontPic, 32 },
+        -- pokeemerald/src/battle_controller_player.c:2324
+        { st.partner.playerFrontPic, 90 },
+      }
     end
     IntroSeq._steps = build_trainer(st, opts)
   end

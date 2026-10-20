@@ -393,9 +393,11 @@ function WorldAPI:mapOverview()
   return MapOverview.build(map, markers)
 end
 
--- opts is accepted for signature parity with the Gen 1 arm; Gold's arrival FX
--- come from the map setup method, so opts.arrive has nothing to select yet.
-function WorldAPI:warpTo(mapId, x, y, facing, opts)
+function WorldAPI:warpTo(mapId, x, y, facing)
+  return self:_warpToWith(mapId, x, y, facing, nil)
+end
+
+function WorldAPI:_warpToWith(mapId, x, y, facing, opts)
   local world = self:overworld()
   if not world then return nil, NO_OVERWORLD end
   if not (world.maps and world.maps[mapId]) then
@@ -403,7 +405,7 @@ function WorldAPI:warpTo(mapId, x, y, facing, opts)
   end
   if not (x and y) then return nil, "warpTo needs x and y" end
   local ok = world:warpToMapId(mapId, x, y,
-    facing or (world.player and world.player.facing) or "down")
+    facing or (world.player and world.player.facing) or "down", opts)
   if not ok then return nil, world.status or "warp failed" end
   return true
 end

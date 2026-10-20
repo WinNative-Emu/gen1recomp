@@ -90,7 +90,7 @@ end
 -- package.loaded.io and undo the whole mod environment -- so it is installed
 -- in player builds too, for any boot that has mods on it.
 
-local devShim = { installed = false, permissions = {}, warned = {}, depth = 0,
+local devShim = { installed = false, permissions = {}, apis = {}, warned = {}, depth = 0,
   -- fast path for already-loaded, undeniable modules (see fastEligible);
   -- `fast` is the test seam that forces every require down the slow path
   fast = true, memo = {}, onFastHit = nil }
@@ -154,10 +154,10 @@ local COMPAT = {
   [3] = { module = Gen3Compat, file = "src/mods/Gen3Compat.lua", tag = "gen3" },
 }
 
-local function compatFor(generation, version)
+local function compatFor(generation, version, modId)
   local compat = COMPAT[generation]
   if compat and type(compat.module.appliesTo) == "function"
-      and not compat.module.appliesTo(version) then
+      and not compat.module.appliesTo(version, devShim.apis[modId]) then
     return nil
   end
   return compat
@@ -207,7 +207,7 @@ local function scanRequire(name)
   -- A Gen 1-only module on a Gold boot is not a permissions question, it is a
   -- dead patch: reported once, attributed, and onto the boot error feed the
   -- manager shows the player rather than a dev-only log line.
-  local compat = compatFor(devShim.generation, devShim.version)
+  local compat = compatFor(devShim.generation, devShim.version, modId)
   if devShim.generation ~= 1 and GEN1_ONLY_MODULES[name]
       and not (compat and compat.module.serves(name)) then
     local key = modId .. "|" .. (compat and compat.tag or "gen?") .. "|" .. name
@@ -300,12 +300,17 @@ function Loader.endSession()
   devShim.generation = nil
   devShim.version = nil
   devShim.errors = nil
+  devShim.permissions = {}
+  devShim.apis = {}
   resetFastMemo()
 end
 
 function Loader:_installDevShim()
+  devShim.permissions = {}
+  devShim.apis = {}
   for id, mod in pairs(self.mods) do
     devShim.permissions[id] = mod.manifest.permissionSet
+    devShim.apis[id] = mod.manifest.api or 1
   end
   devShim.dev = self.dev
   resetFastMemo()
@@ -344,8 +349,8 @@ function Loader:_installDevShim()
       -- doing it is the hole this closes, and any future path that runs mod
       -- code without a sandbox env still lands here.
       local owner = Runtime.currentMod or Runtime.modRequire
+      local id = type(owner) == "string" and owner or nil
       if owner then
-        local id = type(owner) == "string" and owner or nil
         local denial = Sandbox.moduleDenial(name, devShim.permissions[id])
           or (id and crossGenerationDenial(name, devShim.generation))
         if denial then error(("[%s] %s"):format(id or "mod", denial), 0) end
@@ -357,10 +362,10 @@ function Loader:_installDevShim()
       -- The Gen 1 name a mod asked for, answered by this generation's compat arm.
       -- Engine code keeps the real module: src/render/PaletteFX.lua:776
       -- requires src.core.Game on both generations and means it.
-      local compat = compatFor(devShim.generation, devShim.version)
+      local compat = compatFor(devShim.generation, devShim.version, id)
       if compat and compat.module.serves(name)
           and (owner or callerIsMod(3)) then
-        local adapter = compat.module.resolve(name, Runtime.currentMod)
+        local adapter = compat.module.resolve(name, id, devShim.apis[id])
         if adapter then
           local key = "adapter|" .. compat.tag .. "|" .. name
           if not devShim.warned[key] then
@@ -1505,7 +1510,7 @@ function Loader:_api(mod)
     },
     -- the widget toolkit facade (12 4.5) is one shared surface, not
     -- per-mod state; each widget inside it loads on first touch
-    ui = ModUI,
+    ui = ModUI.forApi(mod.manifest.api or 1),
     -- Read-only shared timestamp presentation using current options.lua
     -- preferences. The live game supplies only the current option context;
     -- checkpoint/save data never changes as a side effect.
@@ -1730,6 +1735,71 @@ function Loader:_api(mod)
   for alias, canonical in pairs(Schemas.ALIASES) do
     api.content[alias] = self:_contentApi(mod, self.content[canonical],
       ("the %s registry is deprecated; use %s"):format(alias, canonical))
+  end
+  if (mod.manifest.api or 1) >= 3 then
+    local UnifiedContent = assert(engineRequire("src.mods.UnifiedContent"),
+      "API 3 content service unavailable")
+    local UnifiedCallbacks = assert(engineRequire("src.mods.UnifiedCallbacks"),
+      "API 3 callback service unavailable")
+    local UnifiedWorld = assert(engineRequire("src.mods.UnifiedWorld"),
+      "API 3 world service unavailable")
+    local UnifiedBattle = assert(engineRequire("src.mods.UnifiedBattle"),
+      "API 3 battle service unavailable")
+    api.content = UnifiedContent.new(loader, mod, api.content)
+    local openDataset = api.datasets.open
+    local function trustedDataset(fn, ...)
+      local function pack(...) return { n = select("#", ...), ... } end
+      devShim.depth = devShim.depth + 1
+      local result = pack(pcall(fn, ...))
+      devShim.depth = devShim.depth - 1
+      if not result[1] then error(result[2], 0) end
+      return (table.unpack or unpack)(result, 2, result.n)
+    end
+    api.datasets.open = function(_, version)
+      local view, reason = trustedDataset(openDataset, nil, version)
+      if not view then return nil, reason end
+      local content = {}
+      for name, handle in pairs(view.content) do
+        local native = handle
+        content[name] = {
+          get = function(_, id) return trustedDataset(native.get, native, id) end,
+          has = function(_, id) return trustedDataset(native.has, native, id) end,
+          each = function()
+            local iter = trustedDataset(native.each, native)
+            return function() return trustedDataset(iter) end
+          end,
+        }
+      end
+      local context = { generation = view.generation, version = view.version }
+      local assets = {}
+      for name, method in pairs(view.assets) do
+        local fn = method
+        assets[name] = function(_, ...) return trustedDataset(fn, view.assets, ...) end
+      end
+      return {
+        generation = view.generation,
+        version = view.version,
+        content = UnifiedContent.new(context, mod, content),
+        assets = assets,
+      }, reason
+    end
+    local callbacks = UnifiedCallbacks.new(loader, modId)
+    api.events, api.hooks = callbacks.events, callbacks.hooks
+    local function gameProvider() return loader:_game() end
+    api.world = UnifiedWorld.new(gameProvider, loader.generation, loader.version,
+      modId, engineRequire)
+    api.battle = UnifiedBattle.new(gameProvider, loader.generation, loader.version,
+      engineRequire)
+    function api:supports(surface, name)
+      if surface == "content" then
+        return UnifiedContent.supports(name, loader.generation, loader.version)
+      elseif surface == "world" then
+        return UnifiedWorld.supports(name, loader.generation, loader.version)
+      elseif surface == "hooks" or surface == "events" then
+        return UnifiedCallbacks.supports(surface, name, loader.generation, loader.version)
+      end
+      return false, "unsupported surface: " .. tostring(surface)
+    end
   end
   -- A relative path inside this mod, or the mod root when relative is
   -- omitted.  Empty is the one listing case SafePath.safe rejects on
@@ -1962,6 +2032,10 @@ function Loader:_validateScripts()
   if not failed then return end
   -- purge the failed mods and whatever dependency enforcement takes with
   -- them, exactly as an entry-chunk failure would have
+  self:_purgeFailed()
+end
+
+function Loader:_purgeFailed()
   self:_enforceDependencies()
   for i = #self.loaded, 1, -1 do
     local mod = self.loaded[i]
@@ -1973,6 +2047,35 @@ function Loader:_validateScripts()
   for i = #self.order, 1, -1 do
     local mod = self.mods[self.order[i]]
     if mod and mod.failed then table.remove(self.order, i) end
+  end
+end
+
+function Loader:_preindexNative()
+  for _ = 1, 64 do
+    local failures = Schemas.gen3View.preindex(self.content)
+    if #failures == 0 then return end
+    local purged = false
+    for _, failure in ipairs(failures) do
+      local registry = failure.registry and self.content[failure.registry]
+      local ownerId = registry and failure.id and registry.owners[failure.id]
+      local mod = ownerId and self.mods[ownerId]
+      if mod and not mod.failed then
+        self:_fail(mod, "failed", failure.message)
+        purged = true
+      else
+        local message = tostring(failure.registry) .. ": " .. failure.message
+        local seen = false
+        for _, existing in ipairs(self.errors) do
+          if existing == message then seen = true end
+        end
+        if not seen then
+          self.errors[#self.errors + 1] = message
+          Logger.error("%s", message)
+        end
+      end
+    end
+    if not purged then return end
+    self:_purgeFailed()
   end
 end
 
@@ -2147,6 +2250,7 @@ function Loader:load(data, opts)
   -- home, creating the Data namespace when the base modules never shipped
   -- one.  A registry nobody wrote to -- engine included -- is skipped, so
   -- the namespaces that appear are exactly the ones with content behind them.
+  if self.generation == 3 then self:_preindexNative() end
   for _, name in ipairs(self:_mergeOrder()) do
     local registry = self.content[name]
     local spec = registry.spec
@@ -2156,7 +2260,12 @@ function Loader:load(data, opts)
       if spec.write then
         -- ids that do not map one-to-one onto target keys (type_chart's
         -- ordered rows, battle_anims' per-kind subtables) place themselves
-        spec.write(target, registry)
+        local wrote, writeErr = pcall(spec.write, target, registry)
+        if not wrote then
+          local message = name .. ": " .. tostring(writeErr)
+          self.errors[#self.errors + 1] = message
+          Logger.error("%s", message)
+        end
       elseif spec.semantics == "compose" then
         for id in pairs(registry.ops) do
           local chain = registry:chain(id)
@@ -2195,6 +2304,25 @@ function Loader:load(data, opts)
           if value == nil then
             tombstones[#tombstones + 1] = id
           else
+            if name == "evolution_methods" and self.generation == 2
+                and type(value) == "table" then
+              local checkOwner = registry.owners[id]
+              local list = registry.ops[id] or {}
+              for i = #list, 1, -1 do
+                local entry = list[i]
+                if type(entry.value) == "table" and entry.value.check ~= nil then
+                  checkOwner = entry.owner
+                  break
+                end
+              end
+              local owner = self.mods[checkOwner]
+              if owner and (owner.manifest.api or 1) >= 3 then
+                local copy = {}
+                for key, field in pairs(value) do copy[key] = field end
+                copy.gen1Shape = true
+                value = copy
+              end
+            end
             target[id] = value
           end
         end

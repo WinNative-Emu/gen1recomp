@@ -2,6 +2,7 @@
 
 local AiVm = require("src.core.game3.battle.ai_vm")
 local BattleProfile = require("src.core.game3.battle.profile")
+local ModBattle = require("src.core.game3.battle.mod_registries")
 
 local choose_move_core
 
@@ -237,7 +238,13 @@ function choose_move_core(st, id, opts)
     return shape({ kind = "move", move = "STRUGGLE", slot = nil, user = "enemy", battler = id })
   end
 
-  if not uses_ai(st) then
+  local brainSlot
+  if b.side == "enemy" then
+    local brainTarget = State.battler(st, State.OPPOSITE(id))
+    brainSlot = ModBattle.aiBrainSlot(st, b, brainTarget, rng, bad)
+  end
+
+  if not brainSlot and not uses_ai(st) then
     -- src/battle_controller_opponent.c:1389
     local slot, mv
     for _ = 1, 1000 do
@@ -287,7 +294,7 @@ function choose_move_core(st, id, opts)
   local userSide = (b.side == "player") and st.playerSide or st.enemySide
   local targetSide = (b.side == "player") and st.enemySide or st.playerSide
 
-  if double and rse and bp.rules.aiDoubles == "per_target" and aiFlags ~= 0 and pack and pack.table then
+  if not brainSlot and double and rse and bp.rules.aiDoubles == "per_target" and aiFlags ~= 0 and pack and pack.table then
     local slot2, tid2, action = Ai.chooseDoubles(st, b, id, aiFlags, pack, rng, bad)
     if action == "run" or action == "watch" then
       return shape({ kind = action, user = "enemy", battler = id, scores = scores })
@@ -311,7 +318,9 @@ function choose_move_core(st, id, opts)
   if rse then Ai.recordLastUsedMove(st, tid) end
 
   local aiAction = 0
-  if aiFlags ~= 0 and pack and pack.table and pack.scripts and target then
+  if brainSlot then
+    aiAction = 0
+  elseif aiFlags ~= 0 and pack and pack.table and pack.scripts and target then
     aiAction = run_scripts(pack, aiFlags, st, b, target, userSide, targetSide, scores, simulatedRNG, rng)
   elseif st.roamer then
     -- data/battle_ai_scripts.s: BattleAI_Roaming checks if_can_escape
@@ -338,10 +347,15 @@ function choose_move_core(st, id, opts)
   end
 
   local slot
-  if rse and bp.rules.aiMoveSelection ~= "rs" then
-    slot = pret_pick_rse(scores, rng, mon)
+  if brainSlot then
+    slot = brainSlot
   else
-    slot = pret_pick(scores, rng)
+    if b.side == "enemy" then ModBattle.applyLayers(st, b, target, rng, scores, bad) end
+    if rse and bp.rules.aiMoveSelection ~= "rs" then
+      slot = pret_pick_rse(scores, rng, mon)
+    else
+      slot = pret_pick(scores, rng)
+    end
   end
   local mv = mon.moves and mon.moves[slot]
   if move_num(mv) == 0 then
@@ -512,6 +526,61 @@ function Ai.chooseMove(st, opts)
   return choose_move_core(st, id, opts)
 end
 
+local function native_switch_or_item(st, ad, id, rng)
+  local AiSwitch = require("src.core.game3.battle.ai_switch")
+  -- src/battle_ai_switch_items.c:358
+  local pick = AiSwitch.trySwitch(st, ad, id, rng)
+  if pick then
+    st.monToSwitchInto = st.monToSwitchInto or {}
+    st.monToSwitchInto[id] = pick
+    return { kind = "switch", slot = pick, user = "enemy", battler = id }
+  end
+  local AiItems = require("src.core.game3.battle.ai_items")
+  -- pokeemerald/src/battle_ai_switch_items.c:815
+  local use = (id % 2 == 1) and AiItems.shouldUseItem(st, id) or nil
+  if use then
+    return {
+      kind = "item",
+      item = use.item,
+      aiItemType = use.aiItemType,
+      aiItemFlags = use.aiItemFlags,
+      user = "enemy",
+      battler = id,
+      target = id,
+    }
+  end
+  return nil
+end
+
+function Ai.switchOrItem(st, ad, id, rng)
+  local ModRuntime = require("src.mods.Runtime")
+  if not ModRuntime.wantsHook("battle.enemy_switch_or_item") then
+    return native_switch_or_item(st, ad, id, rng)
+  end
+  local native
+  local chosen = ModRuntime.call("battle.enemy_switch_or_item", function()
+    native = native_switch_or_item(st, ad, id, rng)
+    return native or false
+  end, st)
+  if chosen == true or (native ~= nil and chosen == native) then return native end
+  if type(chosen) ~= "table" then return nil end
+  if chosen.kind == "switch" then
+    local AiSwitch = require("src.core.game3.battle.ai_switch")
+    local slot = AiSwitch.validSlot(st, id, chosen.index or chosen.slot)
+    if not slot then return nil end
+    st.monToSwitchInto = st.monToSwitchInto or {}
+    st.monToSwitchInto[id] = slot
+    return { kind = "switch", slot = slot, user = "enemy", battler = id }
+  elseif chosen.kind == "item" then
+    local use = require("src.core.game3.battle.ai_items").useStocked(st, id,
+      require("src.mods.Gen3Compat").itemId(chosen.item))
+    if not use then return nil end
+    return { kind = "item", item = use.item, aiItemType = use.aiItemType,
+      aiItemFlags = use.aiItemFlags, user = "enemy", battler = id, target = id }
+  end
+  return nil
+end
+
 -- src/battle_main.c:3125
 function Ai.chooseAction(st, id, opts)
   opts = opts or {}
@@ -527,29 +596,10 @@ function Ai.chooseAction(st, id, opts)
   end
   local rng = rng_fn(st, opts)
   local ad = adapter_for(st, opts)
-  -- src/battle_ai_switch_items.c:358
   if not st.wild and not st.pokedude and not st.oldManTutorial then
-    local AiSwitch = require("src.core.game3.battle.ai_switch")
-    local pick = AiSwitch.trySwitch(st, ad, id, rng)
-    if pick then
-      st.monToSwitchInto = st.monToSwitchInto or {}
-      st.monToSwitchInto[id] = pick
-      return { kind = "switch", slot = pick, user = "enemy", battler = id }
-    end
-    local AiItems = require("src.core.game3.battle.ai_items")
-    -- pokeemerald/src/battle_ai_switch_items.c:815
-    local use = (id % 2 == 1) and AiItems.shouldUseItem(st, id) or nil
-    if use then
-      return {
-        kind = "item",
-        item = use.item,
-        aiItemType = use.aiItemType,
-        aiItemFlags = use.aiItemFlags,
-        user = "enemy",
-        battler = id,
-        target = id,
-      }
-    end
+    local act = st.aiClass and ModBattle.classAction(st, id, rng) or nil
+    if not act then act = Ai.switchOrItem(st, ad, id, rng) end
+    if act then return act end
   end
   return choose_move_core(st, id, {
     battler = id,

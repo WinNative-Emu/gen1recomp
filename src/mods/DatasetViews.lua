@@ -46,6 +46,7 @@ local GEN2_ROOTS = {
   gen2Sprites = "sprites", gen2Palettes = "palettes",
   gen2Icons = "icons", gen2BattleAnims = "battle_anims",
   gen2Constants = "constants", gen2Landmarks = "landmarks",
+  gen2Scripts = "scripts",
 }
 
 local GEN3_ROOTS = {

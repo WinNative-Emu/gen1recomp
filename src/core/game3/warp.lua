@@ -115,14 +115,15 @@ end
 Warp.fadeModes = warpFadeModes
 
 -- src/fldeff_flash.c:237
-function Warp.mapTransition(game, destMap, load)
+function Warp.mapTransition(game, destMap, load, lockTag)
   local function cont()
-    load()
+    local result = load()
+    if lockTag and (not result or lockTag.done) then return end
     -- src/map_preview_screen.c:439
     local MapPreviewScreen = package.loaded["src.ui.game3.map_preview_screen"]
     local Field = package.loaded["src.core.game3.field"]
     if MapPreviewScreen and MapPreviewScreen.isForestActive() and Field and Field.lock then
-      Field.lock()
+      Field.lock(lockTag)
     end
   end
   local Map = package.loaded["src.core.game3.map"]
@@ -168,21 +169,22 @@ end
 
 -- pokeruby/src/field_fadetransition.c:376
 -- pokeemerald/src/field_screen_effect.c:483
-local function ordinaryFadeOut(Fade, game, destMap, destX, destY, toMode, playDeparture, done)
+local function ordinaryFadeOut(Fade, game, destMap, destX, destY, toMode, playDeparture, done, keepMusic, token)
   if not isRse() then
     if playDeparture then playDeparture() end
     Fade.begin(toMode, 1, done)
     return
   end
   local Audio = require("src.core.game3.audio")
-  if Audio.tryFadeOutOldMapMusic then Audio.tryFadeOutOldMapMusic(destMap, destX, destY) end
+  if not keepMusic and Audio.tryFadeOutOldMapMusic then Audio.tryFadeOutOldMapMusic(destMap, destX, destY) end
   local faded = false
   Fade.begin(toMode, 1, function() faded = true end)
   local E = require("src.core.game3.weather").rseEngine()
   if E then E.playRainStoppingSoundEffect() end
   if playDeparture then playDeparture() end
   require("src.core.game3.task").spawn(function()
-    if not faded or Audio._fadeOut then return false end
+    if token and token.done then return true end
+    if not faded or (not keepMusic and Audio._fadeOut) then return false end
     done()
     return true
   end)
@@ -1375,9 +1377,192 @@ local function rseStepWarp(mod, game, mapId, x, y, srcX, srcY)
 end
 Warp.rseStepWarp = rseStepWarp
 
+local function requestPortable(mod, game, mapId, x, y, facing, opts)
+  local Map = require("src.core.game3.map")
+  local Field = require("src.core.game3.field")
+  local Player = require("src.core.game3.player")
+  local Doors = require("src.core.game3.doors")
+  local Task = require("src.core.game3.task")
+  local Runtime = require("src.core.game3.runtime")
+  local Compat = package.loaded["src.mods.Gen3Compat"]
+  local provider = Compat and Compat.scriptCtx and Compat.scriptCtx().game
+  local session, save, hooks = Runtime.getSession(), game and game.save, ModRuntime.hooks
+  local fieldGame, fieldSession = Field._game, Field._session
+  local fieldLocks, running = Field._locks, Field.running
+  local expectedMap, layouts = Map.current, Map._loadedLayouts
+  local token = {}
+  facing = facing or "down"
+  Warp._portable = token
+  Warp._busy = true
+  Field.lock(token)
+
+  local function currentPlayerResources()
+    return Runtime.getSession() == session and (not game or game.save == save)
+      and package.loaded["src.core.game3.player"] == Player
+      and Field._game == fieldGame and Field._session == fieldSession
+      and Map.current == expectedMap and Map._loadedLayouts == layouts
+      and (not provider or (Compat.scriptCtx and Compat.scriptCtx().game == provider))
+  end
+
+  local function currentResources()
+    return currentPlayerResources()
+      and Field._locks == fieldLocks and Field.running == running
+  end
+
+  local function cancel()
+    if token.done then return end
+    token.done = true
+    if token.anim then
+      token.anim.onDone = nil
+      if not token.arrived then
+        local Effects = token.effects
+        for i, anim in ipairs(Effects and Effects._anims or {}) do
+          if anim == token.anim then
+            table.remove(Effects._anims, i)
+            if Warp._portable == token and currentPlayerResources()
+                and package.loaded["src.core.game3.field_effects"] == Effects then
+              Player.spriteYOffset = 0
+              if anim.kind == "fly_in" then
+                Player.spriteXOffset = 0
+                Player.flyRide = false
+                Player.fieldMoveAnim = 0
+              elseif anim.kind == "teleport_in" then
+                Player.oamPriority = nil
+              end
+              Player.facing = facing
+              Player.setVisible(true)
+            end
+            break
+          end
+        end
+      end
+    end
+    if fieldLocks then fieldLocks[token] = nil end
+    if Warp._portable == token then
+      Warp._portable = nil
+      Warp._pending = nil
+      Warp._busy = false
+    end
+  end
+  token.cancel = cancel
+
+  local function valid()
+    return not token.done and Warp._portable == token
+      and currentResources() and ModRuntime.hooks == hooks
+  end
+
+  local function guarded(fn)
+    return function(...)
+      if not valid() then cancel(); return nil, "stale warp" end
+      local ok, result, err = pcall(fn, ...)
+      if not ok then cancel(); return nil, result end
+      return result, err
+    end
+  end
+
+  local function notify()
+    if token.notified then return end
+    token.notified = true
+    if opts.onDone then opts.onDone() end
+  end
+
+  local complete = guarded(function()
+    Player.facing = facing
+    Player.syncSavePosition(game)
+    cancel()
+    notify()
+  end)
+  local arrived = guarded(function()
+    token.arrived = true
+    complete()
+  end)
+  Task.spawn(function()
+    if not valid() then cancel() end
+    return token.done == true
+  end)
+
+  local okF, Fade = pcall(require, "src.ui.game3.fade")
+  local fading = opts.fade ~= false and okF and Fade and type(Fade.begin) == "function"
+  local toMode, fromMode
+
+  local load = guarded(function()
+    local callback = Field._fieldCallback
+    if not callback then Field._fieldCallback = token end
+    local defaultLock = fieldLocks and fieldLocks.default
+    local ok, result, err = pcall(Map.load, mod, game, mapId, {
+      x = x, y = y, facing = facing, depth1Connections = true,
+      keepMusic = opts.keepMusic,
+    })
+    if Field._fieldCallback == token then Field._fieldCallback = callback end
+    if not ok or not result then
+      cancel()
+      return nil, ok and (err or "warp load failed") or result
+    end
+    expectedMap, layouts = mapId, Map._loadedLayouts
+    if not valid() then cancel(); return nil, "stale warp" end
+    local Space = package.loaded["src.core.game3.scripting.space"]
+    if not defaultLock and fieldLocks and fieldLocks.default
+        and not (Space and Space._pendingOnFrame)
+        and not (Space and Space.vm and Space.vm.isRunning and Space.vm:isRunning()) then
+      Field.unlock()
+    end
+    Player.setVisible(true)
+    Doors.reset()
+    local function arrival()
+      if opts.arrive == "fly" or opts.arrive == "teleport" then
+        local Effects = require("src.core.game3.field_effects")
+        token.effects = Effects
+        Player.setVisible(false)
+        local start = opts.arrive == "fly" and Effects.startFlyIn or Effects.startTeleportIn
+        token.anim = start(arrived)
+        if not valid() then cancel(); return end
+        Player.facing = facing
+        Player.syncSavePosition(game)
+        notify()
+      else
+        arrived()
+      end
+    end
+    if opts.arrive == "fly" or opts.arrive == "teleport" then
+      if fading then Fade.begin(fromMode, 1, guarded(arrival)) else arrival() end
+    elseif fading then
+      warpExitArrival(game, mapId, x, y, fromMode, arrived)
+    else
+      arrived()
+    end
+    return result
+  end)
+
+  local start = guarded(function()
+    mapId, x, y = announce(game, mapId, x, y, "warp", opts.doorX, opts.doorY)
+    if not valid() then cancel(); return nil, "stale warp" end
+    if fading then toMode, fromMode = warpFadeModes(Fade, game, mapId) end
+    Warp._pending = { mapId = mapId, x = x, y = y, facing = facing, fade = fading == true }
+    local sound = opts.se or Doors.getSoundForWarp((game and game.currentMap) or mapId, x, y, mapId, false)
+    local function playDeparture()
+      if opts.se ~= false then
+        local Audio = require("src.core.game3.audio")
+        if Audio.playSe then pcall(Audio.playSe, sound) end
+      end
+    end
+    if not fading then
+      playDeparture()
+      return load()
+    end
+    ordinaryFadeOut(Fade, game, mapId, x, y, toMode, playDeparture, guarded(function()
+      Warp.mapTransition(game, mapId, load, token)
+    end), opts.keepMusic, token)
+    return true
+  end)
+  return start()
+end
+
 function Warp.request(mod, game, mapId, x, y, facing, opts)
   opts = opts or {}
   if Warp._busy then return nil, "warp busy" end
+  if opts.onDone ~= nil or opts.keepMusic ~= nil or opts.arrive ~= nil then
+    return requestPortable(mod, game, mapId, x, y, facing, opts)
+  end
   if not (opts.door or opts.exitDoor or opts.escalator or opts.teleport or opts.fall) then
     local special = rseStepWarp(mod, game, mapId, x, y, opts.doorX, opts.doorY)
     if special ~= nil then return special end
@@ -1472,6 +1657,7 @@ function Warp.request(mod, game, mapId, x, y, facing, opts)
 end
 
 function Warp.clear()
+  if Warp._portable then Warp._portable.cancel() end
   Warp._pending = nil
   Warp._busy = false
   Warp._isEscalatorActive = false

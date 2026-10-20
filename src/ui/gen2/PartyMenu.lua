@@ -22,6 +22,7 @@ local Font = require("src.render.Font")
 local GbcPalette = require("src.render.GbcPalette")
 local HpBar = require("src.battle.gen2.HpBar")
 local ItemEffects = require("src.core.gen2.ItemEffects")
+local LevelDisplay = require("src.ui.LevelDisplay")
 local Logger = require("src.core.Logger")
 local Mail = require("src.core.gen2.Mail")
 local Mon = require("src.battle.gen2.Mon")
@@ -1060,7 +1061,9 @@ function PartyMenu:drawPanel()
       if row.hp then self:drawHpBar(mon, 11, dataY, hp) end
     end
     if row.status then Chrome.print(row.status, 5, dataY) end
-    if row.level then Chrome.print(row.level, 8, dataY) end
+    if row.level and LevelDisplay.visible(mon, "party", self.game) then
+      Chrome.print(row.level, 8, dataY)
+    end
   end
 
   -- .end does `dec hl` twice from the row past the last nickname, so CANCEL

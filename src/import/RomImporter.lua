@@ -3934,7 +3934,7 @@ function RomImporter:update(dt)
       local w, h = (os.getenv("POKEPORT_WIN") or ""):match("^(%d+)x(%d+)$")
       if w and love.window and love.window.setMode then
         pcall(love.window.setMode, tonumber(w), tonumber(h),
-          { resizable = true })
+          require("src.render.WindowsDpi").modeFlags({ resizable = true }))
       end
       local tab = os.getenv("POKEPORT_LAUNCHER_TAB")
       if tab and tab ~= "" then self:_switchTab(tab) end
@@ -4003,7 +4003,7 @@ function RomImporter:update(dt)
       local w2, h2 = (os.getenv("POKEPORT_WIN2") or ""):match("^(%d+)x(%d+)$")
       if w2 and love.window and love.window.setMode then
         pcall(love.window.setMode, tonumber(w2), tonumber(h2),
-          { resizable = true })
+          require("src.render.WindowsDpi").modeFlags({ resizable = true }))
       end
     end
     local motion = os.getenv("POKEPORT_LAUNCHER_MOTION")

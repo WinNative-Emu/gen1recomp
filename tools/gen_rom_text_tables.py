@@ -103,7 +103,8 @@ if NAMES_MODE:
     DENY = DENY + ("src/data/text/move_descriptions.h", "src/data/text/item_descriptions.h")
 
 EXTRA_NAMED = {
-    "emerald": ("InsideOfTruck_Text_BoxPrintedWithMonLogo", "gText_YourPartnerHasRetired"),
+    "emerald": ("InsideOfTruck_Text_BoxPrintedWithMonLogo", "gText_YourPartnerHasRetired",
+                "LittlerootTown_ProfessorBirchsLab_Text_LikeYouToHavePokemon"),
 }
 
 sources = {}

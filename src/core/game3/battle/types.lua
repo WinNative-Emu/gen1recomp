@@ -25,9 +25,14 @@ Types.PHYSICAL = {
   [5] = true, [6] = true, [7] = true, [8] = true,
 }
 
+Types.NATIVE_PHYSICAL = Types.PHYSICAL
+
+local overlayNames
 local nativeTypeSource, nativeTypeNames
 function Types.name(id)
   id = assert(tonumber(id), "type id")
+  local custom = overlayNames and overlayNames[id]
+  if custom then return custom end
   local profile = require("src.core.game3.profile").forSession()
   if profile.id == "ruby" or profile.id == "sapphire" then
     local Pokemon = require("src.core.game3.pokemon")
@@ -116,6 +121,8 @@ set(DR, ST, 5); set(DR, DR, 20)
 -- DARK
 set(DA, FI, 5); set(DA, GH, 20); set(DA, PSY, 20); set(DA, DA, 5); set(DA, ST, 5)
 
+local NATIVE_C = C
+
 function Types.effectiveness(atkType, defType1, defType2)
   atkType = tonumber(atkType) or 0
   defType1 = tonumber(defType1) or 0
@@ -134,7 +141,7 @@ function Types.effectiveness(atkType, defType1, defType2)
 end
 
 -- pokefirered/src/battle_main.c:312
-Types.TABLE = {
+Types.NATIVE_TABLE = {
   N, RO, 5, N, ST, 5, FIR, FIR, 5, FIR, WA, 5, FIR, GS, 20, FIR, IC, 20, FIR, BU, 20,
   FIR, RO, 5, FIR, DR, 5, FIR, ST, 20, WA, FIR, 20, WA, WA, 5, WA, GS, 5, WA, GR, 20,
   WA, RO, 20, WA, DR, 5, EL, WA, 20, EL, EL, 5, EL, GS, 5, EL, GR, 0, EL, FL, 20,
@@ -152,6 +159,30 @@ Types.TABLE = {
   DA, PSY, 20, DA, GH, 20, DA, DA, 5, DA, ST, 5, ST, FIR, 5, ST, WA, 5, ST, EL, 5,
   ST, IC, 20, ST, RO, 20, ST, ST, 5, -1, -1, 0, N, GH, 0, FI, GH, 0,
 }
+Types.TABLE = Types.NATIVE_TABLE
+
+function Types.useOverlay(overlay)
+  Types.TABLE = overlay.table
+  Types.PHYSICAL = overlay.physical
+  overlayNames = overlay.names
+  local chart = {}
+  local t = overlay.table
+  for i = 1, #t, 3 do
+    local a, d, m = t[i], t[i + 1], t[i + 2]
+    if a ~= -1 then
+      chart[a] = chart[a] or {}
+      chart[a][d] = m
+    end
+  end
+  C = chart
+end
+
+function Types.clearOverlay()
+  Types.TABLE = Types.NATIVE_TABLE
+  Types.PHYSICAL = Types.NATIVE_PHYSICAL
+  overlayNames = nil
+  C = NATIVE_C
+end
 
 -- pokefirered/src/battle_script_commands.c:1274
 function Types.typeCalc(atkType, def1, def2, dmg, foresight)

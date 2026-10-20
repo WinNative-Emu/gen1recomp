@@ -74,7 +74,7 @@ function M.step(session)
     if D.speciesOf(mon) ~= 0 then dc.steps[i] = ((tonumber(dc.steps[i]) or 0) + 1) % U32; count = count + 1 end
   end
   if (tonumber(dc.offspringPersonality) or 0) % 65536 == 0 and count == 2
-    and dc.steps[2] % 256 == 255 and M.compatibility(dc) > math.floor(rng() * 100 / 65535) then
+    and dc.steps[2] % 256 == 255 and B.compatibility(dc, session, true) > math.floor(rng() * 100 / 65535) then
     B.triggerPendingEgg(session, dc)
   end
   dc.stepCounter = ((tonumber(dc.stepCounter) or 0) + 1) % 256

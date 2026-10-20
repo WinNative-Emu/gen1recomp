@@ -119,11 +119,13 @@ function ExpSeq.begin(awards, pushMsg, thenMsgs, opts)
     if opts.double and entry.battler and entry.battler.id ~= nil then key = entry.battler.id end
     if gained > 0 then
       -- pokefirered/src/battle_script_commands.c:3265
-      add("msg", { text = BattleText.get("STRINGID_PKMNGAINEDEXP", {
-        buff1 = name,
-        buff2 = BattleText.get(entry.boosted and "STRINGID_ABOOSTED" or "STRINGID_EMPTYSTRING4"),
-        buff3 = tostring(gained),
-      }) })
+      if entry.announce ~= false then
+        add("msg", { text = BattleText.get("STRINGID_PKMNGAINEDEXP", {
+          buff1 = name,
+          buff2 = BattleText.get(entry.boosted and "STRINGID_ABOOSTED" or "STRINGID_EMPTYSTRING4"),
+          buff3 = tostring(gained),
+        }) })
+      end
       for _, step in ipairs(result.steps or {}) do
         -- pokefirered/src/battle_controller_player.c:1034
         if not isBench and not opts.double then

@@ -388,6 +388,45 @@ function ItemEffects.applyHeldItems(data, snapshot)
   return applied
 end
 
+local UNIFIED_USE = setmetatable({}, { __mode = "k" })
+local ADAPTED = setmetatable({}, { __mode = "k" })
+
+function ItemEffects.markUnified(use)
+  if type(use) == "function" then UNIFIED_USE[use] = true end
+end
+
+local function unifiedOutcome(result, messages)
+  local text = type(messages) == "table" and table.concat(messages, "\f") or nil
+  if result == "consumed" then return { used = true, text = text or "" } end
+  if result == "kept" then return { used = true, keep = true, text = text or "" } end
+  return { used = false, text = text or Strings(ItemEffects.TEXT_NO_EFFECT) }
+end
+
+local function adaptUnified(rec)
+  local adapted = ADAPTED[rec]
+  if adapted then return adapted end
+  adapted = {
+    action = "mod", unified = true, field = rec.field, battle = rec.battle,
+    needsTarget = rec.needsTarget ~= false,
+    use = function(ctx)
+      local data = ctx.data
+      local def = data and data.items and data.items[ctx.item]
+      local ok, result, messages = pcall(rec.use, {
+        data = data, game = ctx.game, save = ctx.game and ctx.game.save,
+        itemId = ctx.item, item = def, target = ctx.mon,
+        battle = ctx.battle, moveIndex = ctx.slot,
+      })
+      if not ok then
+        require("src.core.Logger").error("item_effects use failed: %s", tostring(result))
+        return { used = false, text = Strings(ItemEffects.TEXT_NO_EFFECT) }
+      end
+      return unifiedOutcome(result, messages)
+    end,
+  }
+  ADAPTED[rec] = adapted
+  return adapted
+end
+
 -- the merged `item_effects` record for an item id, the module's own when no
 -- loader ran; `data` is optional so the callers that only know an item id
 -- (src/core/Game2.lua asks partyAction before it has picked a mon) keep
@@ -395,19 +434,47 @@ end
 function ItemEffects.recordFor(itemId, data)
   if itemId == nil then return nil end
   local merged = data and data.gen2ItemEffects
-  return (merged and merged[itemId]) or ItemEffects.RECORDS[itemId]
+  local rec = (merged and merged[itemId]) or ItemEffects.RECORDS[itemId]
+  if rec == nil and merged then
+    local def = data.items and data.items[itemId]
+    local named = type(def) == "table" and def.effect and merged[def.effect]
+    if type(named) == "table" and UNIFIED_USE[named.use] then rec = named end
+  end
+  if type(rec) == "table" and rec.action == nil and UNIFIED_USE[rec.use] then
+    return adaptUnified(rec)
+  end
+  return rec
 end
 
 -- Which family a PACK item runs on a party mon, or nil for an id with no
 -- item_effects record (engine/items/pack.asm UseItem, ITEMMENU_PARTY arm).
-function ItemEffects.partyAction(itemId, data)
+function ItemEffects.partyAction(itemId, data, inBattle)
   local record = ItemEffects.recordFor(itemId, data)
-  return record and record.action or nil
+  if not record then return nil end
+  if record.unified then
+    if inBattle and record.battle == false then return nil end
+    if not inBattle and record.field == false then return nil end
+  end
+  return record.action or nil
+end
+
+function ItemEffects.needsTarget(itemId, data)
+  local record = ItemEffects.recordFor(itemId, data)
+  return not (record and record.unified and record.needsTarget == false)
+end
+
+function ItemEffects.useWithoutTarget(itemId, data, extra)
+  local record = ItemEffects.recordFor(itemId, data)
+  if not record or not record.use then
+    return { used = false, text = Strings(ItemEffects.TEXT_NO_EFFECT) }
+  end
+  return record.use({ item = itemId, data = data,
+    game = extra and extra.game, battle = extra and extra.battle })
 end
 
 -- The one-call families (everything but PP, which needs a move pick first).
 -- Returns { used, text, learned?, level? }.
-function ItemEffects.useOnMon(itemId, mon, data)
+function ItemEffects.useOnMon(itemId, mon, data, extra)
   if not mon then return { used = false, text = Strings(ItemEffects.TEXT_NO_EFFECT) } end
   if mon.isEgg then
     return { used = false, text = Strings(ItemEffects.TEXT_CANT_USE_ON_EGG) }
@@ -418,7 +485,8 @@ function ItemEffects.useOnMon(itemId, mon, data)
   if not record or not record.use or record.action == "pp" then
     return { used = false, text = Strings(ItemEffects.TEXT_NO_EFFECT) }
   end
-  return record.use({ item = itemId, mon = mon, data = data })
+  return record.use({ item = itemId, mon = mon, data = data,
+    game = extra and extra.game, battle = extra and extra.battle })
 end
 
 -- RestorePP over one move entry: a slot already at max refuses (`cp b /

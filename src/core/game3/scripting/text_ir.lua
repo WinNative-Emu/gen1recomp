@@ -451,10 +451,18 @@ local function expand_seg(seg, ctx)
       if g ~= nil then return g end
       if pname and placeholders[pname] then return placeholders[pname] end
     end
+    local token = pname and TextIR.modTokens and TextIR.modTokens[pname]
+    if type(token) == "function" then
+      local ok, value = pcall(token, TextIR.modGame)
+      if ok and value ~= nil then return tostring(value) end
+    end
     return ""
   end
   return nil
 end
+
+TextIR.modTokens = nil
+TextIR.modGame = nil
 
 TextIR.expandSeg = expand_seg
 

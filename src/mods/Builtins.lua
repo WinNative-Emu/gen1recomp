@@ -118,7 +118,11 @@ local GEN2_REGISTRANTS = {
 local GEN2_ONLY_ORDER = { "item_effects", "phone_contacts", "decorations",
                           "apricorns", "radio_channels" }
 
-local GEN3_REGISTRANTS = {}
+local GEN3_REGISTRANTS = {
+  { name = "type_chart", from = "src.core.game3.progression", fn = "seedTypes" },
+  { name = "growth_rates", from = "src.core.game3.progression", fn = "seedGrowth" },
+  { name = "evolution_methods", from = "src.core.game3.progression", fn = "seedEvolution" },
+}
 
 local function registrantsFor(generation)
   if generation == 3 then return GEN3_REGISTRANTS end

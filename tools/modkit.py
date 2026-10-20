@@ -4,7 +4,7 @@
     python3 tools/modkit.py <subcommand> [args]
 
 Subcommands:
-    scaffold  <id> [--profile content|overhaul|total_conversion] [--api 2]
+    scaffold  <id> [--profile content|overhaul|total_conversion] [--api 1|2|3]
               [--github owner/repo] [--experimental] [--dest DIR] [--force]
     translation <id> [--language NAME] [--base auto|fixture|imported]
               [--refresh] [--dest DIR] [--pixel-font]
@@ -337,7 +337,7 @@ MANIFEST_TEMPLATE = """{
   "id": "{{id}}",
   "name": "{{name}}",
   "version": "0.1.0",
-  "api": 2,
+  "api": {{api}},
   "entry": "main.lua",
   "profile": "{{profile}}",
   "game_version": ">={{game_version}} <{{next_major}}.0.0",
@@ -457,7 +457,7 @@ LUARC_TEMPLATE = """{
 
 README_TEMPLATE = """# {{name}}
 
-A `{{profile}}` mod for the LOVE2D Pokemon Red engine (mod api 2).
+A `{{profile}}` mod for the LOVE2D Pokemon Red engine (mod api {{api}}).
 
 ## Layout
 
@@ -509,6 +509,7 @@ def cmd_scaffold(args, repo):
     github_line = f'\n  "github": "{github}",' if github else ""
     subst = {
         "{{id}}": args.id, "{{name}}": name, "{{profile}}": profile,
+        "{{api}}": str(args.api),
         "{{game_version}}": engine, "{{next_major}}": str(next_major),
         "{{extra}}": extra,
         "{{github_line}}": github_line,
@@ -2112,6 +2113,7 @@ def cmd_translation(args, repo):
         "{{game_version}}": engine_version_,
         "{{next_major}}": str(int(engine_version_.split(".")[0]) + 1),
         "{{profile}}": "content",
+        "{{api}}": "2",
         "{{games}}": games_list("gen1,gen3" if rom_text else "gen1"),
         "{{extra}}": "",
         "{{github_line}}": "",

@@ -5,6 +5,7 @@ local Rules = require("src.core.game3.battle.rules")
 local StatusChip = require("src.core.game3.battle.status")
 local Moves = require("src.core.game3.battle.moves")
 local BattleProfile = require("src.core.game3.battle.profile")
+local ModBattle = require("src.core.game3.battle.mod_registries")
 
 local Handlers = {}
 Handlers._installed = false
@@ -264,6 +265,7 @@ function Handlers.registerAll()
     local b = ctx.target
     if not b then return end
     StatusChip.tickChip(b, ctx.adapter)
+    if b.modStatus then ModBattle.residual(ctx.adapter, b) end
   end)
 
   -- pokefirered/src/battle_util.c:841

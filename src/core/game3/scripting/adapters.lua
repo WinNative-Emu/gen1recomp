@@ -1556,7 +1556,42 @@ function Adapters.host(mod, game, world)
     startTrainerBattle = function(foe, done, battleOpts)
       local BattleBridge = require("src.core.game3.battle_bridge")
       battleOpts = battleOpts or {}
-      BattleBridge.start(mod, resolveGame(), foe, {
+      local Space = package.loaded["src.core.game3.scripting.space"]
+      local vm = Space and Space.vm
+      local ctx = vm and vm.ctx
+      local poll, scriptKey = ctx and ctx.nativePoll, vm and vm._scriptKey
+      local Runtime = package.loaded["src.core.game3.runtime"]
+      local session = Runtime and Runtime.getSession and Runtime.getSession()
+      local nativeGame = Runtime and Runtime._game
+      local g = resolveGame()
+      local world, overworld = g and g.world, g and g.overworld
+      local map = session and session.map
+      local Field = package.loaded["src.core.game3.field"]
+      local locks = Field and Field._locks
+      local completed = false
+      local function stopBattle(handler, reason)
+        if completed then return end
+        completed = true
+        if handler then
+          handler(reason)
+          return
+        end
+        if not vm or package.loaded["src.core.game3.scripting.space"] ~= Space
+            or Space.vm ~= vm or vm.ctx ~= ctx or ctx.nativePoll ~= poll
+            or vm._scriptKey ~= scriptKey then return end
+        if Runtime and (package.loaded["src.core.game3.runtime"] ~= Runtime
+            or Runtime._game ~= nativeGame
+            or (Runtime.getSession and Runtime.getSession()) ~= session) then return end
+        if g and (g.world ~= world or g.overworld ~= overworld) then return end
+        if session and session.map ~= map then return end
+        if not Field or package.loaded["src.core.game3.field"] ~= Field
+            or Field._locks ~= locks then return end
+        vm:halt(true)
+        Field.unlock()
+      end
+      local function cancel(reason) stopBattle(battleOpts.cancel, reason) end
+      local function failed(reason) stopBattle(battleOpts.failed, reason) end
+      local started, reason = BattleBridge.start(mod, g, foe, {
         wild = false,
         trainerId = battleOpts.trainerId or (foe and foe.trainerId),
         defeatText = battleOpts.defeatText or (foe and foe.defeatText),
@@ -1573,11 +1608,19 @@ function Adapters.host(mod, game, world)
         -- pokefirered/src/battle_message.c:2066 GetTrainerTowerOpponentName
         trainerName = battleOpts.trainerName or (foe and foe.trainerName),
         trainerPicId = battleOpts.trainerPicId or (foe and foe.trainerPicId),
-        done = function(result)
-          if done then done(result or "win") end
+        cancel = cancel,
+        failed = failed,
+        done = function(result, reason)
+          if result == "cancelled" then return cancel(reason) end
+          if result == "failed" then return failed(reason) end
+          if completed then return end
+          completed = true
+          if done then done(result) end
           tick_vm()
         end,
       })
+      if not started then failed(reason) end
+      return started, reason
     end,
     startWildBattle = function(foe, done, battleOpts)
       local BattleBridge = require("src.core.game3.battle_bridge")

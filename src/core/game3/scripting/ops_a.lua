@@ -1687,8 +1687,16 @@ local function dispatch(vm, row)
       local done = false
       local pendingGoto = nil
       local shouldHalt = false
+      local stopped = false
+      local Space = package.loaded["src.core.game3.scripting.space"]
+      local nativeVm = Space and Space.vm
+      local Runtime = package.loaded["src.core.game3.runtime"]
+      local game = Runtime and Runtime._game
+      local session = Runtime and Runtime.getSession and Runtime.getSession()
+      local world, overworld = game and game.world, game and game.overworld
+      local map = session and session.map
 
-      ctx.nativePoll = function()
+      local function poll()
         if not done then return false end
         if shouldHalt then
           ctx.status = "halted"
@@ -1700,9 +1708,28 @@ local function dispatch(vm, row)
         end
         return true
       end
+      ctx.nativePoll = poll
+
+      local function stopBattle(reason)
+        if done or stopped or vm.ctx ~= ctx or ctx.nativePoll ~= poll then return end
+        if Space and Space.vm ~= nativeVm then return end
+        if Runtime and (Runtime._game ~= game
+            or (Runtime.getSession and Runtime.getSession()) ~= session) then return end
+        if game and (game.world ~= world or game.overworld ~= overworld) then return end
+        if session and session.map ~= map then return end
+        stopped = true
+        vm:halt(true)
+        local Field = package.loaded["src.core.game3.field"]
+        if Field and Field.unlock then Field.unlock() end
+      end
 
       local function beginBattle()
         a.startTrainerBattle(foe, function(result)
+          if result == "cancelled" or result == "failed" then
+            stopBattle(result)
+            return
+          end
+          if done or stopped then return end
           local lost = (result == "lose" or result == "whiteout" or result == "blackout")
           if RseRematch and RseRematch.isPlayerDefeated then lost = RseRematch.isPlayerDefeated(result) end
           -- pret: gSpecialVar_Result = TRUE if player defeated (early rival).
@@ -1753,6 +1780,8 @@ local function dispatch(vm, row)
           defeatText = defeatText,
           victoryText = victoryText,
           double = (foe.doubleBattle == true) or nil,
+          cancel = stopBattle,
+          failed = stopBattle,
         })
       end
 

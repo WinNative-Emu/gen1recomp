@@ -63,7 +63,7 @@ function Window.apply(mode)
   local w, h = st.w, st.h
   mode = mode == "fullscreen" and mode or "windowed"
   if mode == "windowed" and love.window.getDesktopDimensions then
-    local dw, dh = love.window.getDesktopDimensions(flags.display or 1)
+    local dw, dh = require("src.render.WindowsDpi").desktopDimensions(flags.display or 1)
     -- Leave room for the title bar and desktop dock/taskbar.
     w = math.min(w, math.max(100, math.floor(dw * 0.94)))
     h = math.min(h, math.max(100, math.floor(dh * 0.88)))

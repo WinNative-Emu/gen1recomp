@@ -140,20 +140,61 @@ local function evo_view(evo)
   local G3 = require("src.mods.Gen3Compat")
   local okS, Schemas = pcall(require, "src.mods.Schemas")
   local methods = okS and Schemas.gen3View and Schemas.gen3View.EVOLUTIONS or {}
-  local method = tonumber(evo.method or evo[1]) or 0
+  local raw = evo.method or evo[1]
+  local method = tonumber(raw) or 0
   local param = tonumber(evo.param or evo[2]) or 0
   local target = tonumber(evo.target or evo[3]) or 0
+  local custom = type(raw) == "string" and not tonumber(raw)
   return {
-    method = methods[method] or method, methodId = method, param = param,
-    level = param, species = G3.speciesName(target), speciesId = target,
+    method = custom and raw or methods[method] or method, methodId = method, param = param,
+    level = tonumber(evo.level) or param, item = evo.item,
+    species = G3.speciesName(target), speciesId = target,
   }
+end
+
+local function current_game(hook)
+  if hook and hook.game then return hook.game end
+  local R = package.loaded["src.core.game3.runtime"]
+  return R and R._game or nil
+end
+
+local function record_for(evo)
+  return require("src.core.game3.progression").evolutionRecord(evo.method or evo[1])
+end
+
+local function record_matches(record, evo, mon, trigger, hook)
+  local ok, result = pcall(record.check, current_game(hook), mon, evo_view(evo), trigger)
+  return ok and result and true or false
+end
+
+-- pokefirered/src/pokemon.c:5025
+function Evolution.nativeCheck(method)
+  return function(_, mon, view, trigger)
+    local kind = trigger and trigger.kind
+    local row = { method = method, param = view and view.param, target = view and view.speciesId }
+    if kind == "levelup" then
+      return row_matches_normal(row, normal_context(mon, trigger.session)) and true or false
+    elseif kind == "trade" then
+      return method == Evolution.EVO_TRADE
+        or (method == Evolution.EVO_TRADE_ITEM and row_param(row) == held_item_id(mon))
+    elseif kind == "item" then
+      return method == Evolution.EVO_ITEM and row_param(row) == numeric_item(trigger.item)
+    end
+    return false
+  end
 end
 
 local function scan_normal(mon, species, hook, session)
   local c = normal_context(mon, session or (hook and hook.session))
   local target, param = 0, 0
   for _, evo in ipairs(Pokemon.evolutions(species)) do
-    local matched = row_matches_normal(evo, c)
+    local record = record_for(evo)
+    local matched
+    if record then
+      matched = record_matches(record, evo, mon, { kind = "levelup", session = session }, hook)
+    else
+      matched = row_matches_normal(evo, c)
+    end
     if hook then
       local view = evo_view(evo)
       local ok = ModRuntime.call("evolution.check", function()
@@ -179,7 +220,12 @@ local function scan_trade(mon, species)
   local target, param = 0, 0
   for _, evo in ipairs(Pokemon.evolutions(species)) do
     local m = row_method(evo)
-    if m == Evolution.EVO_TRADE then
+    local record = record_for(evo)
+    if record then
+      if record_matches(record, evo, mon, { kind = "trade" }) then
+        target, param = row_target(evo), row_param(evo)
+      end
+    elseif m == Evolution.EVO_TRADE then
       target, param = row_target(evo), row_param(evo)
     elseif m == Evolution.EVO_TRADE_ITEM and row_param(evo) == heldItem then
       target, param = row_target(evo), row_param(evo)
@@ -193,7 +239,12 @@ local function scan_item(mon, species, evolutionItem)
   local num = numeric_item(evolutionItem)
   if num == 0 then return 0, 0 end
   for _, evo in ipairs(Pokemon.evolutions(species)) do
-    if row_method(evo) == Evolution.EVO_ITEM and row_param(evo) == num then
+    local record = record_for(evo)
+    if record then
+      if record_matches(record, evo, mon, { kind = "item", item = evolutionItem }) then
+        return row_target(evo), row_param(evo)
+      end
+    elseif row_method(evo) == Evolution.EVO_ITEM and row_param(evo) == num then
       return row_target(evo), row_param(evo)
     end
   end

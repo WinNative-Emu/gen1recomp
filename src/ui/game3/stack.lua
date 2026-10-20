@@ -6,8 +6,15 @@ local Stack = {}
 
 Stack._layers = {}
 
+Stack._clearHooks = {}
+
+function Stack.onClear(fn)
+  Stack._clearHooks[#Stack._clearHooks + 1] = fn
+end
+
 function Stack.clear()
   Stack._layers = {}
+  for _, fn in ipairs(Stack._clearHooks) do fn() end
 end
 
 function Stack.depth()

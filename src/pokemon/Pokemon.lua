@@ -66,7 +66,7 @@ function Pokemon.new(data, species, level, rng)
   return {
     species = species,
     level = level,
-    exp = Growth.expForLevel(def.growthRate, level),
+    exp = Growth.expForLevel(def.growthRate, level, data.growth_rates),
     dvs = dvs,
     statExp = { hp = 0, attack = 0, defense = 0, speed = 0, special = 0 },
     stats = stats,

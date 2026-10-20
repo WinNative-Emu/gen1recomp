@@ -57,7 +57,7 @@ end
 function F.applyLeague(mon, ctx)
   local plan, reason = F.planLeague(mon, ctx)
   if not plan then return false, reason end
-  Pokemon.setFriendship(mon, plan.after)
+  Pokemon.setFriendship(mon, plan.after, plan.event, "event")
   return true, plan
 end
 

@@ -3,6 +3,7 @@
 local Rules = require("src.core.game3.battle.rules")
 local EffectCtx = require("src.core.game3.battle.effect_ctx")
 local BattleProfile = require("src.core.game3.battle.profile")
+local ModRuntime = require("src.mods.Runtime")
 
 local Residuals = {}
 
@@ -72,15 +73,44 @@ local function sortedBattlers(adapter)
 end
 Residuals.sortedBattlers = sortedBattlers
 
-local function runStepAndRecord(adapter, battler, phase, fn, events)
+local function sideHasLiving(adapter, side)
+  local st = adapter._st
+  local party = side == "player" and st.playerParty or st.foeParty
+  local active = adapter:activeBattlers() or {}
+  local limit = side == "player" and st.playerHalf or nil
+  local view = {}
+  for i, mon in ipairs(party or {}) do
+    if not limit or i <= limit then view[i] = mon end
+  end
+  for _, b in ipairs(active) do
+    if b.side == side and (not limit or (b.partyIndex or 1) <= limit) then
+      view[b.partyIndex or 1] = b.mon
+    end
+  end
+  local Engine = package.loaded["src.core.game3.battle.engine"]
+    or require("src.core.game3.battle.engine")
+  return Engine.hasLivingMons(view)
+end
+
+local function runStepAndRecord(adapter, battler, phase, fn, events, fieldResidual)
   if battler and adapter:isFainted(battler) then return false end
   if adapter:isBattleDecided() then return false end
 
   if adapter.prepareFaintStep then adapter:prepareFaintStep(battler, phase) end
 
   local active = adapter:activeBattlers() or {}
-  local sequencing = BattleProfile.rule(adapter._st, "sequencingPolicy")
-  if sequencing then active = sequencing.residualOrder(adapter, battler, phase, active) end
+  if fieldResidual then
+    local ordered = {}
+    for _, side in ipairs({ "player", "enemy" }) do
+      for _, b in ipairs(active) do
+        if b.side == side then ordered[#ordered + 1] = b end
+      end
+    end
+    active = ordered
+  else
+    local sequencing = BattleProfile.rule(adapter._st, "sequencingPolicy")
+    if sequencing then active = sequencing.residualOrder(adapter, battler, phase, active) end
+  end
   local hpBefore = {}
   for _, b in ipairs(active) do
     if b and b.side then
@@ -100,6 +130,7 @@ local function runStepAndRecord(adapter, battler, phase, fn, events)
   local ok, err = pcall(fn, ctx)
   EffectCtx.pop()
 
+  local terminalPlayer = fieldResidual and ok and not sideHasLiving(adapter, "player")
   local hpChanges = {}
   local faints = {}
   for _, b in ipairs(active) do
@@ -116,13 +147,17 @@ local function runStepAndRecord(adapter, battler, phase, fn, events)
         }
       end
       if adapter:isFainted(b) and before > 0 then
-        faints[#faints + 1] = { side = b.side, battler = b.id }
-        if not b._faintAnnounced then
-          b._faintAnnounced = true
-          if adapter.pushEvent then adapter:pushEvent({ kind = "faint", side = b.side, battler = b.id }) end
-          adapter:sayText("STRINGID_ATTACKERFAINTED", { atk = b })
+        if terminalPlayer and b.side == "enemy" then
+          b._expGiven = true
+        else
+          faints[#faints + 1] = { side = b.side, battler = b.id }
+          if not b._faintAnnounced then
+            b._faintAnnounced = true
+            if adapter.pushEvent then adapter:pushEvent({ kind = "faint", side = b.side, battler = b.id }) end
+            adapter:sayText("STRINGID_ATTACKERFAINTED", { atk = b })
+          end
+          adapter:emitFaint(b)
         end
-        adapter:emitFaint(b)
       end
     end
   end
@@ -147,6 +182,122 @@ local function runStepAndRecord(adapter, battler, phase, fn, events)
     end
   end
   return false
+end
+
+local function publicScalar(value)
+  local kind = type(value)
+  if kind == "string" or kind == "boolean" then return value, true end
+  if kind == "number" and value == value
+      and value < math.huge and value > -math.huge then
+    return value, true
+  end
+  return nil, false
+end
+
+local function publicDataCopy(value, visiting)
+  local scalar, ok = publicScalar(value)
+  if ok then return scalar, true end
+  if type(value) ~= "table" then return nil, false end
+  visiting = visiting or {}
+  if visiting[value] then return nil, false end
+  visiting[value] = true
+  local copy = {}
+  for key, child in next, value do
+    local copiedKey, keyOk = publicScalar(key)
+    local copiedChild, childOk = publicDataCopy(child, visiting)
+    if keyOk and childOk then copy[copiedKey] = copiedChild end
+  end
+  visiting[value] = nil
+  return copy, true
+end
+
+local function collectFieldResiduals(adapter, events)
+  if not ModRuntime.wantsHook("battle.field_residual") then return end
+  local st = adapter._st
+  if not st or adapter:isBattleDecided() then return end
+  local turn = st.turn or 0
+  if st._modFieldResidualTurn == turn then return end
+  if not sideHasLiving(adapter, "player") or not sideHasLiving(adapter, "enemy") then return end
+  st._modFieldResidualTurn = turn
+
+  local hooks, session = ModRuntime.hooks, st.session
+  local Runtime = package.loaded["src.core.game3.runtime"]
+  local game = Runtime and Runtime._game
+  local runtimeSession = Runtime and Runtime.session
+  local gameSession = game and game.session
+  local Battle = package.loaded["src.core.game3.battle.init"] or package.loaded["src.core.game3.battle"]
+  local current = Battle and Battle.getState and Battle.getState() == st
+  local typeNames = require("src.online.xgen.Identity").GEN3_TYPES
+  local active, mons, views = {}, {}, {}
+  for _, b in ipairs(adapter:activeBattlers() or {}) do
+    active[b.id] = b
+    mons[b] = b.mon
+    local view = publicDataCopy({
+      side = b.side,
+      name = adapter:displayName(b),
+      hp = adapter:hp(b),
+      maxHp = adapter:maxHp(b),
+      types = { typeNames[b.type1], typeNames[b.type2] },
+      vanished = b.semiInvulnerable and true or false,
+      battlerId = b.id,
+    })
+    views[b.id] = view
+    if st[b.side] == b then views[b.side] = view end
+  end
+  local field = st.field or {}
+  local rows = ModRuntime.call("battle.field_residual", function() return {} end, {
+    field = publicDataCopy({ weather = st.weather, tokens = field.tokens or {} }),
+    battlers = views,
+    turn = turn,
+  })
+  if type(rows) ~= "table" or getmetatable(rows) ~= nil then return end
+  if adapter._st ~= st or adapter:isBattleDecided() or (st.turn or 0) ~= turn
+      or st.session ~= session or ModRuntime.hooks ~= hooks
+      or (Runtime and (Runtime._game ~= game or Runtime.session ~= runtimeSession))
+      or (game and game.session ~= gameSession)
+      or (current and Battle.getState() ~= st) then return end
+  for _, b in ipairs(adapter:activeBattlers() or {}) do
+    if active[b.id] ~= b or mons[b] ~= b.mon then return end
+    active[b.id] = nil
+  end
+  if next(active) ~= nil then return end
+  if not sideHasLiving(adapter, "player") or not sideHasLiving(adapter, "enemy") then return end
+
+  local accepted = {}
+  for _, row in ipairs(rows) do
+    if type(row) == "table" and getmetatable(row) == nil
+        and (row.side == "player" or row.side == "enemy") then
+      local id = row.battlerId
+      if id == nil then id = row.battler end
+      local b = st[row.side]
+      if id ~= nil then
+        b = nil
+        if type(id) == "number" and id >= 0 and id <= 3 and id == math.floor(id) then
+          for target in pairs(mons) do
+            if target.id == id and target.side == row.side then b = target break end
+          end
+        end
+      end
+      local amount = row.amount
+      if b and mons[b] and type(amount) == "number" and amount > 0
+          and amount < math.huge and amount == math.floor(amount)
+          and (row.message == nil or type(row.message) == "string") then
+        accepted[#accepted + 1] = { target = b, amount = amount, message = row.message }
+      end
+    end
+  end
+  if #accepted == 0 then return end
+  runStepAndRecord(adapter, nil, "field_residual", function()
+    for _, row in ipairs(accepted) do
+      local b = row.target
+      if not adapter:isFainted(b) then
+        local amount = math.min(row.amount, adapter:hp(b))
+        if row.message and row.message ~= "" then adapter:say(row.message) end
+        if adapter.prepareFaintStep then adapter:prepareFaintStep(b, "field_residual") end
+        adapter:applyHpLoss(b, amount)
+      end
+    end
+  end, events, true)
 end
 
 local function run_phase(adapter, phase, battler, events)
@@ -202,6 +353,8 @@ function Residuals.collectEvents(adapter)
     if adapter:isBattleDecided() then break end
     run_phase(adapter, phase, nil, events)
   end
+
+  collectFieldResiduals(adapter, events)
 
   if st then st._endTurnOrder = nil end
   return events

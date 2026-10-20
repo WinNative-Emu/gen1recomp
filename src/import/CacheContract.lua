@@ -151,6 +151,9 @@ CacheContract.VERSION_REQUIRED_FILES_OVERRIDE = {
     -- src/core/RomText.lua does not silently fall back to built-in wording.
     "data/generated/rom_text.lua",
     "data/generated/pokemon.lua",
+    "data/generated/moves.lua",
+    "data/generated/items.lua",
+    "data/generated/type_chart.lua",
     "data/generated/tilesets.lua",
     "data/generated/audio.lua",
     "data/generated/marts.lua",
@@ -197,6 +200,9 @@ CacheContract.VERSION_REQUIRED_FILES_OVERRIDE = {
     "data/generated/rom_text.lua",
     "data/generated/events.lua",
     "data/generated/pokemon.lua",
+    "data/generated/moves.lua",
+    "data/generated/items.lua",
+    "data/generated/type_chart.lua",
     "data/generated/encounters.lua",
     "data/generated/tilesets.lua",
     "data/generated/landmarks.lua",
@@ -1017,6 +1023,11 @@ function CacheContract.publish(version, fs, sha1)
   return ok, err
 end
 
+local function sourceIsCacheRoot(source)
+  local ok, root = pcall(function() return require("src.import.CacheFs").root() end)
+  return ok and root ~= nil and root == source
+end
+
 function CacheContract.sourceTreeHasData(version)
   if not (love and love.filesystem and love.filesystem.getInfo
       and love.filesystem.getRealDirectory and love.filesystem.getSource) then
@@ -1024,6 +1035,7 @@ function CacheContract.sourceTreeHasData(version)
   end
   local prefix = version == "red" and "" or GameVersion.cachePrefix(version)
   local source = love.filesystem.getSource()
+  if sourceIsCacheRoot(source) then return false end
   if planComposed(version) then
     for _, path in ipairs(CacheContract.presenceFilesFor(version)) do
       local fullPath = prefix .. path
@@ -1093,6 +1105,7 @@ end
 
 local function sourceReady(version, fs, semantic)
   if not (fs.getInfo and fs.getRealDirectory and fs.getSource) then return nil end
+  if sourceIsCacheRoot(fs.getSource()) then return nil end
   local prefix = version == "red" and "" or GameVersion.cachePrefix(version)
   local complete = hasExactFiles(version, fs, prefix, semantic)
   if not complete then return nil end

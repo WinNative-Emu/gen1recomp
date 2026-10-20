@@ -14,6 +14,7 @@ BattleBridge._battleParty = nil
 BattleBridge._interceptInstalled = false
 BattleBridge._whiteoutHook = nil
 BattleBridge._finish = nil
+BattleBridge._trainerPending = nil
 
 local function runtimeActive()
   local Runtime = package.loaded["src.core.game3.runtime"]
@@ -264,7 +265,7 @@ local function writeback(session, battleParty, remap, result, save, opts)
   if opts.scriptedLoss then return end
 
   -- pret CB2_EndTrainerBattle EARLY_RIVAL + RIVAL_BATTLE_HEAL_AFTER:
-  -- heal and continue script — no white-out warp.
+  -- heal and continue script: no white-out warp.
   local flags = tonumber(opts.rivalFlags) or 0
   local healAfter = opts.noWhiteout
     or (opts.earlyRival and (flags % 2 == 1)) -- bit0 = RIVAL_BATTLE_HEAL_AFTER
@@ -332,7 +333,7 @@ end
 BattleBridge.EXTRA_KINDS = {
   "twoOpponents", "partner", "recordedLink", "frontier", "trainerHill", "kyogreGroudon", "regi",
   "groudon", "kyogre", "rayquaza", "trainerIdB",
-  "tutorialKind", "playerHalf", "partnerTrainerId", "partnerBackPic", "trainerItems",
+  "tutorialKind", "playerHalf", "partnerTrainerId", "partnerBackPic", "frontierPartner", "trainerItems",
   "battleTower", "secretBase", "dome", "palace", "arena", "factory", "pike", "pyramid", "frontierTrainer", "frontierTrainerB",
   "towerLinkMulti", "victoryTextB", "specialBattleKind",
 }
@@ -394,7 +395,7 @@ end
 
 --- Start owned game3 battle (async). opts.done(result) when finished.
 -- opts.earlyRival / opts.rivalFlags / opts.noWhiteout: Oaks Lab tutorial loss.
-function BattleBridge.start(mod, game, foe, opts)
+local function start_battle(mod, game, foe, opts, lifecycle)
   opts = opts or {}
   local Runtime = require("src.core.game3.runtime")
   local session = (opts.link and type(opts.session) == "table" and opts.session) or Runtime.getSession()
@@ -416,6 +417,39 @@ function BattleBridge.start(mod, game, foe, opts)
   else
     battleParty, remap = PartyView.fromSession(session.party, session.move_overlay)
   end
+  local partyIndices = not opts.link and opts.playerPartyIndices
+  if type(partyIndices) == "table" then
+    local selected, seen, indices, count = {}, {}, {}, 0
+    for key in pairs(partyIndices) do
+      if type(key) ~= "number" or key % 1 ~= 0 or key < 1 or key > #partyIndices then
+        partyIndices = nil
+        break
+      end
+      count = count + 1
+    end
+    if partyIndices and count ~= #partyIndices then partyIndices = nil end
+    for _, index in ipairs(partyIndices or {}) do
+      if type(index) ~= "number" or index % 1 ~= 0 or not battleParty[index] or seen[index] then
+        partyIndices = nil
+        break
+      end
+      seen[index] = true
+      selected[#selected + 1], indices[#indices + 1] = battleParty[index], index
+    end
+    if partyIndices and #selected > 0 then
+      battleParty, partyIndices = selected, indices
+    else
+      partyIndices = nil
+    end
+  else
+    partyIndices = nil
+  end
+  local function session_order_party()
+    if not partyIndices then return battleParty end
+    local out = {}
+    for i, index in ipairs(partyIndices) do out[index] = battleParty[i] end
+    return out
+  end
   if #battleParty == 0 then return nil, "empty party" end
   local foeHalf
   if opts.twoOpponents and opts.frontierFoeHalf and not opts.wild then
@@ -424,7 +458,7 @@ function BattleBridge.start(mod, game, foe, opts)
     foe, foeHalf = BattleBridge.twoOpponentFoe(foe, opts.trainerIdB)
   end
   local isDouble = (not opts.wild) and (opts.double or foeHalf or (foe and foe.doubleBattle)) and true or false
-  if isDouble and Party.monsStateToDoubles(linkParty or session.party) ~= Party.PLAYER_HAS_TWO_USABLE_MONS then
+  if isDouble and Party.monsStateToDoubles(partyIndices and battleParty or linkParty or session.party) ~= Party.PLAYER_HAS_TWO_USABLE_MONS then
     return nil, "need two mons"
   end
   if not opts.link and require("src.core.game3.capabilities").gate(session, "match_call") then
@@ -435,9 +469,10 @@ function BattleBridge.start(mod, game, foe, opts)
 
   BattleBridge._remap = remap
   BattleBridge._battleParty = battleParty
+  if lifecycle then lifecycle.remap, lifecycle.battleParty = remap, battleParty end
 
   local nativeTrainerPolicy = require("src.core.game3.battle.profile").get(session).trainerParty
-  if not nativeTrainerPolicy then BattleBridge.applyLeagueFriendship(session, battleParty, foe, opts) end
+  if not nativeTrainerPolicy then BattleBridge.applyLeagueFriendship(session, session_order_party(), foe, opts) end
 
   local save = game and game.save
   local done = opts.done
@@ -447,12 +482,15 @@ function BattleBridge.start(mod, game, foe, opts)
   end
 
   local function finish(result)
+    if lifecycle and not lifecycle.valid() then lifecycle.discard(); return end
+    if lifecycle and lifecycle.finished then return end
+    if lifecycle then lifecycle.finished = true end
     -- pokefirered/src/battle_main.c:196
     local okN, Natives = pcall(require, "src.core.game3.scripting.natives")
     if okN and Natives and Natives.outcome_to_code then
       session.battleOutcome = Natives.outcome_to_code(result or "win")
     end
-    if not linkParty then writeback(session, battleParty, remap, result, save, opts) end
+    if not linkParty then writeback(session, session_order_party(), remap, result, save, opts) end
     if require("src.core.game3.profile").family(session) == "rse" then
       BattleBridge.tvBattleEnd(session, result)
     end
@@ -500,6 +538,7 @@ function BattleBridge.start(mod, game, foe, opts)
     if done then done(result or "win") end
   end
   BattleBridge._finish = finish
+  if lifecycle then lifecycle.finish = finish end
 
   local Battle = require("src.core.game3.battle")
   local Map = package.loaded["src.core.game3.map"] or require("src.core.game3.map")
@@ -597,7 +636,7 @@ function BattleBridge.start(mod, game, foe, opts)
       BattleBridge.tvBattleEnd(session, result, st)
     end,
     onPartyCreated = nativeTrainerPolicy and function()
-      BattleBridge.applyLeagueFriendship(session, battleParty, foe, opts)
+      BattleBridge.applyLeagueFriendship(session, session_order_party(), foe, opts)
     end or nil,
     onStarted = function()
       local profile = require("src.core.game3.profile").forSession(session)
@@ -674,15 +713,46 @@ function BattleBridge.start(mod, game, foe, opts)
     pcall(function() require("src.core.game3.prewarm").battleStart(startOpts) end)
   end
 
-  local function doStart()
-    local ok, err = Battle.start(startOpts)
-    if not ok then
+  local failed = false
+  local lockedDefault = false
+  local function fail(reason)
+    if failed then return nil, reason end
+    failed = true
+    if lockedDefault and not done then
+      local Field = package.loaded["src.core.game3.field"]
+      if Field and Field.unlock then Field.unlock() end
+    end
+    if BattleBridge._finish == finish then
       BattleBridge._finish = nil
       BattleBridge._remap = nil
       BattleBridge._battleParty = nil
-      if done then done("win") end
-      return nil, err
     end
+    if lifecycle then
+      lifecycle.failed(reason)
+    elseif done then
+      done("win")
+    end
+    return nil, reason
+  end
+  local function guarded(fn, ...)
+    if lifecycle then return pcall(fn, ...) end
+    return true, fn(...)
+  end
+  local function doStart()
+    if lifecycle and not lifecycle.valid() then
+      lifecycle.cancel("trainer battle invalidated")
+      return nil, "stale trainer battle"
+    end
+    if lifecycle and lifecycle.started then return false end
+    if lifecycle then lifecycle.started = true end
+    local called, ok, err = pcall(Battle.start, startOpts)
+    if not called then
+      Battle.reset()
+      if lifecycle then return fail(ok) end
+      BattleBridge._finish, BattleBridge._remap, BattleBridge._battleParty = nil, nil, nil
+      error(ok, 0)
+    end
+    if not ok then return fail(err or "battle did not start") end
     return true
   end
 
@@ -697,7 +767,7 @@ function BattleBridge.start(mod, game, foe, opts)
   local okT, BattleTransition = pcall(require, "src.core.game3.battle_transition")
   if okT and BattleTransition and BattleTransition.start then
     local Field = package.loaded["src.core.game3.field"] or require("src.core.game3.field")
-    if Field and Field.lock then Field.lock() end
+    if Field and Field.lock then Field.lock(lifecycle); lockedDefault = lifecycle == nil end
 
     local leadMon = battleParty and battleParty[1]
     local playerLv = leadMon and (leadMon.level or leadMon.lvl) or 5
@@ -726,23 +796,211 @@ function BattleBridge.start(mod, game, foe, opts)
       pickOpts.flashLevel = session.flashLevel
       pickOpts.pyramid = opts.pyramid
     end
-    local tid = BattleTransition.pick(pickOpts)
-    BattleTransition.start(tid, pickOpts, function()
+    local picked, tid = guarded(BattleTransition.pick, pickOpts)
+    if not picked then return fail(tid) end
+    local function transitionDone()
       doStart()
-    end)
+    end
+    if lifecycle then
+      lifecycle.stopTransition = function()
+        if BattleTransition._doneCb == transitionDone then BattleTransition.abort() end
+      end
+    end
+    local called, ok, err = guarded(BattleTransition.start, tid, pickOpts, transitionDone)
+    if not called then return fail(ok) end
+    if lifecycle and (ok == false or (ok == nil and err ~= nil)) then
+      return fail(err or "battle transition did not start")
+    end
     return true
   end
 
   local okF, Fade = pcall(require, "src.ui.game3.fade")
   if okF and Fade and Fade.begin then
     local Field = package.loaded["src.core.game3.field"] or require("src.core.game3.field")
-    if Field and Field.lock then Field.lock() end
-    Fade.begin(Fade.MODE.TO_BLACK, 1, function()
+    if Field and Field.lock then Field.lock(lifecycle); lockedDefault = lifecycle == nil end
+    local function fadeDone()
       doStart()
-    end)
+    end
+    if lifecycle then
+      lifecycle.stopTransition = function()
+        if Fade.doneCb == fadeDone then
+          Fade.doneCb = nil
+          Fade.active = false
+          Fade.t = 0
+        end
+      end
+    end
+    local called, ok = guarded(Fade.begin, Fade.MODE.TO_BLACK, 1, fadeDone)
+    if not called then return fail(ok) end
+    if lifecycle and ok == false then return fail("battle fade did not start") end
     return true
   end
   return doStart()
+end
+
+function BattleBridge.start(mod, game, foe, opts)
+  opts = opts or {}
+  if opts.wild or opts.link or (foe and foe.link)
+      or opts.firstBattle or opts.firstBattleKind or opts.oldManTutorial or opts.tutorialKind
+      or (foe and (foe.firstBattle or foe.oldManTutorial))
+      or not ModRuntime.wantsHook("trainer.before_battle") then
+    return start_battle(mod, game, foe, opts)
+  end
+  local Runtime = require("src.core.game3.runtime")
+  local session = Runtime.getSession()
+  if not session then return nil, "no session" end
+  if type(session.party) ~= "table" or #session.party == 0 then return nil, "empty party" end
+  if (opts.double or opts.twoOpponents or (foe and foe.doubleBattle))
+      and Party.monsStateToDoubles(session.party) ~= Party.PLAYER_HAS_TWO_USABLE_MONS then
+    return nil, "need two mons"
+  end
+  local Battle = require("src.core.game3.battle")
+  if Battle.isActive and Battle.isActive() then return nil, "battle already active" end
+  local pending = BattleBridge._trainerPending
+  if pending then
+    if pending.valid() then
+      if pending.foe == foe then return true end
+      return nil, "trainer battle pending"
+    end
+    pending.cancel("trainer battle invalidated")
+  end
+  local Field = package.loaded["src.core.game3.field"] or require("src.core.game3.field")
+  local Space = package.loaded["src.core.game3.scripting.space"]
+  local Map = package.loaded["src.core.game3.map"] or require("src.core.game3.map")
+  local Objects = package.loaded["src.core.game3.objects"]
+  local Compat = package.loaded["src.mods.Gen3Compat"]
+  local provider = Compat and Compat.scriptCtx and Compat.scriptCtx().game
+  local vm = Space and Space.vm
+  local ctx = vm and vm.ctx
+  local poll, pc = ctx and ctx.nativePoll, ctx and ctx.pc
+  local pcIndex, status = pc and pc.index, ctx and ctx.status
+  local scriptKey = vm and vm._scriptKey
+  local localId = ctx and (ctx.selectedLocalId or (ctx.specialVars and ctx.specialVars[0x800F]))
+  local npc = localId and Objects and Objects.find and Objects.find(localId)
+  local mapId = Map and Map.current or session.map
+  local hooks, chain = ModRuntime.hooks, ModRuntime.hooks.chains["trainer.before_battle"]
+  local events, ownerEpochs = ModRuntime.events, {}
+  for _, entry in ipairs(chain or {}) do
+    if entry.owner ~= nil then ownerEpochs[entry.owner] = hooks:ownerEpoch(entry.owner) end
+  end
+  local locks, save, party = Field._locks, game and game.save, session.party
+  local gameSession, sessionMap = game and game.session, session.map
+  local world, overworld = game and game.world, game and game.overworld
+  local fieldSession, fieldGame, fieldRunning = Field._session, Field._game, Field.running
+  local runtimeGame, runtimeMod, active = Runtime._game, Runtime._mod, Runtime.isActive()
+  local runtimeWorld, runtimeOverworld = runtimeGame and runtimeGame.world, runtimeGame and runtimeGame.overworld
+  local version, trainerId, trainerClass = session.version,
+    opts.trainerId or (foe and foe.trainerId), opts.trainerClass or (foe and foe.trainerClass)
+  local foeParty, foeId, foeClass = foe and foe.party, foe and foe.trainerId, foe and foe.trainerClass
+  local resumeOpts = {}
+  for k, v in pairs(opts) do resumeOpts[k] = v end
+  local done = opts.done
+  local token = { foe = foe }
+  BattleBridge._trainerPending = token
+  local resumed, completed, result, failure = false, false, true, nil
+  local function release()
+    if locks then locks[token] = nil end
+  end
+  function token.discard()
+    if completed then return end
+    completed = true
+    release()
+    if token.stopTransition then token.stopTransition() end
+    if BattleBridge._trainerPending == token then
+      BattleBridge._trainerPending = nil
+    end
+    if token.finish and BattleBridge._finish == token.finish then BattleBridge._finish = nil end
+    if token.remap and BattleBridge._remap == token.remap then BattleBridge._remap = nil end
+    if token.battleParty and BattleBridge._battleParty == token.battleParty then BattleBridge._battleParty = nil end
+  end
+  function token.current()
+    return package.loaded["src.core.game3.runtime"] == Runtime
+      and Runtime.getSession() == session and Runtime._game == runtimeGame
+      and Runtime._mod == runtimeMod and Runtime.isActive() == active
+      and (not runtimeGame or (runtimeGame.world == runtimeWorld and runtimeGame.overworld == runtimeOverworld))
+      and session.version == version and session.party == party
+      and session.map == sessionMap
+      and (not game or (game.save == save and game.session == gameSession
+        and game.world == world and game.overworld == overworld))
+      and package.loaded["src.core.game3.field"] == Field and Field._locks == locks
+      and Field._session == fieldSession and Field._game == fieldGame and Field.running == fieldRunning
+      and package.loaded["src.core.game3.map"] == Map
+      and (Map and Map.current or session.map) == mapId
+      and package.loaded["src.core.game3.scripting.space"] == Space
+      and (not Space or Space.vm == vm)
+      and (not ctx or (vm.ctx == ctx and ctx.nativePoll == poll and ctx.pc == pc
+        and ctx.status == status and vm._scriptKey == scriptKey
+        and (not pc or pc.index == pcIndex)))
+      and package.loaded["src.core.game3.objects"] == Objects
+      and (not npc or (Objects.find and Objects.find(localId) == npc))
+      and (not foe or (foe.party == foeParty and foe.trainerId == foeId and foe.trainerClass == foeClass))
+      and (not Compat or (package.loaded["src.mods.Gen3Compat"] == Compat
+        and Compat.scriptCtx().game == provider))
+  end
+  function token.valid()
+    if completed or BattleBridge._trainerPending ~= token or not token.current() then return false end
+    if token.started then return true end
+    if ModRuntime.hooks ~= hooks or ModRuntime.events ~= events then return false end
+    for owner, epoch in pairs(ownerEpochs) do
+      if hooks:ownerEpoch(owner) ~= epoch then return false end
+    end
+    return true
+  end
+  function token.cancel(reason)
+    if completed then return end
+    local current = token.current()
+    token.discard()
+    if current and opts.cancel then opts.cancel(reason) end
+  end
+  function token.failed(reason)
+    if completed then return end
+    local current = token.current()
+    token.discard()
+    if current and opts.failed then opts.failed(reason) end
+  end
+  resumeOpts.done = function(outcome)
+    if completed then return end
+    local current = token.current()
+    token.discard()
+    if current and done then done(outcome) end
+  end
+  local function continueBattle(options)
+    if resumed or completed then return false end
+    if not token.valid() then token.cancel("mod removed"); return false end
+    resumed = true
+    if type(options) == "table" and options.cancel == true then
+      token.cancel(options.reason)
+      return true
+    end
+    if Battle.isActive and Battle.isActive() then
+      result, failure = nil, "battle already active"
+      token.failed(failure)
+      return false
+    end
+    if type(options) == "table" then resumeOpts.playerPartyIndices = options.playerPartyIndices end
+    local called, value, err = pcall(start_battle, mod, game, foe, resumeOpts, token)
+    result, failure = value, err
+    if not called then result, failure = nil, value end
+    if not result then token.failed(failure) end
+    return result == true
+  end
+  if Field.lock then Field.lock(token) end
+  local function pollPending()
+    if completed or token.started then return true end
+    if not token.valid() then token.cancel("mod removed"); return true end
+    return false
+  end
+  local function deferPoll()
+    if not pollPending() then Runtime.defer(deferPoll) end
+  end
+  if not Runtime.defer(deferPoll) then Field.addFrameTask(pollPending) end
+  local deferred = ModRuntime.call("trainer.before_battle", function() return false end, game, {
+    trainerClass = trainerClass, partyIndex = trainerId or 1,
+    trainerId = trainerId, mapId = mapId, npcId = localId,
+  }, continueBattle)
+  if deferred ~= true and not resumed and not completed then continueBattle() end
+  if completed and not resumed then return nil, "stale trainer battle" end
+  return result, failure
 end
 
 function BattleBridge.startWild(mod, game, encounter, opts)
@@ -786,6 +1044,7 @@ end
 
 --- Tests / emergency: complete pending battle writeback.
 function BattleBridge.finishPending(result)
+  if BattleBridge._trainerPending and not BattleBridge._trainerPending.started then return false end
   local Battle = package.loaded["src.core.game3.battle"]
     or require("src.core.game3.battle")
   if Battle.isActive and Battle.isActive() then
@@ -801,6 +1060,10 @@ end
 
 -- pokefirered/src/main.c:480
 function BattleBridge.reset()
+  if BattleBridge._trainerPending then
+    local pending = BattleBridge._trainerPending
+    if pending.started then pending.discard() else pending.cancel("battle reset") end
+  end
   BattleBridge._finish = nil
   BattleBridge._remap = nil
   BattleBridge._battleParty = nil

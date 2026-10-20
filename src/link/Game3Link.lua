@@ -2,6 +2,7 @@ local Handshake = require("src.link.Handshake")
 local Session = require("src.link.Session")
 local VersionsGame = require("src.import.gba.versions_game")
 local Fingerprint = require("src.link.Fingerprint")
+local Runtime = require("src.mods.Runtime")
 
 local Game3Link = {}
 Game3Link.__index = Game3Link
@@ -295,6 +296,7 @@ function Game3Link:_finish(state, reason)
   self.state = state
   self.reason = reason
   self._session:close()
+  if Runtime.wants("link.ended") then Runtime.emit("link.ended", { reason = reason }) end
   local cb = self.onClosed
   if cb then cb(reason, state) end
   return true
@@ -521,6 +523,20 @@ function Game3Link:update(dt)
     if self.peerHello and self:_allHellos() then
       local verdict, reason = self:decide()
       self.verdict = verdict
+      if not self._connectedNotified then
+        self._connectedNotified = true
+        local peer = self.peerHello
+        local mode = Game3Link.BATTLE_TYPES[self.linkType] and "battle"
+          or (Game3Link.TRADE_TYPES[self.linkType] and "trade" or peer.mode)
+        if Runtime.wants("link.connected") then
+          Runtime.emit("link.connected", {
+            role = self.role,
+            remote = { name = peer.name, mode = mode,
+                       mods = peer.mods, fingerprint = peer.fingerprint },
+          })
+        end
+        if self.closed or self.state ~= "handshake" then return self.state end
+      end
       if verdict == "full" then
         self.state = "ready"
         local cb = self.onReady

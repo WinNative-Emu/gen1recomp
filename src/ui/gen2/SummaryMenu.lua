@@ -63,6 +63,7 @@ local Font = require("src.render.Font")
 local GbcPalette = require("src.render.GbcPalette")
 local HpBar = require("src.battle.gen2.HpBar")
 local ItemEffects = require("src.core.gen2.ItemEffects")
+local LevelDisplay = require("src.ui.LevelDisplay")
 local Status = require("src.battle.Status")
 local TypeChart = require("src.battle.TypeChart")
 local Mon = require("src.battle.gen2.Mon")
@@ -472,7 +473,9 @@ function SummaryMenu:upperPlacements()
   -- dex number in three leading-zero digits at (10,0).
   put(out, Strings(DEX_NUMBER_LABEL), 8, 0)
   put(out, num(def and def.dex or 0, 3, true), 10, 0)
-  put(out, levelText(mon.level), 14, 0)
+  if LevelDisplay.visible(mon, "summary", self.game) then
+    put(out, levelText(mon.level), 14, 0)
+  end
   put(out, mon.nickname or mon.name or mon.species, 8, 2)
   -- GetGender returns carry for a genderless species, and nothing is written.
   if mon.gender == "male" then
@@ -529,11 +532,13 @@ function SummaryMenu:pinkPlacements()
   put(out, num(mon.experience, 7), 13, 10)
   put(out, Strings("LEVEL UP"), 10, 12)
   put(out, num(self:expToNext(), 7), 13, 13)
-  put(out, Strings(TO_LABEL), 14, 14)
-  -- The level printed at (17,14) is the NEXT one: LoadPinkPage bumps
-  -- wTempMonLevel, calls PrintLevel, and puts it back.  MAX_LEVEL stays put.
-  local level = mon.level or 1
-  put(out, levelText(math.min(Mon.MAX_LEVEL, level + 1)), 17, 14)
+  if LevelDisplay.visible(mon, "summary", self.game) then
+    put(out, Strings(TO_LABEL), 14, 14)
+    -- The level printed at (17,14) is the NEXT one: LoadPinkPage bumps
+    -- wTempMonLevel, calls PrintLevel, and puts it back.  MAX_LEVEL stays put.
+    local level = mon.level or 1
+    put(out, levelText(math.min(Mon.MAX_LEVEL, level + 1)), 17, 14)
+  end
   return out
 end
 
@@ -611,7 +616,9 @@ function SummaryMenu:moveDetailPlacements()
   -- PlaceString leaves bc one tile past the string and MoveScreenLoop pops
   -- that straight into hl for PrintLevel, so the level butts up against the
   -- nickname rather than sitting in a column.
-  put(out, levelText(mon.level), 5 + tiles(name), 1)
+  if LevelDisplay.visible(mon, "summary", self.game) then
+    put(out, levelText(mon.level), 5 + tiles(name), 1)
+  end
 
   local moves = self:moveList()
   for slot = 1, 4 do
@@ -1282,13 +1289,16 @@ function SummaryMenu:drawMoveDetail()
   -- (5,1) -- the upper box's own top border row -- and PlaceMoveData writes
   -- the TYPE plaque at (0,10)/(0,11), the lower box's top border row.  Those
   -- cells belong to the strings, not to the frames.
-  clearCells(5, 1, tiles(monName(mon)) + tiles(levelText(mon.level)), 1)
+  local placements = self:moveDetailPlacements()
+  local nameWidth = tiles(monName(mon))
+  local level = SummaryMenu.at(placements, 5 + nameWidth, 1)
+  clearCells(5, 1, nameWidth + tiles(level), 1)
   clearCells(0, 10, 7, 2)
   -- PlaceMoveScreenLeftArrow / RightArrow only draw when there is a party mon
   -- that way; both sit on row 0, above the list box.
   if self.index > 1 then Chrome.print("◀", 16, 0) end
   if self.index < #self.party then Chrome.print("▶", 18, 0) end
-  self:drawPlacements(self:moveDetailPlacements())
+  self:drawPlacements(placements)
   -- MoveScreen2DMenuData: cursor column 1, first row 3, two rows per step.
   local moves = self:moveList()
   if #moves > 0 then

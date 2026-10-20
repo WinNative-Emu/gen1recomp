@@ -8,9 +8,26 @@ local FrlgFont = require("src.ui.game3.frlg_font")
 local Strings = require("src.core.Strings")
 local RomText = require("src.core.game3.rom_text")
 local ModRuntime = require("src.mods.Runtime")
+local Logger = require("src.core.Logger")
 local FrlgData = require("src.ui.game3.start_menu_frlg")
 
 local StartMenu = { isMenu = true }
+local select_native
+
+local function valid_entries(entries)
+  if type(entries) ~= "table" then return false end
+  local count = #entries
+  for index, entry in pairs(entries) do
+    if type(index) ~= "number" or index % 1 ~= 0 or index < 1 or index > count then return false end
+    if type(entry) ~= "table" or type(entry.label) ~= "string" then return false end
+    if type(entry.onSelect) ~= "function"
+      and not (entry.onSelect == nil and type(entry.id) == "string") then return false end
+  end
+  for index = 1, count do
+    if entries[index] == nil then return false end
+  end
+  return true
+end
 
 local function se(id)
   pcall(function() require("src.core.game3.audio").playSe(require("src.core.game3.se_ids").resolve(id)) end)
@@ -83,6 +100,9 @@ end
 
 function StartMenu.update()
   tick_prompt()
+  -- pokefirered/src/overworld.c:1470
+  local TilesetAnim = package.loaded["src.core.game3.tileset_anim"]
+  if TilesetAnim and TilesetAnim.step then TilesetAnim.step() end
 end
 
 local function player_label(session)
@@ -237,15 +257,29 @@ function StartMenu.show(opts)
   else
     entries, kind, ctx = build_entries(opts.session, opts.game)
   end
+  for index, entry in ipairs(entries) do
+    local id, selection = entry.id, index - 1
+    entry.onSelect = function() return select_native(id, selection) end
+  end
   StartMenu.ENTRIES = entries
   StartMenu._kind = kind
   StartMenu._data = d
   StartMenu._ctx = ctx
   StartMenu._safariStats = kind == "safari"
   if ModRuntime.wantsHook("ui.start_menu.items") then
+    local items = {}
+    for index, entry in ipairs(entries) do
+      local item = {}
+      for key, value in pairs(entry) do item[key] = value end
+      items[index] = item
+    end
     local hooked = ModRuntime.call("ui.start_menu.items", function(_, items) return items end,
-      opts.game, StartMenu.ENTRIES)
-    if type(hooked) == "table" then StartMenu.ENTRIES = hooked end
+      opts.game, items)
+    if valid_entries(hooked) then
+      StartMenu.ENTRIES = hooked
+    else
+      Logger.error("ui.start_menu.items returned invalid %s; keeping the vanilla items", type(hooked))
+    end
   end
   local pos = tonumber(opts.cursor or StartMenu.cursor) or 1
   if pos < 1 or pos > #StartMenu.ENTRIES then pos = 1 end -- pokefirered/src/menu.c:276
@@ -303,21 +337,86 @@ function StartMenu.move(delta)
   se("SE_SELECT")
 end
 
+select_native = function(id, index)
+  if StartMenu._tutorial then
+    local cb = StartMenu._onTutorialSelect
+    StartMenu.close(true)
+    if cb then cb(index) end
+    return
+  end
+  local session = StartMenu._session
+  local d = StartMenu._data or data(session)
+  local Screens = require("src.ui.game3.screens")
+  if id == "exit" then
+    if d.exitConfirms then
+      StartMenu._confirmExit = true
+      StartMenu._confirmCursor = 2
+      begin_exit_prompt()
+    else
+      StartMenu.close(true) -- pokeemerald/src/start_menu.c:747
+    end
+  elseif id == "bag" then
+    local BagMenu = Screens.get("bag", session)
+    BagMenu.show(session and session.bag, {
+      session = session,
+      onClose = function() end,
+    })
+  elseif id == "pokedex" then
+    if d.dexNeedsSeen and not StartMenu.anySeen(session) then return end
+    local Pokedex = Screens.get("pokedex", session)
+    Pokedex.show(session and session.dex, { session = session })
+  elseif id == "pokemon" then
+    local PartyMenu = Screens.get("party", session)
+    PartyMenu.show(session and session.party, session and session.move_overlay, {
+      session = session,
+    })
+  elseif id == "pokenav" or id == "pyramid_bag" or id == "retire_frontier" then
+    local mod = Screens.get(id, session)
+    if mod and mod.show then
+      mod.show({ session = session, game = StartMenu._game })
+    else
+      StartMenu.logUnported(id)
+    end
+  elseif id == "retire" then
+    -- pokefirered/src/start_menu.c:546 StartMenuSafariZoneRetireCallback
+    local game = StartMenu._game
+    StartMenu.close(true)
+    require("src.core.game3.safari").retirePrompt(session, game)
+  elseif id == "trainer_link" then
+    -- pokefirered/src/start_menu.c:556 StartMenuLinkPlayerCallback
+    local TrainerCard = require("src.ui.game3.trainer_card")
+    TrainerCard.show({ session = require("src.core.game3.link").localTrainerCard() })
+  elseif id == "trainer" then
+    local pass = StartMenu._kind ~= "union" and StartMenu.frontierPassScreen(session)
+    if pass then
+      pass.show({ session = session, game = StartMenu._game }) -- pokeemerald/src/start_menu.c:711
+    else
+      local TrainerCard = Screens.get("trainer_card", session)
+      TrainerCard.show({ session = session })
+    end
+  elseif id == "save" or id == "rest_frontier" then
+    local SaveMenu = Screens.get("save", session)
+    SaveMenu.show({ session = session, game = StartMenu._game })
+  elseif id == "option" then
+    local OptionMenu = Screens.get("option", session)
+    OptionMenu.show({ session = session })
+  elseif id == "mods" then
+    local ModManager = require("src.ui.game3.mod_manager")
+    ModManager.show({
+      game = StartMenu._game or (session and session.game),
+      session = session,
+    })
+  end
+end
+
 function StartMenu.confirm()
   if StartMenu.promptTyping() then
     speed_up_prompt()
     return
   end
   se("SE_SELECT")
-  if StartMenu._tutorial then
-    local sel = StartMenu.cursor - 1
-    local cb = StartMenu._onTutorialSelect
-    StartMenu.close(true)
-    if cb then cb(sel) end
-    return
-  end
   if StartMenu._confirmExit then
-    if StartMenu._confirmCursor == 1 then -- YES
+    if StartMenu._confirmCursor == 1 then
       StartMenu.open = false
       StartMenu._confirmExit = false
       StartMenu._prompt = nil
@@ -329,7 +428,7 @@ function StartMenu.confirm()
       if game and game.returnToTitle then
         game:returnToTitle({ skipIntro = true })
       end
-    else -- NO
+    else
       StartMenu._confirmExit = false
       StartMenu._prompt = nil
     end
@@ -338,71 +437,11 @@ function StartMenu.confirm()
 
   local e = StartMenu.ENTRIES[StartMenu.cursor]
   if not e then return end
-  local session = StartMenu._session
-  local d = StartMenu._data or data(session)
-  local Screens = require("src.ui.game3.screens")
   if type(e.onSelect) == "function" then
-    local ok, err = pcall(e.onSelect, StartMenu._game, session)
+    local ok, err = pcall(e.onSelect, StartMenu._game, StartMenu._session)
     if not ok then print("[game3/start_menu] onSelect failed: " .. tostring(err)) end
-  elseif e.id == "exit" then
-    if d.exitConfirms then
-      StartMenu._confirmExit = true
-      StartMenu._confirmCursor = 2
-      begin_exit_prompt()
-    else
-      StartMenu.close(true) -- pokeemerald/src/start_menu.c:747
-    end
-  elseif e.id == "bag" then
-    local BagMenu = Screens.get("bag", session)
-    BagMenu.show(session and session.bag, {
-      session = session,
-      onClose = function() end,
-    })
-  elseif e.id == "pokedex" then
-    if d.dexNeedsSeen and not StartMenu.anySeen(session) then return end
-    local Pokedex = Screens.get("pokedex", session)
-    Pokedex.show(session and session.dex, { session = session })
-  elseif e.id == "pokemon" then
-    local PartyMenu = Screens.get("party", session)
-    PartyMenu.show(session and session.party, session and session.move_overlay, {
-      session = session,
-    })
-  elseif e.id == "pokenav" or e.id == "pyramid_bag" or e.id == "retire_frontier" then
-    local mod = Screens.get(e.id, session)
-    if mod and mod.show then
-      mod.show({ session = session, game = StartMenu._game })
-    else
-      StartMenu.logUnported(e.id)
-    end
-  elseif e.id == "retire" then
-    -- pokefirered/src/start_menu.c:546 StartMenuSafariZoneRetireCallback
-    local game = StartMenu._game
-    StartMenu.close(true)
-    require("src.core.game3.safari").retirePrompt(session, game)
-  elseif e.id == "trainer_link" then
-    -- pokefirered/src/start_menu.c:556 StartMenuLinkPlayerCallback
-    local TrainerCard = require("src.ui.game3.trainer_card")
-    TrainerCard.show({ session = require("src.core.game3.link").localTrainerCard() })
-  elseif e.id == "trainer" then
-    local pass = StartMenu._kind ~= "union" and StartMenu.frontierPassScreen(session)
-    if pass then
-      pass.show({ session = session, game = StartMenu._game }) -- pokeemerald/src/start_menu.c:711
-    else
-      local TrainerCard = Screens.get("trainer_card", session)
-      TrainerCard.show({ session = session })
-    end
-  elseif e.id == "save" or e.id == "rest_frontier" then
-    local SaveMenu = Screens.get("save", session)
-    SaveMenu.show({ session = session, game = StartMenu._game })
-  elseif e.id == "option" then
-    local OptionMenu = Screens.get("option", session)
-    OptionMenu.show({ session = session })
-  elseif e.id == "mods" then
-    local ModManager = require("src.ui.game3.mod_manager")
-    ModManager.show({
-      game = StartMenu._game or (session and session.game),
-      session = session,
-    })
+  else
+    select_native(e.id, StartMenu.cursor - 1)
   end
 end
 

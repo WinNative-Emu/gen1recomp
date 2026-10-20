@@ -89,6 +89,7 @@ local Game2 = {}
 Game2.__index = Game2
 
 local function noop() end
+local function resolveLogicSpeedVanilla(game) return game:_resolveLogicSpeed() end
 
 -- THE FRAME AND INPUT SEAMS.
 --
@@ -290,7 +291,12 @@ end
 -- NEW GAME: a fresh save, then the Oak speech (which collects the name), then
 -- SPAWN_HOME.  engine/menus/intro_menu.asm NewGame is this same order.
 function Game2:newGame()
-  self.save = Save.newGame({ playerName = self.save.player.name })
+  local boot = self.data and self.data.field and self.data.field.boot
+  self.save = Save.newGame({
+    playerName = self.save.player.name,
+    startMoney = boot and boot.startMoney,
+    rivalName = boot and boot.rivalName,
+  })
   self.save.options = self.options
   self.sessionStartedAt = os.time()
   -- InitClock re-anchors this the moment the player answers Oak; the default
@@ -805,6 +811,12 @@ function Game2:usePartyItem(itemId)
   -- at all and never gets past the .Oak refusal below
   local action = ItemEffects.partyAction(itemId, self.data)
   if not action then return end
+  if not ItemEffects.needsTarget(itemId, self.data) then
+    local result = ItemEffects.useWithoutTarget(itemId, self.data, { game = self })
+    if result.used and not result.keep then self:consumeItem(itemId) end
+    if result.text and result.text ~= "" then self:say(result.text) end
+    return
+  end
   local party = (self.save and self.save.party) or {}
   if #party == 0 then
     -- UseItem's .NoPokemon arm (_YouDontHaveAMonText).
@@ -842,7 +854,7 @@ function Game2:usePartyItem(itemId)
       })
       return
     end
-    self:consumeItem(itemId)
+    if not result.keep then self:consumeItem(itemId) end
     if not menu then
       if action == "candy" then
         -- data/text/common_1.asm:86
@@ -873,7 +885,7 @@ function Game2:usePartyItem(itemId)
     onChoose = function(slot, mon)
       local before = mon and mon.hp
       if action ~= "pp" then
-        finish(ItemEffects.useOnMon(itemId, mon, self.data), mon, slot, before)
+        finish(ItemEffects.useOnMon(itemId, mon, self.data, { game = self }), mon, slot, before)
         return
       end
       -- RestorePPEffect: the ELIXER pair needs no move pick; an EGG refuses
@@ -1090,7 +1102,7 @@ function Game2:load(opts)
   self.data.pokemon = loadGenerated("data/generated/pokemon.lua") or {}
   self.data.items = loadGenerated("data/generated/items.lua") or {}
   self.data.moves = loadGenerated("data/generated/moves.lua") or {}
-  self.data.type_chart = loadGenerated("data/generated/type_chart.lua") or {}
+  self.data.type_chart = assert(loadGenerated("data/generated/type_chart.lua"))
   -- data/types/type_matchups.asm:112-116: the rows after the `db -2` marker
   -- apply by default; Foresight is what cuts the table short at it.
   local chart = self.data.type_chart
@@ -1394,11 +1406,17 @@ function Game2:_speedLockEdge()
   end
 end
 
+function Game2:_resolveLogicSpeed()
+  return math.max(1, tonumber(self.options and self.options.speed) or 1)
+end
+
 function Game2:logicSpeed()
   if self:speedLocked() then return 1 end
-  return math.max(1,
-    tonumber(self.speedOverride) or tonumber(self.options and self.options.speed)
-    or 1)
+  local override = tonumber(self.speedOverride)
+  if override then return math.max(1, override) end
+  if not ModRuntime.wantsHook("core.logic_speed") then return self:_resolveLogicSpeed() end
+  return lazy("src.core.GameSpeed").clamp(ModRuntime.call("core.logic_speed",
+    resolveLogicSpeedVanilla, self))
 end
 
 function Game2:update(dt)

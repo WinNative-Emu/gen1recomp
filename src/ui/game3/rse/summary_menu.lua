@@ -6,6 +6,7 @@ local Pokemon = require("src.core.game3.pokemon")
 local ItemsData = require("src.core.game3.items_data")
 local SummaryData = require("src.core.game3.summary_data")
 local Strings = require("src.core.Strings")
+local LevelDisplay = require("src.ui.LevelDisplay")
 
 local RseSummary = {}
 
@@ -336,7 +337,12 @@ local function drawPortrait(m, Sm, mon, egg, detail, page)
   -- pokeemerald/src/pokemon_summary_screen.c:2320 PSS_LABEL_WINDOW_PORTRAIT_SPECIES is cleared in move detail mode
   if not inMoveDetail then
     local sp = win(m, W.SPECIES)
-    put(m, sp, RomText.plain("gText_LevelSymbol") .. tostring(tonumber(mon.level) or 1), 24, 17, 1)
+    local levelSession = Sm._playerState or Sm._session
+    local Runtime = package.loaded["src.core.game3.runtime"]
+    local game = (levelSession and levelSession.game) or (Runtime and Runtime._game)
+    if LevelDisplay.visible(mon, "summary", game) then
+      put(m, sp, RomText.plain("gText_LevelSymbol") .. tostring(tonumber(mon.level) or 1), 24, 17, 1)
+    end
     put(m, sp, "/" .. (Pokemon.name(Pokemon.speciesOf(mon)) or ""), 0, 1, 1)
     local g = SummaryData.gender(mon)
     if g == "M" then put(m, sp, "gText_MaleSymbol", 57, 17, 3)

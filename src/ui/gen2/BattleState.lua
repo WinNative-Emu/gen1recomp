@@ -30,6 +30,7 @@ local Font = require("src.render.Font")
 local ForgetMoveList = require("src.ui.gen2.ForgetMoveList")
 local HpBar = require("src.battle.gen2.HpBar")
 local ItemEffects = require("src.core.gen2.ItemEffects")
+local LevelDisplay = require("src.ui.LevelDisplay")
 local Mon = require("src.battle.gen2.Mon")
 local MonAnim = require("src.render.MonAnim")
 local Palettes = require("src.world.gen2.Palettes")
@@ -1522,6 +1523,15 @@ function BattleState:dexCaught(mon)
   return (mon and caught and caught[mon.species]) and true or false
 end
 
+function BattleState:caughtMarkerVisible()
+  local enemy = self:activeMon("enemy")
+  if not (self.battle and self.battle.wild and self.caughtMark)
+      or not self:dexCaught(enemy) then return false end
+  if not Runtime.wantsHook("battle.caught_marker_visible") then return true end
+  return Runtime.call("battle.caught_marker_visible", function() return true end,
+                      self) == true
+end
+
 -- The status the HUD prints, one drain behind the engine the way shownHp is:
 -- UpdateBattleHuds runs after the animation and its line (home/battle.asm:150).
 function BattleState:hudStatus(mon, side)
@@ -2749,6 +2759,38 @@ function BattleState:introGrayscale()
   return frame ~= nil and frame < BattleAnimView.SLIDE_FRAMES
 end
 
+function BattleState:menuAuxiliarySafe()
+  local battle = self.battle
+  local stack = self.game and self.game.stack
+  if not self.game or not battle or self.phase ~= "menu"
+      or (stack and stack.top and stack:top() ~= self)
+      or self.link or battle.linkBattle or self.tutorial or self.contest
+      or battle.battleType == Battle.BATTLETYPE_TUTORIAL
+      or battle.battleType == Battle.BATTLETYPE_CONTEST
+      or battle.inBattleTowerBattle or battle.over or battle.turnOpen
+      or battle.pendingSwitch or battle.pendingEnemySwitch or battle.forcedSwitch
+      or (self.queue and next(self.queue))
+      or (battle.events and next(battle.events)) then return false end
+  if self:introGrayscale() or self.winSliding or self.trainerSlide
+      or self.backpicSlide or self.faintSlide or self.frontAnim or self.hpAnim
+      or self.expAnim or self.expBurst or self.pendingStatsMon or self.statsBoxMon
+      or self.pendingSendOut or self.afterSendOut or self.pendingAfterAnim
+      or self.shiftSwitchIndex or self.pendingLearn or self.waitSfx
+      or self.messagePages or (self.messageDelay or 0) > 0
+      or (self.messageTimer or 0) > 0
+      or (self.typer and not self.typer:done())
+      or (self.anim and not (self.anim:done() and self.anim.keepSprites)) then
+    return false
+  end
+  for _, side in ipairs({ "player", "enemy" }) do
+    local mon = battle[side]
+    if not mon or (mon.hp or 0) <= 0 or self:activeMon(side) ~= mon
+        or self:hudHp(mon, side) ~= mon.hp
+        or self:hudStatus(mon, side) ~= (mon.status or nil) then return false end
+  end
+  return not battle:lockedInMove(battle.player)
+end
+
 function BattleState:update(_dt)
   -- The evolution sweep owns the stack (and the low-HP alarm is long over);
   -- this state is only still here because ExitBattle has not cleaned up yet.
@@ -2929,6 +2971,12 @@ function BattleState:update(_dt)
   end
 
   if self.phase == "menu" then
+    if input:wasPressed("start") and Runtime.wantsHook("battle.menu_auxiliary")
+        and self:menuAuxiliarySafe()
+        and Runtime.call("battle.menu_auxiliary", function() return false end,
+          self.game, { kind = self.battle.wild and "wild" or "trainer" }) == true then
+      return
+    end
     -- 2x2 grid: left/right swap the column, up/down the row.  No
     -- STATICMENU_WRAP in BattleMenuHeader (engine/battle/menu.asm:31-33), so
     -- the cursor clamps at each edge (engine/menus/menu.asm:156-166) (#1706).
@@ -3961,7 +4009,9 @@ function BattleState:catchOptions(itemId)
   local enemy = battle and battle.enemy
   if not enemy then return nil end
   local enemyDef = data.pokemon and data.pokemon[enemy.species]
-  local dexEntry = data.gen2Pokedex and data.gen2Pokedex[enemy.species]
+  -- engine/items/item_effects.asm:758
+  local dexEntry = data.gen2Pokedex and data.gen2Pokedex.entries
+    and data.gen2Pokedex.entries[enemy.species]
   local evolveItem
   for _, entry in ipairs((enemyDef and enemyDef.evolutions) or {}) do
     if entry.method == "EVOLVE_ITEM" then evolveItem = entry.item end
@@ -4121,7 +4171,7 @@ function BattleState:useItem(itemId)
     -- the ETHER / ELIXER family.  Without the merged dataset this can only
     -- ever see RECORDS, the module's own built-ins, the same gap
     -- Game2:usePartyItem had for the field pack.
-    local action = ItemEffects.partyAction(itemId, self.game and self.game.data)
+    local action = ItemEffects.partyAction(itemId, self.game and self.game.data, true)
     if action then
       return self:useOnPartyMon(itemId, action)
     end
@@ -4231,7 +4281,7 @@ function BattleState:applyPartyItem(itemId, action, mon, slot, partySlot)
   if action == "pp" then
     result = ItemEffects.usePpItem(itemId, mon, slot, data)
   else
-    result = ItemEffects.useOnMon(itemId, mon, data)
+    result = ItemEffects.useOnMon(itemId, mon, data, { game = self.game, battle = self.battle })
   end
   -- HealStatus's `.not_full_heal` and IsItemUsedOnConfusedMon: a $ff-mask item
   -- used on whoever is OUT also clears SUBSTATUS_CONFUSED, and clears it even
@@ -4258,7 +4308,7 @@ function BattleState:applyPartyItem(itemId, action, mon, slot, partySlot)
       and not mon.status then
     self.battle:volatile(mon).nightmare = nil
   end
-  self:consumeItem(itemId)
+  if not result.keep then self:consumeItem(itemId) end
   if menu then
     -- engine/items/item_effects.asm:1671
     local climbs = (action == "heal" or action == "revive")
@@ -4383,15 +4433,20 @@ function BattleState:drawEnemyHud()
   -- PlaceNonFaintStatus (engine/pokemon/mon_stats.asm): a statused mon's tag
   -- prints where the level goes, and DrawEnemyHUD's `.skip_level` arm drops
   -- the level entirely while one is up.
-  Chrome.printThrough(self:statusTag(enemy, "enemy")
-    or ("<LV>" .. tostring(enemy.level or 1)), 6, 1, Chrome.DEFAULT_BOX_PALETTE)
+  local enemyStatus = self:statusTag(enemy, "enemy")
+  if enemyStatus then
+    Chrome.printThrough(enemyStatus, 6, 1, Chrome.DEFAULT_BOX_PALETTE)
+  elseif LevelDisplay.visible(enemy, "battle.enemy", self.game) then
+    Chrome.printThrough("<LV>" .. tostring(enemy.level or 1), 6, 1,
+      Chrome.DEFAULT_BOX_PALETTE)
+  end
   local enemyGender = self:genderSymbol(enemy)
   if enemyGender then
     Chrome.printThrough(enemyGender, 9, 1, Chrome.DEFAULT_BOX_PALETTE)
   end
   -- `ld a, [wBattleMode] / dec a / ret nz`, then CheckCaughtMon puts $5d at
   -- (1,1) (engine/battle/trainer_huds.asm:140-152).
-  if self.battle and self.battle.wild and self.caughtMark then
+  if self:caughtMarkerVisible() then
     self.hud:drawCaughtIcon(1, 1, self:hudHp(enemy, "enemy"),
       enemy.maxHp or (enemy.stats and enemy.stats.hp))
   end
@@ -4439,9 +4494,13 @@ function BattleState:drawPlayerHud()
   Chrome.printThrough(self:name(player), 10, 7, Chrome.DEFAULT_BOX_PALETTE)
   -- PrintPlayerHUD places the same status tag at (14,8) and skips the level
   -- while it is up.
-  Chrome.printThrough(self:statusTag(player, "player")
-    or ("<LV>" .. tostring(self.shownLevel or player.level or 1)), 14, 8,
-    Chrome.DEFAULT_BOX_PALETTE)
+  local playerStatus = self:statusTag(player, "player")
+  if playerStatus then
+    Chrome.printThrough(playerStatus, 14, 8, Chrome.DEFAULT_BOX_PALETTE)
+  elseif LevelDisplay.visible(player, "battle.player", self.game) then
+    Chrome.printThrough("<LV>" .. tostring(self.shownLevel or player.level or 1),
+      14, 8, Chrome.DEFAULT_BOX_PALETTE)
+  end
   local playerGender = self:genderSymbol(player)
   if playerGender then
     Chrome.printThrough(playerGender, 17, 8, Chrome.DEFAULT_BOX_PALETTE)

@@ -117,7 +117,7 @@ M.BY_NAME.GetDaycareMonNicknames = function(ctx, adapters)
   return false
 end
 M.BY_NAME.SetDaycareCompatibilityString = function(ctx, adapters)
-  local score = require("src.core.game3.rs.daycare").compatibility(D.stateOf(R.session()))
+  local score = B.compatibility(D.stateOf(R.session()), R.session())
   local names = {[0] = "DaycareText_PlayOther", [20] = "DaycareText_DontLikeOther", [50] = "DaycareText_GetAlong", [70] = "DaycareText_GetAlongVeryWell"}
   stringVar(ctx, adapters, 4, require("src.core.game3.rom_text").plain(names[score] or names[70])); return false
 end

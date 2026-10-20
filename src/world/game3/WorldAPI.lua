@@ -328,6 +328,13 @@ function WorldAPI:mapOverview()
 end
 
 function WorldAPI:warpTo(mapId, x, y, facing, opts)
+  local legacy = {}
+  if opts and opts.arrive == "teleport" then legacy.teleport = true end
+  if opts and opts.fade == false then legacy.fade = false end
+  return self:_warpToWith(mapId, x, y, facing, nil, legacy)
+end
+
+function WorldAPI:_warpToWith(mapId, x, y, facing, opts, legacy)
   if not self:_field() then return nil, NO_OVERWORLD end
   local raw = Gen3Compat.gen3MapId(mapId)
   if not raw then return nil, "unknown map: " .. tostring(mapId) end
@@ -335,9 +342,12 @@ function WorldAPI:warpTo(mapId, x, y, facing, opts)
   local W = g3("warp")
   if not W then return nil, NO_OVERWORLD end
   local P = loaded("player")
-  local warpOpts = {}
-  if opts and opts.arrive == "teleport" then warpOpts.teleport = true end
-  if opts and opts.fade == false then warpOpts.fade = false end
+  local warpOpts = legacy or {
+    onDone = opts and opts.onDone,
+    keepMusic = opts and opts.keepMusic,
+    arrive = opts and opts.arrive,
+    fade = opts and opts.fade,
+  }
   local ok, err = W.request(nil, self.game, raw, x, y,
     facing or (P and P.facing) or "down", warpOpts)
   if not ok then return nil, err or "warp failed" end
@@ -429,11 +439,21 @@ function WorldAPI:replaceBlock(bx, by, block)
   return true
 end
 
-function WorldAPI:spawnNpc(_mapId, _objDef)
-  warnOnce("spawnNpc",
-    "[%s] mod.world:spawnNpc: FireRed event objects come from the map's "
-    .. "extracted templates only", tostring(self.modId))
-  return nil, UNSUPPORTED
+function WorldAPI:spawnNpc(mapId, objDef)
+  if not self:_field() then return nil, NO_OVERWORLD end
+  local M = loaded("map")
+  local Objects = loaded("objects")
+  if not (M and M.current and Objects) then return nil, NO_OVERWORLD end
+  local raw = Gen3Compat.gen3MapId(mapId)
+  local maps = self.game and self.game.data and self.game.data.maps
+  if not (raw and maps and maps[raw]) then
+    return nil, "unknown map: " .. tostring(mapId)
+  end
+  if type(objDef) ~= "table" then return nil, "objDef must be a table" end
+  if not Objects.addRuntimeObject then return nil, "runtime objects unavailable" end
+  local copy = {}
+  for k, v in pairs(objDef) do copy[k] = v end
+  return Objects.addRuntimeObject(raw, copy, self.modId)
 end
 
 function WorldAPI:liveMaps()
@@ -451,6 +471,7 @@ function WorldAPI:liveMaps()
 end
 
 function WorldAPI:removeNpc(npcId)
+  if type(npcId) == "string" then return self:removeRuntimeNpc(npcId) end
   if not self:_field() then return nil, NO_OVERWORLD end
   local Objects = loaded("objects")
   if not Objects then return nil, NO_OVERWORLD end
@@ -460,25 +481,35 @@ function WorldAPI:removeNpc(npcId)
   return Objects.removeObject(npcId) and true or nil
 end
 
+function WorldAPI:removeRuntimeNpc(npcId)
+  if not self:_field() then return nil, NO_OVERWORLD end
+  local Objects = loaded("objects")
+  if not Objects then return nil, NO_OVERWORLD end
+  if not Objects.removeRuntimeObject then return nil, "runtime objects unavailable" end
+  return Objects.removeRuntimeObject(npcId, self.modId)
+end
+
 local Handle = {}
 Handle.__index = Handle
 
 function Handle:scriptMove(dir, tiles, onDone)
   local Objects = loaded("objects")
   if not Objects then return nil, NO_OVERWORLD end
+  if self.ghost then return nil, "movement tracks require the active map" end
   if not DELTA[dir] then return nil, "unknown direction: " .. tostring(dir) end
   local actions = {}
   for _ = 1, math.max(0, tiles or 1) do
     actions[#actions + 1] = { kind = "step", dir = dir }
   end
-  Objects.startTrack(self.id, actions, onDone)
+  Objects.startTrack(self.localId, actions, onDone)
   return true
 end
 
 function Handle:marchInPlace(onDone)
   local Objects = loaded("objects")
   if not Objects then return nil, NO_OVERWORLD end
-  Objects.startTrack(self.id, { { kind = "turn", dir = self.npc.facing },
+  if self.ghost then return nil, "movement tracks require the active map" end
+  Objects.startTrack(self.localId, { { kind = "turn", dir = self.npc.facing },
     { kind = "sleep", frames = 16 } }, onDone)
   return true
 end
@@ -514,6 +545,13 @@ function Handle:canStep(dir)
   if not (d and C) then return false end
   local npc = self.npc
   local tx, ty = npc.cellX + d[1], npc.cellY + d[2]
+  if self.ghost then
+    local Ghosts = loaded("ghosts")
+    if not (Ghosts and Ghosts._contextFor) then return false end
+    local ctx = Ghosts._contextFor(self.ghost, self.pool)
+    return ctx.canEnter(tx, ty, npc.cellX, npc.cellY, dir)
+      and not ctx.blocks(tx, ty, npc.localId)
+  end
   -- pokefirered/src/event_object_movement.c:4830 GetCollisionAtCoords
   local onWater = C.isWater(npc.cellX, npc.cellY)
   if not C.canEnter(nil, tx, ty, { fromX = npc.cellX, fromY = npc.cellY,
@@ -544,18 +582,47 @@ function Handle:setPassable(passable)
   return true
 end
 
+function Handle:setAppearance(spriteId)
+  local data = self.game and self.game.data
+  local sprites = data and (data.gen2Sprites or data.sprites)
+  if not (sprites and sprites[spriteId]) then
+    return nil, "unknown sprite: " .. tostring(spriteId)
+  end
+  local npc = self.npc
+  npc.sprite, npc.graphicsId = spriteId, nil
+  npc.def.sprite = spriteId
+  npc.def.graphicsId, npc.def.graphics, npc.def.graphicsVar = nil, nil, nil
+  return true
+end
+
 function WorldAPI:npc(mapId, indexOrName)
   if not self:_field() then return nil, NO_OVERWORLD end
   local M = loaded("map")
   local raw = Gen3Compat.gen3MapId(mapId)
-  if not (M and M.current == raw) then return nil, "map is not active" end
+  if not (M and raw) then return nil, "map is not live" end
   local Objects = loaded("objects")
-  for _, lid in ipairs(Objects and Objects._order or {}) do
-    local eo = Objects._byId[lid]
+  if not Objects then return nil, NO_OVERWORLD end
+  local pool, ghost
+  if M.current ~= raw then
+    for _, entry in ipairs(M.world or {}) do
+      if entry.id == raw then ghost = entry break end
+    end
+    if not ghost then return nil, "map is not live" end
+    local Ghosts = loaded("ghosts")
+    if Ghosts and Ghosts.sync then Ghosts.sync() end
+    pool = Ghosts and Ghosts._pools and Ghosts._pools[raw]
+  else
+    pool = { byId = Objects._byId, order = Objects._order }
+  end
+  for _, lid in ipairs(pool and pool.order or {}) do
+    local eo = pool.byId[lid]
     local def = eo and eo.def
-    if eo and (lid == indexOrName or (def and (def.name == indexOrName
-        or def.id == indexOrName))) then
-      return setmetatable({ npc = eo, id = lid }, Handle)
+    local id = eo and (eo.publicId or (def and def.publicId)
+      or (raw .. "_obj_" .. tostring((def and def.index) or eo.originLocalId or lid)))
+    if eo and (id == indexOrName or lid == indexOrName or (def and
+        (def.index == indexOrName or def.name == indexOrName or def.id == indexOrName))) then
+      return setmetatable({ npc = eo, id = id, localId = eo.localId,
+        game = self.game, ghost = ghost, pool = pool }, Handle)
     end
   end
   return nil, "no such object: " .. tostring(indexOrName)

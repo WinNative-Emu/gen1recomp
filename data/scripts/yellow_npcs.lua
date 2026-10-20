@@ -213,7 +213,7 @@ M.POKEMON_FAN_CLUB = {
     local def = game.data.pokemon[species]
     local PicBox = require("src.ui.PicBox")
     game.stack:push(PicBox.new(game, def and def.spriteFront or "",
-      game.data.text[key]))
+      game.data.text[key], species))
     return true
   end,
 }

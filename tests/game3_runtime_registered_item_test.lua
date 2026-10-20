@@ -128,6 +128,24 @@ check(Player.biking == false, "indoors the bike is refused")
 check(fieldMessages[1] == "OAK: RED!\nThis isn't the time to use that!",
   "and the refusal does print (got " .. tostring(fieldMessages[1]) .. ")")
 
+print("[test] 6. the bike is refused while surfing")
+-- pokefirered/src/bike.c:294 IsBikingDisallowedByPlayer
+local s6 = new_session(ITEM_BICYCLE)
+Player.biking, Player.surfing, Player.moving = false, true, false
+press_select(s6)
+check(Player.biking == false and Player.surfing == true, "SELECT leaves the player surfing, not biking")
+check(fieldMessages[1] == "OAK: RED!\nThis isn't the time to use that!",
+  "and Oak's refusal prints (got " .. tostring(fieldMessages[1]) .. ")")
+local ok6, kind6, text6 = ItemUse.useField(s6, s6.bag, ITEM_BICYCLE, nil)
+check(ok6 == false and kind6 == "bike" and Player.biking == false,
+  "bag USE is refused too and the player stays off the bike")
+check(text6 == "OAK: RED!\nThis isn't the time to use that!",
+  "with the same refusal (got " .. tostring(text6) .. ")")
+Player.surfing = false
+press_select(s6)
+check(Player.biking == true, "back on land the same press mounts the bike")
+Player.biking = false
+
 if failed > 0 then
   print("[test] FAILED " .. failed)
   os.exit(1)

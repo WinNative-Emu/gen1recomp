@@ -634,10 +634,21 @@ function Tower.doTowerBattle(ctx, adapters, sess)
     local partnerId = tonumber(Util.frontier(sess).trainerIds[18]) or 0
     local half = #sess.party
     for _, mon in ipairs(Tower.partnerParty(sess, partnerId)) do sess.party[#sess.party + 1] = mon end
+    local partnerClass = D.opponentClass(sess, partnerId, F.TOWER)
+    -- pokeemerald/src/pokemon.c:6953
+    local playerFc = D.constants(sess):require("trainer_classes",
+      (tonumber(sess.gender) or 0) ~= 0 and "FACILITY_CLASS_MAY" or "FACILITY_CLASS_BRENDAN")
+    local _, playerPic = D.secretBaseTrainerInfo(playerFc)
     extra = {
-      partner = true, playerHalf = half, twoOpponents = true, frontierPartner = partnerId,
-      partnerName = D.trainerName(sess, partnerId, F.TOWER),
-      partnerPicId = D.frontSpriteId(sess, partnerId, F.TOWER),
+      partner = true, playerHalf = half, twoOpponents = true,
+      frontierPartner = {
+        trainerId = partnerId,
+        class = partnerClass,
+        className = D.className(sess, partnerClass),
+        name = D.trainerName(sess, partnerId, F.TOWER),
+        pic = D.frontSpriteId(sess, partnerId, F.TOWER),
+        playerPic = playerPic,
+      },
       frontierOpponentB = tonumber(sess.frontierOpponentB) or 0,
     }
   else

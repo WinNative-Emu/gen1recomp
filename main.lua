@@ -389,7 +389,7 @@ local function resizeForEditor()
   if osName ~= "OS X" and osName ~= "Windows" and osName ~= "Linux" then return end
   local w, h, flags = love.window.getMode()
   if flags.fullscreen then return end
-  local dw, dh = love.window.getDesktopDimensions()
+  local dw, dh = require("src.render.WindowsDpi").desktopDimensions()
   local wantW = math.max(w, math.min(1360, math.floor((dw or w) * 0.92)))
   local wantH = math.max(h, math.min(860, math.floor((dh or h) * 0.88)))
   if wantW <= w and wantH <= h then return end

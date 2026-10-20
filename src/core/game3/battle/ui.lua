@@ -32,6 +32,7 @@ local TrainerPic = require("src.core.game3.trainer_pic")
 local Audio = require("src.core.game3.audio")
 local SE = require("src.core.game3.se_ids")
 local LevelUpStreaks = require("src.core.game3.battle.level_up_streaks")
+local ModRuntime = require("src.mods.Runtime")
 local bit = require("bit")
 
 local Ui = {}
@@ -70,6 +71,34 @@ Ui._target = nil
 Ui._bounce = { hb = {}, mon = {} }
 Ui._preview = nil
 Ui._partnerAction = nil
+
+local function default_visible()
+  return true
+end
+
+function Ui.statusHUDVisible()
+  if not ModRuntime.wantsHook("battle.status_hud_visible") then return true end
+  return ModRuntime.call("battle.status_hud_visible", default_visible, Ui._st) ~= false
+end
+
+function Ui.bottomUIVisible(state, queryState)
+  if not ModRuntime.wantsHook("battle.bottom_ui_visible") then return true end
+  local st = Ui._st
+  state = state or st
+  if st and state ~= st
+      and ModRuntime.call("battle.bottom_ui_visible", default_visible, st) == false then
+    return false
+  end
+  if queryState ~= false or state == st then
+    return ModRuntime.call("battle.bottom_ui_visible", default_visible, state) ~= false
+  end
+  return true
+end
+
+function Ui.moveGridNavigation()
+  if not ModRuntime.wantsHook("battle.move_grid_navigation") then return true end
+  return ModRuntime.call("battle.move_grid_navigation", default_visible, Ui._st) == true
+end
 
 -- pokefirered/src/battle_script_commands.c:5149
 local BATTLE_YESNO = { left = 24, top = 9, style = "battle" }
@@ -1101,6 +1130,19 @@ local function grid_nav(index, input, maxN)
   return c + 1, true
 end
 
+local function linear_nav(index, input, maxN)
+  local delta
+  if input:wasPressed("up") then
+    delta = -1
+  elseif input:wasPressed("down") then
+    delta = 1
+  else
+    return index, false
+  end
+  local nextIndex = ((index or 1) - 1 + delta) % (maxN or 4) + 1
+  return nextIndex, nextIndex ~= index
+end
+
 -- pokefirered/src/battle_controller_player.c:1381
 local function move_count(mon)
   local n = 0
@@ -1137,7 +1179,12 @@ local function move_swap_input(input, st, battler, id)
     local n = MoveSwap.moveCount(battler and battler.mon)
     for _, dir in ipairs({ "left", "right", "up", "down" }) do
       if input:wasPressed(dir) then
-        local nc = MoveSwap.step(sw.cursor, dir, n)
+        local nc
+        if Ui.moveGridNavigation() then
+          nc = MoveSwap.step(sw.cursor, dir, n)
+        else
+          nc = linear_nav(sw.cursor + 1, input, n) - 1
+        end
         if nc ~= sw.cursor then
           sw.cursor = nc
           play_select()
@@ -1712,7 +1759,9 @@ local function handle_double_input(input)
     local c = (Ui._moveIndex or 1) - 1
     local nc = c
     -- pokefirered/src/battle_controller_player.c:511
-    if input:wasPressed("left") then
+    if not Ui.moveGridNavigation() then
+      nc = linear_nav(c + 1, input, n) - 1
+    elseif input:wasPressed("left") then
       if c % 2 == 1 then nc = c - 1 end
     elseif input:wasPressed("right") then
       if c % 2 == 0 and c + 1 < n then nc = c + 1 end
@@ -1860,7 +1909,8 @@ function Ui.handleInput(input)
   elseif Ui._mode == "moves" then
     if move_swap_input(input, Ui._st, Ui._st and Ui._st.player, nil) then return true end
     -- pokefirered/src/battle_controller_player.c:526
-    local idx, moved = grid_nav(Ui._moveIndex, input, move_count(Ui._st and Ui._st.player and Ui._st.player.mon))
+    local navigate = Ui.moveGridNavigation() and grid_nav or linear_nav
+    local idx, moved = navigate(Ui._moveIndex, input, move_count(Ui._st and Ui._st.player and Ui._st.player.mon))
     if moved then
       Ui._moveIndex = idx
       play_select()
@@ -2681,7 +2731,16 @@ local function draw_player_trainer(stage)
   if not stage or not stage.trainer then return end
   local TrainerPic = require("src.core.game3.trainer_pic")
   local tp = stage.trainer.player
-  if tp and tp.visible then
+  if tp and tp.visible and tp.fronts then
+    for _, row in ipairs(tp.fronts) do
+      local entry = TrainerPic.front(row[1])
+      if entry and entry.image then
+        love.graphics.setColor(1, 1, 1, 1)
+        -- pokeemerald/src/battle_controller_player.c:2335
+        love.graphics.draw(entry.image, row[2] + (tp.ox or 0) + 32, 80 + (tp.oy or 0) - 32, 0, -1, 1)
+      end
+    end
+  elseif tp and tp.visible then
     -- pokefirered/src/battle_controller_link_partner.c:1093
     local backs = { { tp.gender2, tp.x2 }, { tp.gender or 0, tp.x or 80 } }
     for _, row in ipairs(backs) do
@@ -2884,10 +2943,19 @@ function Ui.clearCaughtDexScene()
   Ui._caughtDexScene = nil
 end
 
-function Ui.draw(w, h)
+function Ui.drawOverlay()
+  if not (love and love.graphics and ModRuntime.wantsHook("battle.overlay")) then return end
+  love.graphics.push("all")
+  local ok, err = pcall(ModRuntime.call, "battle.overlay", function() end, Ui._st)
+  love.graphics.pop()
+  if not ok then error(err, 0) end
+end
+
+function Ui.draw(w, h, deferOverlay)
   if not (love and love.graphics) then return end
   w = w or Display.W
   h = h or Display.H
+  local showBottom = Ui.bottomUIVisible()
 
   local caught = Ui._caughtDexScene
   if caught then
@@ -2895,18 +2963,20 @@ function Ui.draw(w, h)
     local Fx = require("src.core.game3.gba_fx")
     Fx.draw(function()
       BattleChrome.drawPostDexBg(BattleBg.sheetKey())
-      BattleChrome.drawPanel("none")
+      if showBottom then BattleChrome.drawPanel("none") end
     end, caught.pal:fx(0))
     local spr = caught.sprite
     Fx.draw(function()
       love.graphics.setColor(1, 1, 1, 1)
       love.graphics.draw(spr.img, spr.x + (spr.x2 or 0), spr.y + (spr.y2 or 0), 0, 1, spr.scaleY or 1, 32, 32)
     end, caught.pal:fx(16))
-    if Choice and Choice.active and Choice.draw then Choice.draw() end
+    if showBottom and Choice and Choice.active and Choice.draw then Choice.draw() end
+    if not deferOverlay then Ui.drawOverlay() end
     return
   end
 
   local st = Ui._st
+  local showStatus = Ui.statusHUDVisible()
   local stage = Anim.stage and Anim.stage()
 
   local enemyOx = 0
@@ -3000,27 +3070,29 @@ function Ui.draw(w, h)
   -- pokefirered/src/pokeball.c:770
   BallOpen.draw()
   if screenFxActive then Anim.endScreenEffect() end
-  if dbl then
+  if showStatus and dbl then
     draw_double_healthboxes(st, Anim)
-  elseif st then
+  elseif showStatus and st then
     Healthbox.draw("enemy", Anim.shownBattler("enemy", st.enemy), { oy = Ui.bounceOffset("hb", 1) })
     Healthbox.draw("player", Anim.shownBattler("player", st.player), { oy = Ui.bounceOffset("hb", 0) })
   end
   draw_party_bars(stage)
 
-  local panelMode = "none"
-  if Ui._mode == "menu" then
-    panelMode = "menu"
-  elseif Ui._mode == "moves" or Ui._mode == "target" then
-    panelMode = "moves"
-  end
-  BattleChrome.drawPanel(panelMode)
-  Ui.drawMenuFrames(panelMode)
+  if showBottom then
+    local panelMode = "none"
+    if Ui._mode == "menu" then
+      panelMode = "menu"
+    elseif Ui._mode == "moves" or Ui._mode == "target" then
+      panelMode = "moves"
+    end
+    BattleChrome.drawPanel(panelMode)
+    Ui.drawMenuFrames(panelMode)
 
-  if Ui._mode == "menu" then
-    draw_action_menu(st)
-  elseif Ui._mode == "moves" or Ui._mode == "target" then
-    draw_move_menu(st)
+    if Ui._mode == "menu" then
+      draw_action_menu(st)
+    elseif Ui._mode == "moves" or Ui._mode == "target" then
+      draw_move_menu(st)
+    end
   end
 
   -- pokefirered/src/battle_controller_oak_old_man.c:759
@@ -3030,7 +3102,7 @@ function Ui.draw(w, h)
     love.graphics.rectangle("fill", 0, 0, w, h)
     love.graphics.setColor(1, 1, 1, 1)
     -- pokefirered/src/battle_controller_pokedude.c:2607
-    if st and not dbl and Ui.litHealthboxShown() then
+    if showStatus and st and not dbl and Ui.litHealthboxShown() then
       Healthbox.draw("player", Anim.shownBattler("player", st.player), { oy = Ui.bounceOffset("hb", 0) })
     end
   end
@@ -3053,7 +3125,7 @@ function Ui.draw(w, h)
     require("src.ui.game3.screens").draw("bag", BagMenu)
   end
 
-  if Choice and Choice.active and Choice.draw then
+  if showBottom and Choice and Choice.active and Choice.draw then
     Choice.draw()
   end
 
@@ -3080,6 +3152,7 @@ function Ui.draw(w, h)
   end
 
   love.graphics.setColor(1, 1, 1, 1)
+  if not deferOverlay then Ui.drawOverlay() end
 end
 
 function Ui.log()

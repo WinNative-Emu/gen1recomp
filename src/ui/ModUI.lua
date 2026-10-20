@@ -18,16 +18,42 @@ local MODULES = {
   Theme = "src.ui.Theme",
 }
 
+local function onGame3()
+  local GameVersion = require("src.core.GameVersion")
+  local version = GameVersion.get()
+  return version ~= nil and GameVersion.generation(version) == 3
+end
+
 setmetatable(ModUI, { __index = function(t, key)
   local path = MODULES[key]
   if not path then return nil end
+  if key == "TextBox" and onGame3() then
+    return require("src.ui.game3.mod_ui").TextBox
+  end
   local module = require(path)
-  rawset(t, key, module)
+  if key ~= "TextBox" then rawset(t, key, module) end
   return module
 end })
 
 function ModUI.push(game, id, ...)
+  if onGame3() then return require("src.ui.game3.mod_ui").push(game, id, ...) end
   return require("src.ui.Screens").push(game, id, ...)
+end
+
+local legacy
+function ModUI.forApi(apiLevel)
+  if (tonumber(apiLevel) or 1) >= 3 then return ModUI end
+  if not legacy then
+    legacy = setmetatable({
+      push = function(game, id, ...)
+        return require("src.ui.Screens").push(game, id, ...)
+      end,
+    }, { __index = function(_, key)
+      if key == "TextBox" then return require(MODULES.TextBox) end
+      return ModUI[key]
+    end })
+  end
+  return legacy
 end
 
 local function indexOf(items, label)

@@ -168,6 +168,9 @@ end
 
 -- pokeemerald/src/start_menu.c:1123
 function SaveMenu.update()
+  -- pokefirered/src/overworld.c:1470
+  local TilesetAnim = package.loaded["src.core.game3.tileset_anim"]
+  if SaveMenu.open and TilesetAnim and TilesetAnim.step then TilesetAnim.step() end
   if not (SaveMenu.open and SaveMenu._rse) then return end
   if SaveMenu._phase == "saving_msg" then
     SaveMenu._phase = "saving"

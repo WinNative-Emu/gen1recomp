@@ -599,6 +599,25 @@ local function sameRows(_, rows) return rows end
 -- written against Red's OPTION screen finds the shared rows where it expects
 -- them, and the rows Gold has that Red does not (PRINT, MENU ACCOUNT, FRAME,
 -- COLOR) simply appear in the list the hook receives.
+local function pipelineRows()
+  local Pipelines = require("src.render.Pipelines")
+  local rows = {}
+  for _, entry in ipairs(Pipelines.list()) do
+    local id = entry.id
+    rows[#rows + 1] = {
+      id = "pipeline:" .. id, port = true,
+      label = entry.def.label or id:upper(),
+      cycle = function(options, delta)
+        Pipelines.cycle(id, delta)
+        Pipelines.syncOptions(options)
+        require("src.render.Tilt").setLevel(options.tilt or 0)
+      end,
+      text = function() return Strings(Pipelines.levelLabel(id)) end,
+    }
+  end
+  return rows
+end
+
 local function buildRows()
   local rows = {}
   local env = os.getenv("POKEPORT_TOUCH")
@@ -625,6 +644,9 @@ local function buildRows()
       for key, value in pairs(row) do copy[key] = value end
       copy.id = copy.id or copy.key or (copy.cancel and "cancel") or nil
       rows[#rows + 1] = copy
+      if copy.id == "tilt" then
+        for _, extra in ipairs(pipelineRows()) do rows[#rows + 1] = extra end
+      end
     end
   end
   return rows

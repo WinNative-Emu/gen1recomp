@@ -366,6 +366,15 @@ function AiSwitch.shouldSwitch(st, id, rng)
   return false
 end
 
+function AiSwitch.validSlot(st, id, slot)
+  slot = math.floor(tonumber(slot) or 0)
+  local party = party_of(st, id)
+  if slot < 1 or slot > 6 or not party or not mon_usable(party[slot]) then return nil end
+  local in1, in2 = battlers_in(st, id)
+  if excluded(st, slot, in1, in2) then return nil end
+  return slot
+end
+
 -- src/battle_ai_switch_items.c:358
 function AiSwitch.trySwitch(st, ad, id, rng)
   local ok, pick = AiSwitch.shouldSwitch(st, id, rng)

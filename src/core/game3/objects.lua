@@ -25,6 +25,7 @@ local WALK_FRAMES = 16
 local RUN_FRAMES = 8
 -- pokefirered/src/event_object_movement.c:9029 UpdateRunSlowAnim
 local RUN_SLOW_FRAMES = 11
+local FOREIGN_BASE = 0xC0
 -- include/constants/event_object_movement.h:81
 local MOVEMENT_TYPE_INVISIBLE = 0x4C
 Objects.MOVEMENT_TYPE_INVISIBLE = MOVEMENT_TYPE_INVISIBLE
@@ -46,6 +47,15 @@ Objects._bounds = nil
 Objects._perm = {} -- [mapId] = { [localId] = { x=, y=, movementType= } }
 Objects._templateMt = {}
 Objects._logged = false
+Objects.runtimeByMap = {}
+local nextRuntimeIndex = 0
+local runtimePools = setmetatable({}, { __mode = "k" })
+
+local function cancelTrack(lid)
+  local tr = Objects._tracks[lid]
+  if tr then tr.done, tr.onDone = true, nil end
+  Objects._tracks[lid] = nil
+end
 
 local function log(msg)
   print("[game3/objects] " .. tostring(msg))
@@ -175,6 +185,7 @@ end
 Objects.hostSpec = hostSpec
 
 local function objectVisible(def)
+  if def.runtime then return def.hidden ~= true end
   local SpaceMod = Space()
   if SpaceMod and SpaceMod.objectVisible then
     return SpaceMod.objectVisible(def)
@@ -349,6 +360,7 @@ function Objects.clear()
   Objects._tracks = {}
   Objects._mapId = nil
   Objects._defs = nil
+  Objects._mapDef = nil
   Objects._bounds = nil
   -- src/event_object_movement.c:9225
   VirtualObjects.clear()
@@ -356,6 +368,14 @@ end
 
 -- pokefirered/src/overworld.c:405
 function Objects.reset()
+  local ids = {}
+  for _, defs in pairs(Objects.runtimeByMap) do
+    for _, def in ipairs(defs) do ids[#ids + 1] = def.id end
+  end
+  for _, id in ipairs(ids) do Objects.removeRuntimeObject(id) end
+  Objects.runtimeByMap = {}
+  runtimePools = setmetatable({}, { __mode = "k" })
+  Objects._maps = nil
   Objects.retainPrepared({})
   Objects.clear()
   Objects._perm = {}
@@ -592,6 +612,164 @@ local function spawnFromTemplate(def, mapId, prepared)
   return eo
 end
 
+local function runtimeObject(def, neighbor)
+  local eo = newEventObject(def, neighbor)
+  eo.id, eo.publicId = def.id, def.id
+  eo.runtime, eo.owner = true, def.owner
+  return eo
+end
+
+local function announceRuntime(eo, mapId)
+  if ModRuntime.wants("world.npc_spawned") then
+    ModRuntime.emit("world.npc_spawned", { mapId = mapId, npcId = eo.id, runtime = eo })
+  end
+end
+
+local function runtimeMapDef(mapId)
+  if mapId == Objects._mapId then return Objects._mapDef end
+  local def = Objects._maps and Objects._maps[mapId]
+  if def then return def end
+  local M = package.loaded["src.core.game3.map"]
+  for _, entry in ipairs(M and M.world or {}) do
+    if entry.id == mapId then return entry.def end
+  end
+end
+
+local function eachRuntimePool(mapId, fn)
+  local seen = {}
+  for pool, id in pairs(runtimePools) do
+    if id == mapId then seen[pool] = true; fn(pool) end
+  end
+  local Ghosts = package.loaded["src.core.game3.ghosts"]
+  local pool = Ghosts and Ghosts._pools and Ghosts._pools[mapId]
+  if pool and not seen[pool] then fn(pool) end
+end
+
+local function validRuntimeNumber(value)
+  return type(value) == "number" and value == value and value >= 0
+    and value < math.huge and value == math.floor(value)
+end
+
+function Objects.addRuntimeObject(mapId, objDef, owner)
+  if type(mapId) ~= "string" or mapId == "" then return nil, "invalid map id" end
+  if type(objDef) ~= "table" then return nil, "objDef must be a table" end
+  local def = Prepare.freeze(objDef)
+  if not def or not validRuntimeNumber(def.x) or not validRuntimeNumber(def.y) then
+    return nil, "invalid NPC definition"
+  end
+  for _, key in ipairs({ "sprite", "movement", "facing", "range" }) do
+    if def[key] ~= nil and type(def[key]) ~= "string" then return nil, "invalid NPC " .. key end
+  end
+  if def.facing and not DELTA[def.facing:lower()] then return nil, "invalid NPC facing" end
+  if def.radius ~= nil and (type(def.radius) ~= "table"
+      or not validRuntimeNumber(def.radius.x) or not validRuntimeNumber(def.radius.y)) then
+    return nil, "invalid NPC radius"
+  end
+  for _, key in ipairs({ "movementType", "graphicsId", "graphics", "rangeX", "rangeY", "elevation" }) do
+    if def[key] ~= nil and not validRuntimeNumber(def[key]) then return nil, "invalid NPC " .. key end
+  end
+  local mapDef = runtimeMapDef(mapId)
+  local Sp = Space()
+  local ev = Sp and Sp.bundle and Sp.bundle.events and Sp.bundle.events[mapId]
+  if not mapDef and not ev then return nil, "unknown map: " .. mapId end
+  local used, maxIndex = {}, nextRuntimeIndex
+  local function reserve(defs)
+    for _, row in ipairs(defs or {}) do
+      local lid = tonumber(row.localId or row.index)
+      if lid then used[lid] = true end
+      maxIndex = math.max(maxIndex, tonumber(row.index) or tonumber(row.localId) or 0)
+    end
+  end
+  reserve(mapDef and mapDef.objects)
+  reserve(ev and (ev.objects or ev.objectEvents))
+  reserve(Objects.runtimeByMap[mapId])
+  if mapId == Objects._mapId then
+    reserve(Objects._defs)
+    for lid in pairs(Objects._byId) do used[lid] = true end
+  end
+  eachRuntimePool(mapId, function(pool)
+    for lid in pairs(pool.byId or {}) do used[lid] = true end
+  end)
+  local lid
+  for id = 1, FOREIGN_BASE - 1 do
+    if not used[id] and not Objects.isPlayer(id) then lid = id; break end
+  end
+  if not lid then return nil, "no free NPC localId" end
+  local index = math.floor(maxIndex) + 1
+  if index <= maxIndex or index == math.huge then return nil, "NPC id exhausted" end
+  def.index, def.localId = index, lid
+  def.id = mapId .. "_obj_" .. index
+  def.publicId, def.mapId = def.id, mapId
+  def.runtime, def.owner = true, owner
+  def.flag, def.flagId, def.kind, def.cloneTarget = nil, nil, nil, nil
+  def.originMapId, def.originLocalId = mapId, lid
+  def.originMapGroup, def.originMapNum = nil, nil
+  local actors = {}
+  local function prepare(pool)
+    local ok, eo = pcall(runtimeObject, def)
+    if not ok then return nil, "invalid NPC definition: " .. tostring(eo) end
+    actors[#actors + 1] = { pool = pool, eo = eo }
+    return true
+  end
+  if mapId == Objects._mapId then
+    local ok, err = prepare({ byId = Objects._byId, order = Objects._order })
+    if not ok then return nil, err end
+  end
+  local failure
+  eachRuntimePool(mapId, function(pool)
+    if pool.byId ~= Objects._byId then
+      local ok, err = prepare(pool)
+      if not ok then failure = err end
+    end
+  end)
+  if failure then return nil, failure end
+  local defs = Objects.runtimeByMap[mapId] or {}
+  Objects.runtimeByMap[mapId] = defs
+  defs[#defs + 1] = def
+  nextRuntimeIndex = index
+  for _, row in ipairs(actors) do
+    row.pool.byId[lid] = row.eo
+    row.pool.order[#row.pool.order + 1] = lid
+  end
+  for _, row in ipairs(actors) do
+    if row.pool.byId[lid] == row.eo then announceRuntime(row.eo, mapId) end
+  end
+  return def.id
+end
+
+function Objects.removeRuntimeObject(npcId, owner)
+  for mapId, defs in pairs(Objects.runtimeByMap) do
+    for i, def in ipairs(defs) do
+      if def.id == npcId then
+        if owner ~= nil and owner ~= def.owner then return nil, "not owned by " .. tostring(owner) end
+        table.remove(defs, i)
+        if #defs == 0 then Objects.runtimeByMap[mapId] = nil end
+        local function remove(pool)
+          for j = #pool.order, 1, -1 do
+            local lid = pool.order[j]
+            local eo = pool.byId[lid]
+            if eo and eo.runtime and eo.id == npcId then
+              eo.hidden, eo.visible, eo.scriptBusy = true, false, false
+              if pool.byId == Objects._byId then
+                cancelTrack(lid)
+                for key, id in pairs(Objects._foreign or {}) do
+                  if id == lid then Objects._foreign[key] = nil end
+                end
+              end
+              pool.byId[lid] = nil
+              table.remove(pool.order, j)
+            end
+          end
+        end
+        remove({ byId = Objects._byId, order = Objects._order })
+        eachRuntimePool(mapId, remove)
+        return true
+      end
+    end
+  end
+  return nil, "no runtime object " .. tostring(npcId)
+end
+
 -- src/event_object_movement.c:1651
 local function respawnFromTemplate(lid)
   local tpl
@@ -620,6 +798,7 @@ end
 --- Spawn EventObjects from mapDef.objects (extract / content).
 function Objects.loadMap(game, mapId, mapDef)
   local sameMap = Objects._mapId == mapId
+  local previous = sameMap and Objects._byId or nil
   -- Never wipe in-flight applymovement on a same-map rebind (host setMap echo).
   Objects._foreign = nil
   if not sameMap then
@@ -631,6 +810,8 @@ function Objects.loadMap(game, mapId, mapDef)
   Objects._byId = {}
   Objects._order = {}
   Objects._mapId = mapId
+  Objects._mapDef = mapDef
+  Objects._maps = (game and game.data and game.data.maps) or Objects._maps
   -- Prefer ROM event bundle (source of truth). mapDef.objects is the same
   -- table reference after attachEventsToMaps and may have been mutated.
   local defs = nil
@@ -664,6 +845,19 @@ function Objects.loadMap(game, mapId, mapDef)
       end
     end
   end
+  local spawned = {}
+  for _, def in ipairs(Objects.runtimeByMap[mapId] or {}) do
+    if not Objects._byId[def.localId] then
+      local eo = previous and previous[def.localId]
+      if not (eo and eo.runtime and eo.id == def.id) then eo = runtimeObject(def) end
+      Objects._byId[def.localId] = eo
+      Objects._order[#Objects._order + 1] = def.localId
+      if not previous or previous[def.localId] ~= eo then spawned[#spawned + 1] = eo end
+    end
+  end
+  for _, eo in ipairs(spawned) do
+    if Objects._byId[eo.localId] == eo then announceRuntime(eo, mapId) end
+  end
   if not Objects._logged then
     log(string.format("spawned %d objects on %s", #Objects._order, tostring(mapId)))
     Objects._logged = true
@@ -673,8 +867,6 @@ function Objects.loadMap(game, mapId, mapDef)
   end
   return #Objects._order
 end
-
-local FOREIGN_BASE = 0xC0
 
 local function shiftObject(eo, dx, dy)
   eo.cellX, eo.cellY = (eo.cellX or 0) + dx, (eo.cellY or 0) + dy
@@ -2188,7 +2380,7 @@ function Objects.revealTrainer(eo)
 end
 
 function Objects.spawnFromDefs(defs, mapDef, mapId)
-  local pool = { byId = {}, order = {}, bounds = layoutBounds(mapDef), mapDef = mapDef }
+  local pool = { byId = {}, order = {}, bounds = layoutBounds(mapDef), mapDef = mapDef, mapId = mapId }
   local Sp = mapId and Space()
   local nb = Sp and Sp.neighborObjectState and Sp.neighborObjectState(mapId)
   if mapId and not nb and not (Sp and Sp.mapId == mapId) then nb = { store = { flags = {}, vars = {} }, perm = {}, movementType = {} } end
@@ -2215,6 +2407,20 @@ function Objects.spawnFromDefs(defs, mapDef, mapId)
       end
       pool.byId[eo.localId] = eo
       pool.order[#pool.order + 1] = eo.localId
+    end
+  end
+  if mapId then
+    runtimePools[pool] = mapId
+    local spawned = {}
+    for _, def in ipairs(Objects.runtimeByMap[mapId] or {}) do
+      local eo = runtimeObject(def, nb)
+      eo.mapDef = mapDef
+      pool.byId[eo.localId] = eo
+      pool.order[#pool.order + 1] = eo.localId
+      spawned[#spawned + 1] = eo
+    end
+    for _, eo in ipairs(spawned) do
+      if pool.byId[eo.localId] == eo then announceRuntime(eo, mapId) end
     end
   end
   return pool
@@ -2488,6 +2694,34 @@ function Objects.setTrainerMovementType(localId, mt)
   if eo.movement == "RAISE_HAND" then
     eo.facing = "down"
   end
+end
+
+function Objects.walkInPlaceType(dir)
+  local pick
+  for id, ip in pairs(inPlaceTable()) do
+    if ip.dir == dir and (ip.frames == 16 or ip.frames == 32)
+        and (ip.always or fieldBlock().inPlaceMovementTypes) and (not pick or id < pick) then
+      pick = id
+    end
+  end
+  return pick
+end
+
+-- pokeemerald/src/event_object_movement.c:4422
+function Objects.setWalkInPlace(localId, on)
+  local eo = Objects._byId[tonumber(localId) or -1]
+  if not eo or eo == Player() then return false end
+  if not on then
+    local restore = eo.marchRestore
+    eo.marchRestore = nil
+    if restore then Objects.setTrainerMovementType(eo, restore) end
+    return true
+  end
+  local pick = Objects.walkInPlaceType(eo.facing)
+  if not pick then return false end
+  eo.marchRestore = eo.marchRestore or eo.movementType
+  Objects.setTrainerMovementType(eo, pick)
+  return true
 end
 
 -- src/event_object_movement.c:2640

@@ -151,6 +151,7 @@ local function from_rom(numId)
     priority = row.priority,
     flags = row.flags,
     effectId = EffectIds.STATUS_SETUP[row.effect],
+    _modEffectId = row._modEffectId,
   }
 end
 

@@ -43,6 +43,9 @@ local ROUTED = {
   pokemon = "gen3Pokemon", moves = "gen3Moves", items = "gen3Items",
   encounters = "gen3Encounters", trainers = "gen3Trainers",
   text = "gen3Text", map_scripts = "gen3Scripts",
+  statuses = "gen3Statuses", move_effects = "gen3MoveEffects",
+  ai_classes = "gen3AiClasses", battle_anims = "gen3BattleAnims",
+  palettes = "gen3Palettes", font = "gen3Font",
 }
 
 for name, path in pairs(ROUTED) do
@@ -55,20 +58,19 @@ for name, path in pairs(ROUTED) do
     "and Gen 1 is untouched by the routing: " .. name)
 end
 
-for _, name in ipairs({ "maps", "commands", "strings" }) do
+for _, name in ipairs({ "maps", "commands", "strings", "type_chart", "growth_rates",
+                        "evolution_methods", "render_pipelines" }) do
   local spec = Schemas.REGISTRIES[name]
   T.eq(Schemas.targetFor(name, spec, 3), spec.target,
     "available under Gen 3 at its shared path: " .. name)
 end
 
-for _, name in ipairs({ "tilesets", "sprites", "type_chart", "statuses",
-                        "move_effects", "balls", "ai_classes", "growth_rates",
-                        "evolution_methods", "transitions", "rulesets",
-                        "field", "text_pointers", "link_fields", "screens",
-                        "tokens", "music", "sfx", "cries", "map_songs",
-                        "audio", "font", "palettes", "icons", "battle_anims",
+for _, name in ipairs({ "tilesets",
+                        "transitions", "rulesets",
+                        "field", "text_pointers", "link_fields",
+                        "audio",
                         "held_items", "phone_contacts", "decorations",
-                        "apricorns", "landmarks", "radio_channels" }) do
+                        "apricorns", "radio_channels" }) do
   local spec = Schemas.REGISTRIES[name]
   T.check(spec ~= nil, "catalog still has registry: " .. name)
   T.eq(Schemas.targetFor(name, spec, 3), nil,
@@ -123,7 +125,7 @@ end
 
 for name, spec in pairs(Schemas.REGISTRIES) do
   if Schemas.hasGen3Shape(spec) then
-    T.eq(Schemas.gatedFor(name, 3), false,
+    T.eq(Schemas.gatedFor(name, 3, name == "decorations" and "emerald" or nil), false,
       "a registry with a Gen 3 shape is not gated: " .. name)
   end
 end
@@ -171,6 +173,9 @@ local GEN3_EVENTS = {
   "pokemon.move_learned", "world.trainer_engaged",
   "intro.oak_speech.started", "intro.oak_speech.step",
   "intro.oak_speech.answered", "intro.oak_speech.finished",
+  "breeding.egg_created", "egg.hatched", "happiness.changed", "pokerus.infected",
+  "roamer.encountered", "roamer.moved", "pokemon.received", "trade.completed",
+  "link.connected", "link.ended", "link.desync", "link.battle_ended",
 }
 
 local GEN3_HOOKS = {
@@ -184,6 +189,14 @@ local GEN3_HOOKS = {
   "battle.damage", "battle.crit", "battle.accuracy", "battle.charge_required",
   "battle.run", "battle.turn_order", "battle.enemy_action",
   "battle.low_health_alarm",
+  "battle.bottom_ui_visible", "battle.catch_exp", "battle.caught_marker_visible",
+  "battle.enemy_switch_or_item", "battle.exp_award", "battle.field_residual", "battle.menu_auxiliary",
+  "battle.move_grid_navigation", "battle.status_hud_visible",
+  "breeding.compatibility", "core.logic_speed", "encounter.fishing",
+  "fieldmove.eligibility", "gender.roll", "held_item.trigger", "input.pointer",
+  "movement.speed", "render.zones", "shiny.roll", "trainer.before_battle",
+  "ui.list_menu", "ui.naming.grid", "ui.options.rows", "ui.party.grid_navigation",
+  "ui.party.submenu",
 }
 
 local function assertShared(name, sites, kind)
@@ -452,8 +465,9 @@ do
   T.eq(content.commands:get("show_text"), nil, "or Gen 1's row-list verbs")
   T.eq(run.data.statuses, nil, "a mod-free FireRed boot writes no Gen 1 namespace")
   T.eq(run.data.commands, nil, "and leaves data.commands absent")
-  T.eq(#require("src.mods.Builtins").registries(3), 0,
-    "the Gen 3 registrant list is empty")
+  T.same(require("src.mods.Builtins").registries(3),
+    { "type_chart", "growth_rates", "evolution_methods" },
+    "the Gen 3 registrants are the progression three")
   run.release()
 end
 

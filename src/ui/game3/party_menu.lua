@@ -13,6 +13,9 @@ local Bag = require("src.core.game3.bag")
 local Strings = require("src.core.Strings")
 local RomText = require("src.core.game3.rom_text")
 local TextIR = require("src.core.game3.scripting.text_ir")
+local LevelDisplay = require("src.ui.LevelDisplay")
+local Runtime = require("src.mods.Runtime")
+local Logger = require("src.core.Logger")
 
 local PartyMenu = { isMenu = true }
 
@@ -131,11 +134,58 @@ local function action_texts(list)
   local cached = PartyMenu._actionTexts
   if cached and cached.list == list then return cached.texts end
   local texts = {}
-  for i, act in ipairs(list) do texts[i] = cursor_option_text(act) end
+  for i, act in ipairs(list) do
+    texts[i] = type(act) == "table" and act.label or cursor_option_text(act)
+  end
   PartyMenu._actionTexts = { list = list, texts = texts }
   return texts
 end
 PartyMenu._actionTextsFor = action_texts
+
+local function submenu_actions(actions)
+  PartyMenu._actionParty = nil
+  PartyMenu._actionMon = nil
+  PartyMenu._actionSlot = nil
+  if not Runtime.wantsHook("ui.party.submenu") then return actions end
+  local session = currentSession()
+  local native = package.loaded["src.core.game3.runtime"]
+  local game = (session and session.game) or (native and native._game)
+  local mon = PartyMenu._party and PartyMenu._party[PartyMenu.cursor]
+  local items, allowed = {}, {}
+  for i, act in ipairs(actions) do
+    items[i] = { label = cursor_option_text(act), action = act }
+    allowed[act] = true
+  end
+  local hooked = Runtime.call("ui.party.submenu", function(_, rows) return rows end,
+    game, items, mon, { battle = PartyMenu._battle,
+      overworld = game and (game.overworld or game.world) })
+  local valid = type(hooked) == "table"
+  local count = 0
+  if valid then
+    for key, row in pairs(hooked) do
+      if type(key) ~= "number" or key < 1 or key % 1 ~= 0
+          or type(row) ~= "table" or type(row.label) ~= "string"
+          or not (allowed[row.action] or (row.action == nil and type(row.onSelect) == "function")) then
+        valid = false
+        break
+      end
+      count = count + 1
+    end
+    valid = valid and count == #hooked
+  end
+  if not valid then
+    Logger.error("ui.party.submenu returned an invalid %s; keeping the vanilla list", type(hooked))
+    return actions
+  end
+  local rows = {}
+  for i, row in ipairs(hooked) do
+    rows[i] = { label = row.label, action = row.action, onSelect = row.onSelect }
+  end
+  PartyMenu._actionParty = PartyMenu._party
+  PartyMenu._actionMon = mon
+  PartyMenu._actionSlot = PartyMenu.cursor
+  return rows
+end
 
 local FR_INSETS = { msgX = 2, msgY = 2, actX = 9, actY = 2, cursorX = 1 }
 local function textInsets()
@@ -440,6 +490,53 @@ local function battle_nav_double(input)
   if PartyMenu.cursor ~= oldCur then se("SE_SELECT") end
 end
 
+function PartyMenu.gridNavigation()
+  if not PartyMenu._battle or not Runtime.wantsHook("ui.party.grid_navigation") then return false end
+  return Runtime.call("ui.party.grid_navigation", function() return false end, PartyMenu) == true
+end
+
+local function battle_grid_input(input)
+  if not PartyMenu.gridNavigation() then return false end
+  local dir = input:wasPressed("up") and "up" or input:wasPressed("down") and "down"
+    or input:wasPressed("left") and "left" or input:wasPressed("right") and "right"
+  if not dir then return true end
+  local cur = PartyMenu.cursor
+  local target = cur
+  if cur == 7 then
+    if dir == "up" or dir == "down" then
+      local best
+      for i = 1, 6 do
+        if slot_filled(i) and (not best or (dir == "up" and i > best) or (dir == "down" and i < best)) then
+          best = i
+        end
+      end
+      target = best or cur
+    end
+  elseif slot_filled(cur) then
+    local from = slot_sprites(cur)
+    local bestDistance
+    for i = 1, 6 do
+      if i ~= cur and slot_filled(i) then
+        local to = slot_sprites(i)
+        local dx, dy = to[1] - from[1], to[2] - from[2]
+        local distance
+        if (dir == "left" and dx < 0) or (dir == "right" and dx > 0) then
+          distance = math.abs(dy)
+        elseif dx == 0 and ((dir == "up" and dy < 0) or (dir == "down" and dy > 0)) then
+          distance = math.abs(dy)
+        end
+        if distance and (not bestDistance or distance < bestDistance) then
+          target, bestDistance = i, distance
+        end
+      end
+    end
+    if not bestDistance and (dir == "up" or dir == "down") then target = 7 end
+  end
+  PartyMenu.cursor = target
+  if target ~= cur then se("SE_SELECT") end
+  return true
+end
+
 -- pokefirered/src/party_menu.c:5905
 local function open_battle_actions_double(prevMode)
   local mon = PartyMenu._party and PartyMenu._party[PartyMenu.cursor]
@@ -451,8 +548,9 @@ local function open_battle_actions_double(prevMode)
   else
     PartyMenu.ACTIONS = { "SHIFT", "SUMMARY", "CANCEL" }
   end
+  PartyMenu.ACTIONS = submenu_actions(PartyMenu.ACTIONS)
   PartyMenu._previousMode = prevMode
-  PartyMenu.mode = "action"
+  PartyMenu.mode = #PartyMenu.ACTIONS > 0 and "action" or prevMode
   PartyMenu.actionCursor = 1
 end
 
@@ -991,6 +1089,10 @@ function PartyMenu.show(sessionParty, moveOverlay, opts)
     moveOverlay = nil
   end
   opts = opts or {}
+  PartyMenu._actionParty = nil
+  PartyMenu._actionMon = nil
+  PartyMenu._actionSlot = nil
+  PartyMenu._itemParentActionCursor = nil
   PartyMenu._order = nil
   PartyMenu._rsPrompt = nil
   if opts.mode == "battle_switch" or opts.mode == "battle_faint" or (opts.mode == "use" and opts.battleOrder) then
@@ -1077,6 +1179,9 @@ end
 
 function PartyMenu.close()
   PartyMenu.open = false
+  PartyMenu._actionParty = nil
+  PartyMenu._actionMon = nil
+  PartyMenu._actionSlot = nil
   PartyMenu.mode = "list"
   PartyMenu._pokedude = nil
   destroy_party_oam()
@@ -1734,7 +1839,9 @@ function PartyMenu.handleInput(input)
     local direction = p and p.submenuDirection and p.submenuDirection(input, PartyMenu._submenuKind)
     local function cancel()
       PartyMenu.mode = p and PartyMenu._submenuKind == "ITEM" and "action" or "list"
-      if PartyMenu.mode == "action" then PartyMenu.actionCursor = PartyMenu.itemActionCursor end
+      if PartyMenu.mode == "action" then
+        PartyMenu.actionCursor = PartyMenu._itemParentActionCursor or PartyMenu.itemActionCursor
+      end
     end
     if p and p.submenuStep and direction then
       local nextCursor = p.submenuStep(PartyMenu.itemActionCursor, direction, #actions, PartyMenu._submenuKind)
@@ -1799,6 +1906,10 @@ function PartyMenu.handleInput(input)
 
   if PartyMenu.mode == "action" then
     local actions = PartyMenu.ACTIONS
+    if #actions == 0 then
+      PartyMenu.mode = PartyMenu._previousMode or "list"
+      return
+    end
     if input:wasPressed("up") then
       PartyMenu.actionCursor = ((PartyMenu.actionCursor - 2) % #actions) + 1
       se("SE_SELECT")
@@ -1807,6 +1918,28 @@ function PartyMenu.handleInput(input)
       se("SE_SELECT")
     elseif input:wasPressed("a") then
       local act = actions[PartyMenu.actionCursor]
+      if type(act) == "table" then
+        local mon = PartyMenu._party and PartyMenu._party[PartyMenu.cursor]
+        if PartyMenu._actionParty ~= PartyMenu._party or PartyMenu._actionSlot ~= PartyMenu.cursor
+            or PartyMenu._actionMon ~= mon or not mon then
+          PartyMenu.mode = PartyMenu._previousMode or "list"
+          return
+        end
+        if not act.action then
+          local callback = act.onSelect
+          local session = currentSession()
+          local native = package.loaded["src.core.game3.runtime"]
+          local game = (session and session.game) or (native and native._game)
+          PartyMenu.mode = PartyMenu._previousMode or "list"
+          PartyMenu._actionParty = nil
+          PartyMenu._actionMon = nil
+          PartyMenu._actionSlot = nil
+          se("SE_SELECT")
+          callback(mon, game)
+          return
+        end
+        act = act.action
+      end
       if act == "ENTER" then
         -- pokefirered/src/party_menu.c:3760
         PartyMenu.enterChosenMon(PartyMenu.cursor)
@@ -1846,6 +1979,7 @@ function PartyMenu.handleInput(input)
         se("SE_SELECT")
         local p = partyUi()
         PartyMenu._submenuKind = act
+        PartyMenu._itemParentActionCursor = type(actions[PartyMenu.actionCursor]) == "table" and PartyMenu.actionCursor or nil
         PartyMenu.ITEM_ACTIONS = p and p.submenuActions and p.submenuActions(act) or {"GIVE", "TAKE", "CANCEL"}
         PartyMenu.mode = "item_action"
         PartyMenu.itemActionCursor = 1
@@ -2034,7 +2168,8 @@ function PartyMenu.handleInput(input)
 
   if PartyMenu.mode == "battle_switch" or PartyMenu.mode == "battle_faint" then
     local sendOut = PartyMenu.mode == "battle_faint"
-    if is_double() then
+    if battle_grid_input(input) then
+    elseif is_double() then
       battle_nav_double(input)
     else
       local oldCur = PartyMenu.cursor
@@ -2067,7 +2202,9 @@ function PartyMenu.handleInput(input)
   -- Selection mode for item USE
   if PartyMenu.mode == "use" then
     local oldCur = PartyMenu.cursor
-    if is_double() then
+    if battle_grid_input(input) then
+      oldCur = PartyMenu.cursor
+    elseif is_double() then
       battle_nav_double(input)
       oldCur = PartyMenu.cursor
     elseif input:wasPressed("up") then
@@ -2529,6 +2666,9 @@ function PartyMenu.handleInput(input)
       else
         se("SE_SELECT")
         PartyMenu.ACTIONS = PartyMenu.multiActions(PartyMenu.cursor)
+        PartyMenu._actionParty = nil
+        PartyMenu._actionMon = nil
+        PartyMenu._actionSlot = nil
         PartyMenu._fieldMoveNames = nil
         PartyMenu.mode = "action"
         PartyMenu.actionCursor = 1
@@ -2636,9 +2776,10 @@ function PartyMenu.handleInput(input)
     local p = partyUi()
     if p and p.buildActions then actions, fmNames = p.buildActions(mon, PartyMenu._party, gfm) end
     PartyMenu._fieldMoveData = gfm
-    PartyMenu.ACTIONS = actions
+    PartyMenu.ACTIONS = submenu_actions(actions)
     PartyMenu._fieldMoveNames = fmNames
-    PartyMenu.mode = "action"
+    PartyMenu._previousMode = "list"
+    PartyMenu.mode = #PartyMenu.ACTIONS > 0 and "action" or "list"
     PartyMenu.actionCursor = 1
   elseif input:wasPressed("b") or input:wasPressed("start") then
     se("SE_SELECT") -- pokefirered/src/party_menu.c:1246
@@ -2781,8 +2922,13 @@ local function draw_filled_slot(i, mon, selected)
   -- pokefirered/src/party_menu.c:2322 DisplayPartyPokemonLevelCheck:
   -- Level is only shown when the mon is healthy (or PKRS); status ailments replace level.
   if ailment == 0 or ailment == 6 then
-    -- pokefirered/src/party_menu.c:2335
-    party_print(RomText.plain(partyText("level", "gText_Lv")) .. tostring(mon.level or 0), baseX + info.level[1], baseY + info.level[2], 32, winPal)
+    local session = currentSession()
+    local Runtime = package.loaded["src.core.game3.runtime"]
+    local game = (session and session.game) or (Runtime and Runtime._game)
+    if LevelDisplay.visible(mon, "party", game) then
+      -- pokefirered/src/party_menu.c:2335
+      party_print(RomText.plain(partyText("level", "gText_Lv")) .. tostring(mon.level or 0), baseX + info.level[1], baseY + info.level[2], 32, winPal)
+    end
   end
 
   local gender = mon.gender or (Pokemon.gender and Pokemon.gender(mon.species, mon.personality))
@@ -3004,7 +3150,8 @@ function PartyMenu.draw()
       if i == PartyMenu.actionCursor then
         Window.cursorPx(popX * 8 + ins.cursorX, rowY)
       end
-      local isFm = PartyMenu._fieldMoveNames and PartyMenu._fieldMoveNames[act]
+      local action = type(act) == "table" and act.action or act
+      local isFm = PartyMenu._fieldMoveNames and PartyMenu._fieldMoveNames[action]
       local col = isFm and (FrlgFont.COLOR.BLUE or FrlgFont.COLOR.MALE_NPC) or FrlgFont.COLOR.NORMAL
       FrlgFont.draw(texts[i], popX * 8 + ins.actX, rowY, { colors = col })
     end

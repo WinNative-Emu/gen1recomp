@@ -31,7 +31,9 @@ eq(Loader.apiModule("world", 1, nil), "src.world.WorldAPI", "gen1 world facade")
 
 check(Schemas.routing(3, nil) == Schemas.GEN3, "gen3 routing without a version is GEN3")
 check(Schemas.routing(3, "firered") == Schemas.GEN3, "firered has no overlay, so GEN3")
-check(Schemas.routing(3, "ruby") == Schemas.GEN3, "an overlay-less RSE id reads GEN3")
+check(Schemas.routing(3, "ruby") ~= Schemas.GEN3, "an RSE id carries the decorations overlay")
+check(Schemas.routing(3, "firered").decorations == false, "FireRed has no decorations")
+eq(Schemas.routing(3, "emerald").decorations, "gen3Decorations", "Emerald routes decorations")
 check(Schemas.routing(2, nil) == Schemas.GEN2, "gen2 routing unchanged")
 check(Schemas.routing(1, nil) == Schemas.GEN1, "gen1 routing unchanged")
 
@@ -40,7 +42,7 @@ check(spec ~= nil, "the pokemon registry spec exists to test against")
 eq(Schemas.targetFor("pokemon", spec, 3, "firered"), "gen3Pokemon",
   "firered routes pokemon to the shared gen3Pokemon root")
 eq(Schemas.targetFor("pokemon", spec, 3, "ruby"), "gen3Pokemon",
-  "an overlay-less RSE id routes pokemon to the shared root")
+  "an RSE id routes pokemon to the shared root")
 check(Schemas.gatedFor("pokemon", 3, "firered") == false, "pokemon is not gated under FireRed")
 
 Schemas.GEN3_ROUTING["testgame"] = { pokemon = "gen3PokemonTest", moves = false }

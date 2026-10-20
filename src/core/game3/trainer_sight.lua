@@ -604,13 +604,41 @@ function TrainerSight.engagePair(game, a, b)
   end
 
   local rowA, rowB = battleRow(a.eo), battleRow(b.eo)
-  TrainerSight._pair = { a = tidA, b = tidB }
+  local pair = { a = tidA, b = tidB }
+  TrainerSight._pair = pair
+  local locks = F._locks
+  local vm = Sp and Sp.vm
+  local ctx = vm and vm.ctx
+  local pc, poll = ctx and ctx.pc, ctx and ctx.nativePoll
+  local scriptKey = vm and vm._scriptKey
+  local completed = false
+
+  local function retirePair()
+    if completed then return false end
+    completed = true
+    if TrainerSight._pair ~= pair then return false end
+    TrainerSight._pair = nil
+    if F._locks == locks then F.unlock() end
+    return true
+  end
+
+  local function cancelBattle()
+    if not retirePair() then return end
+    if vm and package.loaded["src.core.game3.scripting.space"] == Sp
+        and Sp.vm == vm and vm.ctx == ctx and ctx.status == "waiting"
+        and ctx.pc == pc and ctx.nativePoll == poll and vm._scriptKey == scriptKey
+        and (ctx.selectedLocalId == a.eo.localId or ctx.selectedLocalId == b.eo.localId) then
+      vm:halt(true)
+    end
+    a.eo.frozen, b.eo.frozen = false, false
+    a.eo.scriptBusy, b.eo.scriptBusy = false, false
+  end
 
   local function finishBattle(result)
+    if result == "cancelled" or result == "failed" then return cancelBattle() end
+    if not retirePair() then return end
     local store = Sp and Sp.store
     local ctx = Sp and Sp.vm and Sp.vm.ctx
-    TrainerSight._pair = nil
-    F.locked = false
     a.eo.frozen, b.eo.frozen = false, false
     if inPyramid then
       Pyramid.markBattled(sess, tidA, a.eo.localId)
@@ -673,6 +701,8 @@ function TrainerSight.engagePair(game, a, b)
         defeatTextB = defeatTextB,
         transitionId = D and D.specialTransition(sess, "B_PYRAMID", combinedParty) or nil,
         done = finishBattle,
+        cancel = cancelBattle,
+        failed = cancelBattle,
       }
     else
       local okT, Trainers = pcall(require, "src.core.game3.scripting.trainers")
@@ -694,13 +724,19 @@ function TrainerSight.engagePair(game, a, b)
         defeatText = text(rowA, "defeatText", dlgA.defeat),
         defeatTextB = text(rowB, "defeatText", dlgB.defeat),
         done = finishBattle,
+        cancel = cancelBattle,
+        failed = cancelBattle,
       }
     end
     -- pokeemerald/src/battle_setup.c:1272
     local ok, err = require("src.core.game3.battle_bridge").start(Runtime._mod, game or Runtime._game, foe, battleOpts)
     if not ok then
       print("[game3/trainer_sight] two-trainer battle did not start: " .. tostring(err))
-      finishBattle("lose")
+      if ModRuntime.wantsHook("trainer.before_battle") then
+        cancelBattle()
+      else
+        finishBattle("lose")
+      end
     end
   end
 

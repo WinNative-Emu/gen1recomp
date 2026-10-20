@@ -433,7 +433,12 @@ function BattleTransition.new(game, opts)
   local style = Runtime.call("transition.style", vanillaStyle, ctx)
   -- A hook naming an outro that does not exist would freeze on a black screen
   -- (no phase ever finishes), so it falls back to the vanilla pick.
-  if not BattleTransition.STYLES[style] then style = vanillaStyle(ctx) end
+  local data = game and game.data
+  local modDef = not BattleTransition.STYLES[style] and data and data.transitions
+    and data.transitions[style] or nil
+  if type(modDef) ~= "table" or type(modDef.frames) ~= "number" then modDef = nil end
+  if not BattleTransition.STYLES[style] and not modDef then style = vanillaStyle(ctx) end
+  self.modDef = modDef
   self.style = style
   self.trainer = opts.trainer and true or false
   -- ../pokecrystal/engine/battle/battle_transition.asm:585-587
@@ -486,6 +491,12 @@ function BattleTransition:beginOutro()
   if self.style == "sine" then
     self.sine = BattleTransition.sineFrames()
   end
+  local sound = self.modDef and self.modDef.sound
+  if sound then
+    local data = self.game and self.game.data
+    local Sound = require("src.core.Sound")
+    if data then Sound.play(data, sound) end
+  end
 end
 
 -- One logic frame.  The phases run in the jumptable's order and the state pops
@@ -503,6 +514,7 @@ function BattleTransition:update(_dt)
     return
   end
   if self.phase == "flash" then
+    if self.modDef and not self.modDef.flash then self:beginOutro() return end
     if self.frame >= self:flashFrames() then self:beginOutro() end
     return
   end
@@ -527,6 +539,10 @@ function BattleTransition:outroFrame()
   if self.ending then
     self.ending = self.ending - 1
     if self.ending <= 0 then self:blackOut() end
+    return
+  end
+  if self.modDef then
+    if self.frame >= self.modDef.frames then self:endOutro() end
     return
   end
   local at = self.frame - (BattleTransition.OUTRO_LEAD[style] or 2)
@@ -764,6 +780,10 @@ function BattleTransition:drawWidescreen(w, h)
   end
 
   if not self.overlayDrawn then self:drawTopLayer(w, h) end
+  if self.modDef and self.modDef.draw and self.phase == "outro" then
+    G.setColor(0, 0, 0, 1)
+    self.modDef.draw(self, math.min(1, self.frame / math.max(1, self.modDef.frames)), w, h)
+  end
   G.setColor(1, 1, 1, 1)
 end
 

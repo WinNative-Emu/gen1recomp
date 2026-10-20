@@ -303,6 +303,7 @@ function ItemsData.info(id)
       importance = e.importance,
       secondaryId = e.secondaryId,
       effect = e.effect,
+      modEffect = e.modEffect,
       pocketId = e.pocketId,
       fieldUseName = e.fieldUseName,
       battleUseName = e.battleUseName,
@@ -507,6 +508,8 @@ local VS_SEEKER_IDS = { [362] = true }
 --- Effective field-use kind (medicine refined).
 function ItemsData.fieldUseKind(id)
   local num = ItemsData.toNumericId(id) or tonumber(id)
+  local row = num and ItemsData._byId and ItemsData._byId[num]
+  if row and row.modEffect then return "mod" end
   local host = tostring(id):upper()
   if LEVEL_IDS[num] or host == "RARE_CANDY" then return "level" end
   if EVO_IDS[num] or host:find("STONE", 1, true) then return "evo" end

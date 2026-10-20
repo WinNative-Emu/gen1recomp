@@ -204,7 +204,7 @@ function Save.newGame(opts)
       -- InitCrystalData zeroes wPlayerGender before InitGender is even offered
       -- (engine/menus/init_gender.asm:1-6).
       gender = opts.gender or "male",
-      money = 3000,
+      money = opts.startMoney or 3000,
       coins = 0,
       badges = {},
       kantoBadges = {},

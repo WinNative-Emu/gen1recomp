@@ -314,6 +314,12 @@ local function getSpriteRenderer(game, spriteName, seed, objDef, daytime)
 
   local SpriteRenderer = modSpriteRenderer()
   if not SpriteRenderer then return nil end
+  if not def.gbaArt then
+    local copy = {}
+    for k, v in pairs(def) do copy[k] = v end
+    copy.gbaArt = true
+    def = copy
+  end
   local sr = SpriteRenderer.new(def, seed or spriteName)
 
   local Palettes = modPalettes()

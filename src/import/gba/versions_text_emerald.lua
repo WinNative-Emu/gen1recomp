@@ -600,6 +600,7 @@ return {
     "LilycoveCity_Text_BecauseYoureTrainer",
     "LilycoveCity_Text_BerrySuitsYou",
     "LilycoveCity_Text_PokeblocksSuitPokemon",
+    "LittlerootTown_ProfessorBirchsLab_Text_LikeYouToHavePokemon",
     "MatchCall_BattleDomeText1",
     "MatchCall_BattleDomeText10",
     "MatchCall_BattleDomeText11",

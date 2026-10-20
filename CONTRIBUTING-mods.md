@@ -12,7 +12,7 @@ somebody else's existing mod behave differently?** If yes, it is Lane B.
 
 ---
 
-## Route A — contributing a mod
+## Route A -- contributing a mod
 
 ### 1. Scaffold
 
@@ -20,11 +20,12 @@ somebody else's existing mod behave differently?** If yes, it is Lane B.
 python3 tools/modkit.py scaffold my_mod --profile content
 ```
 
-`--profile` is one of `content`, `overhaul`, `total_conversion`. The
+`--profile` is one of `content`, `overhaul`, `total_conversion`; `--api`
+(1, 2 or 3, default 2) is written into the manifest as given. The
 scaffold refuses to overwrite an existing directory, and prints the next
 commands.
 
-Or copy the gallery entry closest to your intent — that is what the gallery
+Or copy the gallery entry closest to your intent -- that is what the gallery
 is for:
 
 | You want to... | Copy |
@@ -53,7 +54,7 @@ is for:
    reported as skipped rather than guessed at.
 
 2. **A `tests/` directory** with at least one suite that loads the mod
-   through the headless loader and asserts its *stated effect* — not just
+   through the headless loader and asserts its *stated effect* -- not just
    that it loaded.
 
    ```lua
@@ -68,7 +69,7 @@ is for:
    ```
 
    Add a `.modkitignore` listing the suite so it stays out of the
-   distributed package — a test requiring engine modules is a
+   distributed package -- a test requiring engine modules is a
    private-require finding against the shipped archive, and `pack` treats
    warnings as fatal.
 
@@ -213,12 +214,45 @@ own index (413 and up past A) and `letter` as 1 (A) to 28 (`?`), with the path
 pointing at that letter's art.
 
 `docs/mod-api-gen2-compat.md` is the compatibility matrix: what works on Gold,
-Silver and Crystal today (40 of the 46 registries, 40 event and 44 hook names
-shared with Gen 1, and 24 Gen 2-only ones), which registries have no Gen 2 home
+Silver and Crystal today (44 of the 47 registries, 43 event and 60 hook names
+shared with Gen 1, and 25 Gen 2-only ones), which registries have no Gen 2 home
 and drop their writes with a report, and which hooks and events are still to
-come.
+come. `docs/mod-api-gen3-compat.md` is the same matrix for FireRed, LeafGreen,
+Ruby, Sapphire and Emerald.
 `docs/preparing-your-mod-for-gen2.md` is the step-by-step migration guide for a
 Gen 1 mod, and it is the one to start from.
+
+**Scripts on Gold.** `map_scripts` works on Gen 2 the way it does on Gen 3: one
+record per script key, holding the row list `src/script/gen2/Vm.lua` runs (the
+same `{ op = ..., ... }` rows as the game's own decoded scripts, keyed like
+`"55:4e2e"`). It merges into `data.gen2Scripts`, so an object, sign, step
+trigger or trainer `scriptKey` can name a mod's key. A movement is an id with a
+`movement:` prefix whose value is the movement byte list, and `applymovement`
+names it without the prefix. Text a script prints is registered through `text`.
+Registering a key the game already has collides; replace one with `override`.
+
+```lua
+mod.content.text:register("MYMOD_HELLO", "Hello there!")
+mod.content.map_scripts:register("MYMOD_TALK", {
+  { op = "opentext" },
+  { op = "writetext", text = "MYMOD_HELLO" },
+  { op = "closetext" },
+  { op = "applymovement", object = 2, movement = "MYMOD_WALK" },
+  { op = "end" },
+})
+mod.content.map_scripts:register("movement:MYMOD_WALK", { 0x0d, 0x0d, 0x47 })
+mod.content.map_scripts:override("55:4e2e", { { op = "jumptext", text = "MYMOD_HELLO" } })
+```
+
+A row in the Gen 1 shape, `{ "mymod:shake", 4, 2 }`, runs a verb registered
+through `commands` on Gold too.
+
+**New species in the Gold Pokedex.** A species registered through `pokemon`
+with a `dex` number the game does not have gets its own #DEX entry from its
+`dexEntry` (`kind`, `text`, `text2`, `height`, `weight`, or `heightM` and
+`weightKg`). It is listed after the game's own in NEW order, by name in A-Z
+order and by number in OLD order, gets the new-data page when caught, and its
+weight reaches the Heavy Ball.
 
 Two consequences worth knowing before you claim Gen 2.
 
@@ -417,7 +451,7 @@ What has no stand-in, because there is nothing honest to reroute it to:
 
 | Still refused | Why |
 | --- | --- |
-| `love.thread` | a LÖVE thread is a fresh Lua state with the full standard library, which no environment-based sandbox in this state can reach. Use `mod.fetch` for background HTTP (`network`) or `mod.job` for background compute (`background`) — both run your code inside the sandbox instead of outside it |
+| `love.thread` | a LÖVE thread is a fresh Lua state with the full standard library, which no environment-based sandbox in this state can reach. Use `mod.fetch` for background HTTP (`network`) or `mod.job` for background compute (`background`) -- both run your code inside the sandbox instead of outside it |
 | `require("ffi")` | arbitrary C |
 | `debug`, `getfenv`, `setfenv` | each one undoes the sandbox from inside |
 | `io.popen`, `os.execute` | spawning a process |
@@ -432,7 +466,7 @@ Three consequences worth knowing before you write against it:
 - **Your globals are yours.** `_G` inside a mod is that mod's own table. Two
   mods no longer share a namespace, and neither can reach the engine's. To
   publish something to another mod, put it on `mod.exports` and let them
-  `mod.find("your_id").exports` — the channel that was always the intended
+  `mod.find("your_id").exports` -- the channel that was always the intended
   one. The same goes for the standard library: `string`, `table` and `math`
   are per-mod copies, so patching one is a local decision.
 - **Paths cannot climb.** `mod:read`, `mod:list`, `mod:info`, `mod.assets:path`
@@ -465,7 +499,7 @@ The manifest is the *engine's* contract: identity, load order, dependencies,
 permissions, profile (see [Manifest specification](docs/modding.md#manifest-specification-manifestjson)).
 The card is the *human-facing* one: who made this,
 what it changes, what it does not do yet. It is never read by the loader's
-merge — only by tooling and the manager's detail pane — so an absent or
+merge -- only by tooling and the manager's detail pane -- so an absent or
 malformed card can never break a load.
 
 Two fields deserve their own note:
@@ -490,7 +524,7 @@ lowercases and de-dupes. A recommended starting set: `beginner`,
 
 ---
 
-## Route B — contributing an engine / mod-API change
+## Route B -- contributing an engine / mod-API change
 
 Changing the loader, a registry schema, an event or hook name, or a manifest
 field touches the **compatibility surface** the project promises to hold
@@ -500,12 +534,12 @@ stable. Those PRs carry five obligations.
 
 `docs/rfcs/NNNN-<slug>.md`, covering:
 
-- **Motivation** — the mod that cannot be written today.
-- **The decision it extends or amends** — name the D-number and the plan
+- **Motivation** -- the mod that cannot be written today.
+- **The decision it extends or amends** -- name the D-number and the plan
   file, so the change is traceable to the design it modifies.
-- **The exact API delta** — new registry names, new schema fields, new
+- **The exact API delta** -- new registry names, new schema fields, new
   event/hook names and their payload shapes and call sites.
-- **A migration note for existing mods** — what an author has to do, if
+- **A migration note for existing mods** -- what an author has to do, if
   anything. "Nothing" is a valid and preferred answer.
 
 ### 2. A backward-compatibility statement
@@ -523,12 +557,12 @@ api 1, uses `category = "GAMEPLAY"`, copies a whole species record because
 
 Two tests, not one:
 
-- **The no-mod test** — vanilla behavior is unchanged with nothing
+- **The no-mod test** -- vanilla behavior is unchanged with nothing
   installed. A new hook with no subscriber must return the vanilla value;
   a new registry must be a provable no-op when empty; a new event must not
   allocate its payload when nothing wants it (`Runtime.wants(name)` /
   `Runtime.wantsHook(name)` guard the hot paths).
-- **The mod-API test** — the new seam, exercised through the *public* mod
+- **The mod-API test** -- the new seam, exercised through the *public* mod
   API rather than by reaching into internals. If the test has to require a
   private module to drive your seam, the seam is not finished.
 
@@ -574,8 +608,8 @@ by a human.
 ### Error messages
 
 - `[auto]` No bare `error()` or `assert()` in mod callbacks. Every failure
-  path uses `mod.log:warn` / `mod.log:error` — the loader already prefixes
-  `[modid]` — **and names a remediation**:
+  path uses `mod.log:warn` / `mod.log:error` -- the loader already prefixes
+  `[modid]` -- **and names a remediation**:
 
   ```lua
   -- no
@@ -596,22 +630,22 @@ by a human.
 ### Empty states
 
 - `[review]` Every screen a mod adds renders a sentence when its data set
-  is empty — "No songs registered", "Nothing seen yet" — never a blank box.
+  is empty -- "No songs registered", "Nothing seen yet" -- never a blank box.
   `ListMenu` gives you this for free.
 
 ### First-run experience
 
 - `[review]` The README opens with one sentence of what the mod does, then
   the commands to try it.
-- `[auto]` The mod loads clean on a fresh install — zero `Loader.errors` —
+- `[auto]` The mod loads clean on a fresh install -- zero `Loader.errors`  -- 
   with only its declared dependencies.
 - `[review]` Options have sane defaults, so the mod does something useful
   before the player opens its options pane.
 
 ### Credits and honoring authors
 
-- `[review]` `mod.card.credits` names every upstream contribution — art,
-  music arrangement, borrowed code — and what it was for. A mod that ports
+- `[review]` `mod.card.credits` names every upstream contribution -- art,
+  music arrangement, borrowed code -- and what it was for. A mod that ports
   another community work credits it and links it.
 - `[auto]` `mod.card.author` (or `authors`) is present and non-empty. The
   showcase and the manager both surface it, so no author is anonymous by
@@ -636,16 +670,20 @@ by a human.
 
 Three version numbers coexist.
 
-**Engine version** — `src/core/Version.lua`. Major = a breaking change to
+**Engine version** -- `src/core/Version.lua`. Major = a breaking change to
 the mod-facing schemas or API; minor = new backward-compatible seams;
 patch = bugfix.
 
-**Mod API version** — the integer `modApi`, currently `2`. Bumped only on a
+**Mod API version** -- the integer `modApi`, currently `3`. Bumped only on a
 breaking change to the `mod` object surface. A manifest's `api` field pins
-the surface the mod was written against, so an api-2 mod keeps working when
-the engine ships api 3.
+the surface the mod was written against, so api 1 and api 2 mods keep
+working unchanged. Api 3 is the portable cross-generation surface: one entry
+file, Gen 1 names and shapes as the contract, and a capability query
+(`mod:supports`); `tools/modkit.py scaffold --api 3` writes an api 3 manifest. It is documented in
+[Portable API 3](docs/modding.md#portable-api-3), with
+`mods/examples/portable_api` as the runnable example.
 
-**Your mod's version** — the manifest `version`, semver:
+**Your mod's version** -- the manifest `version`, semver:
 
 | bump | when |
 |---|---|

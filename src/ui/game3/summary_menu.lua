@@ -17,6 +17,7 @@ local Strings = require("src.core.Strings")
 local RomText = require("src.core.game3.rom_text")
 local ItemsData = require("src.core.game3.items_data")
 local Screens = require("src.ui.game3.screens")
+local LevelDisplay = require("src.ui.LevelDisplay")
 
 local SummaryMenu = { isMenu = true }
 
@@ -791,10 +792,15 @@ local function draw_header(mon, showLevel, dx)
 
   -- pokefirered/src/pokemon_summary_screen.c:2430
   if showLevel then
-    local lv = tonumber(mon.level) or 1
-    local lx, ly = cxy("level", 4, 18)
-    -- src/pokemon_summary_screen.c:2137
-    draw_text(RomText.plain("gText_Lv") .. lv, lx + dx, ly, 36, "NORMAL")
+    local Runtime = package.loaded["src.core.game3.runtime"]
+    local session = SummaryMenu._playerState or (Runtime and Runtime.getSession and Runtime.getSession())
+    local game = (session and session.game) or (Runtime and Runtime._game)
+    if LevelDisplay.visible(mon, "summary", game) then
+      local lv = tonumber(mon.level) or 1
+      local lx, ly = cxy("level", 4, 18)
+      -- src/pokemon_summary_screen.c:2137
+      draw_text(RomText.plain("gText_Lv") .. lv, lx + dx, ly, 36, "NORMAL")
+    end
   end
 
   local gender = SummaryData.gender(mon)

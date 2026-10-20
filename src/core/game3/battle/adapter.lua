@@ -202,7 +202,7 @@ function Adapter.new(battleState, sayFn)
     opts = opts or {}
     if not battler then return false, "none" end
     status = norm_status(status)
-    if self:status(battler) then return false, "status" end
+    if self:status(battler) or battler.modStatus then return false, "status" end
     local side = self:ownSide(battler)
     if not opts.ignoreSafeguard and source ~= battler and side and (side.expSafeguardTurns or 0) > 0 then
       return false, "safeguard"

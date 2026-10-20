@@ -300,11 +300,16 @@ function Schema.newGame(opts)
     local hooked = ModRuntime.call("save.new_game", function(s) return s end, session)
     if type(hooked) == "table" then session = hooked end
   end
+  session.meta = type(session.meta) == "table" and session.meta or {}
+  if type(session.meta.playthroughId) ~= "string" or session.meta.playthroughId == "" then
+    session.meta.playthroughId = require("src.core.SaveData").newPlaythroughId()
+  end
   return session
 end
 
 function Schema.toSaveTable(session)
   if type(session) ~= "table" then return nil end
+  session.meta = type(session.meta) == "table" and session.meta or {}
   Options.ensure(session)
   local Rng = require("src.core.game3.rng")
   Rng.captureToSession(session)

@@ -126,7 +126,9 @@ function Movement.decodeAction(b)
     return { kind = "step", dir = DIR[b - 0x31], frames = 6 }
   end
   if b >= 0x35 and b <= 0x38 then
-    return { kind = "step", dir = DIR[b - 0x35] }
+    -- pokeemerald/src/event_object_movement.c:5894
+    -- pokeruby/src/event_object_movement.c:5705
+    return { kind = "step", dir = DIR[b - 0x35], frames = rseFamily and 4 or nil }
   end
   if b >= 0x39 and b <= 0x3C then
     -- pokeemerald/src/event_object_movement.c:5956

@@ -16,6 +16,8 @@ local MAX_MULTICHOICE_WIDTH = 28
 -- pokeemerald/include/constants/script_menu.h:127
 local SSTIDAL = { SLATEPORT = 0, BATTLE_FRONTIER = 1, SOUTHERN_ISLAND = 2, NAVEL_ROCK = 3, BIRTH_ISLAND = 4,
   FARAWAY_ISLAND = 5, EXIT = 6, COUNT = 7 }
+-- pokeemerald/include/constants/field_specials.h:41
+local SCROLL_MULTI_SS_TIDAL_DESTINATION = 11
 -- pokeemerald/src/start_menu.c:71
 local SAVE_SUCCESS = 1
 
@@ -301,7 +303,9 @@ function NativesFrontier.ssTidalMultichoice(ctx, adapters)
   NativesFrontier._ssTidal = sel
   Util.setResult(ctx, 0xFF)
   if #sel == SSTIDAL.COUNT then
-    setSpecialVar(ctx, VAR_0x8004, require("src.core.game3.scripting.natives_field_rse").SCROLL_MULTI_SS_TIDAL or 0)
+    -- pokeemerald/src/script_menu.c:505
+    setSpecialVar(ctx, VAR_0x8004, SCROLL_MULTI_SS_TIDAL_DESTINATION)
+    return natives().handlerFor("ShowScrollableMultichoice")(ctx, adapters)
   end
   local labels, widest = {}, 0
   local TextIR = require("src.core.game3.scripting.text_ir")

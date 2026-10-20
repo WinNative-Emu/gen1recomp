@@ -27,6 +27,7 @@ local QuestLog = require("src.ui.game3.quest_log")
 local QuestRecorder = require("src.core.game3.quest_log_recorder")
 local FieldModules = require("src.core.game3.field_modules")
 local ModRuntime = require("src.mods.Runtime")
+local GameViewport = require("src.render.GameViewport")
 
 local s9Warned = {}
 local function s9log(key, err)
@@ -39,6 +40,8 @@ local Game3 = {}
 Game3.__index = Game3
 
 local function noop() end
+local function pointerUnclaimed() return false end
+local function resolveLogicSpeedVanilla(game) return game:_resolveLogicSpeed() end
 
 Game3.SKIN_FAST_FORWARD = 4
 
@@ -601,6 +604,7 @@ function Game3:fixedUpdate(dt)
     if p.done then
       self.questPlayback=nil
       self.input:reset()
+      self:cancelPointers()
       self:_enterField(self.session,"continue")
     end
     return
@@ -696,6 +700,14 @@ function Game3:_speedLockEdge()
   end
 end
 
+function Game3:_resolveLogicSpeed()
+  local GameSpeed = lazyReq("src.core.GameSpeed")
+  local opts = self.options
+  if type(opts) ~= "table" then return 1 end
+  local key = GameSpeed.optionKey(self:speedCategory())
+  return math.max(1, GameSpeed.clamp(opts[key]))
+end
+
 function Game3:logicSpeed()
   if self:speedLocked() then return 1 end
   local override = tonumber(self.speedOverride)
@@ -705,11 +717,9 @@ function Game3:logicSpeed()
       or b.phase == Boot.PHASE.TITLE_CRY or b.phase == Boot.PHASE.TITLE_RESTART) then
     return 1
   end
-  local GameSpeed = lazyReq("src.core.GameSpeed")
-  local opts = self.options
-  if type(opts) ~= "table" then return 1 end
-  local key = GameSpeed.optionKey(self:speedCategory())
-  return math.max(1, GameSpeed.clamp(opts[key]))
+  if not ModRuntime.wantsHook("core.logic_speed") then return self:_resolveLogicSpeed() end
+  return lazyReq("src.core.GameSpeed").clamp(ModRuntime.call("core.logic_speed",
+    resolveLogicSpeedVanilla, self))
 end
 
 function Game3:_cycleSpeed(dir)
@@ -752,6 +762,7 @@ function Game3:update(dt)
   self._frameSpeed = speed
   FixedStep.maxAccum = FixedStep.catchupLimit(speed, dt)
   FixedStep:update(dt, speed)
+  lazyReq("src.render.Pipelines").update(dt)
   self._audioAccum = (self._audioAccum or 0) + dt
   local STEP = 1 / 60
   local guard = 0
@@ -832,12 +843,7 @@ function Game3:_drawFrame(w, h)
         drawBootFrame()
         love.graphics.setCanvas()
         love.graphics.pop()
-        GameViewport.setTarget()
-        local scale, ox, oy, _, _, scaleY = Display.fit(w, h)
-        love.graphics.setColor(0.02, 0.04, 0.08, 1)
-        love.graphics.rectangle("fill", 0, 0, w, h)
-        love.graphics.setColor(1, 1, 1, 1)
-        love.graphics.draw(canvas, ox, oy, 0, scale, scaleY)
+        Display.presentCanvas(self, canvas, w, h, false)
       else
         GameViewport.setTarget()
         drawBootFrame()
@@ -1073,22 +1079,43 @@ function Game3:resize() end
 
 function Game3:mousepressed(x, y, button, istouch)
   if istouch then return end
-  if os.getenv("POKEPORT_TOUCH") == "1" and self.touchControls then
-    self.touchControls:touchpressed("mouse", x, y)
+  if os.getenv("POKEPORT_TOUCH") == "1" then
+    return self:touchpressed("mouse", x, y)
   end
+  if not ModRuntime.wantsHook("input.pointer") then return end
+  self.modPointers = self.modPointers or {}
+  local p = self.modPointers.mouse
+  if p then
+    p.held, p.x, p.y = (p.held or 1) + 1, x, y
+  else
+    self.modPointers.mouse = { source = "mouse", x = x, y = y,
+                               held = 1, button = button }
+  end
+  self:pointerEvent("pressed", "mouse", "mouse", x, y, 0, 0, nil, button)
 end
 
 function Game3:mousemoved(x, y, dx, dy, istouch)
   if istouch then return end
-  if os.getenv("POKEPORT_TOUCH") == "1" and self.touchControls then
-    self.touchControls:touchmoved("mouse", x, y)
+  if os.getenv("POKEPORT_TOUCH") == "1" then
+    return self:touchmoved("mouse", x, y, dx, dy)
   end
+  local p = self.modPointers and self.modPointers.mouse
+  if p then p.x, p.y = x, y end
+  if not ModRuntime.wantsHook("input.pointer") then return end
+  self:pointerEvent("moved", "mouse", "mouse", x, y, dx, dy)
 end
 
 function Game3:mousereleased(x, y, button, istouch)
   if istouch then return end
-  if os.getenv("POKEPORT_TOUCH") == "1" and self.touchControls then
-    self.touchControls:touchreleased("mouse", x, y)
+  if os.getenv("POKEPORT_TOUCH") == "1" then
+    return self:touchreleased("mouse", x, y)
+  end
+  local p = self.modPointers and self.modPointers.mouse
+  if not p then return end
+  p.held = (p.held or 1) - 1
+  if p.held <= 0 then self.modPointers.mouse = nil end
+  if ModRuntime.wantsHook("input.pointer") then
+    self:pointerEvent("released", "mouse", "mouse", x, y, 0, 0, nil, button)
   end
 end
 
@@ -1107,16 +1134,55 @@ end
 function Game3:textinput() end
 function Game3:filedropped() end
 
+function Game3:pointerEvent(phase, source, id, x, y, dx, dy, pressure, button)
+  local gameX, gameY, insideGame = GameViewport.toLocal(x, y)
+  return ModRuntime.call("input.pointer", pointerUnclaimed, self, {
+    phase = phase, source = source, id = id, x = x, y = y,
+    gameX = gameX, gameY = gameY, insideGame = insideGame,
+    dx = dx or 0, dy = dy or 0, pressure = pressure, button = button,
+  })
+end
+
 function Game3:touchpressed(id, x, y, dx, dy, pressure)
   if self.touchControls and self.touchControls:touchpressed(id, x, y) then return end
+  if not ModRuntime.wantsHook("input.pointer") then return end
+  local source = id == "mouse" and "mouse" or "touch"
+  self.modPointers = self.modPointers or {}
+  self.modPointers[id] = { source = source, x = x, y = y, pressure = pressure }
+  self:pointerEvent("pressed", source, id, x, y, dx, dy, pressure)
 end
 
 function Game3:touchmoved(id, x, y, dx, dy, pressure)
   if self.touchControls then self.touchControls:touchmoved(id, x, y) end
+  local p = self.modPointers and self.modPointers[id]
+  if not p then return end
+  if dx == nil then dx, dy = x - p.x, y - p.y end
+  p.x, p.y = x, y
+  if pressure ~= nil then p.pressure = pressure end
+  if ModRuntime.wantsHook("input.pointer") then
+    self:pointerEvent("moved", p.source, id, x, y, dx, dy, pressure)
+  end
 end
 
 function Game3:touchreleased(id, x, y, dx, dy, pressure)
   if self.touchControls then self.touchControls:touchreleased(id, x, y) end
+  local p = self.modPointers and self.modPointers[id]
+  if not p then return end
+  self.modPointers[id] = nil
+  if ModRuntime.wantsHook("input.pointer") then
+    self:pointerEvent("released", p.source, id, x, y, dx, dy, pressure)
+  end
+end
+
+function Game3:cancelPointers()
+  local pointers = self.modPointers
+  if not pointers then return end
+  self.modPointers = nil
+  if not ModRuntime.wantsHook("input.pointer") then return end
+  for id, p in pairs(pointers) do
+    self:pointerEvent("cancelled", p.source, id, p.x, p.y, 0, 0,
+                      p.pressure, p.button)
+  end
 end
 
 function Game3:gamepadaxis(joystick, axis, value)
@@ -1193,6 +1259,7 @@ end
 
 function Game3:_releaseModInput()
   if self.mods and self.mods.releaseModInput then self.mods:releaseModInput() end
+  self:cancelPointers()
 end
 
 function Game3:joystickadded()
@@ -1223,6 +1290,7 @@ function Game3:visible(v)
     lazyReq("src.core.DeferredWrite").flush("options")
     if self.input then self.input:reset() end
     if self.touchControls then self.touchControls:reset() end
+    self:cancelPointers()
   end
 end
 
@@ -1232,6 +1300,7 @@ function Game3:onResume()
     self.input:reconcile()
   end
   if self.touchControls then self.touchControls:reset() end
+  self:cancelPointers()
   Audio.onFocusGained()
 end
 
@@ -1424,6 +1493,7 @@ local function clearFieldScreens()
 end
 
 function Game3:_tearDownField()
+  self:cancelPointers()
   self.questPlayback=nil
   Help.reset()
   Audio.stopAll()
@@ -1477,6 +1547,7 @@ function Game3:returnToTitle(opts)
 end
 
 function Game3:reset()
+  self:cancelPointers()
   lazyReq("src.core.DeferredWrite").flush("options")
   self.questPlayback = nil
   Help.reset()
@@ -1516,6 +1587,7 @@ function Game3:reset()
 end
 
 function Game3:quit()
+  self:cancelPointers()
   lazyReq("src.core.DeferredWrite").flush("options")
   if self:quickSaveAllowed() then self:saveGame() end
 end

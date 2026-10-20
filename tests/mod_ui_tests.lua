@@ -1371,7 +1371,7 @@ local uiLoader = Loader.new({ fs = uiFs })
 check(uiLoader:load({}) == true, "the uikit fixture loads clean")
 local uiApi = (uiLoader.exports.uikit or {}).api
 check(uiApi ~= nil, "the entry chunk received its api")
-check(uiApi.ui == ModUI, "mod.ui is the toolkit facade")
+check(uiApi.ui == ModUI.forApi(1) and uiApi.ui.Menu == ModUI.Menu, "mod.ui is the toolkit facade")
 check(uiApi.ui.Theme == Theme, "mod.ui.Theme reaches the theme module")
 check(uiApi.ui.Menu == require("src.ui.Menu"),
   "mod.ui widgets resolve through the loader-built api")

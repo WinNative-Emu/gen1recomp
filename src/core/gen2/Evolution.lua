@@ -200,11 +200,29 @@ function Evolution.methodFor(data, method)
   return (merged and merged[method]) or Evolution.METHODS[method]
 end
 
+function Evolution.gen1Trigger(ctx)
+  if ctx.force then return { kind = "item", item = ctx.item } end
+  if ctx.link then return { kind = "trade", item = ctx.item } end
+  return { kind = "levelup", item = ctx.item, timeOfDay = ctx.timeOfDay }
+end
+
+function Evolution.gen1Check(record, entry, mon, ctx)
+  local Compat = require("src.mods.Gen2Compat")
+  local game = Compat.resolve("src.core.Game")
+  local ok = record.check(game, mon, entry, Evolution.gen1Trigger(ctx))
+  if not ok then return false, "method" end
+  return true, nil, record.consumesItem and true or nil
+end
+
 function Evolution.rowMatches(entry, mon, ctx, data)
   ctx = ctx or {}
   if not (entry and entry.method and entry.into) then return false, "empty" end
   local record = Evolution.methodFor(data, entry.method)
   local check = record and record.check
+
+  if check and record.gen1Shape then
+    return Evolution.gen1Check(record, entry, mon, ctx)
+  end
 
   -- The two cross-cutting gates in EvolveAfterBattle's own order, with each
   -- method's exemption tested just ahead of the gate it is exempt from -- so

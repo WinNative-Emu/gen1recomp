@@ -239,7 +239,7 @@ function SummaryMenu:draw()
     Font.draw(Strings("LEVEL UP"), 72, 40)
     local Growth = require("src.pokemon.Growth")
     local nextExp = mon.level < 100
-      and (Growth.expForLevel(def.growthRate, mon.level + 1) - mon.exp) or 0
+      and (Growth.expForLevel(def.growthRate, mon.level + 1, self.game.data.growth_rates) - mon.exp) or 0
     Font.draw(("%7d"):format(math.max(0, nextExp)), 56, 48)
     if LevelDisplay.visible(mon, "summary", self.game) then -- RFC 0019
       -- the '<to>' arrow is half a sentence without the level it points at,

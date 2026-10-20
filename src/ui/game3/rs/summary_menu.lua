@@ -8,6 +8,7 @@ local Policy = require("src.ui.game3.rs.summary_policy")
 local Pal = require("src.core.game3.pal_fade")
 local Audio = require("src.core.game3.audio")
 local CacheBlob = require("src.import.CacheBlob")
+local LevelDisplay = require("src.ui.LevelDisplay")
 local S = {isMenu = true, open = false, PAGE = Policy.PAGE, MODE = Policy.MODE, policy = Policy}
 local layers, tiles, quads = {}, {}, {}
 local function rawMon() return S._party and S._party[S._cursor] end
@@ -381,7 +382,12 @@ local function portrait()
   print(Pokemon.displayName(m), 8, 96)
   if S._state ~= "normal" or S._pane then return end
   print("/" .. Pokemon.name(Pokemon.speciesOf(m)), 7, 112)
-  print("{LV}" .. tostring(m.level or 1), 24, 128)
+  local Runtime = package.loaded["src.core.game3.runtime"]
+  local session = S._playerState or (Runtime and Runtime.getSession and Runtime.getSession())
+  local game = (session and session.game) or (Runtime and Runtime._game)
+  if LevelDisplay.visible(m, "summary", game) then
+    print("{LV}" .. tostring(m.level or 1), 24, 128)
+  end
   local species, gender = Pokemon.speciesOf(m), SummaryData.gender(m)
   if species ~= 29 and species ~= 32 then
     if gender == "M" then text("gOtherText_MaleSymbol2", 56, 128, 11)

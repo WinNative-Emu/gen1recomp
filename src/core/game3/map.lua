@@ -828,12 +828,14 @@ function Map.load(mod, game, mapId, opts)
   end
 
   -- Map BGM from extract index / header music.
-  do
+  if not opts.keepMusic then
     local Audio = require("src.core.game3.audio")
     local music = def and def.music
     if not music and Audio._pack and Audio._pack.index and Audio._pack.index.mapSongs then
       music = Audio._pack.index.mapSongs[mapId]
     end
+    local modSong = require("src.core.game3.mod_audio").mapSong(mapId)
+    if modSong ~= nil then music = modSong end
     -- pokefirered/src/overworld.c:1063
     if Map.disableMusicChange == Map.MUSIC_DISABLE_STOP then
       Audio.playSong(0)
@@ -841,7 +843,7 @@ function Map.load(mod, game, mapId, opts)
     elseif Map.disableMusicChange == Map.MUSIC_DISABLE_KEEP then
       music = nil
     end
-    if music and music ~= 0xFFFF and Audio.mapMusicPolicy() == "rse" then
+    if music and music ~= 0xFFFF and not modSong and Audio.mapMusicPolicy() == "rse" then
       -- pokeemerald/src/overworld.c:1170
       Audio.mapLoadMusic({ mapId = mapId, fromMapId = fromMapId, seamless = opts.seamless, music = music,
         x = Player.cellX, y = Player.cellY })
@@ -862,7 +864,7 @@ function Map.load(mod, game, mapId, opts)
         id = Audio._savedSong or (Audio.specialMapSong(def and def.regionMapSectionId) == Audio.MUS_SURF
           and Audio.MUS_SURF) or music
       end
-      if id then Audio.playMapSong(id, { mapSong = music }) end
+      if id then Audio.playMapSong(id, { mapSong = music, exact = modSong ~= nil or nil }) end
     end
   end
 

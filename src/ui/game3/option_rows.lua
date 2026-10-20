@@ -3,6 +3,8 @@
 local Options = require("src.core.game3.options")
 local Strings = require("src.core.Strings")
 local RomText = require("src.core.game3.rom_text")
+local Runtime = require("src.mods.Runtime")
+local Logger = require("src.core.Logger")
 
 local Rows = {}
 
@@ -60,7 +62,7 @@ local function speedRow(id, label, key)
   }
 end
 
-function Rows.build(ctx, skip)
+local function buildRows(ctx, skip)
   local rows = {}
   local function add(row) rows[#rows + 1] = row end
   local function addCart(id, make)
@@ -465,6 +467,137 @@ function Rows.build(ctx, skip)
   return keep
 end
 
+local function cartDescriptor(ctx, row)
+  if row.cart then
+    local r = row.cart
+    return {
+      id = row.id, label = RomText.plain(r.label),
+      value = function()
+        local cur = tonumber(cart(ctx)[r.key]) or 0
+        if r.frame then return RomText.plain("gText_FrameType") .. tostring(cur + 1) end
+        return RomText.plain(r.choices[cur + 1])
+      end,
+      step = function(_, dir)
+        local Chrome = require("src.ui.game3.chrome")
+        local cur = tonumber(cart(ctx)[r.key]) or 0
+        local n = r.frame and Chrome.userFrameCount() or r.count
+        local value = r.toggle and (1 - cur) or ((cur + dir) % n + n) % n
+        if value == cur then return false end
+        Options.set({ options = cart(ctx) }, r.key, value)
+        if r.frame then Chrome.setFrameType(value) end
+        if r.id == "sound" then
+          pcall(function() require("src.core.game3.audio").applyOptions({ options = cart(ctx) }) end)
+        end
+        return true
+      end,
+    }
+  end
+  if row.native then
+    local menu = package.loaded["src.ui.game3.rs.option_menu"]
+    local data = menu and menu._data
+    local keys = { "textSpeed", "battleScene", "battleStyle", "sound", "buttonMode", "frameType" }
+    local counts = { 3, 2, 2, 2, 3, 20 }
+    local i = row.native
+    if not (data and data.rows[i] and menu._pending and keys[i]) then return nil end
+    local r, key = data.rows[i], keys[i]
+    return {
+      id = row.id, label = r.text,
+      value = function()
+        local cur = menu._pending[key]
+        if key == "frameType" then return data.frameLabel .. tostring(cur + 1) end
+        return r.choices[cur + 1].text
+      end,
+      step = function(_, dir)
+        local cur, n = menu._pending[key], counts[i]
+        local value = n == 2 and (1 - cur) or ((cur + dir) % n + n) % n
+        menu._pending[key] = value
+        if key == "sound" then
+          local Audio = require("src.core.game3.audio")
+          if Audio.setCryStereo then Audio.setCryStereo(value) end
+        end
+        return value ~= cur
+      end,
+    }
+  end
+  return row
+end
+
+local function sameRows(_, rows) return rows end
+
+local function hookRows(ctx, rows)
+  if not Runtime.wantsHook("ui.options.rows") then return rows end
+  local candidate, originals = {}, {}
+  local fields = { "id", "label", "value", "step", "activate", "group" }
+  for _, native in ipairs(rows) do
+    local source = cartDescriptor(ctx, native)
+    if not source then
+      Logger.error("ui.options.rows cannot bridge native row %s; keeping the vanilla rows", native.id)
+      return rows
+    end
+    local descriptor, original = {}, { native = native }
+    for _, key in ipairs(fields) do
+      local value = source[key]
+      if type(value) == "function" and (key == "value" or key == "step" or key == "activate") then
+        local callback = value
+        value = function(_, ...) return callback(ctx, ...) end
+      end
+      descriptor[key], original[key] = value, value
+    end
+    candidate[#candidate + 1] = descriptor
+    originals[descriptor] = original
+  end
+  local hooked = Runtime.call("ui.options.rows", sameRows, ctx.game, candidate)
+  local valid = type(hooked) == "table"
+  local count = 0
+  if valid then
+    for key, row in pairs(hooked) do
+      if type(key) ~= "number" or key < 1 or key % 1 ~= 0 or type(row) ~= "table"
+          or type(row.label) ~= "string"
+          or (row.id ~= nil and type(row.id) ~= "string")
+          or (row.group ~= nil and type(row.group) ~= "boolean") then
+        valid = false
+        break
+      end
+      for _, field in ipairs({ "value", "step", "activate" }) do
+        if row[field] ~= nil and type(row[field]) ~= "function" then valid = false end
+      end
+      count = count + 1
+    end
+    for i = 1, count do if hooked[i] == nil then valid = false end end
+  end
+  if not valid then
+    Logger.error("ui.options.rows returned invalid rows (%s); keeping the vanilla rows", type(hooked))
+    return rows
+  end
+  local result = {}
+  for _, descriptor in ipairs(hooked) do
+    local original = originals[descriptor]
+    local unchanged = original ~= nil
+    for _, key in ipairs(fields) do
+      if original and descriptor[key] ~= original[key] then unchanged = false end
+    end
+    if unchanged then
+      result[#result + 1] = original.native
+    else
+      local row = {}
+      for _, key in ipairs(fields) do
+        local value = descriptor[key]
+        if type(value) == "function" and (key == "value" or key == "step" or key == "activate") then
+          local callback = value
+          value = function(c, ...) return callback(c.game, ...) end
+        end
+        row[key] = value
+      end
+      result[#result + 1] = row
+    end
+  end
+  return result
+end
+
+function Rows.build(ctx, skip)
+  return hookRows(ctx, buildRows(ctx, skip))
+end
+
 Rows.GROUPS = {
   { id = "group.speed", label = "SPEED",
     members = { "textSpeed", "speedOverworld", "speedBattle", "speedMenu" } },
@@ -527,10 +660,10 @@ end
 
 function Rows.withCart(ctx, cartRows, openPage, exclude)
   local rows = {}
-  for _, r in ipairs(Rows.build(ctx, cartRows)) do
+  for _, r in ipairs(buildRows(ctx, cartRows)) do
     if not (exclude and exclude[r.id]) then rows[#rows + 1] = r end
   end
-  return Rows.group(rows, openPage)
+  return Rows.group(hookRows(ctx, rows), openPage)
 end
 
 return Rows

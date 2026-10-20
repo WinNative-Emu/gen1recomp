@@ -327,7 +327,7 @@ function SpriteRenderer:gen2Obp()
 end
 
 local function liveTrueColor(def)
-  return def and def.trueColor and PaletteFX.honorsTrueColor()
+  return def and (def.gbaArt or (def.trueColor and PaletteFX.honorsTrueColor()))
 end
 
 function SpriteRenderer:resolveImage()

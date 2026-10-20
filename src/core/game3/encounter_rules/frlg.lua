@@ -345,16 +345,74 @@ function Encounters.hasFishingMons(mapId)
   return area ~= nil and #area.slots > 0
 end
 
+local function fishing_integer(value, max)
+  return type(value) == "number" and value >= 1 and value < math.huge
+    and value == math.floor(value) and (not max or value <= max)
+end
+
+local function valid_fishing_pool(pool)
+  if type(pool) ~= "table" or #pool == 0 then return false end
+  for key in pairs(pool) do
+    if not fishing_integer(key, #pool) then return false end
+  end
+  for i = 1, #pool do
+    local entry = pool[i]
+    if type(entry) ~= "table" or not fishing_integer(entry.species) then return false end
+    local lo = entry.minLevel or entry.level
+    local hi = entry.maxLevel or entry.level or lo
+    if not fishing_integer(lo, 100) or not fishing_integer(hi, 100)
+      or (entry.minLevel ~= nil and not fishing_integer(entry.minLevel, 100))
+      or (entry.maxLevel ~= nil and not fishing_integer(entry.maxLevel, 100))
+      or (entry.level ~= nil and not fishing_integer(entry.level, 100)) then return false end
+    if entry.chance ~= nil and (type(entry.chance) ~= "number"
+      or entry.chance < 0 or entry.chance > 256
+      or entry.chance ~= math.floor(entry.chance)) then return false end
+  end
+  return true
+end
+
+local function choose_mod_fishing_index(pool)
+  local previous = 0
+  local cumulative = true
+  for i = 1, #pool do
+    local chance = pool[i].chance
+    if chance == nil or chance < previous then
+      cumulative = false
+      break
+    end
+    previous = chance
+  end
+  if cumulative and previous == 256 then
+    local rand = Rng.Random() % 256
+    for i = 1, #pool do
+      if rand < pool[i].chance then return i end
+    end
+  end
+  return 1 + (Rng.Random() % #pool)
+end
+
 --- pokefirered/src/wild_encounter.c:519
-function Encounters.rollFishing(mapId, rodKind)
+function Encounters.rollFishing(mapId, rodKind, opts)
+  local pool = opts and opts.modFishingPool
+  if pool ~= nil and not valid_fishing_pool(pool) then return nil end
   Encounters.ensureLoaded()
-  local t = table_for(mapId)
-  local area = normalize_area(t and t.fishing, 0)
+  local area
+  if pool ~= nil then
+    area = { slots = pool }
+  else
+    local t = table_for(mapId)
+    area = normalize_area(t and t.fishing, 0)
+  end
   if not area or #area.slots == 0 then return nil end
   local rod = ROD_KINDS[rodKind]
   if rod == nil then rod = ROD_OLD end
-  local idx = choose_fishing_index(rod)
-  if idx > #area.slots then idx = #area.slots end
+  local idx
+  if pool ~= nil then
+    idx = choose_mod_fishing_index(pool)
+  else
+    idx = choose_fishing_index(rod)
+    if idx > #area.slots then idx = #area.slots end
+  end
   local entry = area.slots[idx]
   if type(entry) ~= "table" then return nil end
   Encounters.resetRateModifiers()

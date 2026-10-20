@@ -3,6 +3,7 @@
 local Extract = require("src.import.gba.extract_island1")
 local OwExtract = require("src.import.gba.ow_extract")
 local Versions = require("src.import.gba.versions")
+local PaletteMods = require("src.core.game3.palette_mods")
 
 local Stream = require("src.core.game3.asset_stream")
 local OwSprites = {}
@@ -97,6 +98,7 @@ local function uploadSprite(meta)
 end
 makeStream = function()
   return Stream.new("sprite", OwSprites._cache, owRoot(), uploadSprite, function(gid, spr)
+    PaletteMods.recolourOwSprite(gid, spr)
     OwSprites._loaded[gid] = spr
     if not OwSprites._logged then
       print(string.format("[game3/ow] sprites ready (%s sheets)", tostring(OwSprites._manifest and OwSprites._manifest.count or "?")))

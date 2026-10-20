@@ -942,7 +942,8 @@ function Renderer:playfieldRect()
   return r.vux, r.vuy, r.vuw, r.vuh, r.cut
 end
 
-function Renderer:endFrame(zones, worldZones)
+function Renderer:endFrame(zones, worldZones, frameOpts)
+  local generation = frameOpts and frameOpts.generation or 1
   GameViewport.setTarget()
   local R = self:frameRects()
   local ww, wh, pw, ph = R.ww, R.wh, R.pw, R.ph
@@ -984,6 +985,7 @@ function Renderer:endFrame(zones, worldZones)
       scale = Sp, Sx = Sx, Sy = Sy, dpiX = dpiX, dpiY = dpiY,
       viewX = vux, viewY = vuy, viewWidth = vuw, viewHeight = vuh,
       secondScreen = require("src.render.SecondScreen"),
+      generation = generation,
     }
     if Runtime.call("render.compose", function() return false end, self, ctx) == true then
       self.worldActive = false
@@ -1104,6 +1106,7 @@ function Renderer:endFrame(zones, worldZones)
       ox = ox, oy = oy, vpw = vpw, vph = vph,
       scale = Sp, dpiX = dpiX, dpiY = dpiY,
       worldActive = self.worldActive and true or false,
+      generation = generation,
     })
     if cut then love.graphics.setScissor() end
   end
@@ -1446,7 +1449,8 @@ function Renderer:endFrame(zones, worldZones)
     -- it.  Each pass hands back a canvas; with none registered
     -- this returns `present` unchanged and the frame is byte-identical.
     local composed = Pipelines.present(present,
-      { width = ww, height = wh, scale = Sp, dpi = dpiY, dpiX = dpiX, dpiY = dpiY }) or present
+      { width = ww, height = wh, scale = Sp, dpi = dpiY, dpiX = dpiX, dpiY = dpiY,
+        generation = generation }) or present
     local outputHandled = hasOutputHook
       and Runtime.call("render.output", function() return false end, {
         canvas = composed,
@@ -1454,7 +1458,7 @@ function Renderer:endFrame(zones, worldZones)
         gameX = ox, gameY = oy,
         gameWidth = vpw, gameHeight = vph,
         scale = Sp, dpiX = dpiX, dpiY = dpiY,
-        generation = 1,
+        generation = generation,
       }) == true
     if not outputHandled then
       if cut then love.graphics.setScissor(vux, vuy, vuw, vuh) end

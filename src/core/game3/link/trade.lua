@@ -1,4 +1,5 @@
 local LT = {}
+local ModRuntime = require("src.mods.Runtime")
 
 -- pokefirered/include/link.h:54
 LT.LINKCMD = {
@@ -66,6 +67,7 @@ LT.playerConfirmStatus = LT.STATUS.NONE
 LT.partnerConfirmStatus = LT.STATUS.NONE
 LT._sent = nil
 LT._received = nil
+LT._transaction = nil
 LT._peerBlock = nil
 LT._monSent = false
 LT._swapped = false
@@ -348,6 +350,7 @@ end
 local function resetExchange()
   LT._sent = nil
   LT._received = nil
+  LT._transaction = nil
   LT._peerBlock = nil
   LT._monSent = false
   LT._swapped = false
@@ -600,6 +603,7 @@ function LT.beginTrade()
   resetExchange()
   LT.state = "exchange"
   LT._sent = mon
+  LT._transaction = { sent = mon }
   -- pokefirered/src/union_room.c:1718 SendBlock(0, &gPlayerParty[monId], sizeof(struct Pokemon))
   local block = {
     type = LT.MSG.MON,
@@ -755,9 +759,25 @@ local function saveAfterTrade()
   LT._saveAsked = true
   local ok = writeSave()
   LT._saveFailed = not ok
+  if LT._transaction then LT._transaction.saved = ok end
   if ok then dropOwnJournal() end
   scene().saveDone()
   return ok
+end
+
+local function notifyTrade(transaction)
+  if transaction.notified then return end
+  transaction.notified = true
+  if ModRuntime.wants("pokemon.received") then
+    ModRuntime.emit("pokemon.received", {
+      mon = transaction.received, from = "link", peerName = transaction.peerName,
+    })
+  end
+  if ModRuntime.wants("trade.completed") then
+    ModRuntime.emit("trade.completed", {
+      sent = transaction.sent, received = transaction.received, evolveTo = transaction.evolveTo,
+    })
+  end
 end
 
 -- pokefirered/src/trade_scene.c:779 CB2_LinkTrade
@@ -786,10 +806,14 @@ function LT.tryPlayScene()
   LT.state = "scene"
   LT._peerBlock = nil
   local peerName = block.name or (LT.peer and LT.peer.name)
+  local transaction = LT._transaction
+  transaction.received = received
+  transaction.peerName = peerName
+  transaction.species = received.species or received.speciesId
   local Scene = scene()
   local slot = LT.cursor or 0
   Scene.play(LT._sent, received, function()
-    LT.finishTrade()
+    LT.finishTrade(transaction)
   end, {
     -- pokefirered/src/trade_scene.c:1230 TradeBufferOTnameAndNicknames
     peer = { name = peerName, id = block.trainerId or (LT.peer and LT.peer.trainerId) },
@@ -836,7 +860,14 @@ function LT.trySave()
 end
 
 -- pokefirered/src/trade_scene.c:2566 CB2_SaveAndEndTrade
-function LT.finishTrade()
+function LT.finishTrade(transaction)
+  transaction = transaction or LT._transaction
+  if not transaction or transaction ~= LT._transaction or transaction.finished
+      or LT.state ~= "scene" or not LT._committed then return false end
+  transaction.finished = true
+  local notify = LT._swapped and transaction.saved == true
+  local species = transaction.received.species or transaction.received.speciesId
+  if species ~= transaction.species then transaction.evolveTo = species end
   LT.state = "done"
   LT.completed = LT.completed + 1
   local cb = LT._onDone
@@ -855,6 +886,7 @@ function LT.finishTrade()
     -- pokefirered/src/trade.c:1322
     LT.startMenu()
   end
+  if notify then notifyTrade(transaction) end
   return true
 end
 
@@ -1191,7 +1223,7 @@ function LT.applyPending(s, entry)
   local Evolution = require("src.core.game3.evolution")
   local target = Evolution.tradeTarget(received, s)
   if target then Evolution.apply(received, target, s, s.bag, "trade") end
-  return true
+  return true, { sent = sent, received = received, peerName = entry.name, evolveTo = target }
 end
 
 local function entryKey(e)
@@ -1204,14 +1236,17 @@ function LT.settlePending(s, entry, outcome)
     return "abort"
   end
   if outcome ~= "commit" or LT._applied[entryKey(entry)] then return nil end
-  local ok, why = LT.applyPending(s, entry)
+  local ok, transaction = LT.applyPending(s, entry)
   if not ok then
-    print("[link] pending trade " .. entryKey(entry) .. " not applied: " .. tostring(why))
+    print("[link] pending trade " .. entryKey(entry) .. " not applied: " .. tostring(transaction))
     journalDrop(entry.room, entry.digest)
     return "dropped"
   end
   LT._applied[entryKey(entry)] = true
-  if writeSave() then journalDrop(entry.room, entry.digest) end
+  if writeSave() then
+    journalDrop(entry.room, entry.digest)
+    notifyTrade(transaction)
+  end
   return "commit"
 end
 

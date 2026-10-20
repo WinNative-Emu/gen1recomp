@@ -14,22 +14,23 @@ The short version, for an author deciding what to write:
 - **Every registry name, hook name and event name means the same thing in both
   games.** Nothing is prefixed, renamed or repurposed per generation. Where Gen
   2 genuinely carries more, the record or the payload gains a *field*.
-- **40 of the 46 registries are available on Gold.** 17 keep their Gen 1 target
-  outright (`commands`, `tokens`, `growth_rates`, `battle_sprite_scales` and
-  `render_pipelines` among them), 16 route to a Gen 2 table under the same
-  name, 6 are Gen 2-only systems Red has no counterpart for, and `migrations`
-  is a code registry with no data target in either game. The other 6 are gated,
-  and are listed below with the consumer change each one still needs.
+- **44 of the 47 registries are available on Gold.** 19 keep their Gen 1 target
+  outright (`commands`, `tokens`, `growth_rates`, `battle_sprite_scales`,
+  `render_pipelines` and `transitions` among them), 17 route to a Gen 2 table
+  under the same name, 7 are Gen 2-only systems Red has no counterpart for, and
+  `migrations` is a code registry with no data target in either game. The other
+  3 are gated, and are listed below with the consumer change each one still
+  needs.
 - **A registry with no home in a generation is reported, never silently
   merged.** The write is taken, dropped, and named once per mod in the same
   error feed the mod manager shows -- in both directions, so a Red boot writing
-  to `decorations` is told exactly as a Gold boot writing to `map_scripts` is.
-- **40 event names and 44 hook names have a call site in both generations**, so
+  to `decorations` is told exactly as a Gold boot writing to `rulesets` is.
+- **43 event names and 60 hook names have a call site in both generations**, so
   one subscription serves both games. `tests/engine/gate_gen2_mod_api.lua`
   reads those names back out of the source and fails if a site is renamed or
   deleted on either side, and fails again if a new shared site appears without
   being listed here.
-- **24 further names are Gen 2-only** (friendship, breeding, the Pokegear, the
+- **25 further names are Gen 2-only** (friendship, breeding, the Pokegear, the
   radio, Pokerus, the roamers, Kurt, the Bug Contest, the Unown puzzle, mail,
   held items, shininess, gender, and the five cards of the GS boot cinema).
   They are plain names, not a `gen2.` namespace, so if Red ever grows the
@@ -55,8 +56,8 @@ The short version, for an author deciding what to write:
 ```
 
 `games` is an optional array of version ids (`"red"`, `"blue"`, `"yellow"`,
-`"gold"`, `"silver"`, `"crystal"`), generations (`"gen1"`, `"gen2"`,
-case-insensitive) or `"all"`. `src/mods/ModTargets.lua` resolves the tokens off
+`"gold"`, `"silver"`, `"crystal"`, and the Gen 3 ids), generations (`"gen1"`,
+`"gen2"`, `"gen3"`, case-insensitive) or `"all"`. `src/mods/ModTargets.lua` resolves the tokens off
 `GameVersion.ORDER` and `GameVersion.generation`, so nothing anywhere restates
 the game list. `"gen2"` now expands to Gold, Silver and Crystal.
 `Manifest.validate` stores the resolved, ORDER-sorted ids on `manifest.games`
@@ -360,6 +361,35 @@ records when no loader ran, so a mod-free Gold boot behaves identically:
 | `evolution_methods` | `Evolution.methodFor` |
 | `item_effects` | `ItemEffects.recordFor` / `partyAction` |
 
+An `api` 3 mod's `item_effects` record is the Gen 1 shape (`use(ctx)` returning
+`"consumed"`, `"kept"` or `"failed"` plus a message list, with `needsTarget`,
+`field` and `battle`). On Gold and Crystal an item whose `effect` names such a
+record opens the party list (or runs straight away when `needsTarget = false`),
+spends one copy on `"consumed"`, and shows the messages. `ctx` carries `data`,
+`game`, `save`, `itemId`, `item`, `target`, `battle` and `moveIndex`. `api` 1
+and 2 records keep the native `action` contract.
+
+`field` is routed to the shared `Data.field` but its ids are a **closed set**
+on Gold: only `boot` is read, and only these keys of it. `startMap`,
+`startX`, `startY` and `startFacing` replace SPAWN_HOME for a New Game
+(`World.bootSpawn`), `startMoney` and `rivalName` seed the new save
+(`Save.newGame`), and `namePresets` feeds the naming screens. Every other Gen 1
+key is reported as an unknown id: `ledges` (Gold's ledges are tile collision
+types), `hiddenItems` (bg events already in `gen2Maps`), `badgeGates`,
+`townMap` (use `landmarks`), `flyOrder` (the cart's flypoint table),
+`playerPics`, and `boot.lastHeal`, `boot.screens`, `boot.starterScript`,
+`boot.title`, `boot.playerName`.
+
+**`evolution_methods` call shapes.** Records registered by a mod with manifest
+`api` 2 or lower keep Gold's `check(entry, mon, ctx)` and may return
+`ok, reason, consumesHeldItem`. A record whose last writer declares `api` 3 is
+called the Gen 1 way, `check(game, mon, evo, trigger)`, with `trigger.kind` one
+of `levelup` (the after-battle sweep), `item` (a stone use, `trigger.item`) or
+`trade` (a link evolution); a truthy answer fires the row and
+`consumesItem = true` on the record eats the held item the way Gold's trade
+rows do. The cross-cutting link and force gates do not apply to these records,
+because `trigger.kind` already says which sweep this is.
+
 `src/mods/Builtins.lua` seeds those six with **Gold's** records under Gen 2
 rather than Red's. It has to: both games call it `GREAT_BALL`, and Red's record
 carries no `multiplier`, so seeding Red's would leave Gold's x1.5 reading nil.
@@ -368,7 +398,7 @@ carries no `multiplier`, so seeding Red's would leave Gold's x1.5 reading nil.
 counterpart for, so there is no Gen 1 table to share and none of these carries
 a Gen 1 target at all. The routed Gen 2 path is their only home, and
 `Schemas.GEN1` gates them on a Red boot the way `Schemas.GEN2` gates
-`map_scripts` on a Gold one -- reported, not silently merged.
+`rulesets` on a Gold one -- reported, not silently merged.
 
 | registry | id space | who reads it |
 | --- | --- | --- |
@@ -497,7 +527,9 @@ available while the entry chunk runs. Gold does not gain Gen 1's developer
 console or F5 hot-reload hotkey; the field reports the loader's mode only.
 
 **`mod.world`.** Same method set, resolved against Gold's world
-(`src/world/gen2/WorldAPI.lua`). Two differences show through and are
+(`src/world/gen2/WorldAPI.lua`). `warpTo` keeps the legacy contract for `api` 1 and 2
+(`opts` is accepted and nothing in it is read); `onDone`, `keepMusic` and `arrive`
+are read only for `api` 3. Two differences show through and are
 documented on the module: Gold's world is not a stack state, and Gen 2 event
 flags are numeric ids into `wEventFlags` rather than string keys.
 `mapOverview` returns the same read-only terrain, tile-shading, and marker
@@ -537,7 +569,11 @@ gains a field instead of the name gaining a prefix.
   `world.live_maps_updated`, `flag.changed`; hooks `warp.destination`,
   `movement.collision`, `movement.speed`, `encounter.roll`,
   `encounter.species`, `encounter.fishing`, `encounter.table`, `world.tod`,
-  `map.palette`, `fieldmove.eligibility`, `world.follower.spawn`. `flag.changed` carries the numeric
+  `map.palette`, `fieldmove.eligibility`, `world.follower.spawn`,
+  `trainer.before_battle`. `trainer.before_battle` (`src/world/gen2/World.lua`)
+  receives `(game, { trainerClass, partyIndex, mapId, npcId }, continueBattle)`
+  and a truthy return defers the battle until a mod calls `continueBattle`,
+  optionally with `{ cancel = true }`. `flag.changed` carries the numeric
   `wEventFlags` id under Gen 1's `name` key, which is the one payload
   difference the numeric flag space forces. `encounter.table` is raised only
   from `mod.world:effectiveEncounters(mapId, terrain, opts)`, a read-only
@@ -577,7 +613,14 @@ gains a field instead of the name gaining a prefix.
   `battle.enemy_action`, `battle.run`, `battle.exp_award`, `exp.gain`,
   `catch.rate`, `trainer.party`, `battle.overlay`, `battle.low_health_alarm`,
   `battle.catch_exp`, `battle.bottom_ui_visible`,
-  `battle.status_hud_visible` and `battle.move_grid_navigation`. One payload
+  `battle.status_hud_visible`, `battle.move_grid_navigation`,
+  `battle.caught_marker_visible`, `battle.field_residual` and
+  `battle.menu_auxiliary`. `battle.field_residual` is raised from
+  `Battle:applyFieldResiduals` and returns data-only damage rows, so HP
+  displays, replacements, experience and battle end stay with the native
+  paths; `battle.menu_auxiliary` is raised from the fight menu on START, only
+  when nothing is animating, and only in a non-link, non-tutorial, non-contest
+  battle. One payload
   difference: Gen 1's vanilla
   `battle.low_health_alarm` link reads `ctx.battle.data`, and Gold's battle
   screen has no `.data` field, so the Gen 2 site **adds** `ctx.data` beside the
@@ -600,7 +643,9 @@ gains a field instead of the name gaining a prefix.
   `src/core/gen2/Evolution.lua` emits `pokemon.evolved` from `apply` and wraps
   each row's decision in `evolution.check`. The hook passes `data` where Gen 1
   passes `game`; positions 2-4 (mon, row, trigger) match.
-- *The frame (`src/core/Game2.lua`):* hooks `input.step`, `input.pointer`,
+- *The frame (`src/core/Game2.lua`):* hooks `core.logic_speed` (the
+  resolved logic-clock multiplier, clamped by `GameSpeed.clamp`; a locked or
+  overridden speed never reaches it), `input.step`, `input.pointer`,
   `input.key`, `input.gamepad`, `input.wheel` (RFC 0020), `render.zones`,
   `render.compose`, `render.output_enabled`, `render.output`,
   `render.letterbox`, `render.hud`, `render.viewport`, `render.window`. Each sits
@@ -768,8 +813,7 @@ fatal: a mod that supports both generations registers its Gen 1 content
 unconditionally and still loads the half that applies. The report is worded
 from the boot's own generation, because the gating runs both ways.
 
-`rulesets`, `transitions`, `field`, `text_pointers`, `link_fields`,
-`map_scripts`.
+`rulesets`, `text_pointers`, `link_fields`.
 
 `Schemas.GEN2` in `src/mods/Schemas.lua` is the authoritative table, and
 `tests/engine/gate_gen2_mod_api.lua` holds it to the catalog.
@@ -786,27 +830,11 @@ the silent no-op the gate exists to prevent. Closing one of these is a consumer
 change in the Gen 2 module first and a routing row second:
 
 - `rulesets`: no Gen 2 ruleset dispatch exists.
-- `transitions`: Gold draws its own battle intro
-  (`src/ui/gen2/BattleTransition.lua`), and its `STYLES` is a boolean *set* of
-  the four cart wipes (`spin`, `speckle`, `zoom`, `sine`) rather than the
-  `{ frames, draw, sound, flash }` record this registry carries. There is no
-  styleDef lookup for a registered id to reach, so a mod style would fail the
-  `STYLES` membership test and fall back to vanilla -- routing it would be the
-  silent no-op, not the fix.
-- `field`: the Gen 1 overworld's data grab bag. Gold's equivalents live in
-  `data.gen2Maps` and the VM's own tables.
 - `text_pointers`: Gen 1's `TEXT_*` indirection. Gold's text *is* pointers.
 - `link_fields`: gated until the Gen 2 mon wire format carries mod fields;
   Gen 2 link battles exist (launcher arenas over `src/link/LinkBattle2.lua`)
   but ship no extra mon fields yet.
-- `map_scripts`: `data.gen2Scripts` is the cart's bytecode pool keyed by ROM
-  pointer, and a Lua row list merged into it is not something
-  `src/script/gen2/Vm.lua` can run. Routing it needs a Gen 2 side dispatcher in
-  `World`, not just the verb table `mod.commands` already has. The
-  `script.started` / `script.ended` / `script.command` seams do fire, so a mod
-  observes and can veto a script it cannot yet author whole.
-
-Four of this list closed after it was written, and how they closed is the
+Six of this list closed after it was written, and how they closed is the
 pattern for the rest:
 
 - **`growth_rates`** now routes to the SHARED Gen 1 target. Gold's curves are
@@ -836,6 +864,15 @@ pattern for the rest:
   `drawWorld` half is still inert, which is why this one is worth reading the
   caveat above for -- it is routed on the strength of the half that works, and
   Gold retires a drawWorld-only level rather than pretending.
+- **`map_scripts`** routes to `data.gen2Scripts` with record semantics, the
+  Gen 3 way. Gold's scripts are already decoded rows keyed by ROM pointer
+  (`"55:4e2e"`), and `src/script/gen2/Vm.lua` runs any row list in that pool,
+  so a registered id is a row list and `override` replaces a cart script
+  outright. A `movement:<key>` id writes `gen2Scripts.movements[key]`.
+- **`transitions`** routes to the SHARED Gen 1 target.
+  `src/ui/gen2/BattleTransition.lua` looks a style up in the four cart wipes
+  (`spin`, `speckle`, `zoom`, `sine`) first and then in `data.transitions`, so a
+  registered `{ frames, draw, sound, flash }` style is reachable by id.
 
 ## Hooks and events Gold does not raise yet
 
@@ -847,14 +884,6 @@ name and the existing payload, plus fields where Gen 2 genuinely carries more
 
 The list is much shorter than it was. What is outstanding, in descending value:
 
-- `battle.field_residual`: the first guarded call site is in Gen 1 end-of-round
-  processing. Gold already has a native weather/between-turn pipeline but does
-  not yet expose the shared data-only descriptor hook.
-- `trainer.before_battle`: Gold constructs and pushes its trainer battle in
-  `src/world/gen2/World.lua:startBattle`, which does not yet expose a deferred
-  preparation boundary or a battle-local player-party view. Gen 1 mods can use
-  the hook documented in `docs/modding.md`; do not claim Gold compatibility
-  when that selection is required.
 - `pokemon.before_give` / `pokemon.received`: Gold has no give-mon seam of its
   own yet.
 - `link.*` and `trade.completed`: a Gold boot offers no in-game link menu.

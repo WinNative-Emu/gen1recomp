@@ -17,7 +17,7 @@ return {
         game.data.text._Route15UpstairsBinocularsText, function()
           require("src.core.Sound").playCry(game.data, "ARTICUNO")
           game.stack:push(require("src.ui.PicBox").new(game,
-            "assets/generated/battle/front/articuno.png"))
+            "assets/generated/battle/front/articuno.png", nil, "ARTICUNO"))
         end))
       return true
     end,

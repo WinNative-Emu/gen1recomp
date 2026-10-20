@@ -10,6 +10,7 @@ local Player = require("src.core.game3.m4a_player")
 local SE = require("src.core.game3.se_ids")
 local Song = require("src.core.game3.song_ids")
 local Warm = require("src.core.game3.warm")
+local ModAudio = require("src.core.game3.mod_audio")
 local ffiOk, ffi = pcall(require, "ffi")
 
 local Audio = {}
@@ -376,6 +377,7 @@ function Audio.applyEngineOptions(opts)
     Audio._bgmVolume = level_gain(opts.musicVol, 7)
   end
   Audio._sfxVolume = level_gain(opts.sfxVol, 7)
+  ModAudio.applyOptions(opts)
   local filter = tonumber(opts.musicFilter) or 0
   if filter < 0 then filter = 0 end
   if filter > 3 then filter = 3 end
@@ -406,6 +408,7 @@ function Audio.setHelpActive(active)
 end
 
 local function stop_bgm_source()
+  ModAudio.stopSong()
   if Audio._bgmSource then
     pcall(function() Audio._bgmSource:stop() end)
   end
@@ -436,6 +439,24 @@ function Audio.playSong(id, opts)
     Audio._currentSong = nil
     return true
   end
+  local modKey = ModAudio.songKey(id)
+  if modKey then
+    if not opts.restart and not Audio._fadeOut and Audio._currentSong
+        and Audio._currentSong.id == id and ModAudio.playing() == modKey then
+      if Audio._fanfareActive then Audio._fanfareDeferred = nil end
+      return true
+    end
+    stop_bgm_source()
+    Audio._currentSong = { id = id, loop = true, startedAt = os.clock() }
+    Audio._mapSong = Audio._mapSong or id
+    Audio._fadeOut, Audio._fadeIn = nil, nil
+    Audio._fanfareActive = false
+    Audio._fanfareFrames = 0
+    Audio._fanfareRestore, Audio._fanfareDeferred, Audio._fanfarePending = nil, nil, nil
+    Audio._bgmPaused = false
+    ModAudio.playSong(modKey)
+    return true
+  end
   if opts.fanfare or (Audio.songInfo(id) and Audio.songInfo(id).kind == "fanfare") or (fanfare_entry(id) ~= nil) then
     return Audio.playFanfare(id)
   end
@@ -443,6 +464,7 @@ function Audio.playSong(id, opts)
     if Audio._fanfareActive then Audio._fanfareDeferred = nil end
     return true
   end
+  ModAudio.stopSong()
   local info = Audio.songInfo(id) or {}
   Audio._currentSong = {
     id = id,
@@ -709,7 +731,7 @@ function Audio.fadeOutBgm(speed)
   -- pret: seconds = 16 * speed / 60
   local seconds = 16 * speed / 60
   local songId = Audio._currentSong and Audio._currentSong.id
-  if Audio._bgmSource and songId then
+  if (Audio._bgmSource or ModAudio.playing()) and songId then
     -- Immediate approximate fade via volume step in update
     Audio._fadeOut = {
       t = 0,
@@ -731,7 +753,8 @@ function Audio.fadeInBgm(id, speed)
   speed = tonumber(speed) or 4
   local seconds = 16 * speed / 60
   Audio._fadeIn = { t = 0, dur = seconds }
-  if Audio._bgmSource then Audio._bgmSource:setVolume(0) end
+  if ModAudio.playing() then ModAudio.setFade(0)
+  elseif Audio._bgmSource then Audio._bgmSource:setVolume(0) end
   return true
 end
 
@@ -959,6 +982,8 @@ end
 
 function Audio.playSe(id, opts)
   opts = opts or {}
+  local modPlayed = ModAudio.playSe(id)
+  if modPlayed ~= nil then return true end
   id = SE.resolve(id)
   if id == nil then
     return false
@@ -1429,6 +1454,12 @@ end
 -- pokefirered/src/sound.c:333
 function Audio.playCry(species, mode, pan)
   species = tonumber(species) or species
+  local modCry = ModAudio.playCry(species)
+  if modCry ~= nil then
+    Audio._crySource = modCry or nil
+    Audio._cryUntil = (not modCry) and ((Audio._cryClock or 0) + 64) or nil
+    return true
+  end
   local volume, noDuck, release, multi
   if type(mode) == "table" then
     local o = mode
@@ -1517,6 +1548,7 @@ end
 
 function Audio.update(dt)
   dt = dt or 1 / 60
+  ModAudio.update()
   Audio.tickCry(dt)
   Audio._pumpSeLoops()
 
@@ -1562,7 +1594,9 @@ function Audio.update(dt)
     local u = math.min(1, f.t / math.max(f.dur, 0.01))
     local stillSame = (f.gen == nil or f.gen == Audio._bgmGen)
       and (f.songId == nil or (Audio._currentSong and Audio._currentSong.id == f.songId))
-    if stillSame and Audio._bgmSource then
+    if stillSame and ModAudio.playing() then
+      ModAudio.setFade(1 - u)
+    elseif stillSame and Audio._bgmSource then
       local vol = bgm_gain(f.start) * (1 - u)
       Audio._bgmSource:setVolume(vol)
     end
@@ -1583,11 +1617,11 @@ function Audio.update(dt)
       end
     end
   end
-  if Audio._fadeIn and Audio._bgmSource then
+  if Audio._fadeIn and (Audio._bgmSource or ModAudio.playing()) then
     local f = Audio._fadeIn
     f.t = f.t + dt
     local u = math.min(1, f.t / math.max(f.dur, 0.01))
-    Audio._bgmSource:setVolume(bgm_gain() * u)
+    if ModAudio.playing() then ModAudio.setFade(u) else Audio._bgmSource:setVolume(bgm_gain() * u) end
     if u >= 1 then Audio._fadeIn = nil end
   end
 

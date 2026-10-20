@@ -411,9 +411,15 @@ function CacheFs.read(rel)
 end
 
 -- Read cache-relative `rel` for the active GameVersion when PhysFS may hide
--- prefixed Blue/Yellow/Gold trees (fused NX mount hole). Same order Data:load
--- already used: active version prefix with CacheFs.prefix cleared, then
--- `rel` under the caller's CacheFs.prefix. Returns the bytes or nil.
+-- prefixed Blue/Yellow/Gold trees (fused NX mount hole): active version
+-- prefix with CacheFs.prefix cleared, then `rel` under the caller's
+-- CacheFs.prefix. The bare root only ever holds Red (legacy cache or source
+-- tree), so no other version reads it. Returns the bytes or nil.
+local function rootIsActiveVersion(saved)
+  if saved ~= nil and saved ~= "" then return true end
+  return require("src.core.GameVersion").get() == "red"
+end
+
 function CacheFs.readActive(rel)
   local GameVersion = require("src.core.GameVersion")
   local prefix = GameVersion.cachePrefix()
@@ -421,7 +427,7 @@ function CacheFs.readActive(rel)
   CacheFs.prefix = ""
   local bytes = CacheFs.read(prefix .. rel)
   CacheFs.prefix = saved
-  if type(bytes) ~= "string" then
+  if type(bytes) ~= "string" and rootIsActiveVersion(saved) then
     bytes = CacheFs.read(rel)
   end
   if type(bytes) == "string" then return bytes end
@@ -429,7 +435,7 @@ function CacheFs.readActive(rel)
 end
 
 -- Load a generated Lua table the way Data:load does: versioned save-dir
--- bytes first (gold/data/generated/maps.lua), then the un-prefixed path.
+-- bytes first (gold/data/generated/maps.lua), then the un-prefixed path for Red.
 -- Game2/World used love.filesystem.load("data/generated/...") which misses
 -- on fused NX when the gold/ overlay mount fails -- intro art still loads
 -- via NxAssetOverlay, but oak_speech.lua / font.lua / maps.lua do not.
@@ -444,7 +450,8 @@ function CacheFs.loadActive(rel)
     if not ok then return nil, value end
     return value
   end
-  if love and love.filesystem and love.filesystem.load then
+  if love and love.filesystem and love.filesystem.load
+      and rootIsActiveVersion(CacheFs.prefix) then
     local chunk, err = love.filesystem.load(rel)
     if not chunk then return nil, err end
     local ok, value = pcall(chunk)

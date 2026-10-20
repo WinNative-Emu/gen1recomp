@@ -395,7 +395,7 @@ Encounters.rules = rules
 
 for _, name in ipairs({
   "mapBaseCooldown", "cooldownMinSteps", "handleCooldown", "resetRateModifiers",
-  "encounterRate", "rollLand", "rollWater", "rollRocks", "rollSweetScent", "sweetScentFacility", "hasFishingMons", "rollFishing",
+  "encounterRate", "rollLand", "rollWater", "rollRocks", "rollSweetScent", "sweetScentFacility", "hasFishingMons",
 }) do
   Encounters[name] = function(...)
     local f = rules()[name]
@@ -453,6 +453,132 @@ local function engine_encounter(enc)
 end
 
 local function same_encounter(enc) return enc end
+
+local FISHING_RODS = {
+  [0] = 0, [1] = 1, [2] = 2,
+  [262] = 0, [263] = 1, [264] = 2,
+  old = 0, good = 1, super = 2,
+  OLD_ROD = 0, GOOD_ROD = 1, SUPER_ROD = 2,
+  ITEM_OLD_ROD = 0, ITEM_GOOD_ROD = 1, ITEM_SUPER_ROD = 2,
+}
+local FISHING_ROD_IDS = { [0] = "OLD_ROD", "GOOD_ROD", "SUPER_ROD" }
+local FISHING_RANGES = { [0] = { 1, 2 }, { 3, 5 }, { 6, 10 } }
+local FISHING_CHANCES = { [0] = { 70, 100 }, { 60, 80, 100 }, { 40, 80, 95, 99, 100 } }
+local FISHING_FIELDS = { "species", "level", "minLevel", "maxLevel", "item", "chance" }
+
+local function same_fishing_pool(a, b)
+  if a == nil or b == nil then return a == b end
+  if type(a) ~= "table" or #a ~= #b then return false end
+  for i = 1, #b do
+    if type(a[i]) ~= "table" then return false end
+    for _, key in ipairs(FISHING_FIELDS) do
+      if a[i][key] ~= b[i][key] then return false end
+    end
+  end
+  return true
+end
+
+local function fishing_integer(value, max)
+  local n = tonumber(value)
+  if n and n == n and n >= 1 and n < math.huge and n == math.floor(n)
+    and (not max or n <= max) then return n end
+end
+
+local function fishing_pool(mapId, rod)
+  local t = table_for(mapId)
+  local area = normalize_area(t and t.fishing, 0)
+  if not area or #area.slots == 0 then return nil end
+  local Pokemon = require("src.core.game3.pokemon")
+  local range = FISHING_RANGES[rod]
+  local pool = {}
+  for idx = range[1], range[2] do
+    local entry = area.slots[Profile.family() == "frlg" and math.min(idx, #area.slots) or idx]
+    if type(entry) ~= "table" then return nil end
+    local lo = tonumber(entry.minLevel or entry.level or entry[2]) or (Profile.family() == "frlg" and 5 or 1)
+    local hi = tonumber(entry.maxLevel or entry.level or entry[2]) or lo
+    pool[#pool + 1] = { species = Pokemon.keyName(entry.species or entry[1]),
+      level = lo, minLevel = lo, maxLevel = hi, item = entry.item,
+      chance = math.floor(FISHING_CHANCES[rod][idx - range[1] + 1] * 256 / 100) }
+  end
+  return pool
+end
+
+local function native_fishing_pool(pool, original)
+  if type(pool) ~= "table" or #pool == 0 then return nil end
+  for key in pairs(pool) do
+    if type(key) ~= "number" or key < 1 or key > #pool or key ~= math.floor(key) then return nil end
+  end
+  local Pokemon = require("src.core.game3.pokemon")
+  local out = {}
+  for i = 1, #pool do
+    local entry = pool[i]
+    if type(entry) ~= "table" then return nil end
+    local species = fishing_integer(entry.species)
+      or (type(entry.species) == "string" and Pokemon.speciesFromName(entry.species))
+    if not fishing_integer(species) or not Pokemon.keyName(species) then return nil end
+    if (entry.level ~= nil and not fishing_integer(entry.level, 100))
+      or (entry.minLevel ~= nil and not fishing_integer(entry.minLevel, 100))
+      or (entry.maxLevel ~= nil and not fishing_integer(entry.maxLevel, 100)) then return nil end
+    local chance = entry.chance ~= nil and tonumber(entry.chance) or nil
+    if entry.chance ~= nil and (not chance or chance ~= chance or chance < 0
+      or chance > 256 or chance ~= math.floor(chance)) then return nil end
+    local prior = original and original[i]
+    local lo, hi = entry.minLevel or entry.level, entry.maxLevel or entry.level or entry.minLevel
+    if prior and entry.level ~= prior.level and entry.minLevel == prior.minLevel
+      and entry.maxLevel == prior.maxLevel then lo, hi = entry.level, entry.level end
+    lo, hi = fishing_integer(lo, 100), fishing_integer(hi, 100)
+    if not lo or not hi then return nil end
+    if hi < lo then lo, hi = hi, lo end
+    out[i] = { species = species, level = lo, minLevel = lo, maxLevel = hi,
+      item = entry.item, chance = chance }
+  end
+  return out
+end
+
+function Encounters.rollFishing(mapId, rodKind, opts)
+  local native = rules().rollFishing
+  if not ModRuntime.wantsHook("encounter.fishing") then
+    return native(mapId, rodKind, opts)
+  end
+  Encounters.ensureLoaded()
+  local rod = FISHING_RODS[rodKind] or 0
+  local original = fishing_pool(mapId, rod)
+  local pool
+  if original then
+    pool = {}
+    for i, entry in ipairs(original) do
+      pool[i] = {}
+      for _, key in ipairs(FISHING_FIELDS) do pool[i][key] = entry[key] end
+    end
+  end
+  local called, rolled
+  local function vanilla(_, _, candidates)
+    if called then return mod_encounter(rolled) end
+    called = true
+    local nativeOpts = opts
+    if not same_fishing_pool(candidates, original) then
+      local changed = native_fishing_pool(candidates, original)
+      if not changed then return nil end
+      local baseline = native_fishing_pool(original)
+      if not same_fishing_pool(changed, baseline) then
+        nativeOpts = {}
+        for key, value in pairs(opts or {}) do nativeOpts[key] = value end
+        nativeOpts.modFishingPool = changed
+      end
+    end
+    rolled = native(mapId, rodKind, nativeOpts)
+    return mod_encounter(rolled)
+  end
+  local enc = ModRuntime.call("encounter.fishing", vanilla, FISHING_ROD_IDS[rod], mapId, pool)
+  if enc == nil then return nil end
+  if type(enc) == "table" and (type(enc.species) == "string" or type(enc.species) == "number") then
+    local result = engine_encounter(enc)
+    if result and fishing_integer(result.species) and fishing_integer(enc.level, 100)
+      and require("src.core.game3.pokemon").keyName(result.species) then return result end
+  end
+  if not called then vanilla(nil, nil, original) end
+  return rolled
+end
 
 -- pokefirered/src/wild_encounter.c:757
 function Encounters.onStep(mapId, terrain, opts)

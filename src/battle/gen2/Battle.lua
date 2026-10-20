@@ -2495,7 +2495,7 @@ Battle.MOVE_EFFECTS.EFFECT_NIGHTMARE = function(self, attacker, defender)
     text = Strings("%s\nstarted to have a\vNIGHTMARE!", self:battlerName(defender)) })
 end
 
--- ../pokecrystal/engine/battle/move_effects/psych_up.asm:1
+-- engine/battle/move_effects/psych_up.asm:1
 Battle.MOVE_EFFECTS.EFFECT_PSYCH_UP = function(self, attacker, defender)
   local own, target = self.stages[self:sideOf(attacker)], self.stages[self:sideOf(defender)]
   local changed = false
@@ -2791,13 +2791,18 @@ end
 -- and stats, keeping its own HP and level.  Every copied move gets 5 PP.
 Battle.MOVE_EFFECTS.EFFECT_TRANSFORM = function(self, attacker, defender)
   local state = self:volatile(attacker)
-  -- engine/battle/move_effects/transform.asm:7
-  if state.transformed or self:volatile(defender).substitute
-      or self:volatile(defender).vanished then
+  local target = self:volatile(defender)
+  -- engine/battle/move_effects/transform.asm:2
+  state.lastMove = nil
+  -- engine/battle/move_effects/transform.asm:3-8
+  if target.transformed or target.vanished then
     return fail(self)
   end
   state.transformed = true
+  -- engine/battle/move_effects/transform.asm:27
+  state.disabled, state.disabledTurns = nil, nil
   local attackerName = self:battlerName(attacker)
+  local shownSpecies = attacker.species
   -- The cart copies the target into BATTLE ram (wBattleMon / wEnemyMon) and
   -- leaves the struct the mon was loaded FROM alone, so every route out of the
   -- battle -- SwitchOutMon reloading the party slot, and PokeBallEffect
@@ -2807,13 +2812,16 @@ Battle.MOVE_EFFECTS.EFFECT_TRANSFORM = function(self, attacker, defender)
   -- routes goes through.  Without it a Ditto that transformed was a permanent
   -- copy of whatever it last faced: the caught record, and the player's own
   -- party slot, went into the save as the wrong species with the wrong moves.
-  state.preTransform = {
-    species = attacker.species,
-    types = attacker.types,
-    moves = state.mimicMoves or attacker.moves,
-    shiny = attacker.shiny,
-    stats = {},
-  }
+  local original = state.preTransform == nil
+  if original then
+    state.preTransform = {
+      species = attacker.species,
+      types = attacker.types,
+      moves = state.mimicMoves or attacker.moves,
+      shiny = attacker.shiny,
+      stats = {},
+    }
+  end
   local targetDef = self:speciesDef(defender)
   attacker.species = defender.species
   attacker.types = self:battlerTypes(defender)
@@ -2823,7 +2831,9 @@ Battle.MOVE_EFFECTS.EFFECT_TRANSFORM = function(self, attacker, defender)
   state.transformDvs = defender.dvs
   local moves = {}
   for index, move in ipairs(defender.moves or {}) do
-    moves[index] = { id = move.id, pp = 5, maxPp = 5 }
+    -- engine/battle/move_effects/transform.asm:90-93
+    local pp = move.id == "SKETCH" and 1 or 5
+    moves[index] = { id = move.id, pp = pp, maxPp = pp }
   end
   attacker.moves = moves
   -- Everything but HP is copied, which is why a Transformed Ditto has the
@@ -2832,10 +2842,14 @@ Battle.MOVE_EFFECTS.EFFECT_TRANSFORM = function(self, attacker, defender)
   local theirs = defender.stats or {}
   for _, key in ipairs({ "attack", "defense", "speed", "specialAttack",
       "specialDefense" }) do
-    state.preTransform.stats[key] = stats[key]
+    if original then state.preTransform.stats[key] = stats[key] end
     stats[key] = theirs[key] or stats[key]
   end
   attacker.stats = stats
+  -- engine/battle/move_effects/transform.asm:106-109
+  local ownStages = self.stages[self:sideOf(attacker)]
+  local theirStages = self.stages[self:sideOf(defender)]
+  for key, value in pairs(theirStages) do ownStages[key] = value end
   local targetName = (targetDef and targetDef.name)
     or defender.species or self:monName(defender) or "?"
   self:emit({ kind = "message", text = Strings("%s TRANSFORMED into %s!",
@@ -2849,10 +2863,10 @@ Battle.MOVE_EFFECTS.EFFECT_TRANSFORM = function(self, attacker, defender)
   -- `shownHp` and a switch has the `send` event for exactly this; a transform
   -- is the third identity swap and this is its event.  `mon` is the battler
   -- whose pic changes (the same key `send` carries) and `from` is what it was.
-  -- ../pokecrystal/engine/battle/move_effects/transform.asm:118-136
+  -- engine/battle/move_effects/transform.asm:118-136
   self:emit({ kind = "transform", side = self:sideOf(attacker),
     mon = attacker, species = attacker.species,
-    from = state.preTransform.species })
+    from = shownSpecies })
 end
 
 -- SwitchOutMon / PokeBallEffect's reload: the copy Transform wrote lives in
@@ -4685,7 +4699,7 @@ function Battle:usableMoves(mon)
   return out
 end
 
--- ../pokecrystal/engine/battle/core.asm:3687-3694 refuses TRAP, CELEBI,
+-- engine/battle/core.asm:3687-3694 refuses TRAP, CELEBI,
 -- FORCESHINY and SUICUNE; pokegold's :3476-3479 has only the first and third.
 function Battle:noEscapeBattleType()
   local t = self.battleType
@@ -5082,6 +5096,83 @@ end
 --   { kind = "item", item = <id>, target = n }  (handled by the caller, which
 --       applies the effect and then calls this with kind = "item" so the enemy
 --       still gets its turn)
+local function publicScalar(value)
+  local kind = type(value)
+  if kind == "string" or kind == "boolean" then return value, true end
+  if kind == "number" and value == value
+      and value < math.huge and value > -math.huge then
+    return value, true
+  end
+  return nil, false
+end
+
+local function publicDataCopy(value, visiting)
+  local scalar, ok = publicScalar(value)
+  if ok then return scalar, true end
+  if type(value) ~= "table" then return nil, false end
+
+  visiting = visiting or {}
+  if visiting[value] then return nil, false end
+  visiting[value] = true
+
+  local copy = {}
+  for key, child in next, value do
+    local copiedKey, keyOk = publicScalar(key)
+    local copiedChild, childOk = publicDataCopy(child, visiting)
+    if keyOk and childOk then copy[copiedKey] = copiedChild end
+  end
+  visiting[value] = nil
+  return copy, true
+end
+
+local function fieldBattlerView(battle, mon, side)
+  local def = battle:speciesDef(mon)
+  return publicDataCopy({
+    side = side,
+    name = battle:monName(mon),
+    hp = tonumber(mon.hp) or 0,
+    maxHp = tonumber(mon.maxHp) or tonumber(mon.stats and mon.stats.hp)
+      or tonumber(mon.hp) or 0,
+    types = (def and def.types) or mon.types or {},
+    vanished = mon.volatile and mon.volatile.vanished and true or false,
+  })
+end
+
+function Battle:applyFieldResiduals()
+  if self.over or not Runtime.wantsHook("battle.field_residual") then return end
+  local field = self.field or {}
+  local rows = Runtime.call("battle.field_residual", function() return {} end, {
+    field = publicDataCopy({ weather = self.weather, tokens = field.tokens or {} }),
+    battlers = {
+      player = fieldBattlerView(self, self.player, "player"),
+      enemy = fieldBattlerView(self, self.enemy, "enemy"),
+    },
+    turn = self.turn or 0,
+  })
+  if type(rows) ~= "table" then return end
+
+  local fainted = false
+  for _, row in ipairs(rows) do
+    local mon = type(row) == "table" and row.side == "player"
+      and self.player or type(row) == "table" and row.side == "enemy"
+      and self.enemy or nil
+    local amount = type(row) == "table" and row.amount or nil
+    if mon and (mon.hp or 0) > 0 and type(amount) == "number"
+        and amount > 0 and amount < math.huge and amount == math.floor(amount)
+        and (row.message == nil or type(row.message) == "string") then
+      amount = math.min(amount, mon.hp)
+      if type(row.message) == "string" and row.message ~= "" then
+        self:emit({ kind = "message", text = row.message })
+      end
+      mon.hp = mon.hp - amount
+      self:emit({ kind = "damage", side = self:sideOf(mon), amount = amount,
+        hp = mon.hp, anim = false })
+      if mon.hp <= 0 then fainted = true end
+    end
+  end
+  if fainted then self:resolveFaints(true) end
+end
+
 local function runTurn(self, action, enemyAction)
   if self.over then return self:takeEvents() end
   self.turn = self.turn + 1
@@ -5381,6 +5472,7 @@ local function runTurn(self, action, enemyAction)
   end
 
   self:betweenTurnEffects()
+  self:applyFieldResiduals()
   return self:takeEvents()
 end
 
@@ -5477,7 +5569,7 @@ function Battle:tickSeedAndCurse(mon)
     local other = mon == self.player and self.enemy or self.player
     if (other.hp or 0) > 0 then self:heal(other, damage) end
   end
-  -- ../pokecrystal/engine/battle/core.asm:1091
+  -- engine/battle/core.asm:1091
   if state.nightmare and (mon.hp or 0) > 0 then
     local damage = math.max(1, math.floor(maxHp / 4))
     mon.hp = math.max(0, mon.hp - damage)

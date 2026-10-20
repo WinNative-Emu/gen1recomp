@@ -372,7 +372,7 @@ do
     "Safeguard has no checkhit: no invented miss")
 end
 
--- ../pokecrystal/engine/battle/effect_commands.asm:1713-1746
+-- engine/battle/effect_commands.asm:1713-1746
 do
   local battle, player, wild = newBattle({ random = rolls({}, 0) })
   battle:volatile(wild).vanished = true
@@ -397,7 +397,7 @@ do
     ".DigMoves lets EARTHQUAKE through")
 end
 
--- ../pokecrystal/engine/battle/move_effects/transform.asm:7
+-- engine/battle/move_effects/transform.asm:7
 do
   local battle, player, wild = newBattle({
     playerMoves = { { id = "TRANSFORM", pp = 10, maxPp = 10 } },
@@ -414,7 +414,7 @@ do
 end
 
 -- ../pokecrystal/data/moves/effects.asm
--- ../pokecrystal/engine/battle/effect_commands.asm:5448
+-- engine/battle/effect_commands.asm:5448
 do
   local Effects = require("src.battle.gen2.Effects")
   local expected = {
@@ -770,6 +770,73 @@ do
   eq(player.moves[1].id, "TRANSFORM", "with its own moves")
   eq(player.stats.attack, ownAttack, "and its own stats")
   eq(player.volatile, nil, "and no volatile left on a save table")
+end
+
+-- engine/battle/move_effects/transform.asm:3-8
+do
+  local battle, player, wild = newBattle({
+    playerMoves = { { id = "TRANSFORM", pp = 10, maxPp = 10 } },
+    wildSpecies = "TANGELA",
+    random = rolls({}, 0) })
+  battle:volatile(wild).substitute = 20
+  battle:useMove(player, wild, "TRANSFORM")
+  eq(player.species, "TANGELA", "a substitute does not stop the copy")
+  battle:takeEvents()
+  battle:untransform(player)
+
+  battle:volatile(wild).substitute = nil
+  battle:volatile(wild).transformed = true
+  battle:useMove(player, wild, "TRANSFORM")
+  check(findText(battle:takeEvents(), "But it failed!"),
+    "a transformed target fails it")
+  eq(player.species, "MACHOP", "and no copy lands")
+end
+
+-- engine/battle/move_effects/transform.asm:3
+do
+  local battle, player, wild = newBattle({
+    playerMoves = { { id = "TRANSFORM", pp = 10, maxPp = 10 } },
+    wildSpecies = "TANGELA",
+    wildMoves = { { id = "TRANSFORM", pp = 10, maxPp = 10 } },
+    random = rolls({}, 0) })
+  local ownAttack = player.stats.attack
+  battle:useMove(player, wild, "TRANSFORM")
+  eq(player.species, "TANGELA", "the first copy lands")
+  battle:useMove(player, wild, "TRANSFORM")
+  check(not findText(battle:takeEvents(), "But it failed!"),
+    "the user being transformed does not fail it")
+  eq(battle:volatile(player).preTransform.species, "MACHOP",
+    "the record kept is still the user's own")
+  battle:clearAllVolatiles()
+  eq(player.species, "MACHOP", "so the reload hands back the real mon")
+  eq(player.stats.attack, ownAttack, "with its own stats")
+end
+
+-- engine/battle/move_effects/transform.asm:2
+-- engine/battle/move_effects/transform.asm:27
+-- engine/battle/move_effects/transform.asm:90-93
+-- engine/battle/move_effects/transform.asm:106-109
+do
+  local battle, player, wild = newBattle({
+    playerMoves = { { id = "TRANSFORM", pp = 10, maxPp = 10 } },
+    wildSpecies = "TANGELA",
+    wildMoves = { { id = "TACKLE", pp = 35, maxPp = 35 },
+      { id = "SKETCH", pp = 1, maxPp = 1 } },
+    random = rolls({}, 0) })
+  local state = battle:volatile(player)
+  state.disabled, state.disabledTurns = "TACKLE", 3
+  battle.stages.enemy.attack = 2
+  battle.stages.enemy.evasion = -1
+  battle.stages.player.speed = 3
+  battle:useMove(player, wild, "TRANSFORM")
+  eq(state.lastMove, nil, "ClearLastMove: the user has no last move")
+  eq(state.disabled, nil, "ResetActorDisable clears the user's disable")
+  eq(state.disabledTurns, nil, "and its count")
+  eq(battle.stages.player.attack, 2, "the target's stat levels are copied")
+  eq(battle.stages.player.evasion, -1, "every one of them")
+  eq(battle.stages.player.speed, 0, "over the user's own")
+  eq(player.moves[1].pp, 5, "a copied move has 5 PP")
+  eq(player.moves[2].pp, 1, "a copied SKETCH has 1")
 end
 
 do

@@ -517,7 +517,7 @@ function ItemEffects.use(data, save, itemId, target, battle, moveIndex, ow)
     local Stats = require("src.pokemon.Stats")
     local speciesDef = data.pokemon[target.species]
     target.level = target.level + 1
-    target.exp = Growth.expForLevel(speciesDef.growthRate, target.level)
+    target.exp = Growth.expForLevel(speciesDef.growthRate, target.level, data.growth_rates)
     local old = target.stats
     target.stats = Stats.calc(speciesDef, target.level, target.dvs, target.statExp)
     target.hp = math.min(target.stats.hp, target.hp + (target.stats.hp - old.hp))

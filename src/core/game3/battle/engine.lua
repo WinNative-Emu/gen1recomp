@@ -21,6 +21,7 @@ local Kinds = require("src.core.game3.battle.kinds")
 local ModRuntime = require("src.mods.Runtime")
 local BattleText = require("src.core.game3.battle.battle_text")
 local RomText = require("src.core.game3.rom_text")
+local ModBattle = require("src.core.game3.battle.mod_registries")
 
 local Engine = {}
 
@@ -220,10 +221,11 @@ local function speed_of(battler, st, adapter)
   if battler and battler.side == "player" and not noBoost and Engine.hasBadge(st, 3) then
     spe = math.floor(spe * 110 / 100)
   end
-  local he, param = HeldItems.of(battler)
+  local he, param = HeldItems.of(battler, "priority", st)
   if he == HeldItems.HOLD.MACHO_BRACE then spe = math.floor(spe / 2) end
   local st1 = battler and (battler.status or (battler.mon and battler.mon.status))
   if st1 == "PAR" then spe = math.floor(spe / 4) end
+  if battler and battler.modStatus then spe = ModBattle.penalty(battler, "speed", spe) end
   if he == HeldItems.HOLD.QUICK_CLAW and st and (tonumber(st.randomTurnNumber) or 0xFFFF)
       < math.floor(0xFFFF * param / 100) then
     spe = 0xFFFFFFFF
@@ -453,7 +455,7 @@ function Ctx:accuracyCheck(mode, printFail)
   if ad:abilityOf(user) == "HUSTLE" and Types.isPhysical(self.moveType or self.move.type) then
     calc = math.floor(calc * 80 / 100)
   end
-  local tHe, tParam = HeldItems.of(target)
+  local tHe, tParam = HeldItems.of(target, "accuracy", self.st)
   if tHe == HeldItems.HOLD.EVASION_UP then calc = math.floor(calc * (100 - tParam) / 100) end
   local hit
   if ModRuntime.wantsHook("battle.accuracy") then
@@ -623,6 +625,11 @@ local function canceller(M)
     end
   end
 
+  if user.modStatus and not ModBattle.beforeMove(M, true) then
+    Engine.cancelMultiTurnMoves(user)
+    return false
+  end
+
   if Abilities.truantLoafs(ad, user) then
     -- pokefirered/src/battle_util.c:1337
     Engine.cancelMultiTurnMoves(user)
@@ -696,6 +703,11 @@ local function canceller(M)
     -- pokefirered/data/battle_scripts_1.s:3717
     Engine.cancelMultiTurnMoves(user)
     user.expUnableToMove = true
+    return false
+  end
+
+  if user.modStatus and not ModBattle.beforeMove(M, false) then
+    Engine.cancelMultiTurnMoves(user)
     return false
   end
 
@@ -1262,7 +1274,7 @@ end
 function Engine.moveLimitations(b, ad)
   local bad = {}
   local mon = b and b.mon or {}
-  local he = HeldItems.of(b)
+  local he = HeldItems.of(b, "check", ad and ad._st)
   local foe = ad and ad:foeOf(b)
   for i = 1, 4 do
     local mv = mon.moves and mon.moves[i]
@@ -1387,7 +1399,7 @@ function Engine.moveEndEffects(M, opts)
   Abilities.immunityCure(ad)
   if target and target ~= user then Abilities.synchronize(M, user, target) end
   local chosenNum = move_num(M.opts.calledBy or M.moveId)
-  if not M.notObeyed and HeldItems.has(user, HeldItems.HOLD.CHOICE_BAND) and chosenNum ~= MOVE_STRUGGLE
+  if not M.notObeyed and HeldItems.has(user, HeldItems.HOLD.CHOICE_BAND, "check", M.st) and chosenNum ~= MOVE_STRUGGLE
       and not user.choicedMove then
     local cm = Moves.get(M.opts.calledBy or M.moveId)
     if not (tonumber(cm and cm.effect) == E.BATON_PASS and not M.failed) then
@@ -1600,10 +1612,16 @@ local function run(M)
       return
     end
 
+    local modRecord = ModBattle.effectRecord(M.move)
     local power = tonumber(M.move.power) or 0
     if power > 0 then
       local Hit = require("src.core.game3.battle.effects.hit")
       Hit.run(M)
+      if modRecord then
+        ModBattle.runAfterHit(M, modRecord)
+        M:tryFaintTarget()
+        M:tryFaintUser()
+      end
       move_end(M)
       return
     end
@@ -1611,7 +1629,12 @@ local function run(M)
     M.anim.statusOnly = true
     M:attackString()
     M:ppReduce()
-    local handled = Effects.runForMove(ad, M.user, M.target, M.moveId, M)
+    local handled
+    if modRecord and modRecord.kind == "primary" then
+      handled = ModBattle.runPrimary(M, modRecord)
+    else
+      handled = Effects.runForMove(ad, M.user, M.target, M.moveId, M)
+    end
     if not handled then
       M:attackAnimation()
       M:sayId("STRINGID_BUTNOTHINGHAPPENED")
@@ -2000,7 +2023,9 @@ function Engine.performSwitch(st, adapter, side, slot, opts)
   end
   Engine.switchOutEffects(st, adapter, old)
   State.syncBattlerToParty(old, party)
+  ModBattle.switchOut(st, old)
   local nb = State.makeBattler(party[slot], side, { partyIndex = slot, id = id, st = st })
+  ModBattle.switchIn(st, nb)
   if opts.batonPass then
     -- pokefirered/src/battle_main.c:2350
     for k, v in pairs(old.stages or {}) do nb.stages[k] = v end
@@ -2176,7 +2201,7 @@ function Engine.canRun(st, adapter, battler)
   -- pokefirered/src/battle_main.c:3240
   if st.link then return true end
   if not st.wild then return false, State.text(st, "STRINGID_NORUNNINGFROMTRAINERS") end
-  if HeldItems.has(battler, HeldItems.HOLD.CAN_ALWAYS_RUN) or adapter:abilityOf(battler) == "RUN_AWAY" then
+  if HeldItems.has(battler, HeldItems.HOLD.CAN_ALWAYS_RUN, "run", st) or adapter:abilityOf(battler) == "RUN_AWAY" then
     return true
   end
   local holder, ab = Abilities.escapeBlocker(adapter, battler)
@@ -2224,7 +2249,7 @@ function Engine.tryFlee(st, adapter, battler)
     return false
   end
   local foe = adapter:foeOf(battler)
-  if HeldItems.has(battler, HeldItems.HOLD.CAN_ALWAYS_RUN) then
+  if HeldItems.has(battler, HeldItems.HOLD.CAN_ALWAYS_RUN, "run", st) then
     adapter:playAnim("general", "SMOKEBALL_ESCAPE", battler, battler)
     say_id(adapter, "STRINGID_PKMNFLEDUSINGITS", { atk = battler, lastItem = HeldItems.itemOf(battler) })
     return true, "item"
@@ -2376,11 +2401,11 @@ local function is_chosen_map(t)
   return next(t) == nil
 end
 
-local function forced_move(b, mv, slot)
+local function forced_move(b, mv, slot, st)
   if not b then return mv, slot end
   if b.expLockedMove then return b.expLockedMove, slot end
   if b.expEncoreMove and (b.expEncoreTurns or 0) > 0 then return b.expEncoreMove, slot end
-  if b.choicedMove and HeldItems.has(b, HeldItems.HOLD.CHOICE_BAND) and move_num(mv) ~= b.choicedMove
+  if b.choicedMove and HeldItems.has(b, HeldItems.HOLD.CHOICE_BAND, "check", st) and move_num(mv) ~= b.choicedMove
       and move_num(mv) ~= MOVE_STRUGGLE then
     local H = require("src.core.game3.battle.effects._helpers")
     local cs = H.slotOf(b, b.choicedMove)
@@ -2424,7 +2449,7 @@ function Engine.planTurnActions(st, adapter, chosen)
       row.user = b
       row.kind = act.kind or "move"
       if row.kind == "move" then
-        row.move, row.slot = forced_move(b, act.move, act.slot)
+        row.move, row.slot = forced_move(b, act.move, act.slot, st)
         local mv = Moves.get(row.move)
         row.targetType = tonumber(mv and mv.target) or 0
       end
@@ -2566,7 +2591,7 @@ function Engine.planTurnFromActions(st, adapter, playerAct, enemyAct)
     if not b then return mv, slot end
     if b.expLockedMove then return b.expLockedMove, slot end
     if b.expEncoreMove and (b.expEncoreTurns or 0) > 0 then return b.expEncoreMove, slot end
-    if b.choicedMove and HeldItems.has(b, HeldItems.HOLD.CHOICE_BAND) and move_num(mv) ~= b.choicedMove
+    if b.choicedMove and HeldItems.has(b, HeldItems.HOLD.CHOICE_BAND, "check", st) and move_num(mv) ~= b.choicedMove
         and move_num(mv) ~= MOVE_STRUGGLE then
       local H = require("src.core.game3.battle.effects._helpers")
       local cs = H.slotOf(b, b.choicedMove)

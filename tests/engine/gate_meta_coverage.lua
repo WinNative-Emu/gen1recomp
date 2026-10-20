@@ -121,9 +121,6 @@ local DEBT = {
   -- the shared-hook list and the ledger's rule ("an entry closes the moment
   -- any test names the seam") retired it.
 
-  ["event:link.connected"] = "M12",
-  ["event:link.ended"] = "M12",
-  ["event:trade.completed"] = "M12",
 }
 
 local seen = {}

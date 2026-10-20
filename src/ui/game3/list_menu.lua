@@ -1,6 +1,8 @@
 local Display = require("src.core.game3.display")
 local Window = require("src.ui.game3.window")
 local FrlgFont = require("src.ui.game3.frlg_font")
+local Runtime = require("src.mods.Runtime")
+local Logger = require("src.core.Logger")
 
 local ListMenu = {}
 ListMenu.__index = ListMenu
@@ -28,9 +30,56 @@ end
 
 ListMenu.playSe = playSe
 
+local function sameOpts(opts) return opts end
+
+local function validOptions(opts)
+  if type(opts) ~= "table" then return false end
+  for _, key in ipairs({ "wrap", "pageJump", "keyRepeat" }) do
+    if opts[key] ~= nil and type(opts[key]) ~= "boolean" then return false end
+  end
+  for _, key in ipairs({ "repeatDelay", "repeatRate" }) do
+    local value = opts[key]
+    if value ~= nil and (type(value) ~= "number" or value ~= value
+      or value == math.huge or value < (key == "repeatRate" and 1 or 0)
+      or value % 1 ~= 0) then return false end
+  end
+  return true
+end
+
 function ListMenu.new(opts)
   opts = opts or {}
   local self = setmetatable({}, ListMenu)
+  self.game = opts.game or require("src.core.game3.runtime")._game
+  self.title = opts.title
+  self.kind = opts.kind or opts.title
+  self.wrap = opts.wrap
+  self.pageJump = opts.pageJump
+  self.keyRepeat = opts.keyRepeat ~= false
+  self.repeatDelay = opts.repeatDelay or ListMenu.REPEAT_START
+  self.repeatRate = opts.repeatRate or ListMenu.REPEAT_CONTINUE
+  if Runtime.wantsHook("ui.list_menu") then
+    local hooked = Runtime.call("ui.list_menu", sameOpts, {
+      wrap = self.wrap,
+      pageJump = self.pageJump,
+      keyRepeat = self.keyRepeat,
+      repeatDelay = self.repeatDelay,
+      repeatRate = self.repeatRate,
+    }, {
+      game = self.game,
+      title = self.title,
+      kind = self.kind,
+      itemCount = opts.items and #opts.items or 0,
+    })
+    if validOptions(hooked) then
+      if hooked.wrap ~= nil then self.wrap = hooked.wrap end
+      if hooked.pageJump ~= nil then self.pageJump = hooked.pageJump end
+      if hooked.keyRepeat ~= nil then self.keyRepeat = hooked.keyRepeat end
+      if hooked.repeatDelay ~= nil then self.repeatDelay = hooked.repeatDelay end
+      if hooked.repeatRate ~= nil then self.repeatRate = hooked.repeatRate end
+    else
+      Logger.error("ui.list_menu returned invalid %s; keeping the vanilla options", type(hooked))
+    end
+  end
   self.template = opts.template or Window.template(0, 0, 8, 2)
   self.frame = opts.frame or "std"
   self.items = opts.items or {}
@@ -100,6 +149,16 @@ function ListMenu:step(down)
   local n = #self.items
   local shown = self:shown()
   if shown == 0 then return 0 end
+  local index = self.scroll + self.row + 1
+  if self.wrap and n > 1 then
+    if not down and index == 1 then
+      self:setSelected(n)
+      return 2
+    elseif down and index == n then
+      self:setSelected(1)
+      return 2
+    end
+  end
   local row, scroll = self.row, self.scroll
   if not down then
     local newRow = shown == 1 and 0 or (shown - (math.floor(shown / 2) + shown % 2) - 1)
@@ -176,8 +235,8 @@ end
 
 function ListMenu:repeated(input, key)
   if input:wasPressed(key) then return true end
-  return self._held == key and self._heldFrames >= ListMenu.REPEAT_START
-    and (self._heldFrames - ListMenu.REPEAT_START) % ListMenu.REPEAT_CONTINUE == 0
+  return self.keyRepeat and self._held == key and self._heldFrames >= self.repeatDelay
+    and (self._heldFrames - self.repeatDelay) % self.repeatRate == 0
 end
 
 -- pokefirered/src/list_menu.c:166
@@ -206,10 +265,12 @@ function ListMenu:handleInput(input)
     return self:changeSelection(1, true) and "move" or nil
   end
   local left, right = false, false
-  if self.scrollMultiple == "dpad" then
+  if self.pageJump or self.scrollMultiple == "dpad" then
     left, right = self:repeated(input, "left"), self:repeated(input, "right")
-  elseif self.scrollMultiple == "lr" then
-    left, right = self:repeated(input, "l"), self:repeated(input, "r")
+  end
+  if self.scrollMultiple == "lr" then
+    left = left or self:repeated(input, "l")
+    right = right or self:repeated(input, "r")
   end
   if left then return self:changeSelection(self.maxShowed, false) and "move" or nil end
   if right then return self:changeSelection(self.maxShowed, true) and "move" or nil end

@@ -49,6 +49,12 @@ TextAliases.gText_CantUseUntilNewBadge = "gOtherText_CantBeUsedBadge"
 TextAliases.gText_PokemonOnHook = "gOtherText_PokeOnHook"
 -- pokeruby/src/field_player_avatar.c:1730
 TextAliases.gText_NotEvenANibble = "gOtherText_NotEvenANibble"
+-- pokeruby/src/item_use.c:281
+TextAliases.gText_ItemFinderNothing = "gOtherText_NoResponse"
+-- pokeruby/src/item_use.c:561
+TextAliases.gText_ItemFinderNearby = "gOtherText_ItemfinderResponding"
+-- pokeruby/src/item_use.c:577
+TextAliases.gText_ItemFinderOnTop = "gOtherText_ItemfinderItemUnderfoot"
 -- pokeruby/data/field_move_scripts.inc:10
 TextAliases.Text_WantToCut = "UseCutPromptText"
 TextAliases.Text_MonUsedFieldMove = "UsedCutRockSmashText"

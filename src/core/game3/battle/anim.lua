@@ -8,6 +8,7 @@ local BallOpen = require("src.core.game3.battle.ball_open")
 local AnimPal = require("src.core.game3.battle.anim_pal")
 local AnimCoords = require("src.core.game3.battle.anim_coords")
 local SE = require("src.core.game3.se_ids")
+local ModBattle = require("src.core.game3.battle.mod_registries")
 
 local function fallback_prefix()
   return require("src.core.game3.battle.profile").get().animCacheFallback or nil
@@ -873,6 +874,8 @@ function Anim.launchShiny(key, opts)
 end
 
 function Anim.scriptForMove(moveId)
+  local modScript = ModBattle.animScript(moveId)
+  if modScript then return modScript end
   local pack = load_pack()
   local numId = tonumber(moveId)
   if not numId then

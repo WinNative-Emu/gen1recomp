@@ -210,4 +210,24 @@ function AiItems.shouldUseItem(st, id)
   return nil
 end
 
+function AiItems.useStocked(st, id, item)
+  item = item_num(item)
+  if item == 0 or id % 2 ~= 1 then return nil end
+  local e = AiItems.effect(item)
+  if not e then return nil end
+  local h = AiItems.history(st)
+  for i = 1, 4 do
+    if h.items[i] == item then
+      local kind = AiItems.itemType(item, e)
+      st.aiItemType = st.aiItemType or {}
+      st.aiItemType[id] = kind
+      st.aiItemFlags = st.aiItemFlags or {}
+      st.aiItemFlags[id] = 0
+      h.items[i] = 0
+      return { item = item, aiItemType = kind, aiItemFlags = 0 }
+    end
+  end
+  return nil
+end
+
 return AiItems

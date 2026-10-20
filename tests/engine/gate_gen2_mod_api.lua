@@ -145,7 +145,8 @@ for name, path in pairs({ maps = "gen2Maps", tilesets = "gen2Tilesets",
                           item_effects = "gen2ItemEffects",
                           balls = "gen2Balls",
                           ai_classes = "gen2AiClasses",
-                          evolution_methods = "gen2EvolutionMethods" }) do
+                          evolution_methods = "gen2EvolutionMethods",
+                          map_scripts = "gen2Scripts" }) do
   local spec = Schemas.REGISTRIES[name]
   T.check(spec ~= nil, "catalog still has registry: " .. name)
   T.eq(Schemas.targetFor(name, spec, 2), path,
@@ -159,7 +160,7 @@ end
 
 -- The mirror set: registries that exist because GOLD does.  They carry no
 -- Gen 1 target at all, so the routed path is the only path they ever have, and
--- Schemas.GEN1 gates them on Red the way Schemas.GEN2 gates `map_scripts` on Gold.
+-- Schemas.GEN1 gates them on Red the way Schemas.GEN2 gates `rulesets` on Gold.
 -- Each is held to a live consumer, which is the claim that matters: a routed
 -- registry nothing reads is the silent no-op the whole routing table exists to
 -- prevent.  The per-consumer cases are in
@@ -211,16 +212,8 @@ end
 -- Game2:draw composites a `present` pipeline.  Both are asserted in the shared
 -- set above.
 --
--- `transitions` stays because Gold's own intro
--- (src/ui/gen2/BattleTransition.lua) keys STYLES as a boolean SET of the four
--- cart wipes rather than the { frames, draw, sound, flash } record this
--- registry carries, and has no styleDef lookup a mod id could reach.
---
--- map_scripts is the one genuine script-side gap left: src/script/gen2/Vm.lua
--- runs the cart's bytecode out of data.gen2Scripts keyed by ROM pointer, and a
--- Lua row list merged into that pool is not something the VM can run.
-for _, name in ipairs({ "map_scripts", "rulesets", "transitions",
-                        "field", "text_pointers", "link_fields" }) do
+for _, name in ipairs({ "rulesets",
+                        "text_pointers", "link_fields" }) do
   local spec = Schemas.REGISTRIES[name]
   T.check(spec ~= nil, "catalog still has registry: " .. name)
   T.eq(Schemas.targetFor(name, spec, 2), nil,
@@ -442,7 +435,9 @@ local GEN2_HOOKS = {
   -- nextFn gets nil there).
   "battle.catch_exp", "battle.low_health_alarm", "battle.overlay",
   "battle.bottom_ui_visible", "battle.status_hud_visible",
-  "battle.move_grid_navigation",
+  "battle.move_grid_navigation", "battle.caught_marker_visible",
+  "battle.field_residual", "battle.menu_auxiliary",
+  "trainer.before_battle", "core.logic_speed",
   -- One pic path resolver for both games: the Gen 1 site is the SHARED
   -- src/pokemon/Sprites.lua and Gold's own battle screen calls the same hook
   -- with the Gen 1 ctx keys plus `letter` and `shiny`, which Red has no
@@ -690,11 +685,8 @@ local GEN2_READY = {
     local mod = ...
     -- one registry with a Gen 2 home, one without: the first applies in both
     -- generations, the second applies in Gen 1 and reports in Gen 2.
-    -- `transitions` is the gated one because Gold draws its own battle intro
-    -- (src/ui/gen2/BattleTransition.lua) and never composes through the Gen 1
-    -- Renderer, so nothing on a Gold boot would ever read the merged record.
     mod.content.pokemon:patch("FIXMON_A", { catchRate = 123 })
-    mod.content.transitions:register("FIXTURE_WIPE", { frames = 30 })
+    mod.content.link_fields:register("FIXTURE_WIPE", { rev = 1 })
   ]],
 }
 
@@ -725,9 +717,9 @@ do
     "Gen 1: a gen2compat mod loads too")
   T.eq(run.data.pokemon.FIXMON_A.catchRate, 123,
     "Gen 1: the later mod's patch merged")
-  T.check(run.data.transitions ~= nil
-    and run.data.transitions.FIXTURE_WIPE ~= nil,
-    "Gen 1: transitions merged")
+  T.check(run.data.link_fields ~= nil
+    and run.data.link_fields.FIXTURE_WIPE ~= nil,
+    "Gen 1: link_fields merged")
   run.release()
 end
 
@@ -756,12 +748,12 @@ do
     "Gen 2: only the declared mod's patch merged")
 
   -- a gated registry takes the write, drops it, and says so
-  T.check(run.data.transitions == nil
-    or run.data.transitions.FIXTURE_WIPE == nil,
+  T.check(run.data.link_fields == nil
+    or run.data.link_fields.FIXTURE_WIPE == nil,
     "Gen 2: a gated registry merges nothing")
   local told = false
   for _, message in ipairs(run.errors) do
-    if message:match("transitions") and message:match("Gen 2") then told = true end
+    if message:match("link_fields") and message:match("Gen 2") then told = true end
   end
   T.check(told, "Gen 2: the dropped registration is reported, not silent")
   run.release()

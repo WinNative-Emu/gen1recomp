@@ -25,6 +25,55 @@ function ItemUse.fieldUseKind(id, session, inBattle)
   return ItemsData.fieldUseKind(id)
 end
 
+ItemUse.modEffects = {}
+ItemUse.modGame = nil
+
+function ItemUse.installEffects(effects, game)
+  ItemUse.modEffects = type(effects) == "table" and effects or {}
+  ItemUse.modGame = game
+end
+
+function ItemUse.modEffect(id)
+  if next(ItemUse.modEffects) == nil then return nil end
+  local info = ItemsData.info(id)
+  local name = info and info.modEffect
+  local record = name and ItemUse.modEffects[name]
+  if type(record) == "table" and type(record.use) == "function" then
+    return record, name, info
+  end
+  return nil
+end
+
+function ItemUse.runModEffect(session, bag, id, mon, partySlot, battle, moveSlot)
+  local record, _, info = ItemUse.modEffect(id)
+  if not record then return false, nil end
+  local Compat = require("src.mods.Gen3Compat")
+  local game = ItemUse.modGame
+  local ok, result, messages = pcall(record.use, {
+    data = game and game.data,
+    save = Compat.saveView,
+    game = game,
+    session = session,
+    itemId = Compat.itemName(id) or tostring(id),
+    item = info,
+    target = mon,
+    partySlot = partySlot,
+    battle = battle,
+    moveIndex = moveSlot,
+  })
+  if not ok then
+    require("src.core.Logger").error("item_effects use failed: %s", tostring(result))
+    return false, nil
+  end
+  local text = type(messages) == "table" and table.concat(messages, "\f") or nil
+  if result == "consumed" then
+    Bag.remove(bag, id, 1)
+    return true, text
+  end
+  if result == "kept" then return true, text end
+  return false, text
+end
+
 local function player_name(session)
   return tostring((session and (session.name or session.playerName)) or "")
 end
@@ -499,20 +548,31 @@ function ItemUse.useBikeRse(session, id, BikeRse)
   return false, "bike", not_the_time(session)
 end
 
+-- pokefirered/src/bike.c:289 IsBikingDisallowedByPlayer
+local function biking_disallowed_by_player(Player)
+  if Player.surfing or Player.underwater then return true end
+  local x, y = Player.cellX, Player.cellY
+  if Player.moving then x, y = Player.targetX, Player.targetY end
+  local Collision = require("src.core.game3.collision")
+  local beh = Collision.behavior and Collision.behavior(x, y)
+  -- pokefirered/src/bike.c:263 MetatileBehaviorForbidsBiking
+  return beh ~= nil and beh == require("src.core.game3.mb").id("RUNNING_DISALLOWED")
+end
+
 -- pokefirered/src/item_use.c:253 FieldUseFunc_Bike
 function ItemUse.useBike(session, id)
   local BikeRse = require("src.core.game3.bike").rse(session)
   if BikeRse then return ItemUse.useBikeRse(session, id, BikeRse) end
   local Player = require("src.core.game3.player")
   if Player.biking then
-    -- pokefirered/src/item_use.c:261: If already on bike, cannot dismount on cycling road
+    -- pokefirered/src/item_use.c:261
     if Player.isOnCyclingRoad and Player.isOnCyclingRoad(session) then
       return false, "bike", cant_dismount_bike_text()
     end
     -- pokefirered/src/item_use.c:267
     local allowed = map_header_flag(session, "bikingAllowed")
     if allowed == nil then allowed = is_outdoor(session) end
-    if not allowed then return false, "bike", not_the_time(session) end
+    if not allowed or biking_disallowed_by_player(Player) then return false, "bike", not_the_time(session) end
     Player.biking = false
     if session then session.biking = false end
     local Runtime = package.loaded["src.core.game3.runtime"]
@@ -526,10 +586,10 @@ function ItemUse.useBike(session, id)
     require("src.core.game3.audio").bikeMusic(false)
     return true, "bike", nil
   else
-    -- pokefirered/src/overworld.c:948 Overworld_IsBikingAllowed: Mounting only allowed where biking is permitted
+    -- pokefirered/src/item_use.c:267
     local biking = map_header_flag(session, "bikingAllowed")
     if biking == nil then biking = is_outdoor(session) end
-    if not biking then
+    if not biking or biking_disallowed_by_player(Player) then
       return false, "bike", not_the_time(session)
     end
     pcall(function()
@@ -643,6 +703,8 @@ function ItemUse.needsPartyTarget(id)
   if not id then return false end
   local info = ItemsData.info(id)
   if not info then return false end
+  local modRecord = ItemUse.modEffect(id)
+  if modRecord then return modRecord.needsTarget == true end
   local use = ItemUse.fieldUseKind(id)
   if use == "heal" or use == "status" or use == "revive" or use == "tm"
       or use == "pp" or use == "level" or use == "evo" or use == "vitamin" then
@@ -1319,6 +1381,19 @@ local function useField(session, bag, id, partySlot, moveSlot)
   local info = ItemsData.info(id)
   if not info then return false, "unknown", Strings("Unknown item.") end
   local use = ItemUse.fieldUseKind(id, session)
+
+  local modRecord = ItemUse.modEffect(id)
+  if modRecord then
+    if modRecord.field == false then return false, "none", not_the_time(session) end
+    local mon
+    if modRecord.needsTarget then
+      mon = partySlot and session and session.party and session.party[partySlot]
+      if not mon then return false, "need_slot", Strings("Select a POKéMON.") end
+    end
+    local ok, text = ItemUse.runModEffect(session, bag, id, mon, partySlot, nil, moveSlot)
+    if ok then return true, "mod", text end
+    return false, "noeffect", text or wont_have_effect()
+  end
 
   if require("src.core.game3.profile").family(session) == "rse" then
     local n = ItemsData.toNumericId(id) or tonumber(id)

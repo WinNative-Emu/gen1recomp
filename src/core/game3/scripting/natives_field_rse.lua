@@ -384,19 +384,19 @@ FieldRse.BY_NAME = {
   -- pokeemerald/src/field_specials.c:3470
   GetAbnormalWeatherMapNameAndType = function(ctx, adapters)
     local location = Rse.var("VAR_ABNORMAL_WEATHER_LOCATION")
-    local mapSecs = {
-      "ROUTE_114", "ROUTE_114", "ROUTE_115", "ROUTE_115",
-      "ROUTE_116", "ROUTE_116", "ROUTE_118", "ROUTE_118",
-      "ROUTE_105", "ROUTE_105", "ROUTE_125", "ROUTE_125",
-      "ROUTE_127", "ROUTE_127", "ROUTE_129", "ROUTE_129",
+    local maps = {
+      "MAP_ROUTE114", "MAP_ROUTE114", "MAP_ROUTE115", "MAP_ROUTE115",
+      "MAP_ROUTE116", "MAP_ROUTE116", "MAP_ROUTE118", "MAP_ROUTE118",
+      "MAP_ROUTE105", "MAP_ROUTE105", "MAP_ROUTE125", "MAP_ROUTE125",
+      "MAP_ROUTE127", "MAP_ROUTE127", "MAP_ROUTE129", "MAP_ROUTE129",
     }
-    local sectionName = mapSecs[location]
-    if sectionName then
-      local RegionMap = require("src.ui.game3.rse.region_map")
-      local sec = RegionMap.mapsec(sectionName)
-      if sec and adapters and adapters.setStringVar then
-        adapters.setStringVar(1, RegionMap.mapName(sec))
-      end
+    local mapName = maps[location]
+    if mapName and adapters and adapters.setStringVar then
+      local Constants = require("src.core.game3.constants")
+      local C = Constants.of(Constants.versionOf(Rse.session()))
+      -- pokeemerald/src/field_specials.c:3493
+      local num = tonumber(C:require("map_groups", mapName).num)
+      adapters.setStringVar(1, require("src.ui.game3.rse.region_map").mapName(num))
     end
     return false, location >= 9 and 1 or 0
   end,
@@ -911,6 +911,8 @@ local STORY = {
     local ListMenu = require("src.core.game3.scripting.natives_listmenu")
     local copy = { keepOpen = false }
     for k, v in pairs(layout) do copy[k] = v end
+    -- pokeemerald/src/field_specials.c:2570
+    copy.width = nil
     copy.exchangeMenuId = id
     return ListMenu.presentItems(ctx, "scroll_multichoice", labels, copy, function(index)
       Rse.setSpecialVar(ctx, varId("VAR_RESULT"), index)

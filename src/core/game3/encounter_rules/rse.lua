@@ -601,9 +601,61 @@ function M.bind(E, H, policy)
     return false
   end
 
+  local function fishing_integer(value, max)
+    return type(value) == "number" and value >= 1 and value < math.huge
+      and value == math.floor(value) and (not max or value <= max)
+  end
+
+  local function valid_fishing_pool(pool)
+    if type(pool) ~= "table" or #pool == 0 then return false end
+    for key in pairs(pool) do
+      if not fishing_integer(key, #pool) then return false end
+    end
+    for i = 1, #pool do
+      local entry = pool[i]
+      if type(entry) ~= "table" or not fishing_integer(entry.species) then return false end
+      local lo = entry.minLevel or entry.level
+      local hi = entry.maxLevel or entry.level or lo
+      if not fishing_integer(lo, 100) or not fishing_integer(hi, 100)
+        or (entry.minLevel ~= nil and not fishing_integer(entry.minLevel, 100))
+        or (entry.maxLevel ~= nil and not fishing_integer(entry.maxLevel, 100))
+        or (entry.level ~= nil and not fishing_integer(entry.level, 100)) then return false end
+      if entry.chance ~= nil and (type(entry.chance) ~= "number"
+        or entry.chance < 0 or entry.chance > 256
+        or entry.chance ~= math.floor(entry.chance)) then return false end
+    end
+    return true
+  end
+
+  local function choose_mod_fishing_index(pool)
+    local previous = 0
+    local cumulative = true
+    for i = 1, #pool do
+      local chance = pool[i].chance
+      if chance == nil or chance < previous then
+        cumulative = false
+        break
+      end
+      previous = chance
+    end
+    if cumulative and previous == 256 then
+      local rand = Rng.Random() % 256
+      for i = 1, #pool do
+        if rand < pool[i].chance then return i end
+      end
+    end
+    return 1 + (Rng.Random() % #pool)
+  end
+
   -- pokeemerald/src/wild_encounter.c:780
   function R.rollFishing(mapId, rodKind, opts)
+    local pool = opts and opts.modFishingPool
+    if pool ~= nil and not valid_fishing_pool(pool) then return nil end
     E.ensureLoaded()
+    if pool ~= nil then
+      local entry = pool[choose_mod_fishing_index(pool)]
+      return create_wild(tonumber(entry.species), choose_level(entry))
+    end
     if R.checkFeebas(mapId, opts) then
       local mon = wild_extra().feebas.mon
       return create_wild(tonumber(mon.species), choose_level(mon))

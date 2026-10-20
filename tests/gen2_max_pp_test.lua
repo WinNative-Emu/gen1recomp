@@ -229,7 +229,8 @@ do
     local geodude = { species = "GEODUDE", hp = 30, maxHp = 30, stats = {},
       moves = { { id = "TACKLE", pp = 35, maxPp = 35 },
                 { id = "ROCK_THROW", pp = 15, maxPp = 15 } } }
-    local b = setmetatable({ data = TDATA, events = {} }, Battle)
+    local b = setmetatable({ data = TDATA, events = {}, stages = {
+      player = Battle.newStages(), enemy = Battle.newStages() } }, Battle)
     b.player, b.enemy = ditto, geodude
     Battle.MOVE_EFFECTS.EFFECT_TRANSFORM(b, ditto, geodude)
     return ditto

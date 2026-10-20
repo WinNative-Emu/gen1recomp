@@ -1,4 +1,5 @@
 local Rng = require("src.core.game3.rng")
+local Runtime = require("src.mods.Runtime")
 
 local Roamer = {}
 
@@ -150,6 +151,14 @@ local function roamer_state(session)
   return r
 end
 
+local function emit_moved(r, from, reason)
+  if from == r.map or not Runtime.wants("roamer.moved") then return end
+  Runtime.emit("roamer.moved", {
+    index = 1, slot = r, species = r.species,
+    from = from, to = r.map, reason = reason,
+  })
+end
+
 -- pokeemerald/src/roamer.c:84
 function Roamer.initRse(session, createLatios)
   local cfg = cfg_of(session)
@@ -175,14 +184,16 @@ function Roamer.updateHistory(session, mapId)
 end
 
 -- pokeemerald/src/roamer.c:127
-function Roamer.moveToOtherSet(session)
+function Roamer.moveToOtherSet(session, reason, from)
   local r = roamer_state(session)
   if not (r and r.active) then return end
+  if from == nil then from = r.map end
   local sets = Roamer.locationSets(cfg_of(session))
   while true do
     local mapId = sets[(Rng.Random() % #sets) + 1][1]
     if r.map ~= mapId then
       r.map = mapId
+      emit_moved(r, from, reason or "jump")
       return
     end
   end
@@ -192,17 +203,18 @@ end
 function Roamer.onContinue(session, mapId)
   local r = roamer_state(session)
   if not (r and cfg_of(session)) then return end
+  local from = r.map
   -- pokeemerald/src/roamer.c:18
   r.history, r.map = { false, false, false }, false
   Roamer.updateHistory(session, mapId)
-  Roamer.moveToOtherSet(session)
+  Roamer.moveToOtherSet(session, "jump", from)
 end
 
 -- pokeemerald/src/roamer.c:149
 function Roamer.moveWithinSet(session)
   local cfg = cfg_of(session)
   if (Rng.Random() % cfg.moveOdds) == 0 then
-    return Roamer.moveToOtherSet(session)
+    return Roamer.moveToOtherSet(session, "connection")
   end
   local r = roamer_state(session)
   if not (r and r.active) then return end
@@ -211,7 +223,9 @@ function Roamer.moveWithinSet(session)
       while true do
         local mapId = set[(Rng.Random() % (#set - 1)) + 2]
         if r.history[3] ~= mapId and mapId then
+          local from = r.map
           r.map = mapId
+          emit_moved(r, from, "connection")
           return
         end
       end
@@ -225,7 +239,14 @@ local function try_encounter(session, cfg, mapId)
   if not (r.active and r.map == mapId) then return nil end
   if (Rng.Random() % cfg.encounterOdds) ~= 0 then return nil end
   -- pokeemerald/src/roamer.c:194
-  return Roamer.instance(session)
+  local mon = Roamer.instance(session)
+  if mon and Runtime.wants("roamer.encountered") then
+    Runtime.emit("roamer.encountered", {
+      index = 1, slot = r, species = r.species,
+      level = r.level, mapId = mapId,
+    })
+  end
+  return mon
 end
 
 Roamer.SPECIES_RAIKOU = 243

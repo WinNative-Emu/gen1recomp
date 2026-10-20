@@ -67,6 +67,8 @@ function BattleItems.isBall(id)
 end
 
 function BattleItems.isBattleUsable(id)
+  local modRecord = ItemUse.modEffect(id)
+  if modRecord then return modRecord.battle ~= false end
   if (ItemsData.toNumericId(id) or tonumber(id)) == 175 and require("src.core.game3.rs.enigma").matches() then
     return ItemUse.fieldUseKind(id, nil, true) ~= "none"
   end
@@ -81,6 +83,8 @@ end
 function BattleItems.needsPartySelect(id)
   if not id then return false end
   if Catching.isBall(id) then return false end
+  local modRecord = ItemUse.modEffect(id)
+  if modRecord then return modRecord.needsTarget == true end
   local num = ItemsData.toNumericId(id) or tonumber(id)
   if num == 80 then return false end -- POKE_DOLL
   if BattleItems.isStatBooster(id) then return false end
@@ -218,6 +222,7 @@ function BattleItems.canUseOn(st, itemId, partySlot, mon, moveSlot)
   local session = st and st.session
   if not mon or not itemId then return false, wont_have_effect() end
   if mon.isEgg then return false, Strings("An EGG can't be used on.") end
+  if ItemUse.modEffect(itemId) then return true end
   if (ItemsData.toNumericId(itemId) or tonumber(itemId)) == 175 and require("src.core.game3.rs.enigma").matches(session) then
     if ItemUse.fieldUseKind(itemId, session, true) == "none" then return false, wont_have_effect() end
     local ok, detail = ItemUse.applyEnigmaItem(session, mon, moveSlot or 1,
@@ -318,6 +323,21 @@ function BattleItems.use(st, adapter, bag, session, itemId, partySlot, battlerId
   if not Bag.has(bag, itemId, 1) then
     say(Strings("You don't have that item."))
     return "error", msgs, false, false
+  end
+
+  local modRecord = ItemUse.modEffect(itemId)
+  if modRecord then
+    if modRecord.battle == false then
+      say(wont_have_effect()); return "error", msgs, false, false
+    end
+    local mon = modRecord.needsTarget and (st.playerParty or (session and session.party) or {})[partySlot] or nil
+    if modRecord.needsTarget and not mon then return "need_slot", msgs, false, false end
+    local used, text = ItemUse.runModEffect(session, bag, itemId, mon, partySlot, st, moveSlot)
+    if not used then
+      say(text or wont_have_effect()); return "error", msgs, false, false
+    end
+    if text then say(text) end
+    return "heal", msgs, true, false, text
   end
 
   local num = ItemsData.toNumericId(itemId) or tonumber(itemId)

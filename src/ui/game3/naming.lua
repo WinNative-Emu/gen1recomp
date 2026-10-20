@@ -15,6 +15,8 @@ local RomText = require("src.core.game3.rom_text")
 local TextIR = require("src.core.game3.scripting.text_ir")
 local RsNaming = require("src.ui.game3.rs.naming_data")
 local SE = require("src.core.game3.se_ids")
+local Runtime = require("src.mods.Runtime")
+local Logger = require("src.core.Logger")
 
 local rsCursorMultiplyShader
 local function dampRsCursor(img, quad, x, y)
@@ -199,6 +201,102 @@ local function pagesOf(st)
   return (st and st.pages) or PAGES
 end
 
+local function cellRole(cell)
+  if cell == "ED" then return "OK" end
+  if cell == "lower case" or cell == "UPPER CASE" or cell == "lower" or cell == "UPPER" then
+    return "PAGE"
+  end
+end
+
+local function sameGrid(grid) return grid end
+
+local function sequenceLength(value, capacity)
+  if type(value) ~= "table" or getmetatable(value) ~= nil then return nil end
+  local n = #value
+  if n < 1 or n > capacity then return nil end
+  for key in pairs(value) do
+    if type(key) ~= "number" or key % 1 ~= 0 or key < 1 or key > n then return nil end
+  end
+  return n
+end
+
+local function nativeGrid(grid, page, rs, allowed)
+  local rowCount = sequenceLength(grid, #page.rows)
+  if not rowCount then return nil end
+  local rows = {}
+  for r = 1, #page.rows do
+    local row
+    if r <= rowCount then row = grid[r] else row = { "" } end
+    local count = sequenceLength(row, #page.colX)
+    if not count then return nil end
+    local out = {}
+    for c = 1, count do
+      local cell = row[c]
+      if type(cell) ~= "string" then return nil end
+      if not cellRole(cell) and not allowed[cell]
+        and (utf8Len(cell) ~= 1 or FrlgFont.glyphId(cell) == 0) then return nil end
+      out[c] = cell
+    end
+    if rs then
+      for c = count + 1, #page.rows[1] do out[c] = "" end
+    end
+    rows[r] = out
+  end
+  return rows
+end
+
+local function setGridPages(st, pages)
+  local oldRow = pagesOf(st)[st.page].rows[st.row]
+  local wasSide = st.col > #oldRow
+  st.pages = pages
+  local row = pagesOf(st)[st.page].rows[st.row]
+  st.col = wasSide and #row + 1 or math.max(1, math.min(st.col, #row))
+end
+
+local function refreshGrids(st)
+  if not Runtime.wantsHook("ui.naming.grid") then
+    if st.nativePages then setGridPages(st, st.unhookedPages) end
+    return
+  end
+  if not st.nativePages then
+    st.unhookedPages = st.pages
+    st.nativePages = pagesOf(st)
+  end
+  local allowed = { [""] = true, [" "] = true }
+  for _, page in ipairs(st.nativePages) do
+    for _, row in ipairs(page.rows) do
+      for _, cell in ipairs(row) do allowed[cell] = true end
+    end
+  end
+  local pages = {}
+  for i, page in ipairs(st.nativePages) do
+    local candidate = {}
+    for r, row in ipairs(page.rows) do
+      candidate[r] = {}
+      for c, cell in ipairs(row) do candidate[r][c] = cell end
+    end
+    local hooked = Runtime.call("ui.naming.grid", sameGrid, candidate, {
+      lower = page.id == "LOWER",
+      title = st.title,
+      maxLen = st.maxLen,
+      game = st.game,
+    })
+    local rows = nativeGrid(hooked, page, st.rs, allowed)
+    if rows then
+      pages[i] = { id = page.id, rows = rows, colX = page.colX }
+    else
+      local owners = {}
+      for _, entry in ipairs((Runtime.hooks.chains or {})["ui.naming.grid"] or {}) do
+        owners[#owners + 1] = tostring(entry.owner or "?")
+      end
+      Logger.error("[%s] ui.naming.grid returned an invalid or oversized native grid; keeping the vanilla grid",
+        table.concat(owners, ", "))
+      pages[i] = page
+    end
+  end
+  setGridPages(st, pages)
+end
+
 local function pageInfo(st)
   return pagesOf(st)[st.page]
 end
@@ -232,7 +330,7 @@ local function cellAt(st)
 end
 
 local function appendChar(st, ch)
-  if not ch then return end
+  if not ch or ch == "" then return end
   if st.rs then
     st.name = utf8Trim(st.name, st.maxLen - 1) .. ch
     st.cursorActivation = 0
@@ -277,9 +375,15 @@ local function commitPage(st)
 end
 
 -- pokefirered/src/naming_screen.c:768
-local function cyclePage(st)
+local function cyclePage(st, caseSwitch)
   if st.swapT ~= nil then return end
   st.swapTo = st.page % #pagesOf(st) + 1
+  if caseSwitch then
+    local target = pageInfo(st).id == "LOWER" and "UPPER" or "LOWER"
+    for i, page in ipairs(pagesOf(st)) do
+      if page.id == target then st.swapTo = i break end
+    end
+  end
   st.swapT = 0
   playSe(6)
 end
@@ -322,6 +426,23 @@ local function sentToPcPages(st, nick)
   return pages
 end
 
+local function selectCell(st)
+  local cell = cellAt(st)
+  local role = cellRole(cell)
+  if role == "PAGE" then
+    cyclePage(st, true)
+  elseif role == "OK" then
+    playSe(st.rs and SE.SE_SELECT or 5)
+    local nick = confirm(st)
+    local pages = sentToPcPages(st, nick)
+    if pages then st.pcPages, st.pcPage, st.pcResult = pages, 1, nick
+    else Naming.close(nick) end
+  else
+    playSe(st.rs and SE.SE_SELECT or 5)
+    appendChar(st, cell)
+  end
+end
+
 --- Draw keyboard letters at fixed colX cells (matches cursor grid; ignores glyph-width drift).
 local function drawKeyboardKeys(page, colors, layout)
   local L = layout or L
@@ -333,6 +454,7 @@ local function drawKeyboardKeys(page, colors, layout)
     local y = L.kbY + (r - 1) * 16 + L.keyTextOy
     for c = 1, #row do
       local ch = row[c]
+      if cellRole(ch) == "PAGE" then ch = "a/A" end
       if ch and ch ~= "" and ch ~= " " then
         local x = L.kbX + L.keyTextOx + (colX[c] or 0)
         FrlgFont.draw(ch, x, y, {
@@ -562,6 +684,7 @@ function Naming.open(opts)
     rs = rs, manifest = rs and man or nil,
     layout = rs and RsNaming.layout(man) or nil,
     monGender = opts.monGender or opts.gender,
+    game = opts.game or (package.loaded["src.core.game3.runtime"] or {})._game,
   }
   if rs then
     st.page = (tpl.initialPage or 0) + 1
@@ -579,6 +702,7 @@ function Naming.open(opts)
       end
     end
   end
+  refreshGrids(st)
   Naming._state = st
   Naming.openFlag = true
   Stack.push("naming", Naming, { hideBelow = true, fullscreen = true })
@@ -655,6 +779,7 @@ function Naming.handleInput(input)
     return
   end
 
+  refreshGrids(st)
   local function pressed(k)
     return input and input.wasPressed and input:wasPressed(k)
   end
@@ -674,8 +799,7 @@ function Naming.handleInput(input)
           else Naming.close(nick) end
         end
       else
-        playSe(SE.SE_SELECT)
-        appendChar(st, cellAt(st))
+        selectCell(st)
       end
     elseif pressed("b") then playSe(SE.SE_BALL); backspace(st)
     elseif pressed("select") then cyclePage(st)
@@ -765,8 +889,7 @@ function Naming.handleInput(input)
         end
       end
     else
-      playSe(5) -- pokefirered/src/naming_screen.c:1837
-      appendChar(st, cellAt(st))
+      selectCell(st)
     end
   end
 end
@@ -898,6 +1021,7 @@ end
 function Naming.draw()
   if not Naming.openFlag or not Naming._state then return end
   local st = Naming._state
+  refreshGrids(st)
   local L = layoutOf(st)
   local W, H = Display.W, Display.H
   local page = pageInfo(st)

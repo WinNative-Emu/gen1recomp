@@ -64,6 +64,11 @@ mod.content.ai_classes:patch("OPP_BROCK", { uses = 9 })
 - semantics: `record`
 - target: `Data.gen2AiClasses`
 
+### On Gen 3
+
+- semantics: `record`
+- target: `Data.gen3AiClasses`
+
 ## apricorns
 
 - semantics: `record`
@@ -90,6 +95,11 @@ mod.content.apricorns:override("RED_APRICORN", { apricorn = "RED_APRICORN", ball
 - semantics: `record`
 - target: `Data.gen2Apricorns`
 
+### On Gen 3
+
+Not available on Gen 3: the Gen 3 games have no counterpart, so a
+write here is dropped and reported on a Gen 3 boot.
+
 ## audio
 
 - semantics: `record`
@@ -101,6 +111,11 @@ mod.content.apricorns:override("RED_APRICORN", { apricorn = "RED_APRICORN", ball
 ```lua
 mod.content.audio:override("mapSongs", { ... })
 ```
+
+### On Gen 3
+
+Not available on Gen 3: the Gen 3 games have no counterpart, so a
+write here is dropped and reported on a Gen 3 boot.
 
 ## balls
 
@@ -126,6 +141,24 @@ mod.content.balls:override("GREAT_BALL", { randMax = 180, hpFactor = 12 })
 
 - semantics: `record`
 - target: `Data.gen2Balls`
+
+### On Gen 3
+
+- semantics: `record`
+- target: `Data.balls`
+
+The record differs; the registry name, the verbs and the id space
+do not.
+
+| field | type | required |
+|---|---|---|
+| `autoCatch` | boolean | no |
+| `multiplier` | integer 0..255 | no |
+
+<!-- snippet: illustrative -->
+```lua
+mod.content.balls:register("MOD_BALL", { multiplier = 25 })
+```
 
 ## battle_anims
 
@@ -168,6 +201,22 @@ accepted and merged as-is.
 mod.content.battle_anims:patch("moves", { SHADOW_BALL = "5e86" })
 ```
 
+### On Gen 3
+
+- semantics: `record`
+- target: `Data.gen3BattleAnims`
+
+The record differs; the registry name, the verbs and the id space
+do not.
+- value: {seq, source?}
+
+<!-- snippet: illustrative -->
+```lua
+mod.content.battle_anims:register("SHADOW_BALL", { seq = { { op = "createvisualtask", task = "AnimTask_ShakeMon", priority = 2, args = { "target", 3, 0, 6, 1 } }, { op = "waitforvisualfinish" }, { op = "end" } } })
+```
+
+On Gen 3 the id is a move id and `seq` is the battle animation script the cart runs for it: rows of the same `op` vocabulary the ROM pack uses (createsprite, createvisualtask, delay, playsewithpan, waitforvisualfinish, end). A native move id replaces its animation. Gen 1 subanimation and tilesheet records do not exist on Gen 3.
+
 ## battle_sprite_scales
 
 - semantics: `record`
@@ -194,6 +243,11 @@ image-level, then species-level, then the defaults (1x front, 2x back).
 The pic stays grounded at any scale: player feet stay flush on the
 text-box top, the enemy pic stays bottom-pinned in its slot, and the
 scale composes with the send-out grow animation.
+
+### On Gen 3
+
+Not available on Gen 3: the Gen 3 games have no counterpart, so a
+write here is dropped and reported on a Gen 3 boot.
 
 ## commands
 
@@ -304,6 +358,11 @@ accepted and merged as-is.
 mod.content.constants:patch("speciesOrder", { [252] = "MODMON" })
 ```
 
+### On Gen 3
+
+Not available on Gen 3: the Gen 3 games have no counterpart, so a
+write here is dropped and reported on a Gen 3 boot.
+
 ## cries
 
 - semantics: `record`
@@ -341,6 +400,36 @@ mod.content.decorations:patch("deco:2", { name = "COZY" })
 
 - semantics: `record`
 - target: `Data.gen2Decorations`
+
+### On Gen 3
+
+- semantics: `record`
+- target on `emerald`, `ruby`, `sapphire`: `Data.gen3Decorations`
+
+Not available on the other Gen 3 versions: a write there is
+dropped and reported.
+
+The record differs; the registry name, the verbs and the id space
+do not.
+
+| field | type | required |
+|---|---|---|
+| `category` | integer 0..7 | yes |
+| `description` | string | yes |
+| `id` | string | no |
+| `index` | integer 1..255 | yes |
+| `name` | string | yes |
+| `permission` | integer 0..3 | yes |
+| `price` | integer 0..65535 | yes |
+| `shape` | integer 0..9 | yes |
+| `tiles` | list of integer 0..1023 | yes |
+
+<!-- snippet: illustrative -->
+```lua
+mod.content.decorations:register("DECOR_MOD_DESK", { name = "MOD DESK", index = 130, permission = 0, shape = 0, category = 0, price = 500, description = "A desk.", tiles = { 640 } })
+```
+
+A Gen 3 decoration is a gDecorations row (Ruby, Sapphire and Emerald only). `index` is the decoration id the bag, the secret base save and scripts use; an id the cart already has replaces that row. `permission` is DECORPERM_SOLID_FLOOR..NA_WALL (0..3: sprite decorations are not moddable), `shape` DECORSHAPE_*, `category` DECORCAT_*, and `tiles` the metatile ids painted row by row.
 
 ## encounters
 
@@ -400,6 +489,30 @@ id that is not one of them is a write nothing reads. An id outside the set is
 rejected -- a Gen 1 mod ported unchanged passes the map where Gold wants the
 kind, and that call is refused rather than silently dropped.
 
+### On Gen 3
+
+- semantics: `record`
+- target: `Data.gen3Encounters`
+
+The record differs; the registry name, the verbs and the id space
+do not.
+
+| field | type | required |
+|---|---|---|
+| `fishing` | {rate, slots, ...} | no |
+| `grass` | {rate, slots, ...} | no |
+| `id` | string | no |
+| `land` | {rate, slots, ...} | no |
+| `mapGroup` | integer >= 0 | no |
+| `mapNum` | integer >= 0 | no |
+| `rocks` | {rate, slots, ...} | no |
+| `water` | {rate, slots, ...} | no |
+
+<!-- snippet: illustrative -->
+```lua
+mod.content.encounters:patch("FR_ROUTE_1", { land = { rate = 30 } })
+```
+
 ## evolution_methods
 
 - semantics: `record`
@@ -445,10 +558,32 @@ mod.content.field:patch("boot", { startMap = "SABLE_COVE" })
 
 ### On Gold (Gen 2)
 
-No Gen 2 home: Gold reimplements this system without reading the
-registry, so a write here is dropped and reported on a Gold boot.
-`docs/mod-api-gen2-compat.md` in the engine repo lists what is left
-to do for each one.
+- semantics: `deep`
+- target: `Data.field`
+
+The record differs; the registry name, the verbs and the id space
+do not.
+
+Id = a top-level key of the target table. The set below is **closed**:
+an id that is not one of these is rejected rather than merged, because
+the engine reads this table by name and a key it does not name is a
+write nothing reads.
+
+| key | type |
+|---|---|
+| `boot` | {namePresets?, rivalName?, startFacing?, startMap?, startMoney?, startX?, startY?} |
+
+<!-- snippet: illustrative -->
+```lua
+mod.content.field:patch("boot", { startMap = "NEW_BARK_TOWN", startX = 6, startY = 8 })
+```
+
+Gold reads only `boot`: the New Game spawn (`startMap`, `startX`, `startY`, `startFacing`, replacing SPAWN_HOME), the starting money, the rival's starting name and the naming presets. Every other Gen 1 key has no Gold consumer: `ledges` (Gold's ledges are tile collision types), `hiddenItems` (bg events in `maps`), `badgeGates`, `townMap` (`landmarks`), `flyOrder` (the flypoint table), `playerPics`, and `boot.lastHeal`, `boot.screens`, `boot.starterScript`, `boot.title`, `boot.playerName`.
+
+### On Gen 3
+
+Not available on Gen 3: the Gen 3 games have no counterpart, so a
+write here is dropped and reported on a Gen 3 boot.
 
 ## font
 
@@ -460,6 +595,11 @@ to do for each one.
 ```lua
 mod.content.font:register("charmap:hiragana_a", { seq = "あ", code = 256 })
 ```
+
+### On Gen 3
+
+- semantics: `record`
+- target: `Data.gen3Font`
 
 ## growth_rates
 
@@ -498,6 +638,11 @@ mod.content.held_items:override("LEFTOVERS", { heldEffect = "HELD_LEFTOVERS", he
 
 - semantics: `record`
 - target: `Data.gen2HeldItems`
+
+### On Gen 3
+
+Not available on Gen 3: the Gen 3 games have no counterpart, so a
+write here is dropped and reported on a Gen 3 boot.
 
 ## icons
 
@@ -588,6 +733,31 @@ do not.
 | `price` | integer >= 0 | yes |
 | `tossable` | boolean | no |
 
+### On Gen 3
+
+- semantics: `record`
+- target: `Data.gen3Items`
+
+The record differs; the registry name, the verbs and the id space
+do not.
+
+| field | type | required |
+|---|---|---|
+| `battleUsage` | integer 0..255 | no |
+| `description` | string | no |
+| `effect` | item_effects id \| list of integer 0..255 | no |
+| `fieldUse` | string | no |
+| `holdEffect` | integer 0..255 | no |
+| `holdEffectParam` | integer 0..255 | no |
+| `id` | string | yes |
+| `importance` | integer 0..255 | no |
+| `index` | integer 1..1023 | no |
+| `name` | string | yes |
+| `pocket` | string | no |
+| `price` | integer >= 0 | yes |
+| `registrability` | integer 0..255 | no |
+| `secondaryId` | integer >= 0 | no |
+
 ## landmarks
 
 - semantics: `record`
@@ -614,6 +784,33 @@ mod.content.landmarks:patch("LANDMARK_ROUTE_29", { x = 12 })
 
 - semantics: `record`
 - target: `Data.gen2Landmarks.landmarks`
+
+### On Gen 3
+
+- semantics: `record`
+- target: `Data.gen3Landmarks`
+
+The record differs; the registry name, the verbs and the id space
+do not.
+
+| field | type | required |
+|---|---|---|
+| `height` | integer >= 1 | no |
+| `id` | string | no |
+| `index` | integer 0..255 | yes |
+| `name` | string | yes |
+| `region` | integer 0..3 | no |
+| `theme` | one of "wood" \| "marble" \| "stone" \| "brick" \| "underwater" \| "stone2" | no |
+| `width` | integer >= 1 | no |
+| `x` | integer >= 0 | no |
+| `y` | integer >= 0 | no |
+
+<!-- snippet: illustrative -->
+```lua
+mod.content.landmarks:register("MAPSEC_MOD_COVE", { name = "MOD COVE", index = 230, theme = "wood", x = 4, y = 6 })
+```
+
+A Gen 3 landmark is a map section (the byte a map header carries as `regionMapSectionId`). `index` names the section: an index the cart already uses renames and re-themes it, a free one adds a new section. `x`/`y` (and `width`/`height`, default 1) are zero-based region map cells the cursor resolves to this section; `region` picks the FireRed region layout (0 Kanto, 1..3 Sevii) and Ruby/Sapphire/Emerald ignore it. The pretty tilemap art is not redrawn.
 
 ## link_fields
 
@@ -642,6 +839,11 @@ registry, so a write here is dropped and reported on a Gold boot.
 `docs/mod-api-gen2-compat.md` in the engine repo lists what is left
 to do for each one.
 
+### On Gen 3
+
+Not available on Gen 3: the Gen 3 games have no counterpart, so a
+write here is dropped and reported on a Gen 3 boot.
+
 ## map_scripts
 
 - semantics: `compose`
@@ -655,10 +857,31 @@ mod.content.map_scripts:register("PALLET_TOWN", { talk = { ... } })
 
 ### On Gold (Gen 2)
 
-No Gen 2 home: Gold reimplements this system without reading the
-registry, so a write here is dropped and reported on a Gold boot.
-`docs/mod-api-gen2-compat.md` in the engine repo lists what is left
-to do for each one.
+- semantics: `record`
+- target: `Data.gen2Scripts`
+
+The record differs; the registry name, the verbs and the id space
+do not.
+- value: list of any value
+
+<!-- snippet: illustrative -->
+```lua
+mod.content.map_scripts:register("MYMOD_TALK", { { op = "jumptextfaceplayer", text = "MYMOD_HELLO" } })
+```
+
+### On Gen 3
+
+- semantics: `record`
+- target: `Data.gen3Scripts`
+
+The record differs; the registry name, the verbs and the id space
+do not.
+- value: list of any value
+
+<!-- snippet: illustrative -->
+```lua
+mod.content.map_scripts:override("EventScript_BufferItemsPocket", { { op = "return" } })
+```
 
 ## map_songs
 
@@ -703,6 +926,30 @@ mod.content.maps:register("MY_CAVE", { tileset = "CAVERN", ... })
 - semantics: `record`
 - target: `Data.gen2Maps`
 
+### On Gen 3
+
+- semantics: `record`
+- target: `Data.maps`
+
+The record differs; the registry name, the verbs and the id space
+do not.
+
+| field | type | required |
+|---|---|---|
+| `connections` | any value | no |
+| `height` | integer >= 0 | no |
+| `id` | string | no |
+| `name` | string | no |
+| `objects` | list of any value | no |
+| `tileset` | any value | no |
+| `warps` | list of any value | no |
+| `width` | integer >= 0 | no |
+
+<!-- snippet: illustrative -->
+```lua
+mod.content.maps:patch("FR_PALLET_TOWN", { weather = 2 })
+```
+
 ## migrations
 
 - semantics: `compose`
@@ -737,6 +984,11 @@ A "primary" handler returns its messages as an array. Set `failed = true` on tha
 
 - semantics: `record`
 - target: `Data.gen2MoveEffects`
+
+### On Gen 3
+
+- semantics: `record`
+- target: `Data.gen3MoveEffects`
 
 ## moves
 
@@ -796,6 +1048,30 @@ do not.
 | `semiInvulnerable` | boolean | no |
 | `type` | type_chart id | yes |
 
+### On Gen 3
+
+- semantics: `record`
+- target: `Data.gen3Moves`
+
+The record differs; the registry name, the verbs and the id space
+do not.
+
+| field | type | required |
+|---|---|---|
+| `accuracy` | integer 0..100 | yes |
+| `category` | one of "physical" \| "special" \| "status" | no |
+| `effect` | integer 0..255 | no |
+| `flags` | integer 0..255 | no |
+| `id` | string | yes |
+| `index` | integer 1..1023 | no |
+| `name` | string | yes |
+| `power` | integer 0..255 | yes |
+| `pp` | integer 0..64 | yes |
+| `priority` | integer -7..7 | no |
+| `secondaryChance` | integer 0..100 | no |
+| `target` | integer 0..255 | no |
+| `type` | type_chart id | yes |
+
 ## music
 
 - semantics: `record`
@@ -852,6 +1128,11 @@ accepted and merged as-is.
 mod.content.palettes:patch("pokemon", { TOTODILE = { shiny = { {255,255,255}, {255,0,0} } } })
 ```
 
+### On Gen 3
+
+- semantics: `record`
+- target: `Data.gen3Palettes`
+
 ## phone_contacts
 
 - semantics: `record`
@@ -885,6 +1166,11 @@ mod.content.phone_contacts:patch("PHONE_YOUNGSTER_JOEY", { map = "ROUTE_31" })
 
 - semantics: `record`
 - target: `Data.gen2PhoneContacts`
+
+### On Gen 3
+
+Not available on Gen 3: the Gen 3 games have no counterpart, so a
+write here is dropped and reported on a Gen 3 boot.
 
 ## pokemon
 
@@ -941,7 +1227,7 @@ do not.
 | `catchRate` | integer 0..255 | yes |
 | `cry` | cries id | no |
 | `dex` | integer >= 1 | yes |
-| `dexEntry` | {heightM?, kind?, text?, text2?, weightKg?} | no |
+| `dexEntry` | {height?, heightM?, kind?, text?, text2?, weight?, weightKg?} | no |
 | `eggGroups` | list of string | no |
 | `eggGroupsRaw` | integer 0..255 | no |
 | `eggMoves` | list of moves id | no |
@@ -969,6 +1255,46 @@ do not.
 mod.content.pokemon:patch("TOTODILE", { baseStats = { specialAttack = 80 } })
 ```
 
+### On Gen 3
+
+- semantics: `record`
+- target: `Data.gen3Pokemon`
+
+The record differs; the registry name, the verbs and the id space
+do not.
+
+| field | type | required |
+|---|---|---|
+| `abilities` | list of string \| integer 0..255 | no |
+| `baseExp` | integer 0..255 | yes |
+| `baseStats` | {attack, defense, hp, specialAttack, specialDefense, speed} | yes |
+| `catchRate` | integer 0..255 | yes |
+| `dex` | integer >= 1 | no |
+| `dexEntry` | {height, heightM?, kind, weight, weightKg?} | no |
+| `eggCycles` | integer 0..255 | no |
+| `eggGroups` | list of integer 0..255 | no |
+| `eggMoves` | list of moves id | no |
+| `evolutions` | list of {item?, level?, method, param?, species} | yes |
+| `friendship` | integer 0..255 | no |
+| `genderRatio` | integer 0..255 | no |
+| `growthRate` | growth_rates id | yes |
+| `id` | string | yes |
+| `index` | integer 1..1023 | no |
+| `itemCommon` | items id | no |
+| `itemRare` | items id | no |
+| `learnset` | list of {level, move} | yes |
+| `name` | string | yes |
+| `spriteBack` | file path | yes |
+| `spriteFront` | file path | yes |
+| `tmhm` | list of moves id | no |
+| `trueColor` | boolean | no |
+| `types` | list of type_chart id | yes |
+
+<!-- snippet: illustrative -->
+```lua
+mod.content.pokemon:patch("MEW", { baseStats = { specialAttack = 120 } })
+```
+
 ## radio_channels
 
 - semantics: `record`
@@ -992,6 +1318,11 @@ mod.content.radio_channels:register("PIRATE_RADIO", { channel = 9, name = "PIRAT
 
 - semantics: `record`
 - target: `Data.gen2RadioChannels`
+
+### On Gen 3
+
+Not available on Gen 3: the Gen 3 games have no counterpart, so a
+write here is dropped and reported on a Gen 3 boot.
 
 ## render_pipelines
 
@@ -1037,6 +1368,15 @@ mod.content.rom_text:override("_WokeUpText", "%s se réveille !")
 - semantics: `record`
 - target: `Data.text`
 
+### On Gen 3
+
+- semantics: `record`
+- target: `Data.gen3RomText`
+
+The record differs; the registry name, the verbs and the id space
+do not.
+- value: string | list of any value
+
 ## rulesets
 
 - semantics: `record`
@@ -1057,6 +1397,11 @@ No Gen 2 home: Gold reimplements this system without reading the
 registry, so a write here is dropped and reported on a Gold boot.
 `docs/mod-api-gen2-compat.md` in the engine repo lists what is left
 to do for each one.
+
+### On Gen 3
+
+Not available on Gen 3: the Gen 3 games have no counterpart, so a
+write here is dropped and reported on a Gen 3 boot.
 
 ## screens
 
@@ -1167,6 +1512,11 @@ mod.content.statuses:patch("BRN", { catchBonus = 12 })
 - semantics: `record`
 - target: `Data.gen2Statuses`
 
+### On Gen 3
+
+- semantics: `record`
+- target: `Data.gen3Statuses`
+
 ## strings
 
 - semantics: `record`
@@ -1194,6 +1544,15 @@ mod.content.text:override("_PalletTownText1", "HELLO!")
 - semantics: `record`
 - target: `Data.gen2Text`
 
+### On Gen 3
+
+- semantics: `record`
+- target: `Data.gen3Text`
+
+The record differs; the registry name, the verbs and the id space
+do not.
+- value: string | list of any value
+
 ## text_pointers
 
 - semantics: `deep`
@@ -1215,6 +1574,11 @@ No Gen 2 home: Gold reimplements this system without reading the
 registry, so a write here is dropped and reported on a Gold boot.
 `docs/mod-api-gen2-compat.md` in the engine repo lists what is left
 to do for each one.
+
+### On Gen 3
+
+Not available on Gen 3: the Gen 3 games have no counterpart, so a
+write here is dropped and reported on a Gen 3 boot.
 
 ## tilesets
 
@@ -1245,6 +1609,11 @@ mod.content.tilesets:register("MY_TILES", { image = "...", blocks = { ... } })
 
 - semantics: `record`
 - target: `Data.gen2Tilesets`
+
+### On Gen 3
+
+Not available on Gen 3: the Gen 3 games have no counterpart, so a
+write here is dropped and reported on a Gen 3 boot.
 
 ## tokens
 
@@ -1312,6 +1681,36 @@ do not.
 mod.content.trainers:patch("BEAUTY", { baseMoney = 99 })
 ```
 
+### On Gen 3
+
+- semantics: `record`
+- target: `Data.gen3Trainers`
+
+The record differs; the registry name, the verbs and the id space
+do not.
+
+| field | type | required |
+|---|---|---|
+| `aiClass` | ai_classes id | no |
+| `aiFlags` | integer >= 0 | no |
+| `aiMods` | list of ai_classes id | no |
+| `baseMoney` | integer >= 0 | no |
+| `class` | integer 0..255 | no |
+| `className` | string | no |
+| `dialogs` | any value | no |
+| `doubleBattle` | boolean | no |
+| `gender` | integer 0..255 | no |
+| `id` | string | no |
+| `items` | list of integer >= 0 | no |
+| `name` | string | yes |
+| `party` | list of {heldItem?, level, moves?, species, ...} | yes |
+| `pic` | integer 0..255 \| file path | no |
+
+<!-- snippet: illustrative -->
+```lua
+mod.content.trainers:patch("326", { party = { { species = "MEW", level = 5 } } })
+```
+
 ## transitions
 
 - semantics: `record`
@@ -1329,12 +1728,10 @@ mod.content.trainers:patch("BEAUTY", { baseMoney = 99 })
 mod.content.transitions:register("dissolve", { frames = 30, draw = fn })
 ```
 
-### On Gold (Gen 2)
+### On Gen 3
 
-No Gen 2 home: Gold reimplements this system without reading the
-registry, so a write here is dropped and reported on a Gold boot.
-`docs/mod-api-gen2-compat.md` in the engine repo lists what is left
-to do for each one.
+Not available on Gen 3: the Gen 3 games have no counterpart, so a
+write here is dropped and reported on a Gen 3 boot.
 
 ## type_chart
 

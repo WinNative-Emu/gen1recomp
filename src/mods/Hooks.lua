@@ -12,7 +12,11 @@ local function pack(...) return { n = select("#", ...), ... } end
 local PASS = {}
 
 function Hooks.new()
-  return setmetatable({ chains = {} }, Hooks)
+  return setmetatable({ chains = {}, ownerEpochs = {} }, Hooks)
+end
+
+function Hooks:ownerEpoch(owner)
+  return owner ~= nil and self.ownerEpochs and self.ownerEpochs[owner] or 0
 end
 
 -- owner is the wrapping mod id; failures are attributed to it
@@ -106,6 +110,8 @@ end
 -- drops every wrap a mod made; used by entry-chunk rollback
 function Hooks:removeOwner(owner)
   if owner == nil then return end
+  self.ownerEpochs = self.ownerEpochs or {}
+  self.ownerEpochs[owner] = (self.ownerEpochs[owner] or 0) + 1
   for name, chain in pairs(self.chains) do
     for i = #chain, 1, -1 do
       if chain[i].owner == owner then table.remove(chain, i) end

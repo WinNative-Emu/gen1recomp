@@ -52,6 +52,7 @@ local FLY_BIRD_W, FLY_BIRD_H, FLY_BIRD_FRAMES = 64, 64, 5
 
 local frlgReflective = nil
 local frlgReflectionQuad = nil
+local frlgCover, frlgCoverN = {}, 0
 local frlgModules = nil
 local FRLG_REFL_CULL = 64
 local objectPoseOpts = {}
@@ -126,6 +127,7 @@ local function drawFrlgReflections(camX, camY)
   local Objects, P, Runtime = modules.Objects, modules.Player, modules.Runtime
   local behaviorAt = Collision.worldBehavior or Collision.behavior
   local drawn = 0
+  frlgCoverN = 0
   if Objects.forDraw then
     for _, obj in ipairs(Objects.forDraw()) do
       if not obj.hideReflection and obj.graphicsId then
@@ -190,6 +192,10 @@ local function drawFrlgReflections(camX, camY)
     end
   end
   FieldEffects.lastFrlgReflections = drawn
+  -- pokefirered/src/field_effect_helpers.c:38
+  if frlgCoverN > 0 then
+    lazyReq("src.core.game3.field_effects_rse").coverCells(frlgCover, frlgCoverN, camX, camY)
+  end
 end
 
 drawFrlgReflection = function(obj, graphicsId, frame, hflip, camX, camY, behaviorAt, Ow, ox, oy, x2, y2)
@@ -220,6 +226,8 @@ drawFrlgReflection = function(obj, graphicsId, frame, hflip, camX, camY, behavio
           q:setViewport(sx, frame * h + sy, dw, dh, w, h * spr.frameCount)
           love.graphics.draw(spr.image, q, ix0 + (hflip and dw or 0) - camX, iy0 + dh - camY,
             0, hflip and -1 or 1, -1)
+          frlgCover[frlgCoverN + 1], frlgCover[frlgCoverN + 2] = tx, ty
+          frlgCoverN = frlgCoverN + 2
         end
       end
     end
@@ -2086,6 +2094,41 @@ function FieldEffects.collectActors(actors, camX, camY)
               draw = function(_, camX, camY)
                 love.graphics.setColor(1, 1, 1, 1)
                 love.graphics.draw(sheetGrass.image, qStatic, gx - camX, gy - camY)
+              end,
+            }
+          end
+        end
+      end
+    end
+  end
+
+  if Objects and Objects.forDraw and Collision and Collision.behavior then
+    local springs
+    for _, eo in ipairs(Objects.forDraw()) do
+      local pcx, pcy = eo.cellX, eo.cellY
+      if pcx and pcy and not eo.virtualId then
+        local cx, cy = pcx, pcy
+        if eo.moving and eo.targetX and eo.targetY then cx, cy = eo.targetX, eo.targetY end
+        -- pokefirered/src/event_object_movement.c:8196
+        if is_hot_springs(Collision.behavior(cx, cy)) and is_hot_springs(Collision.behavior(pcx, pcy)) then
+          springs = springs or load_sheet("hot_springs_water", 16, 16, 1) or false
+          local q = springs and springs.quads[0]
+          if q then
+            -- pokefirered/src/field_effect_helpers.c:792
+            local hx = eo.px or pcx * CELL
+            local hy = eo.py or pcy * CELL
+            local img = springs.image
+            actors[#actors + 1] = {
+              kind = "field_effect_hot_springs",
+              elevation = eo.elevation or (eo.def and eo.def.elevation) or 3,
+              sortY = hy + 0.5,
+              x = hx,
+              y = hy,
+              i = 91500 + (tonumber(eo.localId) or 0),
+              disguiseObject = eo,
+              draw = function(_, camX, camY)
+                love.graphics.setColor(1, 1, 1, 1)
+                love.graphics.draw(img, q, hx - camX, hy - camY)
               end,
             }
           end

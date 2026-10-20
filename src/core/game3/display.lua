@@ -48,6 +48,15 @@ function Display.ensureCanvas(which)
 end
 
 local SafeArea = require("src.core.SafeArea")
+local ModRuntime = require("src.mods.Runtime")
+
+local function sameZones(_, zones) return zones end
+
+local function frameZones(game)
+  if ModRuntime.wantsHook("render.zones") then
+    return ModRuntime.call("render.zones", sameZones, game, nil)
+  end
+end
 
 function Display.fit(winW, winH)
   local gw, gh = 0, 0
@@ -231,7 +240,7 @@ function Display.presentUi(game, winW, winH, kind, drawFn)
     love.graphics.setColor(1, 1, 1, 1)
     drawFn()
     love.graphics.pop()
-    Renderer:endFrame(nil, nil)
+    Renderer:endFrame(frameZones(game), nil, { generation = 3 })
   end)
   if ok then return true end
   love.graphics.setCanvas()
@@ -342,7 +351,7 @@ local function presentPlanes(game)
       Oam.flush()
     end
     love.graphics.pop()
-    Renderer:endFrame(nil, nil)
+    Renderer:endFrame(frameZones(game), nil, { generation = 3 })
     Display.mirrorFlatFrame(Renderer)
     return
   end
@@ -354,7 +363,7 @@ local function presentPlanes(game)
     if shopView then drawFieldPlane(game, Display.W, Display.H, nil) end
     drawUiPlane()
     love.graphics.pop()
-    Renderer:endFrame(nil, nil)
+    Renderer:endFrame(frameZones(game), nil, { generation = 3 })
     Display.mirrorFlatFrame(Renderer)
     return
   end
@@ -384,7 +393,7 @@ local function presentPlanes(game)
   love.graphics.origin()
   drawUiPlane()
   love.graphics.pop()
-  Renderer:endFrame(nil, nil)
+  Renderer:endFrame(frameZones(game), nil, { generation = 3 })
   Display.mirrorFlatFrame(Renderer)
 end
 
@@ -419,10 +428,133 @@ function Display.mirrorFlatFrame(Renderer)
   love.graphics.pop()
 end
 
+local function presentFlatHooks(game, canvas, winW, winH, worldActive)
+  local composing = ModRuntime.wantsHook("render.compose")
+  local output = ModRuntime.wantsHook("render.output")
+  local letterbox = ModRuntime.wantsHook("render.letterbox")
+  local Pipelines = require("src.render.Pipelines")
+  local presenting = Pipelines.wantsPresent()
+  if not (composing or output or letterbox or ModRuntime.wantsHook("render.zones") or presenting) then
+    return false
+  end
+
+  local zones = frameZones(game)
+  local Renderer = require("src.render.Renderer")
+  local renderer = setmetatable({
+    canvas = canvas, worldCanvas = canvas, worldActive = worldActive, uiOpaque = true,
+  }, { __index = Renderer })
+  local scale, ox, oy, vpw, vph, scaleY = Display.fit(winW, winH)
+  local dpiX, dpiY = 1, 1
+  local gw, gh = love.graphics.getDimensions()
+  if gw > 0 and gh > 0 and love.graphics.getPixelDimensions then
+    local pw, ph = love.graphics.getPixelDimensions()
+    if pw and pw > 0 then dpiX = pw / gw end
+    if ph and ph > 0 then dpiY = ph / gh end
+  elseif love.graphics.getDPIScale then
+    local dpi = tonumber(love.graphics.getDPIScale())
+    if dpi and dpi > 1e-6 then dpiX, dpiY = dpi, dpi end
+  end
+  local ctx = {
+    renderer = renderer, worldCanvas = canvas, uiCanvas = canvas,
+    worldActive = worldActive, zones = zones,
+    ww = winW, wh = winH, pw = winW * dpiX, ph = winH * dpiY,
+    ox = ox, oy = oy, vpw = vpw, vph = vph, uiw = Display.W, uih = Display.H,
+    scale = scale * dpiX, Sx = scale, Sy = scaleY, dpiX = dpiX, dpiY = dpiY,
+    viewX = 0, viewY = 0, viewWidth = winW, viewHeight = winH,
+    generation = 3, sceneCanvas = canvas,
+  }
+  local G = love.graphics
+  local previous = G.getCanvas()
+  G.push("all")
+  local ok, err = xpcall(function()
+    G.origin()
+    G.setShader()
+    G.setScissor()
+    G.setColor(1, 1, 1, 1)
+    local function call(name, vanilla, ...)
+      local target = G.getCanvas()
+      G.push("all")
+      local okCall, result = pcall(ModRuntime.call, name, vanilla, ...)
+      G.setCanvas(target)
+      G.pop()
+      if not okCall then error(result) end
+      return result
+    end
+    if composing then
+      ctx.secondScreen = require("src.render.SecondScreen")
+      if call("render.compose", function() return false end, renderer, ctx) == true then return end
+    end
+    local hasOutput = output
+      and call("render.output_enabled", function() return false end) == true
+    local present
+    if hasOutput or presenting then
+      present = Display._presentCanvas
+      if not present or present:getWidth() ~= winW or present:getHeight() ~= winH then
+        present = G.newCanvas(winW, winH, { dpiscale = dpiY })
+        present:setFilter("linear", "linear")
+        Display._presentCanvas = present
+      end
+      G.setCanvas(present)
+    end
+    G.setColor(0.02, 0.04, 0.08, 1)
+    G.rectangle("fill", 0, 0, winW, winH)
+    G.setColor(1, 1, 1, 1)
+    if letterbox then
+      call("render.letterbox", function() end, ctx)
+    end
+    if zones and zones[1] then
+      renderer:blitCanvas(canvas, scale, scaleY, zones, scale, scaleY,
+        ox, oy, math.max(0, ox), math.max(0, oy),
+        math.max(0, math.min(winW, ox + vpw) - math.max(0, ox)),
+        math.max(0, math.min(winH, oy + vph) - math.max(0, oy)), dpiX, dpiY)
+    else
+      G.draw(canvas, ox, oy, 0, scale, scaleY)
+    end
+    if present then
+      G.setCanvas(previous)
+      G.push("all")
+      local okPresent, composed = pcall(Pipelines.present, present, {
+        width = winW, height = winH, scale = scale * dpiX,
+        dpi = dpiY, dpiX = dpiX, dpiY = dpiY, generation = 3,
+      })
+      G.setCanvas(previous)
+      G.pop()
+      if not okPresent then error(composed) end
+      composed = composed or present
+      local outputHandled = hasOutput and call("render.output", function() return false end, {
+        canvas = composed, width = winW, height = winH,
+        gameX = ox, gameY = oy, gameWidth = vpw, gameHeight = vph,
+        scale = scale * dpiX, dpiX = dpiX, dpiY = dpiY, generation = 3,
+      }) == true
+      if not outputHandled then
+        G.setColor(1, 1, 1, 1)
+        G.draw(composed, 0, 0)
+      end
+    end
+  end, debug.traceback)
+  G.setCanvas(previous)
+  G.pop()
+  if not ok then error(err) end
+  return true
+end
+
+function Display.presentCanvas(game, canvas, winW, winH, worldActive)
+  if GameViewport.active() then GameViewport.setTarget() end
+  if presentFlatHooks(game, canvas, winW, winH, worldActive) then return true end
+
+  love.graphics.setColor(0.02, 0.04, 0.08, 1)
+  love.graphics.rectangle("fill", 0, 0, winW, winH)
+  local scale, ox, oy, _, _, scaleY = Display.fit(winW, winH)
+  love.graphics.setColor(1, 1, 1, 1)
+  love.graphics.draw(canvas, ox, oy, 0, scale, scaleY)
+  return true
+end
+
 local function presentFlat(game, winW, winH)
   local canvas = Display.ensureCanvas("main")
   if not canvas then return false end
 
+  local worldActive = false
   beginOn(canvas)
   local ok, err = xpcall(function()
     local Help = require("src.ui.game3.help_system")
@@ -434,7 +566,8 @@ local function presentFlat(game, winW, winH)
     Oam.resetFrame()
 
     local Battle = require("src.core.game3.battle")
-    if Battle.isActive() then
+    worldActive = not Battle.isActive()
+    if not worldActive then
       Battle.draw(game, Display.W, Display.H)
     else
       local FieldView = require("src.core.game3.field_view")
@@ -460,14 +593,7 @@ local function presentFlat(game, winW, winH)
     error(err)
   end
 
-  GameViewport.setTarget()
-  -- Void bars + blit our frame (game3 letterbox, not Gen2 Playfield).
-  love.graphics.setColor(0.02, 0.04, 0.08, 1)
-  love.graphics.rectangle("fill", 0, 0, winW, winH)
-  local scale, ox, oy, _, _, scaleY = Display.fit(winW, winH)
-  love.graphics.setColor(1, 1, 1, 1)
-  love.graphics.draw(canvas, ox, oy, 0, scale, scaleY)
-  return true
+  return Display.presentCanvas(game, canvas, winW, winH, worldActive)
 end
 
 Display.presentFlat = presentFlat
@@ -486,7 +612,7 @@ function Display.present(game, winW, winH)
 end
 
 function Display.release()
-  for _, key in ipairs({ "_canvas", "_uiOnly" }) do
+  for _, key in ipairs({ "_canvas", "_uiOnly", "_presentCanvas" }) do
     local canvas = Display[key]
     if canvas then
       pcall(function() canvas:release() end)

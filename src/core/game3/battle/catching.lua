@@ -10,6 +10,7 @@ local Pokemon = require("src.core.game3.pokemon")
 local Types = require("src.core.game3.battle.types")
 local Dex = require("src.core.game3.dex")
 local ModRuntime = require("src.mods.Runtime")
+local ModBattle = require("src.core.game3.battle.mod_registries")
 
 local Catching = {}
 
@@ -51,16 +52,35 @@ function Catching.targetFor(st, attackerId)
   return st.battlers and st.battlers[t] or st.enemy
 end
 
+Catching.modBalls = {}
+
+function Catching.installBalls(balls, itemNum)
+  Catching.modBalls = {}
+  for id, record in pairs(type(balls) == "table" and balls or {}) do
+    local num = itemNum(id)
+    if num and type(record) == "table" then Catching.modBalls[num] = record end
+  end
+end
+
+local function mod_ball(itemId)
+  if next(Catching.modBalls) == nil then return nil end
+  local num = ItemsData.toNumericId(itemId) or tonumber(itemId)
+  return num and Catching.modBalls[num] or nil
+end
+
 function Catching.isBall(id)
   local num = ItemsData.toNumericId(id) or tonumber(id)
-  return num and num >= 1 and num <= 12
+  return num and (num >= 1 and num <= 12 or Catching.modBalls[num] ~= nil)
 end
 
 --- Evaluate effective ball multiplier (bonus × 10) for a given foe and battle state.
 function Catching.ballMultiplier(itemId, foeBattler, st, session)
   local num = ItemsData.toNumericId(itemId) or tonumber(itemId) or 4
+  local modBall = mod_ball(itemId)
+  if modBall and modBall.autoCatch then return 255 end
   if num == 1 then return 255 end
   local mult = Catching.BALL_BONUS[num] or 10
+  if modBall and modBall.multiplier then return modBall.multiplier end
   local mon = foeBattler and foeBattler.mon
   local level = tonumber(mon and mon.level) or 50
 
@@ -107,6 +127,8 @@ end
 function Catching.catchOdds(itemId, foeBattler, st, session)
   local num = ItemsData.toNumericId(itemId) or tonumber(itemId) or 4
   if num == 1 then return 255 end
+  local modBall = mod_ball(itemId)
+  if modBall and modBall.autoCatch then return 255 end
 
   local species = foeBattler and (foeBattler.species or (foeBattler.mon and foeBattler.mon.species))
   local meta = species and Pokemon.speciesMeta(species)
@@ -137,6 +159,10 @@ function Catching.catchOdds(itemId, foeBattler, st, session)
     end
   end
 
+  if foeBattler and foeBattler.modStatus then
+    odds = odds + ModBattle.catchBonus(foeBattler)
+  end
+
   return math.max(1, math.min(255, odds))
 end
 
@@ -145,6 +171,8 @@ local function vanilla_catch(itemId, foeBattler, st, session, rng)
   if num == 1 then
     return true, 4
   end
+  local modBall = mod_ball(itemId)
+  if modBall and modBall.autoCatch then return true, 4 end
 
   local odds = Catching.catchOdds(itemId, foeBattler, st, session)
 

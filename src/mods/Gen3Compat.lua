@@ -1,4 +1,3 @@
--- Gen 1 module facades for a FireRed boot: the Gen 1 API backed by src/core/game3.
 -- Contract mirrors src/mods/Gen2Compat.lua; docs/mod-api-gen3-compat.md.
 
 local Logger = require("src.core.Logger")
@@ -14,6 +13,7 @@ local lastGame = nil
 
 local built = {}
 local claimants = {}
+local modernClaims = {}
 local warned = {}
 
 local function warnOnce(key, fmt, ...)
@@ -89,33 +89,40 @@ end
 
 -- ------- ids
 
-local MAP_PREFIX = "FR_"
+local function mapPrefix()
+  return rawRequire("src.core.game3.profile").forSession(session()).map.enginePrefix
+end
 
 Gen3Compat.FAMILIES = { frlg = true }
 
-function Gen3Compat.appliesTo(version)
+function Gen3Compat.appliesTo(version, apiVersion)
   if type(version) ~= "string" then return true end
   if not GameVersion.VERSIONS[version] then return true end
-  return Gen3Compat.FAMILIES[GameVersion.layout(version)] == true
+  local layout = GameVersion.layout(version)
+  return Gen3Compat.FAMILIES[layout] == true
+    or (tonumber(apiVersion) or 0) >= 3 and GameVersion.generation(version) == 3
+      and layout == "rse"
 end
 
 function Gen3Compat.gen1MapId(id)
   if type(id) ~= "string" then return id end
-  if id:sub(1, #MAP_PREFIX) == MAP_PREFIX then return id:sub(#MAP_PREFIX + 1) end
+  local prefix = mapPrefix()
+  if id:sub(1, #prefix) == prefix then return id:sub(#prefix + 1) end
   return id
 end
 
 function Gen3Compat.gen3MapId(id)
   if type(id) ~= "string" then return id end
+  local prefix = mapPrefix()
   local g = live()
   local maps = g and g.data and g.data.maps
   if maps then
     if maps[id] then return id end
-    if maps[MAP_PREFIX .. id] then return MAP_PREFIX .. id end
+    if maps[prefix .. id] then return prefix .. id end
     return nil
   end
-  if id:sub(1, #MAP_PREFIX) == MAP_PREFIX then return id end
-  return MAP_PREFIX .. id
+  if id:sub(1, #prefix) == prefix then return id end
+  return prefix .. id
 end
 
 local function canonicalName(display)
@@ -251,10 +258,27 @@ local function nameList(list, toName)
   if type(list) ~= "table" then return list end
   local out = {}
   for _, v in ipairs(list) do
-    local name = (tonumber(v) or 0) ~= 0 and toName(v) or nil
+    local name = tonumber(v) ~= 0 and toName(v) or nil
     if name then out[#out + 1] = name end
   end
   return out
+end
+
+local function moveIdList(list, previous)
+  local out = {}
+  for i, v in ipairs(list) do out[i] = Gen3Compat.moveId(v) or 0 end
+  if type(previous) ~= "table" then return out end
+  local names = nameList(previous, Gen3Compat.moveName)
+  if #names ~= #list then return out end
+  for i, v in ipairs(names) do
+    if v ~= list[i] then return out end
+  end
+  local ids = {}
+  for i, v in ipairs(previous) do
+    if type(v) ~= "number" or v < 0 or v % 1 ~= 0 then return out end
+    ids[i] = v
+  end
+  return ids
 end
 
 function Gen3Compat.partyNames(party)
@@ -262,17 +286,16 @@ function Gen3Compat.partyNames(party)
   for i, mon in ipairs(party or {}) do
     local row = {}
     for k, v in pairs(mon) do row[k] = v end
-    local sp = tonumber(mon.species or mon.speciesId)
+    local sp = Gen3Compat.speciesId(mon.species or mon.speciesId)
     row.species = Gen3Compat.speciesName(sp) or mon.species
     row.speciesId = sp
     if type(mon.moves) == "table" then
       row.moves = nameList(mon.moves, Gen3Compat.moveName)
-      row.moveIds = {}
-      for j, v in ipairs(mon.moves) do row.moveIds[j] = v end
+      row.moveIds = moveIdList(mon.moves, mon.moveIds)
     end
     if mon.heldItem ~= nil then
       row.heldItem = Gen3Compat.itemName(mon.heldItem)
-      row.heldItemId = tonumber(mon.heldItem)
+      row.heldItemId = Gen3Compat.itemId(mon.heldItem)
     end
     out[i] = row
   end
@@ -287,9 +310,7 @@ function Gen3Compat.partyNums(party)
     row.species = Gen3Compat.speciesId(mon.species) or tonumber(mon.speciesId) or 0
     row.speciesId = nil
     if type(mon.moves) == "table" then
-      local list = {}
-      for j, v in ipairs(mon.moves) do list[j] = Gen3Compat.moveId(v) or 0 end
-      row.moves = list
+      row.moves = moveIdList(mon.moves, mon.moveIds)
     end
     row.moveIds = nil
     if mon.heldItem ~= nil then
@@ -448,6 +469,7 @@ local function dexSide(field)
       s.dex = s.dex or {}
       s.dex[field] = s.dex[field] or {}
       s.dex[field][sp] = value and true or nil
+      if not value then s.dex[field][tostring(sp)] = nil end
     end,
   })
 end
@@ -634,11 +656,10 @@ local ITEMS_VIEW = namedView("items", itemRecord)
 local DATA_RENAMES = {
   encounters = "gen3Encounters", trainers = "gen3Trainers",
   text = "gen3Text", map_scripts = "gen3Scripts", scripts = "gen3Scripts",
+  palettes = "gen3Palettes", font = "gen3Font",
 }
 
 local DATA_UNBACKED = {
-  sprites = "FireRed's overworld sprites are baked by the extractor, not a "
-    .. "data.sprites registry",
   field = "FireRed's field rules are src/core/game3/collision.lua and the "
     .. "ROM's metatile behaviours, not a data.field record",
   constants = "no Gen 1 rule table exists on FireRed",
@@ -646,8 +667,6 @@ local DATA_UNBACKED = {
     .. "counterpart",
   trainer_headers = "the extractor's Gen 1 header table has no FireRed "
     .. "counterpart",
-  palettes = "FireRed palettes are baked into the extracted RGBA art",
-  icons = "FireRed icons are src/core/game3/pokemon.lua Pokemon.icon",
   battle_anims = "FireRed's battle animations are the pret script VM under "
     .. "src/core/game3/battle/anim_*",
   type_chart = "FireRed's type chart is src/core/game3/battle/types.lua",
@@ -662,7 +681,7 @@ local function mapsView(data)
       if not maps then return nil end
       local hit = maps[key]
       if hit ~= nil then return hit end
-      if type(key) == "string" then return maps[MAP_PREFIX .. key] end
+      if type(key) == "string" then return maps[mapPrefix() .. key] end
       return nil
     end,
     __newindex = function(_, key, value)
@@ -875,6 +894,7 @@ COVERAGE["src.core.Game"] = {
   kind = "facade", target = "src.core.Game3",
   backed = "overworld data data.pokemon data.moves data.items data.maps "
     .. "data.encounters data.trainers data.text data.map_scripts data.tilesets "
+    .. "data.sprites data.palettes data.font "
     .. "save save.flags save.vars save.party save.money save.inventory "
     .. "save.player save.player.map save.player.x save.player.y "
     .. "save.player.facing save.player.rival save.pokedex save.options "
@@ -888,8 +908,8 @@ COVERAGE["src.core.Game"] = {
     .. "worldBgBattleDim worldBgBattleInStack fillScaleInStack "
     .. "wideBattleInStack uiAnchorsHeldInStack drawBaseInStack dynamicUI",
   warned = "stack renderer load bootConfig makeTitleState step restoreSave "
-    .. "linkNet linkSession data.sprites data.field data.constants "
-    .. "data.text_pointers data.trainer_headers data.palettes data.icons "
+    .. "linkNet linkSession data.field data.constants "
+    .. "data.text_pointers data.trainer_headers data.icons "
     .. "data.battle_anims data.type_chart save.boxes save.box "
     .. "save.objectToggles save.defeatedTrainers save.hiddenTaken",
   absent = "saveReport save.meta",
@@ -905,14 +925,14 @@ COVERAGE["src.core.Game"] = {
       .. "EVENT_GOT_STARTER reads nil because FireRed has no such flag",
     ["save.inventory"] = "item name or FireRed item id -> count; answered "
       .. "through src/core/game3/bag.lua, so a write lands in the right pocket",
-    ["save.player.map"] = "the Gen 1 spelling (FR_ prefix stripped); "
+    ["save.player.map"] = "the Gen 1 spelling (selected profile's map prefix stripped); "
       .. "save.player.gen3Map is the raw id",
     ["save.pokedex"] = "seen / caught keyed by species name or FireRed "
       .. "species number",
     ["data.pokemon"] = "a NAME-keyed view assembled from the numeric FireRed "
       .. "tables; spriteFront/spriteBack name the cache .rgba, and a "
       .. "registry override wins",
-    ["data.maps"] = "keyed by the FR_ id; a Gen 1 spelling without the "
+    ["data.maps"] = "keyed by the native id for the selected profile; a Gen 1 spelling without the "
       .. "prefix also resolves",
     stack = "src/ui/game3/stack.lua, a module-level id stack, warned once",
     applyOptions = "Game3:applyOptions(opts) takes the table directly, the "
@@ -1340,10 +1360,18 @@ local function localIdOf(entity)
   return nil
 end
 
-function Gen3Compat.worldBusy()
+function Gen3Compat.worldBusy(ownLock, additionalLock)
   local Field = package.loaded["src.core.game3.field"]
   if not (Field and Field.running) then return true, "no overworld" end
-  if Field.locked then return true, "world is busy" end
+  if Field.locked then
+    if not (Field._locks and ((ownLock ~= nil and Field._locks[ownLock])
+        or (additionalLock ~= nil and Field._locks[additionalLock]))) then
+      return true, "world is busy"
+    end
+    for lock in pairs(Field._locks) do
+      if lock ~= ownLock and lock ~= additionalLock then return true, "world is busy" end
+    end
+  end
   local R = package.loaded["src.core.game3.runtime"]
   if R and R.uiBusy then
     local ok, busy = pcall(R.uiBusy)
@@ -1361,6 +1389,151 @@ function Gen3Compat.worldBusy()
   local P = playerModule()
   if P and P.moving then return true, "world is busy" end
   return false
+end
+
+function Gen3Compat.runTalkScript(rows, opts)
+  opts = opts or {}
+  if type(opts) ~= "table" or (opts.onDone ~= nil and type(opts.onDone) ~= "function") then
+    return nil, "invalid script options"
+  end
+  local game = opts.game or live()
+  local Field = package.loaded["src.core.game3.field"]
+  local Map = package.loaded["src.core.game3.map"]
+  if not (game and Field and Field.running and Map) then return nil, "no overworld" end
+  local provider, providerGame = resolveGame, live()
+  local scriptSession = opts.session or Field._session or game.session
+  local version = type(scriptSession) == "table" and scriptSession.version or nil
+  if type(version) ~= "string" or not GameVersion.VERSIONS[version] then
+    version = GameVersion.get()
+  end
+  local mapId = opts.mapId or Map.current
+  local locks, hooks = Field._locks, Runtime.hooks
+  local owner = type(opts.source) == "table" and opts.source.modId or nil
+  owner = owner or opts.owner or "base"
+  if not (hooks and type(hooks.wrap) == "function") then
+    return nil, "script continuation unavailable"
+  end
+  local handle, subscriptions = {}, {}
+  local done, finishReason, ownedMessage, ownedCallback = false, nil, nil, nil
+  local sharedWorld
+  local function finish(ok, reason)
+    if done then return end
+    done, finishReason = true, reason
+    if sharedWorld then rawRequire("src.mods.UnifiedWorld").cancel(sharedWorld, reason) end
+    for unsubscribe in pairs(subscriptions) do unsubscribe() end
+    if ownedMessage and ownedMessage._done == ownedCallback then
+      ownedMessage._done = nil
+      ownedMessage.close()
+    end
+    ownedMessage, ownedCallback = nil, nil
+    if opts.onDone then
+      local called, err = pcall(opts.onDone, ok, reason)
+      if not called then Runtime.reportError(owner, "world script callback failed: " .. tostring(err)) end
+    end
+  end
+  local function valid()
+    if done then return false end
+    if resolveGame ~= provider or live() ~= providerGame
+        or Runtime.hooks ~= hooks or not Field.running
+        or package.loaded["src.core.game3.field"] ~= Field
+        or package.loaded["src.core.game3.map"] ~= Map
+        or (Field._game and Field._game ~= game)
+        or Field._session ~= scriptSession or session() ~= scriptSession
+        or game.session ~= scriptSession or Field._locks ~= locks
+        or Map.current ~= mapId then
+      finish(false, "world changed")
+      return false
+    end
+    if hooks.chains then
+      for _, subscription in pairs(subscriptions) do
+        local found = false
+        for _, entry in ipairs(hooks.chains[subscription.name] or {}) do
+          if entry.callback == subscription.callback then found = true; break end
+        end
+        if not found then
+          finish(false, "script continuation removed")
+          return false
+        end
+      end
+    end
+    return true
+  end
+  function handle.cancel(first, reason)
+    if first ~= handle then reason = first end
+    finish(false, type(reason) == "string" and reason or "script cancelled")
+  end
+  function handle.isRunning() return valid() end
+
+  local ownedHooks = setmetatable({}, {
+    __index = function(_, key)
+      if key == "chains" then return hooks.chains end
+    end,
+    __newindex = function(t, key, value)
+      if key == "chains" then error("script hook chains are read-only", 2) end
+      rawset(t, key, value)
+    end,
+  })
+  function ownedHooks:ownerEpoch(modId)
+    return hooks.ownerEpoch and hooks:ownerEpoch(modId) or 0
+  end
+  function ownedHooks:wrap(name, callback, priority)
+    local remove = hooks:wrap(name, callback, priority, owner)
+    local function unsubscribe()
+      if not subscriptions[unsubscribe] then return end
+      subscriptions[unsubscribe] = nil
+      remove()
+    end
+    subscriptions[unsubscribe] = { name = name, callback = callback }
+    return unsubscribe
+  end
+  local runtime = setmetatable({}, {
+    __index = function(_, key)
+      if key == "hooks" then
+        return Runtime.hooks == hooks and ownedHooks or Runtime.hooks
+      end
+      return Runtime[key]
+    end,
+  })
+  local compat = setmetatable({
+    worldBusy = function(additionalLock)
+      return Gen3Compat.worldBusy(opts.lockToken, additionalLock)
+    end,
+  }, { __index = Gen3Compat })
+  local function engineRequire(name)
+    if name == "src.mods.Runtime" then return runtime end
+    if name == "src.mods.Gen3Compat" then return compat end
+    if name == "src.ui.game3.message" then
+      local Message = rawRequire(name)
+      return setmetatable({ show = function(text, complete)
+        if not valid() then error("world changed", 0) end
+        if Message.isOpen() then error("world is busy", 0) end
+        local callback
+        callback = function()
+          if not valid() or ownedCallback ~= callback then return end
+          ownedMessage, ownedCallback = nil, nil
+          complete()
+        end
+        ownedMessage, ownedCallback = Message, callback
+        local result = Message.show(text, callback)
+        if Message._done ~= callback or not Message.open then
+          error("script message could not start", 0)
+        end
+        return result
+      end }, { __index = Message })
+    end
+    return rawRequire(name)
+  end
+  if not valid() then return nil, finishReason end
+  sharedWorld = rawRequire("src.mods.UnifiedWorld").new(function()
+    if valid() then return game end
+  end, 3, version, owner, engineRequire)
+  local ok, reason = sharedWorld:queueScript(rows, { onDone = finish })
+  if not ok then
+    finish(false, reason)
+    return nil, reason
+  end
+  if done and finishReason then return nil, finishReason end
+  return handle
 end
 
 local function buildOverworld()
@@ -1418,14 +1591,20 @@ local function buildOverworld()
     if not ready("startWarpTo") then return nil end
     local raw = Gen3Compat.gen3MapId(mapId)
     if not raw then return nil, "unknown map: " .. tostring(mapId) end
+    local W = g3("warp")
+    local P = playerModule()
+    if modernClaims[OW] then
+      return W and W.request(nil, live(), raw, x, y,
+        facing or (P and P.facing) or "down",
+        { onDone = onDone, keepMusic = opts and opts.keepMusic,
+          arrive = opts and opts.arrive, fade = opts and opts.fade }) or nil
+    end
     if onDone then
       warnOnce("ow.startWarpTo.onDone",
         "[%s] OverworldState.startWarpTo drops onDone on FireRed "
         .. "(src/core/game3/warp.lua Warp.request has no completion callback)",
         who(OW))
     end
-    local W = g3("warp")
-    local P = playerModule()
     return W and W.request(nil, live(), raw, x, y,
       facing or (P and P.facing) or "down",
       { teleport = opts and opts.arrive == "teleport" or nil }) or nil
@@ -1645,7 +1824,7 @@ COVERAGE[OW] = {
     .. "stepForwardOrCrossEdge checkLedgeHop checkEdgeExit crossConnection "
     .. "scriptMove partyKnows openPC nurseHeal showMapText queueScript "
     .. "update interact talkTo",
-  warned = "timeOfDay replaceBlock startWarpTo openPC",
+  warned = "timeOfDay replaceBlock openPC",
   absent = "pushableAtCell pooledNPC computeNeighbors rebuildNeighbors "
     .. "takeWarp refreshStandingOnWarp dirHeld handleInput connectionLanding "
     .. "checkBoulderPush checkForcedMovement updateScriptMoves setDark "
@@ -1663,7 +1842,8 @@ COVERAGE[OW] = {
     update = "a replacement runs each field tick via Gen3Compat.worldTick",
     interact = "a replacement owns the A press; the original is Field.interact",
     talkTo = "a replacement returning true consumes a scripted NPC talk",
-    startWarpTo = "Warp.request with the FireRed fade; onDone is dropped",
+    startWarpTo = "Warp.request with the FireRed fade; onDone is dropped for "
+      .. "API 1 and 2 mods; API 3 mods get onDone, keepMusic, arrive and fade",
     replaceBlock = "sets one 16px metatile (Field.setMetatile), not a 32px "
       .. "Gen 1 block",
     npcByIndex = "keyed by the FireRed localId the map's object template "
@@ -2018,13 +2198,16 @@ COVERAGE["src.world.WorldAPI"] = {
   backed = "new __index overworld current activeBlockAt canReorderParty "
     .. "reorderParty availableFieldActions useFieldAction canFly flyTo "
     .. "mapOverview warpTo toggleObject setFlag getFlag effectiveEncounters "
-    .. "replaceBlock npc queueScript startWildBattle invalidateMap",
-  warned = "spawnNpc removeNpc",
+    .. "replaceBlock spawnNpc removeNpc npc queueScript startWildBattle invalidateMap",
+  warned = "",
   absent = "",
   notes = {
     current = "mapId is the raw FR_ id; warpTo accepts either spelling",
     setFlag = "a FireRed flag NAME (with or without FLAG_) or number",
     replaceBlock = "one 16px metatile, not a 32px block",
+    spawnNpc = "adds an owned runtime object and returns its public string id",
+    removeNpc = "owned string ids remove runtime objects; legacy numeric localIds "
+      .. "hide template objects and set their hide flags",
     queueScript = "the five Gen 2 verbs (start_battle wild, warp, text, "
       .. "setflag, clearflag); anything else is refused by name up front",
   },
@@ -2181,12 +2364,28 @@ local function hookedIcon(species, mon, vanilla)
   return iconEntry(hooked) or vanilla
 end
 
+local function registryIcon(sp, iconOrig)
+  local g = live()
+  local icons = g and g.data and g.data.icons and g.data.icons.bySpecies
+  if type(icons) ~= "table" or next(icons) == nil then return nil end
+  local okName, name = pcall(Gen3Compat.speciesName, sp)
+  local def = okName and icons[name] or nil
+  if type(def) == "table" and type(def.image) == "string" then
+    return iconEntry(def.image)
+  end
+  if type(def) == "string" then
+    local borrowed = Gen3Compat.speciesId(def)
+    if borrowed and borrowed ~= sp then return iconOrig(borrowed) end
+  end
+  return nil
+end
+
 local function wrapIcons(P)
   local iconOrig, monIconOrig = P.icon, P.monIcon
   if iconOrig then
     P.icon = function(species)
-      local entry = iconOrig(species)
       local sp = tonumber(species)
+      local entry = sp and sp >= 1 and registryIcon(sp, iconOrig) or iconOrig(species)
       if sp and sp >= 1 then return hookedIcon(sp, nil, entry) end
       return entry
     end
@@ -2194,7 +2393,7 @@ local function wrapIcons(P)
   if iconOrig and monIconOrig and P.monPicSpecies then
     P.monIcon = function(mon)
       local sp = tonumber(P.monPicSpecies(mon))
-      local entry = iconOrig(sp)
+      local entry = sp and sp >= 1 and registryIcon(sp, iconOrig) or iconOrig(sp)
       if sp and sp >= 1 then return hookedIcon(sp, mon, entry) end
       return entry
     end
@@ -2320,6 +2519,11 @@ local function reapplyPokemon(P)
   reapply("pokemon", P, "species")
 end
 
+local function installStep(key, fn)
+  local ok, err = pcall(fn)
+  if not ok then warnOnce("applyMerged." .. key, "[gen3] %s not installed: %s", key, tostring(err)) end
+end
+
 function Gen3Compat.applyMerged(game)
   if game then lastGame = game end
   imageCache = {}
@@ -2332,8 +2536,67 @@ function Gen3Compat.applyMerged(game)
     Moves.onReload(reapplyMoves, "gen3compat")
   end
   collectOverrides(game or live())
+  installStep("mod registries", function()
+    rawRequire("src.core.game3.battle.mod_registries").bind(game and game.data or nil)
+  end)
+  local okC, Catching = pcall(rawRequire, "src.core.game3.battle.catching")
+  local okS, Schemas = pcall(rawRequire, "src.mods.Schemas")
+  if okC and okS then
+    installStep("mod balls", function()
+      Catching.installBalls(game and game.data and game.data.balls or nil, function(id)
+        return Schemas.gen3View.itemNum(game.data.gen3Items, id) or tonumber(id)
+      end)
+    end)
+  end
+  local data = game and game.data
+  local okF, family = pcall(function()
+    return rawRequire("src.core.game3.profile").family()
+  end)
+  local okL, errL = pcall(function()
+    rawRequire("src.core.game3.mod_landmarks").install(data and data.gen3Landmarks,
+      okF and family == "rse" and "rse" or "frlg")
+  end)
+  if not okL then
+    warnOnce("landmarks.install", "[gen3] mod landmarks not installed: %s", tostring(errL))
+  end
+  if okF and family == "rse" then
+    local okD, errD = pcall(function()
+      rawRequire("src.core.game3.mod_decorations").install(data and data.gen3Decorations)
+    end)
+    if not okD then
+      warnOnce("decorations.install", "[gen3] mod decorations not installed: %s", tostring(errD))
+    end
+  end
+  local okU, ItemUse = pcall(rawRequire, "src.core.game3.item_use")
+  if okU and type(ItemUse) == "table" then
+    installStep("item effects", function()
+      ItemUse.installEffects(game and game.data and game.data.item_effects, game)
+    end)
+  end
+  installStep("text tokens", function()
+    local TextIR = rawRequire("src.core.game3.scripting.text_ir")
+    TextIR.modTokens = game and game.data and next(game.data.tokens or {}) and game.data.tokens or nil
+    TextIR.modGame = game
+  end)
+  installStep("mod audio", function()
+    local ModAudio = rawRequire("src.core.game3.mod_audio")
+    ModAudio.install(game and game.data or nil)
+    if game then ModAudio.applyOptions(game.options) end
+  end)
+  installStep("palette mods", function()
+    rawRequire("src.core.game3.palette_mods").install(game and game.data or nil)
+  end)
+  local okFont, FrlgFont = pcall(rawRequire, "src.ui.game3.frlg_font")
+  if okFont and type(FrlgFont) == "table" and FrlgFont.setModFont then
+    installStep("mod font", function()
+      FrlgFont.setModFont(game and game.data and game.data.gen3Font or nil)
+    end)
+  end
+  local OwSprites = package.loaded["src.core.game3.ow_sprites"]
+  if OwSprites and OwSprites.invalidate then OwSprites.invalidate() end
   local okP, P = pcall(rawRequire, "src.core.game3.pokemon")
   if not (okP and P) then return end
+  if P.flushPicCaches then P.flushPicCaches() end
   wrapPics(P)
   seed(P)
   if type(P.onReload) == "function" and not reloadRegistered[P] then
@@ -2384,12 +2647,15 @@ local ADAPTERS = {
 Gen3Compat.ADAPTERS = ADAPTERS
 
 function Gen3Compat.endSession()
+  local bound = package.loaded["src.core.game3.battle.mod_registries"]
+  if bound then bound.bind(nil) end
   resolveGame, lastGame = nil, nil
   built, claimants, warned = {}, {}, {}
 end
 
 function Gen3Compat.bind(fn)
   resolveGame = fn
+  modernClaims = {}
 end
 
 function Gen3Compat.serves(name)
@@ -2423,7 +2689,7 @@ function Gen3Compat.memberStatus(name, member)
   return row and row.members[member] or nil
 end
 
-function Gen3Compat.resolve(name, modId)
+function Gen3Compat.resolve(name, modId, apiVersion)
   local spec = ADAPTERS[name]
   if not spec then return nil end
   local module = built[name]
@@ -2432,6 +2698,7 @@ function Gen3Compat.resolve(name, modId)
     built[name] = module
   end
   if modId then
+    if (tonumber(apiVersion) or 0) >= 3 then modernClaims[name] = true end
     local ids = claimants[name]
     if not ids then ids = {} claimants[name] = ids end
     local seen = false

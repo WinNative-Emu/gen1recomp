@@ -62,6 +62,9 @@ end
 
 --- Opponent trainer front pic (64×64). Returns nil if unavailable (no placeholder).
 function TrainerPic.front(picId)
+  if type(picId) == "string" and tonumber(picId) == nil then
+    return require("src.mods.Gen3Compat").centredSprite(picId)
+  end
   picId = tonumber(picId)
   if not picId or picId < 0 then return nil end
   if TrainerPic._front[picId] then return TrainerPic._front[picId] end

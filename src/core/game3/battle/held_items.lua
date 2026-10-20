@@ -1,6 +1,7 @@
 local Secondary = require("src.core.game3.battle.effects.secondary")
 local State = require("src.core.game3.battle.state")
 local RomText = require("src.core.game3.rom_text")
+local ModRuntime = require("src.mods.Runtime")
 
 local HeldItems = {}
 
@@ -21,6 +22,35 @@ local H = {
   SHELL_BELL = 62, LUCKY_PUNCH = 63, METAL_POWDER = 64, THICK_CLUB = 65, STICK = 66,
 }
 HeldItems.HOLD = H
+
+local EFFECT_NAME = {}
+for name, he in pairs(H) do EFFECT_NAME[he] = "HELD_" .. name end
+EFFECT_NAME[H.RESTORE_HP] = "HELD_BERRY"
+EFFECT_NAME[H.CURE_PAR] = "HELD_HEAL_PARALYZE"
+EFFECT_NAME[H.CURE_SLP] = "HELD_HEAL_SLEEP"
+EFFECT_NAME[H.CURE_PSN] = "HELD_HEAL_POISON"
+EFFECT_NAME[H.CURE_BRN] = "HELD_HEAL_BURN"
+EFFECT_NAME[H.CURE_FRZ] = "HELD_HEAL_FREEZE"
+EFFECT_NAME[H.CURE_CONFUSION] = "HELD_HEAL_CONFUSION"
+EFFECT_NAME[H.CURE_STATUS] = "HELD_HEAL_STATUS"
+EFFECT_NAME[H.CRITICAL_UP] = "HELD_PINCH_CRITICAL_UP"
+EFFECT_NAME[H.SCOPE_LENS] = "HELD_CRITICAL_UP"
+EFFECT_NAME[H.EVASION_UP] = "HELD_BRIGHTPOWDER"
+EFFECT_NAME[H.DOUBLE_PRIZE] = "HELD_AMULET_COIN"
+EFFECT_NAME[H.REPEL] = "HELD_CLEANSE_TAG"
+EFFECT_NAME[H.CAN_ALWAYS_RUN] = "HELD_ESCAPE"
+local EFFECT_ID = { HELD_NONE = 0 }
+for he, name in pairs(EFFECT_NAME) do
+  if name:match("_POWER$") then
+    name = name:gsub("_POWER$", "_BOOST")
+    EFFECT_NAME[he] = name
+  end
+  EFFECT_ID[name] = he
+end
+
+local BYTE_CHANCE = {
+  [H.QUICK_CLAW] = true, [H.EVASION_UP] = true, [H.FOCUS_BAND] = true, [H.FLINCH] = true,
+}
 
 -- pokefirered/src/data/items.json:1
 local ITEM_HOLD = {
@@ -90,10 +120,8 @@ function HeldItems.itemOf(b)
   return b and tonumber(b.item) or 0
 end
 
-function HeldItems.of(b)
+local function native_effect(b, st)
   local item = HeldItems.itemOf(b)
-  local battle = package.loaded["src.core.game3.battle.init"]
-  local st = battle and battle._st
   local E = require("src.core.game3.rs.enigma")
   if item == 175 and b and E.matches(st and st.session) then
     local berry = b.enigmaBerry or (st and st.enigmaBerries and st.enigmaBerries[b.id])
@@ -108,10 +136,46 @@ function HeldItems.of(b)
   local he, param = HeldItems.effectOf(item)
   return he, param, item
 end
+
+function HeldItems.of(b, trigger, st)
+  if not st then
+    local battle = package.loaded["src.core.game3.battle.init"]
+    st = battle and battle._st
+  end
+  local he, param, item = native_effect(b, st)
+  if not ModRuntime.wantsHook("held_item.trigger") then return he, param, item end
+  local effect = EFFECT_NAME[he]
+  local parameter = BYTE_CHANCE[he] and math.floor(param * 256 / 100) or param
+  local def
+  if item ~= 0 then
+    def = {}
+    local ok, ItemsData = pcall(require, "src.core.game3.items_data")
+    if ok and ItemsData and ItemsData.info then
+      local ok2, info = pcall(ItemsData.info, item)
+      if ok2 and type(info) == "table" then
+        for k, v in pairs(info) do def[k] = v end
+      end
+    end
+    def.id = item
+    def.heldEffect, def.heldParameter = effect, parameter
+  end
+  local hookedEffect, hookedParameter = ModRuntime.call("held_item.trigger",
+    function(c) return c.effect, c.parameter end,
+    { battle = st, mon = b and b.mon, item = item, def = def,
+      effect = effect, parameter = parameter, trigger = trigger or "check" })
+  if type(hookedEffect) ~= "string" then return 0, 0, item end
+  hookedParameter = tonumber(hookedParameter) or parameter
+  if hookedEffect == effect and hookedParameter == parameter then return he, param, item end
+  local hookedHe = EFFECT_ID[hookedEffect] or 0
+  if BYTE_CHANCE[hookedHe] then
+    hookedParameter = math.max(0, math.min(256, hookedParameter)) * 100 / 256
+  end
+  return hookedHe, hookedParameter, item, true
+end
 HeldItems.installEnigmaState = require("src.core.game3.rs.enigma").installBattle
 
-function HeldItems.has(b, he)
-  return (HeldItems.of(b)) == he
+function HeldItems.has(b, he, trigger, st)
+  return (HeldItems.of(b, trigger, st)) == he
 end
 
 function HeldItems.name(item)
@@ -263,7 +327,7 @@ end
 -- pokefirered/src/battle_util.c:2557
 function HeldItems.normal(ad, b, moveTurn)
   if not b or ad:hp(b) <= 0 then return false end
-  local he, param, item = HeldItems.of(b)
+  local he, param, item = HeldItems.of(b, "residual", ad._st)
   if he == 0 then return false end
   local hp, maxHp = ad:hp(b), ad:maxHp(b)
   if he == H.RESTORE_HP then
@@ -365,7 +429,7 @@ function HeldItems.moveEnd(ad, opts)
   elseif ad._st.double then list = ad:activeBattlers() end
   for _, b in ipairs(list) do
     if b and ((opts and opts.includeFainted) or not ad:isFainted(b)) then
-      local he, _, item = HeldItems.of(b)
+      local he, _, item = HeldItems.of(b, "residual", ad._st)
       local did = false
       if he >= H.CURE_PAR and he <= H.CURE_FRZ then
         did = cure_status_item(ad, b, item, he)
@@ -388,9 +452,10 @@ end
 function HeldItems.kingsRockShellBell(M)
   local ad, user, target = M.adapter, M.user, M.target
   if not user or not target or (M.firstDmg or 0) == 0 then return false end
-  local he, param, item = HeldItems.of(user)
+  local he, param, item, changed = HeldItems.of(user, "flinch", ad._st)
   if he == H.FLINCH then
-    local _, p0 = HeldItems.of(ad._st.player)
+    local _, p0 = HeldItems.of(ad._st.player, "flinch", ad._st)
+    if changed then p0 = param end
     if not M.noEffect and M.targetDamaged and ad:roll(0, 99) < p0
         and M.move and M.move.flags and math.floor((tonumber(M.move.flags) or 0) / 32) % 2 == 1
         and ad:hp(target) > 0 then
@@ -415,7 +480,7 @@ end
 -- pokefirered/src/battle_util.c:2532
 function HeldItems.onSwitchIn(ad, b)
   if not b then return false end
-  local he, _, item = HeldItems.of(b)
+  local he, _, item = HeldItems.of(b, "check", ad._st)
   if he == H.DOUBLE_PRIZE then
     -- pokeemerald/src/battle_util.c:3294
     if b.side == "player" or not require("src.core.game3.battle.profile").rule(ad._st, "amuletCoinPlayerOnly") then
@@ -429,7 +494,7 @@ end
 
 -- pokefirered/src/battle_script_commands.c:1596
 function HeldItems.rollFocusBand(ad, target)
-  local he, param = HeldItems.of(target)
+  local he, param = HeldItems.of(target, "endure", ad._st)
   if he == H.FOCUS_BAND and ad:roll(0, 99) < param then
     target.expFocusBanded = true
     return true

@@ -297,10 +297,14 @@ function PokedexMenu:order()
   local mode = self:mode()
   if mode == "NEW" and dex.newOrder then return dex.newOrder end
   if mode == "A-Z" and dex.alphabeticalOrder then return dex.alphabeticalOrder end
+  local entries = dex.entries or {}
   local out = {}
-  for species, entry in pairs(dex.entries or {}) do
-    out[entry.dex or #out + 1] = species
-  end
+  for species in pairs(entries) do out[#out + 1] = species end
+  table.sort(out, function(a, b)
+    local da, db = entries[a].dex or math.huge, entries[b].dex or math.huge
+    if da ~= db then return da < db end
+    return a < b
+  end)
   return out
 end
 

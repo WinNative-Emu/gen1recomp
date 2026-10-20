@@ -5,6 +5,7 @@ local Versions = require("src.import.gba.versions")
 local ModRuntime = require("src.mods.Runtime")
 local CacheBlob = require("src.import.CacheBlob")
 local Strings = require("src.core.Strings")
+local PaletteMods = require("src.core.game3.palette_mods")
 
 local Pokemon = {}
 
@@ -352,7 +353,7 @@ end
 --- ROM BaseStats.growthRate: pret GROWTH_* index into gExperienceTables.
 function Pokemon.growthRate(species)
   local meta = Pokemon.speciesMeta(species)
-  return (meta and tonumber(meta.growthRate) or 0) % 6
+  return require("src.core.game3.progression").growthKey(meta and tonumber(meta.growthRate) or 0)
 end
 
 -- Gen3 genderRatio specials (match pret constants/pokemon.h).
@@ -393,17 +394,37 @@ function Pokemon.natureId(personality)
   return (tonumber(personality) or 0) % 25
 end
 
+local function native_gender(ratio, personality)
+  if ratio == nil then return "U" end
+  if ratio == Pokemon.GENDER_MALE then return "M" end
+  if ratio == Pokemon.GENDER_FEMALE then return "F" end
+  if ratio == Pokemon.GENDER_GENDERLESS then return "U" end
+  if ratio > ((tonumber(personality) or 0) % 256) then return "F" end
+  return "M"
+end
+
+local function species_hook_def(species, meta)
+  local def = {}
+  for k, v in pairs(meta or {}) do def[k] = v end
+  def.id = species
+  return def
+end
+
+local GENDER_NAMES = { M = "male", F = "female", U = "unknown" }
+local GENDER_CODES = { male = "M", female = "F", unknown = "U" }
+
 function Pokemon.gender(species, personality)
   species = tonumber(species)
   personality = tonumber(personality) or 0
   local meta = Pokemon.speciesMeta(species)
   local ratio = meta and meta.genderRatio
-  if ratio == nil then return "U" end
-  if ratio == Pokemon.GENDER_MALE then return "M" end
-  if ratio == Pokemon.GENDER_FEMALE then return "F" end
-  if ratio == Pokemon.GENDER_GENDERLESS then return "U" end
-  if ratio > (personality % 256) then return "F" end
-  return "M"
+  local native = native_gender(ratio, personality)
+  if not ModRuntime.wantsHook("gender.roll") then return native end
+  local gender = ModRuntime.call("gender.roll", function(c)
+    return GENDER_NAMES[native_gender(c.def and c.def.genderRatio, c.personality)]
+  end, { species = species, def = species_hook_def(species, meta), ratio = ratio,
+         personality = personality })
+  return GENDER_CODES[gender] or native
 end
 
 --- Ability id for species + personality (ability1 vs ability2).
@@ -569,13 +590,24 @@ function Pokemon.friendshipOf(mon)
   return Pokemon.baseFriendship(tonumber(mon.species or mon.speciesId))
 end
 
-function Pokemon.setFriendship(mon, value)
+function Pokemon.setFriendship(mon, value, event, reason)
   if type(mon) ~= "table" then return 0 end
+  local from
+  if ModRuntime.wants("happiness.changed") and not Pokemon.isEgg(mon) then
+    from = Pokemon.friendshipOf(mon)
+  end
   value = math.floor(tonumber(value) or 0)
   if value < 0 then value = 0 end
   if value > Pokemon.MAX_FRIENDSHIP then value = Pokemon.MAX_FRIENDSHIP end
   mon.friendship = value
   mon.happiness = value
+  if from ~= nil and from ~= value then
+    reason = reason or "event"
+    ModRuntime.emit("happiness.changed", {
+      mon = mon, event = reason ~= "step" and event or nil, reason = reason,
+      delta = value - from, from = from, to = value,
+    })
+  end
   return value
 end
 
@@ -663,6 +695,17 @@ local function has_species(mon)
   return type(mon) == "table" and (tonumber(mon.species or mon.speciesId) or 0) ~= 0
 end
 
+local function emit_pokerus_infected(party, slot, from, source)
+  if from ~= 0 or not ModRuntime.wants("pokerus.infected") then return end
+  local mon = party[slot]
+  local value = tonumber(mon.pokerus) or 0
+  if value % 16 == 0 then return end
+  ModRuntime.emit("pokerus.infected", {
+    party = party, slot = slot, mon = mon,
+    strain = math.floor(value / 16), days = value % 16, source = source,
+  })
+end
+
 -- pokeemerald/src/pokemon.c:6078
 function Pokemon.randomlyGivePartyPokerus(party, session)
   if type(party) ~= "table" or not pokerus_live(session) then return end
@@ -688,6 +731,7 @@ function Pokemon.randomlyGivePartyPokerus(party, session)
   r = bit.band(bit.bor(r, bit.lshift(r, 4)), 0xFF)
   r = bit.band(r, 0xF3)
   party[idx + 1].pokerus = (r + 1) % 256
+  emit_pokerus_infected(party, idx + 1, 0, "contracted")
 end
 
 -- pokeemerald/src/pokemon.c:6170
@@ -727,11 +771,15 @@ function Pokemon.partySpreadPokerus(party, session)
       if cur ~= 0 and bit.band(cur, 0xF) ~= 0 then
         local prev = party[i]
         if i ~= 0 and type(prev) == "table" and bit.band(tonumber(prev.pokerus) or 0, 0xF0) == 0 then
+          local from = tonumber(prev.pokerus) or 0
           prev.pokerus = cur
+          emit_pokerus_infected(party, i, from, "spread")
         end
         local nxt = party[i + 2]
         if i ~= 5 and type(nxt) == "table" and bit.band(tonumber(nxt.pokerus) or 0, 0xF0) == 0 then
+          local from = tonumber(nxt.pokerus) or 0
           nxt.pokerus = cur
+          emit_pokerus_infected(party, i + 2, from, "spread")
           i = i + 1
         end
       end
@@ -914,7 +962,8 @@ function Pokemon.adjustFriendship(mon, event, ctx)
   if delta > 0 then
     friendship = friendship_bonuses(mon, friendship, ctx)
   end
-  Pokemon.setFriendship(mon, friendship)
+  Pokemon.setFriendship(mon, friendship, event,
+    event == Pokemon.FRIENDSHIP_EVENT_WALKING and "step" or "event")
   return true
 end
 
@@ -1453,16 +1502,34 @@ function Pokemon.picBaseSpecies(species)
   return species, nil
 end
 
+local function native_shiny(personality, otId, otSecretId)
+  local p = (tonumber(personality) or 0) % 4294967296
+  local full = (tonumber(otId) or 0) % 4294967296
+  local tid = full % 65536
+  local sid = (tonumber(otSecretId) or math.floor(full / 65536)) % 65536
+  local value = bit.bxor(bit.bxor(tid, sid), bit.bxor(math.floor(p / 65536), p % 65536))
+  return value < 8
+end
+
 -- pokefirered/src/pokemon.c:6062
 function Pokemon.isShiny(mon)
   if not mon then return false end
   if mon.isShiny ~= nil then return not not mon.isShiny end
-  local p = (tonumber(mon.personality) or 0) % 4294967296
-  local full = (tonumber(mon.otId or mon.trainerId) or 0) % 4294967296
-  local tid = full % 65536
-  local sid = (tonumber(mon.otSecretId) or math.floor(full / 65536)) % 65536
-  local value = bit.bxor(bit.bxor(tid, sid), bit.bxor(math.floor(p / 65536), p % 65536))
-  return value < 8
+  if not ModRuntime.wantsHook("shiny.roll") then
+    return native_shiny(mon.personality, mon.otId or mon.trainerId, mon.otSecretId)
+  end
+  local species = Pokemon.speciesOf(mon)
+  local ivs
+  if type(mon.ivs) == "table" then
+    ivs = {}
+    for k, v in pairs(mon.ivs) do ivs[k] = v end
+  end
+  local shiny = ModRuntime.call("shiny.roll", function(c)
+    return native_shiny(c.personality, c.otId, c.otSecretId)
+  end, { species = species, def = species_hook_def(species, Pokemon.speciesMeta(species)),
+         level = mon.level, personality = mon.personality, ivs = ivs,
+         otId = mon.otId or mon.trainerId, otSecretId = mon.otSecretId })
+  return shiny and true or false
 end
 
 function Pokemon.monPicSpecies(mon)
@@ -1567,6 +1634,7 @@ function Pokemon.icon(species)
   local h = (Pokemon._manifest and Pokemon._manifest.iconH) or Versions.MON_ICON_H or 32
   local rgba = read_rgba(species)
   if not rgba then return nil end
+  rgba = PaletteMods.recolourIcon(rgba, species)
   local actualH = (#rgba >= w * (h * 2) * 4) and (h * 2) or h
   local image = image_from_rgba(rgba, w, actualH)
   if not image then return nil end
@@ -1632,6 +1700,15 @@ local function pic_entry(store, key, rgba, cap)
   return entry
 end
 
+function Pokemon.flushPicCaches()
+  for _, store in ipairs({ Pokemon._front or {}, Pokemon._back or {}, Pokemon._spindaPics or {} }) do
+    for k, v in pairs(store) do
+      if type(v) == "table" and v.lru then store[k] = nil end
+    end
+  end
+  Pokemon._icons = {}
+end
+
 function Pokemon.picCacheSize(store)
   local n = 0
   for _, v in pairs(store or {}) do if type(v) == "table" and v.lru then n = n + 1 end end
@@ -1657,6 +1734,7 @@ local function pic(store, kind, species, form, shiny)
     store[key] = false
     return nil
   end
+  rgba = PaletteMods.recolourPic(rgba, species, kind:find("_shiny", 1, true) ~= nil)
   return pic_entry(store, key, rgba)
 end
 
@@ -1753,7 +1831,9 @@ local function spinda_pic(personality, shiny)
   local key = (shiny and "spinda_shiny:" or "spinda:") .. p
   Pokemon._spindaPics = Pokemon._spindaPics or {}
   if Pokemon._spindaPics[key] then return pic_touch(Pokemon._spindaPics[key]) end
-  return pic_entry(Pokemon._spindaPics, key, spinda_rgba(p, shiny), Pokemon.SPINDA_CAP)
+  local rgba = spinda_rgba(p, shiny)
+  rgba = rgba and PaletteMods.recolourPic(rgba, SPECIES_SPINDA, shiny)
+  return pic_entry(Pokemon._spindaPics, key, rgba, Pokemon.SPINDA_CAP)
 end
 
 -- pokefirered/src/battle_gfx_sfx_util.c:354

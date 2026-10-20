@@ -107,16 +107,31 @@ for g = 0, 5 do
   end
 end
 
-function SummaryData.expForLevel(growthRate, level)
-  growthRate = (tonumber(growthRate) or 0) % 6
+local function native_exp(growthRate, level)
   level = math.max(1, math.min(100, tonumber(level) or 1))
   local tbl = EXP_TABLES[growthRate]
   return tbl and tbl[level] or 0
 end
 
+function SummaryData.nativeExpForLevel(growthRate, level)
+  return native_exp((tonumber(growthRate) or 0) % 6, level)
+end
+
+function SummaryData.expForLevel(growthRate, level)
+  local Progression = require("src.core.game3.progression")
+  growthRate = Progression.growthKey(growthRate)
+  local curve = Progression.growthCurve(growthRate)
+  if curve then
+    level = math.max(1, math.min(100, tonumber(level) or 1))
+    return math.max(0, math.floor(curve(level) or 0))
+  end
+  return native_exp(growthRate, level)
+end
+
 --- Return experience progress struct for a Pokémon
 function SummaryData.expProgress(mon, growthRate)
-  growthRate = (tonumber(growthRate) or tonumber(mon and mon.growthRate) or 0) % 6
+  growthRate = require("src.core.game3.progression").growthKey(
+    tonumber(growthRate) or tonumber(mon and mon.growthRate) or 0)
   local level = math.max(1, math.min(100, tonumber(mon and mon.level) or 1))
   local totalExp = tonumber(mon and mon.exp) or SummaryData.expForLevel(growthRate, level)
 

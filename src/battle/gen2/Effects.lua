@@ -685,8 +685,9 @@ end
 -- BEFORE Battle:clearVolatile, which is what puts it back and clears both keys
 -- (Battle:untransform).  Dropping it here would strand a passing DITTO as a
 -- permanent copy instead.
+-- engine/battle/move_effects/baton_pass.asm:140
 Effects.BATON_PASS_DROPS = {
-  "nightmare", "disable", "disableTurns", "attract", "transformed",
+  "nightmare", "disabled", "disabledTurns", "attract", "transformed",
   "encore", "encoreTurns", "lastMove",
 }
 

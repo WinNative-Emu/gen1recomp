@@ -42,10 +42,18 @@ Pipelines.DEFAULT_LEVELS = { "OFF", "ON" }
 -- default -- Game.data is that very table -- and install() lets a headless
 -- caller (the SDK harness, a tool) point this at a dataset of its own.
 local source = Data
+local worldPass = true
 
 function Pipelines.install(data)
   source = data or Data
+  local Schemas = require("src.mods.Schemas")
+  worldPass = not Schemas.isGen3Data(source)
   Pipelines.reset()
+end
+
+local function inert(def)
+  return not worldPass and def.drawWorld ~= nil and def.present == nil
+    and def.worldPresent == nil
 end
 
 -- ------- catalog
@@ -191,6 +199,7 @@ function Pipelines.setLevel(id, level)
   if level < 0 then level = 0 end
   local max = Pipelines.maxLevel(id)
   if level > max then level = max end
+  if inert(Pipelines.get(id)) then level = 0 end
   levels[id] = level
   excludeTilt(id, level)
   return level
@@ -218,7 +227,7 @@ function Pipelines.syncOptions(opts)
   end
   for _, entry in ipairs(Pipelines.list()) do
     bucket[entry.id] = Pipelines.level(entry.id)
-    if entry.def.drawWorld and Pipelines.level(entry.id) > 0 then
+    if worldPass and entry.def.drawWorld and Pipelines.level(entry.id) > 0 then
       opts.tilt = 0
     end
   end
@@ -238,10 +247,11 @@ function Pipelines.applyOptions(opts)
     if level < 0 then level = 0 end
     local max = Pipelines.maxLevel(entry.id)
     if level > max then level = max end
+    if inert(entry.def) then level = 0 end
     -- list() is priority order, so the first world pipeline with a stored
     -- level is the one that wins; the rest restore to OFF rather than
     -- sitting on a level that can never render
-    if entry.def.drawWorld and level > 0 then
+    if worldPass and entry.def.drawWorld and level > 0 then
       if world then level = 0 else world = entry.id end
     end
     levels[entry.id] = level
@@ -281,7 +291,7 @@ end
 -- walked through a door.  Once a mode is on it renders until it is off.
 function Pipelines.eligible(id)
   local def = Pipelines.get(id)
-  if not def or broken[id] then return false end
+  if not def or broken[id] or inert(def) then return false end
   if Pipelines.level(id) <= 0 then return false end
   if def.available and guard(id, def.available) ~= true then return false end
   return true
@@ -292,7 +302,7 @@ end
 -- Input only -- see eligible() for why the draw path does not consult it.
 function Pipelines.canToggle(id, top, overworld)
   local def = Pipelines.get(id)
-  if not def then return false end
+  if not def or inert(def) then return false end
   local gate = def.gate or Zoom.gateOK
   return guard(id, gate, top, overworld) == true
 end
@@ -301,6 +311,7 @@ end
 -- flat/tilt draw.  Highest priority wins; the exclusion rules above mean
 -- there is normally only one candidate anyway.
 function Pipelines.worldPipeline()
+  if not worldPass then return nil end
   for _, entry in ipairs(Pipelines.list()) do
     if entry.def.drawWorld and Pipelines.eligible(entry.id) then
       return entry.id, entry.def

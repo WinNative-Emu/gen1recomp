@@ -856,6 +856,12 @@ function FxRse.coverWorldRect(left, top, w, h, camX, camY)
   coverReflections(camX, camY)
 end
 
+function FxRse.coverCells(cells, n, camX, camY)
+  for i = 1, n do coverCells[i] = cells[i] end
+  coverN = n
+  coverReflections(camX, camY)
+end
+
 local function drawReflections(camX, camY)
   FxRse.lastReflections = 0
   coverN = 0

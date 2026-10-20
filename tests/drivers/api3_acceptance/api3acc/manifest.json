@@ -1,0 +1,10 @@
+{
+  "id": "api3acc",
+  "name": "API 3 Acceptance",
+  "version": "1.0.0",
+  "api": 3,
+  "games": ["all"],
+  "entry": "main.lua",
+  "profile": "content",
+  "description": "Driver fixture for tests/drivers/api3_acceptance.lua."
+}

@@ -105,6 +105,7 @@ function Hit.dealDamage(M, dmg, info)
     target.expBideTarget = user
   end
   M.hpDealt = dealt
+  M.totalDealt = (M.totalDealt or 0) + dealt
   M.hitsLanded = (M.hitsLanded or 0) + 1
   dealt_event(M, target, dealt, info, false)
   -- pokefirered/src/battle_controller_opponent.c:304

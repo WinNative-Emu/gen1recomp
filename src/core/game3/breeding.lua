@@ -1,6 +1,8 @@
 -- pokefirered/src/daycare.c:1271
 
 local Breeding = {}
+local ModRuntime = require("src.mods.Runtime")
+local pendingCompatibility = setmetatable({}, { __mode = "k" })
 
 local SPECIES_NONE = 0 -- pokefirered/include/constants/species.h:4
 local SPECIES_NIDORAN_F = 29 -- pokefirered/include/constants/species.h:33
@@ -145,7 +147,7 @@ function Breeding.eggGroupsOverlap(a, b)
 end
 
 -- pokefirered/src/daycare.c:1271 GetDaycareCompatibilityScore
-function Breeding.compatibility(dc, session)
+local function nativeCompatibility(dc, session)
   local policy = daycarePolicy(session)
   if policy and policy.compatibility then return policy.compatibility(dc) end
   local Daycare = daycareMod()
@@ -177,6 +179,54 @@ function Breeding.compatibility(dc, session)
   end
   if ids[1] ~= ids[2] then return PARENTS_MED_COMPATIBILITY end
   return PARENTS_LOW_COMPATIBILITY
+end
+
+local function sharedCompatibility(score, mon1, mon2)
+  if score == PARENTS_MAX_COMPATIBILITY then return 254 end
+  if score == PARENTS_MED_COMPATIBILITY then
+    return speciesOf(mon1) == speciesOf(mon2) and 177 or 128
+  end
+  if score == PARENTS_LOW_COMPATIBILITY then return 51 end
+  return 0
+end
+
+local function compatibility(dc, session, dayCare)
+  local Daycare = daycareMod()
+  local mon1, mon2 = Daycare.mon(dc, 1), Daycare.mon(dc, 2)
+  if not ModRuntime.wantsHook("breeding.compatibility") then
+    local score = nativeCompatibility(dc, session)
+    return score, sharedCompatibility(score, mon1, mon2)
+  end
+  session = liveSession(session)
+  local rt = package.loaded["src.core.game3.runtime"]
+  local game = rt and rt._game
+  local data = (session and session.data) or (game and game.data)
+    or { pokemon = pokemonMod()._speciesMeta }
+  local native, shared
+  local value = ModRuntime.call("breeding.compatibility", function(c)
+    native = nativeCompatibility({ c.mon1, c.mon2 }, session)
+    shared = sharedCompatibility(native, c.mon1, c.mon2)
+    return shared
+  end, { data = data, mon1 = mon1, mon2 = mon2, dayCare = dayCare == true })
+  value = tonumber(value)
+  if not value or value ~= value then
+    if native == nil then
+      native = nativeCompatibility(dc, session)
+      shared = sharedCompatibility(native, mon1, mon2)
+    end
+    return native, shared
+  end
+  value = math.max(0, math.min(255, math.floor(value)))
+  if value == 0 or value == 255 then return PARENTS_INCOMPATIBLE, value end
+  if value < 70 then return PARENTS_LOW_COMPATIBILITY, value end
+  if value < 230 then return PARENTS_MED_COMPATIBILITY, value end
+  return PARENTS_MAX_COMPATIBILITY, value
+end
+
+function Breeding.compatibility(dc, session, dayCare)
+  local score, shared = compatibility(dc, session, dayCare == true)
+  if dayCare == true then pendingCompatibility[dc] = shared end
+  return score
 end
 
 local preEvoOf, preEvoSource
@@ -297,8 +347,10 @@ function Breeding.tryProduceEgg(session, dc, validEggs)
   if ((tonumber(dc.steps and dc.steps[2]) or 0) % 256) ~= 255 then return false end
   local Rng = rngMod()
   -- pokefirered/src/daycare.c:1152
-  if Breeding.compatibility(dc, session) > math.floor(Rng.Random() * 100 / USHRT_MAX) then
+  local score, shared = compatibility(dc, session, true)
+  if score > math.floor(Rng.Random() * 100 / USHRT_MAX) then
     Breeding.triggerPendingEgg(session, dc)
+    pendingCompatibility[dc] = shared
     return true
   end
   return false
@@ -310,6 +362,7 @@ function Breeding.removeEgg(dc)
   dc.offspringPersonality = 0
   dc.stepCounter = 0
   dc.eggPending = false
+  pendingCompatibility[dc] = nil
 end
 
 -- pokefirered/src/daycare.c:1018 DetermineEggSpeciesAndParentSlots
@@ -534,7 +587,11 @@ end
 function Breeding.createEgg(session, species, setHotSpringsLocation)
   local Rng = rngMod()
   local egg = buildEggMon(session, species, Rng.Random32())
-  return Breeding.applyEggData(egg, setHotSpringsLocation)
+  egg = Breeding.applyEggData(egg, setHotSpringsLocation)
+  if egg and ModRuntime.wants("breeding.egg_created") then
+    ModRuntime.emit("breeding.egg_created", { egg = egg, stepsToEgg = 0 })
+  end
+  return egg
 end
 
 -- pokefirered/src/daycare.c:1063 _GiveEggFromDaycare
@@ -557,6 +614,17 @@ function Breeding.giveEggFromDaycare(session)
     Breeding.giveVoltTackleIfLightBall(session, egg, dc)
   end
   egg.isEgg = true
+  if ModRuntime.wants("breeding.egg_created") then
+    local motherMon, fatherMon = Daycare.mon(dc, mother), Daycare.mon(dc, father)
+    local shared = pendingCompatibility[dc]
+    if shared == nil then
+      shared = sharedCompatibility(nativeCompatibility(dc, session), motherMon, fatherMon)
+    end
+    ModRuntime.emit("breeding.egg_created", {
+      egg = egg, mother = motherMon, father = fatherMon,
+      compatibility = shared, stepsToEgg = 0,
+    })
+  end
   session.party = session.party or {}
   -- pokefirered/src/daycare.c:1081 gPlayerParty[PARTY_SIZE - 1] = egg
   session.party[PARTY_SIZE] = egg
@@ -566,7 +634,7 @@ function Breeding.giveEggFromDaycare(session)
 end
 
 -- pokefirered/src/daycare.c:1639 AddHatchedMonToParty
-function Breeding.hatchMon(session, mon)
+local function nativeHatchMon(session, mon)
   local Daycare = daycareMod()
   local Pokemon = pokemonMod()
   if not mon then return nil end
@@ -618,6 +686,38 @@ function Breeding.hatchMon(session, mon)
     Dex.setCaught(session.dex, species)
   end
   return mon
+end
+
+local function copyEgg(value, seen)
+  if type(value) ~= "table" then return value end
+  seen = seen or {}
+  if seen[value] then return seen[value] end
+  local out = {}
+  seen[value] = out
+  for key, item in pairs(value) do out[key] = copyEgg(item, seen) end
+  return out
+end
+
+function Breeding.hatchMon(session, mon)
+  if not ModRuntime.wants("egg.hatched") or not mon
+    or not (mon.isEgg == true or mon.egg == true) then
+    return nativeHatchMon(session, mon)
+  end
+  session = daycareMod().sessionOf(session)
+  local slot
+  for i, member in ipairs((session and session.party) or {}) do
+    if member == mon then slot = i; break end
+  end
+  local egg = slot and copyEgg(mon)
+  local hatched = nativeHatchMon(session, mon)
+  if egg and hatched and session.party[slot] == hatched
+    and not (hatched.isEgg == true or hatched.egg == true) then
+    ModRuntime.emit("egg.hatched", {
+      mon = hatched, egg = egg, slot = slot, species = speciesOf(egg),
+      nickname = hatched.nickname ~= "" and hatched.nickname or nil,
+    })
+  end
+  return hatched
 end
 
 return Breeding

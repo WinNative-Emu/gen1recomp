@@ -2,6 +2,7 @@ local Kit = require("src.ui.game3.rse.scene_kit")
 local Pokemon = require("src.core.game3.pokemon")
 local Font = require("src.ui.game3.frlg_font")
 local Pal = require("src.core.game3.pal_fade")
+local LevelDisplay = require("src.ui.LevelDisplay")
 local Chrome = {native = true}
 local tiles, quads, icons = {}, {}, {}
 function Chrome.manifest()
@@ -138,10 +139,15 @@ local function drawSlot(ui, index, mon)
     local status = require("src.core.game3.summary_data").statusAilment(mon)
     if status > 0 and status ~= 6 then strip(m.sprites.status, status - 1, (point[1] - 1) * 8, (point[2] + 1) * 8)
     else
-      tile(0x40, 0, (point[1] - 1) * 8, (point[2] + 1) * 8, "order")
-      local row = data.oam[5]
-      -- src/party_menu.c:2662
-      text(tostring(mon.level or 1), data.x + row[2] % 512 + 8, data.y + row[1] % 256 - 8)
+      local Runtime = package.loaded["src.core.game3.runtime"]
+      local session = ui._session
+      local game = (session and session.game) or (Runtime and Runtime._game)
+      if LevelDisplay.visible(mon, "party", game) then
+        tile(0x40, 0, (point[1] - 1) * 8, (point[2] + 1) * 8, "order")
+        local row = data.oam[5]
+        -- src/party_menu.c:2662
+        text(tostring(mon.level or 1), data.x + row[2] % 512 + 8, data.y + row[1] % 256 - 8)
+      end
     end
     local species, gender = Pokemon.speciesOf(mon), require("src.core.game3.summary_data").gender(mon)
     local hideGender = (species == 29 or species == 32) and tostring(nick):gsub("{[^}]*}", "") == Pokemon.name(species)

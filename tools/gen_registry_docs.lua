@@ -115,7 +115,9 @@ local function renderSchema(spec)
     line("| field | type | required |")
     line("|---|---|---|")
     local fieldNames = {}
-    for fieldName in pairs(spec.fields) do fieldNames[#fieldNames + 1] = fieldName end
+    for fieldName in pairs(spec.fields) do
+      if fieldName:sub(1, 1) ~= "_" then fieldNames[#fieldNames + 1] = fieldName end
+    end
     table.sort(fieldNames)
     for _, fieldName in ipairs(fieldNames) do
       local ft = spec.fields[fieldName]
@@ -210,6 +212,61 @@ for _, name in ipairs(names) do
     else
       renderExample(spec.gen2Example, spec.gen2Notes)
     end
+  end
+
+  local gen3Target = Schemas.targetFor(name, spec, 3)
+  local gen3Shaped = Schemas.hasGen3Shape(spec)
+  local overlays = {}
+  local overlayVersions = {}
+  for version in pairs(Schemas.GEN3_ROUTING) do
+    overlayVersions[#overlayVersions + 1] = version
+  end
+  table.sort(overlayVersions)
+  for _, version in ipairs(overlayVersions) do
+    if Schemas.targetFor(name, spec, 3, version) ~= gen3Target then
+      overlays[#overlays + 1] = version
+    end
+  end
+  local function versionList(list)
+    local parts = {}
+    for i, version in ipairs(list) do parts[i] = "`" .. version .. "`" end
+    return table.concat(parts, ", ")
+  end
+  if Schemas.gatedFor(name, 3) and #overlays == 0 then
+    line("")
+    line("### On Gen 3")
+    line("")
+    line("Not available on Gen 3: the Gen 3 games have no counterpart, so a")
+    line("write here is dropped and reported on a Gen 3 boot.")
+  elseif gen3Target ~= spec.target or gen3Shaped or #overlays > 0 then
+    local gen3 = Schemas.shapeFor(name, spec, 3)
+    line("")
+    line("### On Gen 3")
+    line("")
+    if #overlays > 0 then
+      local overlayTarget = Schemas.targetFor(name, spec, 3, overlays[1])
+      if gen3Target then
+        line("- semantics: `%s`", gen3.semantics)
+        line("- target: `Data.%s`", gen3Target)
+        line("- on %s: `Data.%s`", versionList(overlays), overlayTarget)
+      else
+        line("- semantics: `%s`", gen3.semantics)
+        line("- target on %s: `Data.%s`", versionList(overlays), overlayTarget)
+        line("")
+        line("Not available on the other Gen 3 versions: a write there is")
+        line("dropped and reported.")
+      end
+    else
+      line("- semantics: `%s`", gen3.semantics)
+      line("- target: %s", gen3Target and ("`Data." .. gen3Target .. "`") or "none")
+    end
+    if gen3Shaped then
+      line("")
+      line("The record differs; the registry name, the verbs and the id space")
+      line("do not.")
+      renderSchema(gen3)
+    end
+    renderExample(spec.gen3Example, spec.gen3Notes)
   end
 end
 

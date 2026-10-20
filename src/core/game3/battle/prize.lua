@@ -138,7 +138,7 @@ function Prize.calc(trainerId, opts)
   local mult = tonumber(opts.moneyMultiplier) or 1
   if mult < 1 then mult = 1 end
   local doubleMult = opts.double and 2 or 1
-  local value = Prize.classValue(classId)
+  local value = tonumber(info.baseMoney) or Prize.classValue(classId)
   return 4 * lastLevel * mult * doubleMult * value
 end
 
@@ -154,7 +154,7 @@ function Prize.calcRse(trainerId, opts)
   if not row then error("no trainer row " .. tostring(trainerId)) end
   local lastMon = row.party[#row.party]
   local lastLevel = tonumber(lastMon and lastMon.level) or 0
-  local value = tonumber(money[tonumber(row.class)]) or tonumber(pack.moneyDefault)
+  local value = tonumber(row.baseMoney) or tonumber(money[tonumber(row.class)]) or tonumber(pack.moneyDefault)
   local mult = tonumber(opts.moneyMultiplier) or 1
   -- pokeemerald/src/battle_script_commands.c:5624
   if opts.double and not opts.twoOpponents then

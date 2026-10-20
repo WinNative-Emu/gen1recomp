@@ -140,9 +140,9 @@ local function buildGB(data, raw)
       local exp = {}
       for level = 1, 100 do
         if generation == 1 then
-          exp[level] = Growth.expForLevel(curve, level)
+          exp[level] = Growth.expForLevel(curve, level, raw.growth_rates)
         else
-          exp[level] = Mon.experienceForLevel(growthRows and growthRows[curve], level)
+          exp[level] = Mon.experienceForLevel(Mon.growthFor(raw, curve) or (growthRows and growthRows[curve]), level)
         end
       end
       local levelMoves, tmhm, tutor, egg = {}, {}, {}, {}
