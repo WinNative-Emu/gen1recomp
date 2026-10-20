@@ -64,7 +64,18 @@ function Playfield.dimensions()
   if Playfield.entered and Playfield.box then
     return Playfield.box.w, Playfield.box.h
   end
-  return GameViewport.pixelDimensions()
+  return GameViewport.dimensions()
+end
+
+function Playfield.snap(v, d)
+  d = d or Playfield.ratio()
+  if d == 1 then return math.floor(v) end
+  return math.floor(v * d + 1e-6) / d
+end
+
+function Playfield.pixelScale(w, h, gw, gh, d)
+  d = d or Playfield.ratio()
+  return math.max(1, math.floor(math.min(w * d / gw, h * d / gh) + 1e-6))
 end
 
 function Playfield.push(sw, sh)

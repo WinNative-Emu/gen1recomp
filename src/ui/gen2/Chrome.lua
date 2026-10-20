@@ -92,16 +92,28 @@ end
 
 Chrome.playfieldRect = playfieldRect
 
+local function pixelRatio()
+  local ok, Playfield = pcall(require, "src.render.Playfield")
+  if not (ok and Playfield.ratio) then return 1 end
+  local okr, d = pcall(Playfield.ratio)
+  return (okr and d and d > 0) and d or 1
+end
+
+Chrome.pixelRatio = pixelRatio
+
 function Chrome.fitScaleFor(winW, winH, tilesW, tilesH)
   local _, _, w, h = playfieldRect(winW, winH)
-  return math.max(1, math.floor(math.min(w / (tilesW * 8), h / (tilesH * 8))))
+  local d = pixelRatio()
+  return math.max(1, math.floor(math.min(w * d / (tilesW * 8),
+    h * d / (tilesH * 8)) + 1e-6)) / d
 end
 
 function Chrome.fitOriginFor(winW, winH, scale, tilesW, tilesH)
   scale = scale or Chrome.fitScaleFor(winW, winH, tilesW, tilesH)
   local x, y, w, h = playfieldRect(winW, winH)
-  return x + math.floor((w - tilesW * 8 * scale) / 2),
-    y + math.floor((h - tilesH * 8 * scale) / 2)
+  local d = pixelRatio()
+  return x + math.floor((w - tilesW * 8 * scale) * d / 2 + 1e-6) / d,
+    y + math.floor((h - tilesH * 8 * scale) * d / 2 + 1e-6) / d
       - Chrome.positionLift(winW, winH, scale)
 end
 
@@ -120,10 +132,9 @@ function Chrome.positionLift(winW, winH, scale)
   local ok, ScreenPosition = pcall(require, "src.core.ScreenPosition")
   if not ok or ScreenPosition.skinActive(winW, winH) then return 0 end
   local _, _, _, h = playfieldRect(winW, winH)
-  local okp, Playfield = pcall(require, "src.render.Playfield")
-  local d = okp and Playfield.ratio and Playfield.ratio() or 1
-  return ScreenPosition.lift(h, Chrome.SCREEN_H * 8 * (scale
-    or Chrome.fitScale(winW, winH)), ScreenPosition.safeTop() * d)
+  local d = pixelRatio()
+  return ScreenPosition.lift(h * d, Chrome.SCREEN_H * 8 * (scale
+    or Chrome.fitScale(winW, winH)) * d, ScreenPosition.safeTop() * d) / d
 end
 
 -- pokegold engine/battle/core.asm:8646, engine/events/halloffame.asm:270

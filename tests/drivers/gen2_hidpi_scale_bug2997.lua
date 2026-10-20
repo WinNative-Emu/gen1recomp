@@ -42,10 +42,20 @@ return function(game)
   local want = math.floor(math.min(pw / 160, ph / 144))
   ok(math.abs(k - want) < 1e-6,
     string.format("Gen 2 fit is %.3f framebuffer px per GB px (Gen 1 rule: %d)", k, want))
-  ok(math.abs(world:fitScale() - want) < 1e-6,
-    string.format("world fit scale %s matches", tostring(world:fitScale())))
+  ok(math.abs(world:fitScale() * d - want) < 1e-6,
+    string.format("world fit scale %.3f px matches", world:fitScale() * d))
+  local seen
+  local drawScene = game.drawScene
+  game.drawScene = function(self, sw, sh)
+    seen = { sw, sh }
+    return drawScene(self, sw, sh)
+  end
   print(string.format("[2997] origin %.2f,%.2f units", ox, oy))
   U.still(game, out .. "/2997_gen2_hidpi_overworld.png")
+  game.drawScene = nil
+  ok(seen and seen[1] == w and seen[2] == h,
+    string.format("the scene is handed LOVE units (%sx%s, window %dx%d)",
+      tostring(seen and seen[1]), tostring(seen and seen[2]), w, h))
   U.tap(game, "start")
   U.wait(20)
   U.still(game, out .. "/2997_gen2_hidpi_start_menu.png")

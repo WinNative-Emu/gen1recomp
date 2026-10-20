@@ -186,8 +186,9 @@ function MapNameSign.draw(world, w, h, posLift)
   local G = love.graphics
   local scale = world:fitScale()
   G.push()
-  G.translate(math.floor((w - 160 * scale) / 2),
-    math.floor((h - 144 * scale) / 2) - (posLift or 0))
+  local Playfield = require("src.render.Playfield")
+  G.translate(Playfield.snap((w - 160 * scale) / 2),
+    Playfield.snap((h - 144 * scale) / 2) - (posLift or 0))
   G.scale(scale, scale)
   G.setColor(1, 1, 1, 1)
   local function blit()

@@ -800,6 +800,8 @@ function BattleTransition:drawBgLayer(s)
     bw, bh = canvas:getPixelDimensions()
   elseif canvas then
     bw, bh = canvas:getDimensions()
+  elseif world.pixelDrawing then
+    bw, bh = world.pixelW, world.pixelH
   else
     bw, bh = Playfield.dimensions()
   end
