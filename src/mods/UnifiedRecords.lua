@@ -1,5 +1,6 @@
 
 local Ids = require("src.mods.UnifiedIds")
+local Stats = require("src.pokemon.Stats")
 local Records = {}
 
 local STAT_KEYS = { "hp", "attack", "defense", "speed", "special", "specialAttack", "specialDefense" }
@@ -22,7 +23,21 @@ local STATUS_BITS = { sleep = 1, poison = 8, burn = 16, freeze = 32,
   paralyze = 64, toxic = 128 }
 local FIELDS = { species = true, item = true, name = true, nickname = true, level = true,
   hp = true, maxHp = true, status = true, isEgg = true, stats = true,
-  moves = true, native = true }
+  moves = true, native = true, dvs = true, shiny = true }
+
+local function shinyOf(native, generation)
+  if native.shiny ~= nil then return native.shiny == true end
+  if generation == 3 then
+    if native.isShiny ~= nil then return native.isShiny == true end
+    local p = (tonumber(native.personality) or 0) % 4294967296
+    local full = (tonumber(native.otId or native.trainerId) or 0) % 4294967296
+    local tid = full % 65536
+    local sid = (tonumber(native.otSecretId) or math.floor(full / 65536)) % 65536
+    local value = bit.bxor(bit.bxor(tid, sid), bit.bxor(math.floor(p / 65536), p % 65536))
+    return value < 8
+  end
+  return Stats.isShiny(native.dvs)
+end
 
 local function copy(value, seen)
   if type(value) ~= "table" then
@@ -241,7 +256,9 @@ function Records.mon(native, generation, data, version)
     name = name, nickname = native.nickname, level = native.level, hp = native.hp,
     maxHp = stats.hp or native.hp, status = SHORT_STATUS[statusOf(native.status)] or statusOf(native.status),
     isEgg = native.isEgg == true or native.egg == true or (generation == 3 and native.species == 412),
-    stats = stats, moves = moves, native = copy(native) }
+    stats = stats, moves = moves, native = copy(native),
+    dvs = generation ~= 3 and type(native.dvs) == "table" and copy(native.dvs) or nil,
+    shiny = shinyOf(native, generation) }
 end
 
 local function prepare(native, canonical, generation, data, version)
@@ -262,6 +279,7 @@ local function prepare(native, canonical, generation, data, version)
       put("speciesId", writeId(canonical.species, "species", generation, data, native.speciesId, native))
     end
   end
+  if changed("dvs") or changed("shiny") then error("dvs and shiny are read only", 0) end
   local complete = type(canonical.native) == "table"
   if changed("item") or (complete and canonical.item == nil and before.item ~= nil) then
     local id = canonical.item

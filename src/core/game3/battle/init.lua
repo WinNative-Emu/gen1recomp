@@ -3828,7 +3828,7 @@ local function start_post_catch_flow(catchRes)
           local target = (enemy and enemy.mon) or mon
           local pid = target and target.personality or personality
           local shiny = Pokemon.isShiny(target)
-          local pic = Pokemon.frontPic(Pokemon.picSpecies(sp, pid), nil, shiny, pid, "dex")
+          local pic = Pokemon.frontPic(Pokemon.picSpecies(sp, pid), nil, shiny, pid, "dex", target)
           Ui.beginCaughtDexScene({
             family = "frlg", personality = pid,
             otId = target and target.otId, otSecretId = target and target.otSecretId,

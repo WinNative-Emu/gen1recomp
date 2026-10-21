@@ -70,8 +70,8 @@ end
 local sites = {
   { "src/ui/game3/summary_menu.lua", 'monFrontPic(mon, nil, "summary")' },
   { "src/ui/game3/summary_menu.lua", 'frontPic(species, nil, nil, nil, "summary")' },
-  { "src/ui/game3/evolution_scene.lua", 'mon and mon.personality, "evolution")' },
-  { "src/ui/game3/egg_hatch.lua", 'mon and mon.personality, "hatch")' },
+  { "src/ui/game3/evolution_scene.lua", 'mon and mon.personality, "evolution", mon)' },
+  { "src/ui/game3/egg_hatch.lua", 'mon and mon.personality, "hatch", mon)' },
   { "src/ui/game3/egg_hatch.lua", 'frontPic(Pokemon.SPECIES_EGG, nil, nil, nil, "hatch")' },
   { "src/ui/game3/credits.lua", 'frontPic(mon.def.species, nil, nil, nil, "credits")' },
   { "src/ui/game3/rse/credits.lua", 'species), "credits")' },

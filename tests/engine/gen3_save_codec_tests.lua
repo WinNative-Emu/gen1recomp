@@ -833,4 +833,17 @@ do
   eq(assert(Gen3Save.decode(ab)).money, 222, "the newer slot wins")
 end
 
+do
+  local save = portSave({ hallOfFameTeams = { {
+    { species = 6, level = 50, nickname = "CHAR", trainerId = 1, otSecretId = 2, personality = 3 },
+    { species = 1500, level = 60, nickname = "BIG", trainerId = 1, otSecretId = 2, personality = 4 },
+  } } })
+  local bytes, notes = Gen3Save.exportPort(reload(save), stubOpts())
+  check(bytes ~= nil, "a Hall of Fame with a modded species still exports")
+  local c = assert(Gen3Save.decode(bytes))
+  eq(#c.hallOfFame[1], 1, "a species the 9-bit Hall of Fame field cannot hold is left out")
+  eq(c.hallOfFame[1][1].species, 6, "the representable species is kept")
+  check(type(notes) == "string" and notes:find("512", 1, true) ~= nil, "the export says why it was left out")
+end
+
 T.finish("gen3_save_codec")

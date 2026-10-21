@@ -1538,11 +1538,11 @@ function Pokemon.monPicSpecies(mon)
 end
 
 function Pokemon.monFrontPic(mon, form, kind)
-  return Pokemon.frontPic(Pokemon.monPicSpecies(mon), form, Pokemon.isShiny(mon), mon and mon.personality, kind)
+  return Pokemon.frontPic(Pokemon.monPicSpecies(mon), form, Pokemon.isShiny(mon), mon and mon.personality, kind, mon)
 end
 
 function Pokemon.monBackPic(mon, form, kind)
-  return Pokemon.backPic(Pokemon.monPicSpecies(mon), form, Pokemon.isShiny(mon), kind)
+  return Pokemon.backPic(Pokemon.monPicSpecies(mon), form, Pokemon.isShiny(mon), kind, mon)
 end
 
 -- pokefirered/src/pokemon_icon.c:1116
@@ -1570,12 +1570,12 @@ local function without_deoxys_form(fn, ...)
 end
 
 -- pokefirered/src/decompress.c:327
-function Pokemon.frontPicDontHandleDeoxys(species, form, shiny, personality, kind)
-  return without_deoxys_form(Pokemon.frontPic, species, form, shiny, personality, kind)
+function Pokemon.frontPicDontHandleDeoxys(species, form, shiny, personality, kind, mon)
+  return without_deoxys_form(Pokemon.frontPic, species, form, shiny, personality, kind, mon)
 end
 
-function Pokemon.backPicDontHandleDeoxys(species, form, shiny, kind)
-  return without_deoxys_form(Pokemon.backPic, species, form, shiny, kind)
+function Pokemon.backPicDontHandleDeoxys(species, form, shiny, kind, mon)
+  return without_deoxys_form(Pokemon.backPic, species, form, shiny, kind, mon)
 end
 
 function Pokemon.monFrontPicDontHandleDeoxys(mon, form, kind)

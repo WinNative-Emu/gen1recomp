@@ -1786,6 +1786,7 @@ local function build(L)
 
   Gen3Save.MSG.noMap = "That save is on a map the cartridge does not have."
   Gen3Save.MSG.noData = "Import this game's ROM again before exporting a cartridge save."
+  Gen3Save.MSG.hofSpecies = "Hall of Fame entries for species 512 and above are left out, because the cartridge format only has 9 bits for the species."
   Gen3Save.MSG.badSpecies = "Pokemon #%d (%s) has no cartridge species number, so the save can't be exported."
 
   function Gen3Save.ownerOf(bytes)
@@ -2175,17 +2176,25 @@ local function build(L)
       }
     end
 
-    local teams = {}
+    local teams, hofSkipped = {}, false
     for _, team in ipairs(type(save.hallOfFameTeams) == "table" and save.hallOfFameTeams or {}) do
       local rec = {}
       for _, m in ipairs(type(team) == "table" and team or {}) do
-        rec[#rec + 1] = {
-          tid = num(m.trainerId, 0) % 65536 + (num(m.otSecretId, 0) % 65536) * 65536,
-          personality = num(m.personality, 0) % U32,
-          species = num(m.species, 0),
-          level = num(m.level, 0),
-          nickname = trunc(m.nickname, L.HOF.nickLength),
-        }
+        if num(m.species, 0) >= 512 then
+          if not hofSkipped then
+            c.notes = c.notes or {}
+            c.notes[#c.notes + 1] = Gen3Save.MSG.hofSpecies
+            hofSkipped = true
+          end
+        else
+          rec[#rec + 1] = {
+            tid = num(m.trainerId, 0) % 65536 + (num(m.otSecretId, 0) % 65536) * 65536,
+            personality = num(m.personality, 0) % U32,
+            species = num(m.species, 0),
+            level = num(m.level, 0),
+            nickname = trunc(m.nickname, L.HOF.nickLength),
+          }
+        end
       end
       if #rec > 0 then teams[#teams + 1] = rec end
     end

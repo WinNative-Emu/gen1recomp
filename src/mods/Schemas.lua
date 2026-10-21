@@ -1304,7 +1304,7 @@ local function prepareNativeWrite(index, registry, tables, reserved)
         label .. ": changing a native index is unsupported")
       if not num and value.index ~= nil then
         num = value.index
-        nativeCheck(type(num) == "number" and num % 1 == 0 and num >= 1 and num <= 1023
+        nativeCheck(type(num) == "number" and num % 1 == 0 and num >= 1 and num <= 65535
           and not (reserved and reserved[num]), id, label .. ": invalid or reserved native index")
         nativeCheck(not occupied[num] or owners[num] == id, id,
           label .. ": native index collision: " .. num)
@@ -1317,7 +1317,7 @@ local function prepareNativeWrite(index, registry, tables, reserved)
   end
   for _, id in ipairs(ids) do
     if values[id] ~= nil and slots[id] == nil then
-      for num = 1, 1023 do
+      for num = 1, 65535 do
         if not occupied[num] and not (reserved and reserved[num]) then
           slots[id], occupied[num] = num, true
           break
@@ -2093,7 +2093,7 @@ R.pokemon = {
   gen3BaseAt = G3.monRecord, gen3BaseIds = G3.monIds, gen3Write = G3.monWrite,
   gen3Fields = {
     id = f.str, name = f.str, dex = f.opt(f.int(1)),
-    index = f.opt(f.int(1, 1023)),
+    index = f.opt(f.int(1, 65535)),
     types = f.list(f.id("type_chart")),
     baseStats = f.rec{ hp = f.int(1, 255), attack = f.int(1, 255),
                        defense = f.int(1, 255), speed = f.int(1, 255),
@@ -2177,7 +2177,7 @@ R.moves = {
   gen3BaseAt = G3.moveRecord, gen3BaseIds = G3.moveIds, gen3Write = G3.moveWrite,
   gen3Fields = {
     id = f.str, name = f.str,
-    index = f.opt(f.int(1, 1023)),
+    index = f.opt(f.int(1, 65535)),
     type = f.id("type_chart"),
     power = f.int(0, 255), accuracy = f.int(0, 100), pp = f.int(0, 64),
     effect = f.opt(f.int(0, 255)), secondaryChance = f.opt(f.int(0, 100)),
@@ -2207,7 +2207,7 @@ R.items = {
   gen3BaseAt = G3.itemRecord, gen3BaseIds = G3.itemIds, gen3Write = G3.itemWrite,
   gen3Fields = {
     id = f.str, name = f.str,
-    index = f.opt(f.int(1, 1023)),
+    index = f.opt(f.int(1, 65535)),
     price = f.int(0),
     pocket = f.opt(f.str), fieldUse = f.opt(f.str),
     holdEffect = f.opt(f.int(0, 255)), holdEffectParam = f.opt(f.int(0, 255)),

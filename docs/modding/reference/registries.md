@@ -751,7 +751,7 @@ do not.
 | `holdEffectParam` | integer 0..255 | no |
 | `id` | string | yes |
 | `importance` | integer 0..255 | no |
-| `index` | integer 1..1023 | no |
+| `index` | integer 1..65535 | no |
 | `name` | string | yes |
 | `pocket` | string | no |
 | `price` | integer >= 0 | yes |
@@ -1063,7 +1063,7 @@ do not.
 | `effect` | integer 0..255 | no |
 | `flags` | integer 0..255 | no |
 | `id` | string | yes |
-| `index` | integer 1..1023 | no |
+| `index` | integer 1..65535 | no |
 | `name` | string | yes |
 | `power` | integer 0..255 | yes |
 | `pp` | integer 0..64 | yes |
@@ -1279,7 +1279,7 @@ do not.
 | `genderRatio` | integer 0..255 | no |
 | `growthRate` | growth_rates id | yes |
 | `id` | string | yes |
-| `index` | integer 1..1023 | no |
+| `index` | integer 1..65535 | no |
 | `itemCommon` | items id | no |
 | `itemRare` | items id | no |
 | `learnset` | list of {level, move} | yes |

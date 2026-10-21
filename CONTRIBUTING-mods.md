@@ -198,6 +198,10 @@ have; on Ruby, Sapphire and Emerald those requires are reported like any other n
 adapter. `python3 tools/modkit.py gen3check` reads `"frlg"` and `"rse"` as a
 Gen 3 claim.
 
+`pokemon.sprite` carries `ctx.shiny` on Gen 1 and Gen 2, and a mod on API 3 reads
+`ctx.mon.shiny` and `ctx.mon.dvs` the same way an API 1 mod reads them off the raw mon
+(both are read-only; the raw mon is still at `ctx.mon.native`).
+
 On every Gen 3 game, `pokemon.sprite` and `pokemon.icon` fire for mon pics
 and for menu icons (party, summary, PC, trade, naming). The sprite hook's
 `ctx.kind` names the screen with the Gen 1 and Gen 2 values: `battle`,

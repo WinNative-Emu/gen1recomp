@@ -210,7 +210,7 @@ local function pic_args(battler, sp)
   if tf and tonumber(tf.species) == tonumber(sp) and tf.personality ~= nil then
     personality = tf.personality
   end
-  return Pokemon.picSpecies(sp, personality), Pokemon.isShiny(mon), personality
+  return Pokemon.picSpecies(sp, personality), Pokemon.isShiny(mon), personality, mon
 end
 Ui.picArgs = pic_args
 
@@ -231,20 +231,20 @@ function Ui.ignoreDeoxysForm(side, id, transformed)
   return false
 end
 
-function Ui.sidePic(back, ignoreDeoxys, picSp, form, shiny, personality)
+function Ui.sidePic(back, ignoreDeoxys, picSp, form, shiny, personality, mon)
   local entry
   if back and Pokemon.backPic then
     if ignoreDeoxys then
-      entry = Pokemon.backPicDontHandleDeoxys(picSp, form, shiny)
+      entry = Pokemon.backPicDontHandleDeoxys(picSp, form, shiny, nil, mon)
     else
-      entry = Pokemon.backPic(picSp, form, shiny)
+      entry = Pokemon.backPic(picSp, form, shiny, nil, mon)
     end
   end
   if not entry and Pokemon.frontPic then
     if ignoreDeoxys then
-      entry = Pokemon.frontPicDontHandleDeoxys(picSp, form, shiny, personality)
+      entry = Pokemon.frontPicDontHandleDeoxys(picSp, form, shiny, personality, nil, mon)
     else
-      entry = Pokemon.frontPic(picSp, form, shiny, personality)
+      entry = Pokemon.frontPic(picSp, form, shiny, personality, nil, mon)
     end
   end
   return entry
@@ -271,9 +271,9 @@ function Ui.battlerPic(side, battler, species)
   local sp = tonumber(species) or (battler and tonumber(battler.species))
   if not sp then return nil, 0, false end
   local form = (sp == SPECIES_CASTFORM) and castform_form(side, battler) or 0
-  local picSp, shiny, personality = pic_args(battler, sp)
+  local picSp, shiny, personality, mon = pic_args(battler, sp)
   local ignore = Ui.ignoreDeoxysForm(side, id, is_transformed(battler, sp))
-  return Ui.sidePic(side == "player", ignore, picSp, form, shiny, personality), form, false
+  return Ui.sidePic(side == "player", ignore, picSp, form, shiny, personality, mon), form, false
 end
 
 function Ui.reset(opts)
@@ -2236,10 +2236,10 @@ local function draw_mon_sprite(battler, base, back, id)
   if not entry and ghost and Pokemon.ghostPic then
     entry = Pokemon.ghostPic()
   end
-  local picSp, shiny, personality = pic_args(battler, sp)
+  local picSp, shiny, personality, mon = pic_args(battler, sp)
   if not entry then
     -- pokefirered/src/battle_gfx_sfx_util.c:341, :390
-    entry = Ui.sidePic(back, Ui.ignoreDeoxysForm(side, id, tf ~= nil), picSp, form, shiny, personality)
+    entry = Ui.sidePic(back, Ui.ignoreDeoxysForm(side, id, tf ~= nil), picSp, form, shiny, personality, mon)
   end
   if not back and not ghost and not dollImg and pres and (tonumber(pres.monFrame) or 0) ~= 0 then
     -- pokeemerald/src/sprite.c:917

@@ -158,7 +158,7 @@ EggHatch._finish = finish_scene
 local function hatched_pic()
   local mon = EggHatch._mon
   return Pokemon.frontPic(Pokemon.picSpecies(EggHatch._species, mon and mon.personality), nil,
-    Pokemon.isShiny(mon), mon and mon.personality, "hatch")
+    Pokemon.isShiny(mon), mon and mon.personality, "hatch", mon)
 end
 
 function EggHatch.start(mon, opts)

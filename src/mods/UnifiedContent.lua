@@ -1005,7 +1005,7 @@ local function gen3Index(loader, name, id, value, old)
   end
   local used = {}
   local function reserve(index, owner)
-    if integer(index, 1, 1023) then
+    if integer(index, 1, 65535) then
       if owner == id then used[index] = used[index] or id
       else used[index] = owner or true end
     end
@@ -1048,11 +1048,11 @@ local function gen3Index(loader, name, id, value, old)
   if name == "pokemon" then used[412] = true end
   local index = value.index or (old and old.index)
   if index == nil then
-    for candidate = 1, 1023 do
+    for candidate = 1, 65535 do
       if not used[candidate] then index = candidate; break end
     end
   end
-  expect(integer(index, 1, 1023), "no valid Gen 3 native index")
+  expect(integer(index, 1, 65535), "no valid Gen 3 native index")
   expect(used[index] == nil or used[index] == id, "Gen 3 native index collision")
   value.index = index
 end
@@ -1069,7 +1069,7 @@ local function gen3References(loader, name, payload, currentId)
       elseif registryName == "moves" then num = Schemas.gen3View.moveNum(base, id)
       elseif registryName == "items" then num = Schemas.gen3View.itemNum(base, id) end
     end
-    if not identifier(id) or not integer(num, 1, 1023)
+    if not identifier(id) or not integer(num, 1, 65535)
         or (registryName == "pokemon" and num == 412) then
       refuse("unmapped Gen 3 " .. registryName .. " id " .. tostring(id))
     end

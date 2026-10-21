@@ -9,6 +9,7 @@
 
 local Runtime = require("src.mods.Runtime")
 local FieldDefaults = require("src.world.FieldDefaults")
+local Stats = require("src.pokemon.Stats")
 
 local Sprites = {}
 
@@ -33,6 +34,7 @@ function Sprites.path(data, species, side, opts)
     mon = opts.mon,
     trueColor = def.trueColor and true or false,
     data = data,
+    shiny = opts.mon ~= nil and Stats.isShiny(opts.mon.dvs),
   })
 end
 
