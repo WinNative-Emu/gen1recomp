@@ -404,6 +404,9 @@ local function boundary(loader, name, fishing)
     end
     local out = shallow(raw)
     out.loader = nil
+    if name == "mods.loaded" and raw.loader == loader then
+      out.loader = { exports = shallow(loader.exports) }
+    end
     for key, value in pairs(raw) do
       local role = recordRole(key)
       if kind == "exp_award" and key == "applyShare" and type(value) == "function" then

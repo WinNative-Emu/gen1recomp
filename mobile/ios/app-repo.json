@@ -13,6 +13,832 @@
       "category": "games",
       "versions": [
         {
+          "version": "0.3.95",
+          "date": "2026-10-21",
+          "size": 44713427,
+          "downloadURL": "https://github.com/bryanthaboi/gen1recomp/releases/download/v0.3.95/gen1recomp++-0.3.95-ios.ipa",
+          "localizedDescription": "Mod Mon index cap 🧢\n\n## Contributors\n\n- @bryanthaboi"
+        },
+        {
+          "version": "0.3.94",
+          "date": "2026-10-21",
+          "size": 44708049,
+          "downloadURL": "https://github.com/bryanthaboi/gen1recomp/releases/download/v0.3.94/gen1recomp++-0.3.94-ios.ipa",
+          "localizedDescription": "Shiny api gen 3\n\n## Contributors\n\n- @bryanthaboi"
+        },
+        {
+          "version": "0.3.93",
+          "date": "2026-10-20",
+          "size": 44712138,
+          "downloadURL": "https://github.com/bryanthaboi/gen1recomp/releases/download/v0.3.93/gen1recomp++-0.3.93-ios.ipa",
+          "localizedDescription": "major mod api update\r\n\r\nCo-authored-by: Nexhas28 <45065431+Nexhas28@users.noreply.github.com>\n\n## Contributors\n\n- @bryanthaboi\n- @Nexhas28"
+        },
+        {
+          "version": "0.3.92",
+          "date": "2026-10-20",
+          "size": 44589605,
+          "downloadURL": "https://github.com/bryanthaboi/gen1recomp/releases/download/v0.3.92/gen1recomp++-0.3.92-ios.ipa",
+          "localizedDescription": "Download the right version for your device below.\n\n## Issues closed\n\n- #2988 Fractional Scaling Support (Gen-2)\n- #3011 Mods can't register Gold scripts (map_scripts is off on Gen 2)\n- #3013 Gen2: a species a mod registers technically doesn't show in the Pokédex\n- #3016 Crash during any battle\n- #3017 Boat to Dewport is slow.\n- #3018 (Sapphire) Crash when using item finder\n- #3021 Shown Pokemon don't get their palette in redpp\n- #3022 (Firered) Ice reflection covers rock\n- #3024 (Firered) NPCs at the Ember Spa are standing on the water rather than in it\n- #3025 (Firered) Pausing also pauses water animations\n- #3026 (Firered) Bike is useable when surfing\n- #3027 [Emerald] Scientists doesn't say the location of Groundon/Kyogre\n- #3028 [Emerald] Multi-battle in battle tower crash before start\n\n## Contributors\n\n- @bryanthaboi"
+        },
+        {
+          "version": "0.3.91",
+          "date": "2026-10-19",
+          "size": 44586417,
+          "downloadURL": "https://github.com/bryanthaboi/gen1recomp/releases/download/v0.3.91/gen1recomp++-0.3.91-ios.ipa",
+          "localizedDescription": "Ui fix specifically for ui mods \n\n## Contributors\n\n- @bryanthaboi"
+        },
+        {
+          "version": "0.3.90",
+          "date": "2026-10-18",
+          "size": 44590913,
+          "downloadURL": "https://github.com/bryanthaboi/gen1recomp/releases/download/v0.3.90/gen1recomp++-0.3.90-ios.ipa",
+          "localizedDescription": "Bazinga time\n\n## Issues closed\n\n- #2989 (Saphire) Crash when fishing\n- #2991 problem with map transitions\n- #2992 no typewriting effect on quit confirmation dialog\n- #2994 (Gen 3) Funky graphics on chat system with most of the screen turning black\n- #2997 Inconsistent display scaling between generations\n- #2998 Music stutters on intro\n- #2999 (Firered) Status effect labels\n- #3000 (Firered) Bug when paralyzed and digging\n- #3002 (Firered) Cycling music resets after battle\n- #3003 (Firered) Forced switching EXP bar display glitch\n- #3004 Launcher issue - mods\n- #3005 Using the save editor Fix all errors feature removes the pokemon name\n- #3006 Not saving in the Frontier Pass in Pokémon Emerald's Battle Frontier\n- #3009 Script waitbuttonpress wait survives a VM halt on map change, leaving the player unable to move\n- #3010 Exclude *.psd from build\n- #3012 Gen2: a side-effect status says \"But it failed!\" when the target already has one\n\n## Contributors\n\n- @bryanthaboi"
+        },
+        {
+          "version": "0.3.89",
+          "date": "2026-10-15",
+          "size": 56348310,
+          "downloadURL": "https://github.com/bryanthaboi/gen1recomp/releases/download/v0.3.89/gen1recomp++-0.3.89-ios.ipa",
+          "localizedDescription": "Crystal Enhancements mainly but several that affect GS as well.\n\n## Contributors\n\n- @bryanthaboi"
+        },
+        {
+          "version": "0.3.88",
+          "date": "2026-10-14",
+          "size": 56337448,
+          "downloadURL": "https://github.com/bryanthaboi/gen1recomp/releases/download/v0.3.88/gen1recomp++-0.3.88-ios.ipa",
+          "localizedDescription": "Download the right version for your device below.\n\n## Issues closed\n\n- #2828 Cannot import FireRed, Sapphire and Emerald on sbc-portmaster version\n- #2916 RG35xxsp\n\n## Contributors\n\n- @AverageConsumer\n- @bryanthaboi\n- @Nexhas28"
+        },
+        {
+          "version": "0.3.87",
+          "date": "2026-10-14",
+          "size": 56337258,
+          "downloadURL": "https://github.com/bryanthaboi/gen1recomp/releases/download/v0.3.87/gen1recomp++-0.3.87-ios.ipa",
+          "localizedDescription": "+++ goober boulder bug patched out\n\n## Issues closed\n\n- #2982 Improve Fractional Scaling Support in Windows\n- #2983 Pacifidlog Town log bridges not reacting to player (Ruby and Sapphire)\n\n## Contributors\n\n- @bryanthaboi"
+        },
+        {
+          "version": "0.3.86",
+          "date": "2026-10-14",
+          "size": 56341503,
+          "downloadURL": "https://github.com/bryanthaboi/gen1recomp/releases/download/v0.3.86/gen1recomp++-0.3.86-ios.ipa",
+          "localizedDescription": "hella bs /s\n\n## Issues closed\n\n- #2917 Roamer area location doesn't initialize in emerald\n- #2918 Mods can't add fly towns\n- #2920 Curse uses Ghost Animation for non-ghost types\n- #2921 The NPCs in Sootopolis who ask for Lotad and Seedot are not recognizing the respective Pokémon to measure their size\n- #2922 EV reducing berries are unusable\n- #2923 (Yellow) Pokédex: KOFFING's entry ends with the word \"DONE\"\n- #2924 (Yellow) Trainer moves and item use, Cerulean Cave hidden items, Celadon Hotel PC and diploma follow Red/Blue\n- #2925 (Yellow) Two NPCs and the two Fan Club pictures do not react\n- #2926 (RBY) Battle menus: screens open or close in a different order than the original\n- #2927 (RBY) Battle: wrong or missing messages (MIST, SUBSTITUTE, REST, BIDE, sleep move, move learned at level-up)\n- #2928 (RBY) PP UP adds 8 PP to a 40-PP move; MAX ETHER refuses a full move that has PP UPs\n- #2929 (Blue/Yellow) Credits: \"THE END\" in the text font; (Yellow) STAFF / PRODUCTION missing, \"××××××××\" shown\n- #2930 (RBY) VICTREEBEL and VILEPLUME get the wrong level-up moveset\n- #2931 (RBY) Items and field moves from the menu: OAK's PARCEL, ITEMFINDER, BICYCLE, TELEPORT, FLY, SOFTBOILED\n- #2932 (RBY) Full bag: gift NPCs print a generic line; Nugget Bridge reward is not kept\n- #2933 (RBY) State the original resets on leaving an area stays set (Mr. Fuji, Mansion, Museum ticket, Seafoam)\n- #2934 (RBY) Hidden events and NPCs with a wrong or missing reaction (7 places)\n- #2935 (RBY) Scripted events: missing turns and walks, different order, repeated battle\n- #2936 (RBY) Rocket Hideout elevator puts you one tile left of where the original does\n- #2937 (RBY) Day Care accepts a Pokémon with an HM move; cancel texts of Day Care and Name Rater differ\n- #2938 (RBY) Game Corner slot machine: reacts from above/below, CREDIT digits, bet menu, win message, YES/NO spacing\n- #2940 (RBY) Bill's PC: wrong screen after RELEASE and after CANCEL, list closed too early; (Yellow) \"SEE YA!\" covered\n- #2941 (RBY) Poké Mart: prices one tile too far left; cursor is not reset after buying or selling\n- #2942 (RBY) Messages that wait for a button where the original goes on, and one ▼ that is missing\n- #2943 (Yellow) Summer Beach House: text box closes before YES/NO, no Hi-Score on NO, HP counter 8 px too far right\n- #2944 (RBY) Text tiles (\"No.\", \"IDNo.\", \":L\", \"PP\", \"'s\", colon, period, \"×\") are drawn with normal font letters\n- #2945 (RBY) Pokémon pictures placed differently: small front pictures (status, Pokédex, Hall of Fame), 68 back sprites\n- #2946 (RBY) Hall of Fame: the MONEY value is two tiles too far left\n- #2947 (RBY) Battle text box: the ▼ prompt is drawn 4 px lower than in the original\n- #2948 (RBY) Item PC: the quantity box is gone before \"… was stored via PC.\"\n- #2949 (RBY) Overworld NPCs just below the bottom screen edge are partly drawn; the original hides them\n- #2950 (RBY) Collection of small differences (8 points)\n- #2951 (RBY) Question: are these differences from the original intentional? (8 points)\n- #2952 (RBY) Mt. Moon B2F: wild Pokémon still attack in the fossil corner after the Super Nerd is beaten\n- #2953 (RBY) After losing to the rival on Route 22 or on the S.S. Anne he is gone until you step on the trigger again\n- #2954 (RBY) SAVE over the save file of another game: \"The older file will be erased to save. Okay?\" is never asked\n- #2955 (RBY) Warps fire on a blocked step where the original does nothing (S.S. Anne cabin mats, Seafoam stairs)\n- #2956 (RBY) Blackout from poison on the map: one sentence is missing, and the player always faces down afterwards\n- #2957 (Red) Link cable: trade confirmation, cancelling, list cursor, party order, trade movie, battle screens differ\n- #2958 (Yellow) NPC lines that Yellow added are missing: Museum hiker, Fan Club, Celadon Mansion 3F, gym guide, quiz\n- #2959 [Gen 3] Interactive Secret Base decoration not working\n- #2960 Gen 3 eggs are created without the cart's egg data (gift eggs hatch about 3.5× slower; no Japanese language flag)\n- #2962 (Yellow) Yellow-specific events differ: old man's walk, MACHOKE trade evolution, trash cans, and 3 more places\n- #2963 (RBY) Status screen, second page: the nickname is shown where the original prints the species name\n- #2964 (Blue) Title screen: the white pixels of the ball in the player's hand are opaque\n- #2965 (Yellow) Pokémon Center: \"OK. We'll need your POKéMON.\" waits for a button, the original goes on by itself\n- #2966 (RBY) Question: Game Corner gentleman refuses with 9991–9999 coins (original: only with 9990) – intentional?\n- #2967 (RBY) COLORS = OG: move-animation sprites lose their grey shades; palette effects skip the Pokémon pictures\n- #2968 (RBY) Battle effects missing or different: EXPLOSION 2nd part, Safari throw, X items, RAGE, HUD shake, SPORE\n- #2969 (RBY) Battle animations: pauses and effect lengths differ from the original (measured, 8 points)\n- #2970 (RBY) Battle start: wipes and black hold shorter than in the original; blackout shows the map without fade\n- #2972 (Yellow) Viridian Forest: the LASS standing in tall grass is half hidden; the original draws her completely\n- #2973 (RBY) Super Game Boy colours: the four Saffron gates always use the route palette\n- #2976 (Ruby) Game crashes consistently at champion\n- #2977 Grass animation error\n- #2978 Mods can't change Gold's Pokédex entries\n\n## Contributors\n\n- @1Jamie\n- @bryanthaboi"
+        },
+        {
+          "version": "0.3.85",
+          "date": "2026-10-12",
+          "size": 56323592,
+          "downloadURL": "https://github.com/bryanthaboi/gen1recomp/releases/download/v0.3.85/gen1recomp++-0.3.85-ios.ipa",
+          "localizedDescription": "Gazoontite ?\n\n## Issues closed\n\n- #2907 Character sprite on Trainer Card incorrect\n- #2909 Inaccurate location banner\n- #2911 Awkward silence in cutscenes\n- #2913 Savestates can be used to bypass guy that stops you from going to left\n\n## Contributors\n\n- @bryanthaboi"
+        },
+        {
+          "version": "0.3.84",
+          "date": "2026-10-12",
+          "size": 56324224,
+          "downloadURL": "https://github.com/bryanthaboi/gen1recomp/releases/download/v0.3.84/gen1recomp++-0.3.84-ios.ipa",
+          "localizedDescription": "bazinga nation runnin wild\n\n## Issues closed\n\n- #2897 Various Gen 3 sound effects lowers the music volume down\n- #2898 (Modding API + Trades) Gen1 copy of Gen2 species added through mod throws error when trying to trade between the two gens\n- #2899 Ditto appears to keep it's crit rate rather than changing to the transformed mon.\n- #2900 Explode/Self Destruct interaction with Substitute.\n- #2901 Issues with healing paralysis in a battle.\n- #2902 Union room parity?\n- #2903 Union Room parity? (Part 2)\n- #2904 (Modding API) \"pokemon.sprite\" and \"pokemon.icon\" hooks crash and burn for UNOWN specifically, and only in gen3\n\n## Contributors\n\n- @1Jamie\n- @bryanthaboi"
+        },
+        {
+          "version": "0.3.83",
+          "date": "2026-10-12",
+          "size": 56309430,
+          "downloadURL": "https://github.com/bryanthaboi/gen1recomp/releases/download/v0.3.83/gen1recomp++-0.3.83-ios.ipa",
+          "localizedDescription": "Keep em comin\n\n## Issues closed\n\n- #2889 Save screen not accurate\n- #2890 Poke Dude walking animation broken\n- #2891 Using Teachy TV doesn't have a fading animation\n- #2892 Teachy TV item random space\n- #2893 no old man throwing pokeball animation\n- #2894 old man instantly throws pokeball\n- #2895 issues with transition going out of buildings\n- #2896 pokemon catch jingle isn't cued properly\n\n## Contributors\n\n- @bryanthaboi"
+        },
+        {
+          "version": "0.3.82",
+          "date": "2026-10-12",
+          "size": 56311752,
+          "downloadURL": "https://github.com/bryanthaboi/gen1recomp/releases/download/v0.3.82/gen1recomp++-0.3.82-ios.ipa",
+          "localizedDescription": "Cry cry cry (gen 3 ambient cries)\n\n## Contributors\n\n- @bryanthaboi"
+        },
+        {
+          "version": "0.3.81",
+          "date": "2026-10-12",
+          "size": 56304890,
+          "downloadURL": "https://github.com/bryanthaboi/gen1recomp/releases/download/v0.3.81/gen1recomp++-0.3.81-ios.ipa",
+          "localizedDescription": "my flow state is getting fungshway'd\n\n## Issues closed\n\n- #2873 [Emerald] Loading save state during battle doesn't work properly\n- #2876 Ninja Boys and Hidden Trainers show\n- #2877 Pokenav menu broken\n- #2878 putting pokemon in box ui is broken\n- #2879 sadly the running against something or someone ends with you stuck for 2 frames in walking animation\n- #2880 [FireRed]  Evolving Pokémon, doesn't change name\n- #2882 FRLG: roaming beast's PID and IVs are re-rolled every encounter\n\n## Contributors\n\n- @bryanthaboi\n- @Nexhas28"
+        },
+        {
+          "version": "0.3.80",
+          "date": "2026-10-11",
+          "size": 56274201,
+          "downloadURL": "https://github.com/bryanthaboi/gen1recomp/releases/download/v0.3.80/gen1recomp++-0.3.80-ios.ipa",
+          "localizedDescription": "Quick performant update gen 3\n\n## Contributors\n\n- @bryanthaboi"
+        },
+        {
+          "version": "0.3.79",
+          "date": "2026-10-11",
+          "size": 56273971,
+          "downloadURL": "https://github.com/bryanthaboi/gen1recomp/releases/download/v0.3.79/gen1recomp++-0.3.79-ios.ipa",
+          "localizedDescription": "Bazinga m9\n\n## Issues closed\n\n- #2862 (Crystal) Pokémon gaining exp. in battle tower\n- #2863 (RBY, GSC) FLASH state not being saved\n- #2864 (Crystal) Missing SFX when closing options\n- #2865 Poison visual effect missing\n- #2866 Problem importing Fire Red\n- #2867 \"display\" refresh rate just sets framerate to 60\n- #2868 HM animations not playing\n- #2871 (Crystal) Does Thief and/or wild pokemon Held Items work correctly?\n\n## Contributors\n\n- @bryanthaboi\n- @claude\n- @Nexhas28"
+        },
+        {
+          "version": "0.3.78",
+          "date": "2026-10-11",
+          "size": 56271392,
+          "downloadURL": "https://github.com/bryanthaboi/gen1recomp/releases/download/v0.3.78/gen1recomp++-0.3.78-ios.ipa",
+          "localizedDescription": "Download the right version for your device below.\n\n## Issues closed\n\n- #2828 Cannot import FireRed, Sapphire and Emerald on sbc-portmaster version\n\n## Contributors\n\n- @bryanthaboi"
+        },
+        {
+          "version": "0.3.77",
+          "date": "2026-10-11",
+          "size": 56269693,
+          "downloadURL": "https://github.com/bryanthaboi/gen1recomp/releases/download/v0.3.77/gen1recomp++-0.3.77-ios.ipa",
+          "localizedDescription": "Download the right version for your device below.\n\n## Issues closed\n\n- #2858 Shoal Cave tides don't seem to be working properly\n- #2859 Deoxys doesn't change form\n\n## Contributors\n\n- @bryanthaboi"
+        },
+        {
+          "version": "0.3.76",
+          "date": "2026-10-11",
+          "size": 56267765,
+          "downloadURL": "https://github.com/bryanthaboi/gen1recomp/releases/download/v0.3.76/gen1recomp++-0.3.76-ios.ipa",
+          "localizedDescription": "Everyone thinks they are the real they\n\n## Issues closed\n\n- #2788 [Save editor] Pokéblocks editor\n- #2811 [Save editor] A more direct way to set the Mirage Island values ​​in the save editor\n- #2829 Can't scroll up or down in the save file editor on sbc-portmaster version\n- #2837 SBC PortMaster package fails to launch on ROCKNIX: libtheoradec.so.1 not found\n- #2850 [Save editor] Sort pokémon in the boxes\n\n## Contributors\n\n- @bryanthaboi"
+        },
+        {
+          "version": "0.3.75",
+          "date": "2026-10-11",
+          "size": 56260241,
+          "downloadURL": "https://github.com/bryanthaboi/gen1recomp/releases/download/v0.3.75/gen1recomp++-0.3.75-ios.ipa",
+          "localizedDescription": "Deez bugs\n\n## Issues closed\n\n- #2847 pikachu bump sfx\n- #2848 most pointless bug to be patched\n- #2849 Bug with move reminder in Emerald\n- #2853 Viridian City blackboard is a little broken\n- #2854 Wrong theme when rival leaves lab\n\n## Contributors\n\n- @AverageConsumer\n- @bryanthaboi\n- @Nexhas28"
+        },
+        {
+          "version": "0.3.74",
+          "date": "2026-10-10",
+          "size": 56260051,
+          "downloadURL": "https://github.com/bryanthaboi/gen1recomp/releases/download/v0.3.74/gen1recomp++-0.3.74-ios.ipa",
+          "localizedDescription": "Download the right version for your device below.\n\n## Issues closed\n\n- #2840 Item window not overlapping correctly at PC\n- #2841 Sprite color on the Town Map\n- #2843 Oak's first dialogue closes too fast\n- #2844 Music skip\n- #2845 Fainting in bug catching contest doesn't end the contest\n- #2846 Small pikachu inaccuracy\n\n## Contributors\n\n- @bryanthaboi"
+        },
+        {
+          "version": "0.3.73",
+          "date": "2026-10-10",
+          "size": 56259647,
+          "downloadURL": "https://github.com/bryanthaboi/gen1recomp/releases/download/v0.3.73/gen1recomp++-0.3.73-ios.ipa",
+          "localizedDescription": "Weird name tho tbh\n\n## Issues closed\n\n- #2833 Optional dependancies\n- #2835 Music stops after defeating rival in the League\n- #2836 Hall Of Fame cutscene inaccuracies\n- #2838 Wrong position of pokeballs on hall of fame machine\n- #2839 Walking animation frames while idle during cutscenes\n\n## Contributors\n\n- @bryanthaboi"
+        },
+        {
+          "version": "0.3.72",
+          "date": "2026-10-10",
+          "size": 56258677,
+          "downloadURL": "https://github.com/bryanthaboi/gen1recomp/releases/download/v0.3.72/gen1recomp++-0.3.72-ios.ipa",
+          "localizedDescription": "sheeshing like a b word\n\n## Issues closed\n\n- #2817 Slow Oak\n- #2818 pikachu why are you not looking at me :(\n- #2819 Pikachu turns around instantly\n- #2820 no music fade out on title screen\n- #2821 Rival too slow\n- #2822 Pikachu doesn't twitch\n- #2823 \"piiiiikaaaaa...\" not audible\n- #2824 Mindless Pikachu\n- #2825 update 0.3.71 Pokémon emerald stuck for a few frames when collide while running (again)\n- #2826 wild encounter whole on the phone\n- #2827 Emerald - npc trainers don't trigger battle\n- #2831 Self-Destruct against your last Pokémon doesn't cause blackout if you win the battle\n- #2832 Trainer rematch calls via the phone tell you that they are in your current location, when they aren't\n\n## Contributors\n\n- @bryanthaboi"
+        },
+        {
+          "version": "0.3.71",
+          "date": "2026-10-09",
+          "size": 56263935,
+          "downloadURL": "https://github.com/bryanthaboi/gen1recomp/releases/download/v0.3.71/gen1recomp++-0.3.71-ios.ipa",
+          "localizedDescription": "This one's for [non problematic musical artist]\n\n## Issues closed\n\n- #2813 issue with bobbing animation on water and underwater\n- #2814 Issue #2807 is still not working\n- #2815 issues with the lab interlude\n\n## Contributors\n\n- @bryanthaboi"
+        },
+        {
+          "version": "0.3.70",
+          "date": "2026-10-09",
+          "size": 56262211,
+          "downloadURL": "https://github.com/bryanthaboi/gen1recomp/releases/download/v0.3.70/gen1recomp++-0.3.70-ios.ipa",
+          "localizedDescription": "Download the right version for your device below.\n\n## Contributors\n\n- @bryanthaboi"
+        },
+        {
+          "version": "0.3.69",
+          "date": "2026-10-09",
+          "size": 56262155,
+          "downloadURL": "https://github.com/bryanthaboi/gen1recomp/releases/download/v0.3.69/gen1recomp++-0.3.69-ios.ipa",
+          "localizedDescription": "Bacons last resort\n\n## Issues closed\n\n- #2802 generic party indicator (slide-in and out animation and no sfx)\n- #2803 no side background\n- #2804 Minor incorrect Pikachu eye color\n- #2805 Save Edit Nature Type Causes Crash\n- #2806 Cannot get pokemon back from Daycare\n- #2807 badges on trainer card do not show\n- #2808 Sound effect missing when entering Hall of Fame\n\n## Contributors\n\n- @bryanthaboi"
+        },
+        {
+          "version": "0.3.68",
+          "date": "2026-10-09",
+          "size": 56253722,
+          "downloadURL": "https://github.com/bryanthaboi/gen1recomp/releases/download/v0.3.68/gen1recomp++-0.3.68-ios.ipa",
+          "localizedDescription": "Oops I make a oopsie\n\n## Issues closed\n\n- #2799 Pokémon emerald stuck for a few frames when collide while running\n\n## Contributors\n\n- @bryanthaboi"
+        },
+        {
+          "version": "0.3.67",
+          "date": "2026-10-09",
+          "size": 56252813,
+          "downloadURL": "https://github.com/bryanthaboi/gen1recomp/releases/download/v0.3.67/gen1recomp++-0.3.67-ios.ipa",
+          "localizedDescription": "I'm eating hot and spicy cheez its rn\n\n## Issues closed\n\n- #2793 Text advance indicator at the end of dialogue sections\n- #2794 Unintentional Visual Glitch (Shiny Sparkle )\n- #2795 Emerald Pokédex Cry Needle is not correct.\n- #2796 Crash when trying to start Emerald on PS4\n- #2797 Pokémon Stats and Data Are Altered or Lost When Transferring Between Generations Using the Box System\n- #2798 Trainer card doesn't change after two stars\n\n## Contributors\n\n- @artyrambles\n- @bryanthaboi"
+        },
+        {
+          "version": "0.3.66",
+          "date": "2026-10-08",
+          "size": 56251569,
+          "downloadURL": "https://github.com/bryanthaboi/gen1recomp/releases/download/v0.3.66/gen1recomp++-0.3.66-ios.ipa",
+          "localizedDescription": "shiddy doo\n\n## Issues closed\n\n- #2784 Issue entering buildings while riding a bike\n- #2785 Able to fast-forward through Hall of Fame\n- #2786 Credits roll too fast\n- #2787 No bumping sfx\n- #2789 battle transition incomplete\n- #2790 \"Can't use that here.\" dialogue inconsistency\n\n## Contributors\n\n- @bryanthaboi"
+        },
+        {
+          "version": "0.3.65",
+          "date": "2026-10-08",
+          "size": 56251113,
+          "downloadURL": "https://github.com/bryanthaboi/gen1recomp/releases/download/v0.3.65/gen1recomp++-0.3.65-ios.ipa",
+          "localizedDescription": "sue me ? ???? no... SUE U!\n\n## Issues closed\n\n- #2768 Broken palette\n- #2770 Dialogue inconsistencies\n- #2771 Incomplete/broken using field moves animation\n- #2772 [Modding API] Wrong pokemon.sprite callback value (\"kind\") in Summary screen\n- #2773 [Save Editor] Edit BP currency in Emerald\n- #2775 [Ruby] Berries not growing\n- #2778 MY EYES! MY EYES!\n- #2779 Player reflection shows the wrong frame while fishing (RSE and FRLG)\n- #2780 Missing battle animation and sound effect for Gen 2\n- #2781 No fishing animation while surfing or cycling (RSE and FRLG)\n- #2782 Surfing.. on land?\n\n## Contributors\n\n- @bryanthaboi"
+        },
+        {
+          "version": "0.3.64",
+          "date": "2026-10-08",
+          "size": 56250108,
+          "downloadURL": "https://github.com/bryanthaboi/gen1recomp/releases/download/v0.3.64/gen1recomp++-0.3.64-ios.ipa",
+          "localizedDescription": "slam dunking on these hoes (the bugs)\n\n## Issues closed\n\n- #2759 [FireRed] Player loads standing on water when saving while surfing\n- #2761 surf doesn't persist -emerald \n- #2762 Game Breaks using flash on 3rd floor of cave seeing steven.\n- #2763 hidden ninja npc visiable before battle\n- #2764 weird positions dialog and character run over (Android)\n- #2765 Player render error when \"Tilt\" option is used\n- #2766 Gen 3: Battle menu cursor resets to Fight after using an item or Poké Ball\n- #2767 Slightly slow surfing\n\n## Contributors\n\n- @bryanthaboi"
+        },
+        {
+          "version": "0.3.63",
+          "date": "2026-10-08",
+          "size": 56248514,
+          "downloadURL": "https://github.com/bryanthaboi/gen1recomp/releases/download/v0.3.63/gen1recomp++-0.3.63-ios.ipa",
+          "localizedDescription": "Download the right version for your device below.\n\n## Issues closed\n\n- #2732 Audio sync issue on Android for Gen 2\n- #2746 Sootopolis City camera oddities during unique events\n- #2748 Aqua team member Matt invisble\n- #2752 [Save Editor] Edit Volcanic Ash currency in R/S/E\n- #2756 Firered start menu and intro text is garbled\n\n## Contributors\n\n- @bryanthaboi\n- @Nexhas28"
+        },
+        {
+          "version": "0.3.62",
+          "date": "2026-10-07",
+          "size": 56231585,
+          "downloadURL": "https://github.com/bryanthaboi/gen1recomp/releases/download/v0.3.62/gen1recomp++-0.3.62-ios.ipa",
+          "localizedDescription": "blah bla blah ps4\n\n## Issues closed\n\n- #2742 Android: External music causes game audio to freeze after audio focus changes\n\n## Contributors\n\n- @bryanthaboi\n- @tomasmorello\n- Autoresearch"
+        },
+        {
+          "version": "0.3.61",
+          "date": "2026-10-07",
+          "size": 53198152,
+          "downloadURL": "https://github.com/bryanthaboi/gen1recomp/releases/download/v0.3.61/gen1recomp++-0.3.61-ios.ipa",
+          "localizedDescription": "union for me, union for you, union for everyone on earth!\n\n## Contributors\n\n- @bryanthaboi\n- @HimioneGranger\n- @thibautbus"
+        },
+        {
+          "version": "0.3.60",
+          "date": "2026-10-07",
+          "size": 52995898,
+          "downloadURL": "https://github.com/bryanthaboi/gen1recomp/releases/download/v0.3.60/gen1recomp++-0.3.60-ios.ipa",
+          "localizedDescription": "small bug fix update\n\n## Contributors\n\n- @bryanthaboi"
+        },
+        {
+          "version": "0.3.59",
+          "date": "2026-10-07",
+          "size": 52985361,
+          "downloadURL": "https://github.com/bryanthaboi/gen1recomp/releases/download/v0.3.59/gen1recomp++-0.3.59-ios.ipa",
+          "localizedDescription": "+ BOX enhancements 🦅 _(that's a bird emoji because it has something to do w migration mods)_\n\n## Issues closed\n\n- #2726 [Save editor] Edit Unown's form\n- #2727 berry in bag is broken so is ui\n- #2729 quick attack and box is messed up on the battle menu\n- #2730 Petalburg Woods encounter animation sometimes dosen't work\n- #2731 battle animation bug\n- #2733 Rock Tomb Animation\n- #2734 Uproar Animation is broken\n- #2735 Confusion and status changes don't animate and leech life doesn't shoot needle\n- #2736 Emerald white out crash\n- #2737 Mr. Stones Decapitated\n- #2740 launcher settings getting randomly reset/forgotten\n\n## Contributors\n\n- @bryanthaboi"
+        },
+        {
+          "version": "0.3.58",
+          "date": "2026-10-07",
+          "size": 52972673,
+          "downloadURL": "https://github.com/bryanthaboi/gen1recomp/releases/download/v0.3.58/gen1recomp++-0.3.58-ios.ipa",
+          "localizedDescription": "Clean up, bugs, and contributor work\n\n## Issues closed\n\n- #2484 Option to duplicate (back up) save files directly via the launcher\n- #2600 Speed Down keyboard hotkey?\n- #2694 Bugs when changing speed in portmaster build, which weren't present in 0.3.19\n- #2708 Naming a pokemon in starter and capture doesn't display the pokemon sprite and gender details\n- #2713 Mod-authored outdoor maps roll wild encounters on every step (indoor rule ignores outdoor)\n- #2723 Healing & damaging speed too high\n\n## Contributors\n\n- @bryanthaboi\n- @flaviodelima\n- @Nexhas28\n- @pokeparadox\n- @thibautbus"
+        },
+        {
+          "version": "0.3.57",
+          "date": "2026-10-06",
+          "size": 52956167,
+          "downloadURL": "https://github.com/bryanthaboi/gen1recomp/releases/download/v0.3.57/gen1recomp++-0.3.57-ios.ipa",
+          "localizedDescription": "…sence\n\n## Contributors\n\n- @bryanthaboi"
+        },
+        {
+          "version": "0.3.56",
+          "date": "2026-10-06",
+          "size": 52942319,
+          "downloadURL": "https://github.com/bryanthaboi/gen1recomp/releases/download/v0.3.56/gen1recomp++-0.3.56-ios.ipa",
+          "localizedDescription": "… CLOSES #2702, CLOSES #2703, CLOSES #2705, CLOSES #2706, CLOSES #2707, CLOSES #2709, CLOSES #2710, CLOSES #2711, CLOSES #2712, CLOSES #2714\r\n\r\nCLOSES #2693, CLOSES #2697, CLOSES #2698, CLOSES #2699, CLOSES #2701, CLOSES #2702, CLOSES #2703, CLOSES #2705, CLOSES #2706, CLOSES #2707, CLOSES #2709, CLOSES #2710, CLOSES #2711, CLOSES #2712, CLOSES #2714\n\n## Issues closed\n\n- #2693 (Modding API) The pokemon.icon hook doesn't exist/fire in gen3 games.\n- #2697 Your father voice stops you from watering a weird tree\n- #2698 [Save Editor] Edit Berry Powder currency in FR/LG and Emerald\n- #2699 Game crash when you try to teach you pokemon tm/hm\n- #2701 Pokemon Sapphire Naming UI is cut off\n- #2702 Pokemon Emerald uses the wrong sprite going into battle\n- #2703 starter pokemon are to big on selection\n- #2705 FireRed and LeafGreen crashes when entering ferry port area\n- #2706 Ripping your gen 3 save with Japanese Pokemon breaks the names\n- #2707 Trainer memo info is missing\n- #2709 the box using a item its to small\n- #2710 Pokedex Flashes are wrong catching mons\n- #2711 Crashes when trying to withdraw a Pokemon from the daycare\n- #2712 Mew can't be encounter\n- #2714 rebinding/controls menu not working\n\n## Contributors\n\n- @bryanthaboi"
+        },
+        {
+          "version": "0.3.55",
+          "date": "2026-10-06",
+          "size": 52935624,
+          "downloadURL": "https://github.com/bryanthaboi/gen1recomp/releases/download/v0.3.55/gen1recomp++-0.3.55-ios.ipa",
+          "localizedDescription": "ID Sync fix and new feature - BOX!\n\n## Contributors\n\n- @bryanthaboi\n- @Nexhas28"
+        },
+        {
+          "version": "0.3.54",
+          "date": "2026-10-06",
+          "size": 50919741,
+          "downloadURL": "https://github.com/bryanthaboi/gen1recomp/releases/download/v0.3.54/gen1recomp++-0.3.54-ios.ipa",
+          "localizedDescription": "ID Sync\n\n## Contributors\n\n- @bryanthaboi"
+        },
+        {
+          "version": "0.3.53",
+          "date": "2026-10-05",
+          "size": 50922309,
+          "downloadURL": "https://github.com/bryanthaboi/gen1recomp/releases/download/v0.3.53/gen1recomp++-0.3.53-ios.ipa",
+          "localizedDescription": "cleaning a couple ruby / sapphire bugs and overal gen 3 performance enhancements\n\n## Contributors\n\n- @bryanthaboi\n- @thibautbus"
+        },
+        {
+          "version": "0.3.52",
+          "date": "2026-10-05",
+          "size": 50907816,
+          "downloadURL": "https://github.com/bryanthaboi/gen1recomp/releases/download/v0.3.52/gen1recomp++-0.3.52-ios.ipa",
+          "localizedDescription": "Fixed some bugs and added some other stuff.\n\n## Issues closed\n\n- #2646 Pokemon Gen 2 Fly bug on map\n- #2647 Poison sttatus displayed immediately after move selection\n- #2649 Victory Road Guards missing dialogue\n- #2650 Boulder dust has wrong color\n- #2651 Crashes when picking up Pokemon at the daycare\n- #2652 Rage building message when Pokemon already defeated\n- #2653 Pokemon using Take Down loses HP too early\n- #2654 More issues with Rage\n- #2657 Options disappear when teaching TMs & HMs\n- #2658 League doors open too early\n- #2659 Wrong theme after defeating Lance\n- #2660 Rival missing dialogue after being defeated in the League\n- #2662 Pokeballs displayed too early in wild encounter\n- #2663 Battle pyramid crash when entering double battle\n- #2664 Battle scene & overworld music inbetween two evolutions\n- #2665 Wrong path from Agatha to Lance\n- #2666 Wrong path to final rival fight\n- #2667 Battle UI\n- #2668 You can't encounter mew\n- #2669 Lance turning\n- #2671 Marts not capping quantity\n- #2672 HP bars too far right\n- #2673 Groudon Solar Beam Animation\n- #2674 Pokedex rating bugs\n- #2676 Character on diploma is cropped and has wrong color\n- #2677 trick master house no escape \n- #2682 Small inaccuracies in the Pokemon menu\n- #2683 Interchanged captions on Indigo Plateau statues\n- #2684 Badge and Pokedex count not aligned correctly when loading a game\n- #2685 Shrinking animation in the opening looks wrong\n- #2686 Pokeball removed too late when picking starter\n- #2687 Naming issue\n- #2688 Grass still not fixed\n- #2689 Sprites don't have correct color\n- #2690 Mods menu confirmation dialogs really crumpled up\n- #2691 Staged mod changes don't get applied after the restart.\n\n## Contributors\n\n- @1Jamie\n- @bryanthaboi\n- @thibautbus"
+        },
+        {
+          "version": "0.3.51",
+          "date": "2026-10-03",
+          "size": 45960216,
+          "downloadURL": "https://github.com/bryanthaboi/gen1recomp/releases/download/v0.3.51/gen1recomp++-0.3.51-ios.ipa",
+          "localizedDescription": "Download the right version for your device below.\n\n## Issues closed\n\n- #2639 Buena's Password aren't playing in the Radio\n- #2640 Edit Buena's Password points in save editor\n- #2642 Pokemon stats never increase when you check Pokemon summary\n- #2643 Game look for a move that has id 0 in battle palace and crash\n- #2644 Player turning too early before second Route 22 rival fight\n- #2645 Solarbeam text inaccurate\n\n## Contributors\n\n- @bryanthaboi"
+        },
+        {
+          "version": "0.3.50",
+          "date": "2026-10-03",
+          "size": 45950599,
+          "downloadURL": "https://github.com/bryanthaboi/gen1recomp/releases/download/v0.3.50/gen1recomp++-0.3.50-ios.ipa",
+          "localizedDescription": "Also save editor should now hopefully see custom maps. (Gen 3 custom maps)\n\n## Issues closed\n\n- #2632 Guy has wrong dialogue after getting Earth Badge\n- #2634 Blank lines missing in NPCs dialogue\n- #2637 Gen 3 Bike breaks doors and Rename Screen is wrong.\n- #2638 Battle tent issue\n\n## Contributors\n\n- @bryanthaboi"
+        },
+        {
+          "version": "0.3.49",
+          "date": "2026-10-02",
+          "size": 45948378,
+          "downloadURL": "https://github.com/bryanthaboi/gen1recomp/releases/download/v0.3.49/gen1recomp++-0.3.49-ios.ipa",
+          "localizedDescription": "Download the right version for your device below.\n\n## Contributors\n\n- @bryanthaboi\n- @Code-Grub"
+        },
+        {
+          "version": "0.3.48",
+          "date": "2026-10-02",
+          "size": 45941961,
+          "downloadURL": "https://github.com/bryanthaboi/gen1recomp/releases/download/v0.3.48/gen1recomp++-0.3.48-ios.ipa",
+          "localizedDescription": "bugs\n\n## Issues closed\n\n- #2578 MENU SPEED doesn't apply to menus opened from the overworld or battle\n- #2588 bug: Filter mods by game doesn’t filter.\n- #2617 Softlock under the bikers bridge\n- #2623 Goldenrod City music playing at Goldenrod Radio Tower instead of Team Rocket Takeover music\n- #2626 trick house: trick master doesn't appear\n\n## Contributors\n\n- @bryanthaboi"
+        },
+        {
+          "version": "0.3.47",
+          "date": "2026-10-02",
+          "size": 45941144,
+          "downloadURL": "https://github.com/bryanthaboi/gen1recomp/releases/download/v0.3.47/gen1recomp++-0.3.47-ios.ipa",
+          "localizedDescription": "windows fix and spooky nation. try this version if ur on windows and u have the stuck restart to update and maybe the NEXT version after this will work correctly.\n\n## Contributors\n\n- @bryanthaboi"
+        },
+        {
+          "version": "0.3.46",
+          "date": "2026-10-02",
+          "size": 45004681,
+          "downloadURL": "https://github.com/bryanthaboi/gen1recomp/releases/download/v0.3.46/gen1recomp++-0.3.46-ios.ipa",
+          "localizedDescription": "some bug fixes and major gen 3 performance enhancement\n\n## Issues closed\n\n- #2618 Trainer ID generation is broken\n\n## Contributors\n\n- @bryanthaboi"
+        },
+        {
+          "version": "0.3.45",
+          "date": "2026-10-02",
+          "size": 44989096,
+          "downloadURL": "https://github.com/bryanthaboi/gen1recomp/releases/download/v0.3.45/gen1recomp++-0.3.45-ios.ipa",
+          "localizedDescription": "Save editor enhancements part two\n\n## Issues closed\n\n- #2619 Problems with save editor\n\n## Contributors\n\n- @bryanthaboi"
+        },
+        {
+          "version": "0.3.44",
+          "date": "2026-10-02",
+          "size": 44977295,
+          "downloadURL": "https://github.com/bryanthaboi/gen1recomp/releases/download/v0.3.44/gen1recomp++-0.3.44-ios.ipa",
+          "localizedDescription": "+ save editor enhanced\n\n## Issues closed\n\n- #2604 Ghosts spawn after you complete a contest\n- #2605 Can't select GBA rom for gen3\n- #2607 Small Snorlax sprite issue\n- #2608 Post-battle Snorlax text when running\n- #2610 Sealed chamber hole can't be opened with dig\n- #2611 Ball animation & sound out of sync\n- #2612 Pokemon sprites stay onscreen during stone evolution\n- #2613 Surf animation too short\n\n## Contributors\n\n- @bryanthaboi"
+        },
+        {
+          "version": "0.3.43",
+          "date": "2026-10-01",
+          "size": 44933101,
+          "downloadURL": "https://github.com/bryanthaboi/gen1recomp/releases/download/v0.3.43/gen1recomp++-0.3.43-ios.ipa",
+          "localizedDescription": "Hopefully perfecting save import / export for good.\n\n## Issues closed\n\n- #2603 Pokemon ability don't change when evolves\n\n## Contributors\n\n- @bryanthaboi"
+        },
+        {
+          "version": "0.3.42",
+          "date": "2026-10-01",
+          "size": 44824883,
+          "downloadURL": "https://github.com/bryanthaboi/gen1recomp/releases/download/v0.3.42/gen1recomp++-0.3.42-ios.ipa",
+          "localizedDescription": "Gen 3 should be even more performant after this.\n\n## Issues closed\n\n- #2498 Method mod.world:spawnNpc does not provide NPC an ID\n- #2601 [Gen 3 / 0.3.39] Sweet Scent finishes its field animation without starting an encounter\n\n## Contributors\n\n- @bryanthaboi"
+        },
+        {
+          "version": "0.3.41",
+          "date": "2026-10-01",
+          "size": 44821840,
+          "downloadURL": "https://github.com/bryanthaboi/gen1recomp/releases/download/v0.3.41/gen1recomp++-0.3.41-ios.ipa",
+          "localizedDescription": "inching closer to gen 1 perfection OH! so close. \n\n## Issues closed\n\n- #2555 Wrong jingle for receiving rods\n- #2558 Captain not turning during dialogue\n- #2560 Small S.S. Anne departure inaccuracies\n- #2561 Clip into trees at the start\n- #2562 Pokeballs all black in Rock Tunnel when not using Flash\n- #2563 Wall bump sound when quickly turning on the bike\n- #2581 Vending machine issues\n- #2583 NPCs keep talking after giving TMs\n- #2584 Items removed from list too soon\n- #2585 Spin tile speed still way too high\n- #2589 Extra text when using Guard Spec.\n- #2590 Starting Giovanni fight in the Hideout is buggy\n- #2592 Wrong TM42 jingle\n- #2593 [FRLG/Emerald] Missing control setting\n- #2596 Use Bike in Area You Should Not\n- #2597 Feebas won't evolve with high beauty\n\n## Contributors\n\n- @bryanthaboi"
+        },
+        {
+          "version": "0.3.40",
+          "date": "2026-09-30",
+          "size": 44816287,
+          "downloadURL": "https://github.com/bryanthaboi/gen1recomp/releases/download/v0.3.40/gen1recomp++-0.3.40-ios.ipa",
+          "localizedDescription": "Download the right version for your device below.\n\n## Contributors\n\n- @bryanthaboi"
+        },
+        {
+          "version": "0.3.39",
+          "date": "2026-09-30",
+          "size": 44822669,
+          "downloadURL": "https://github.com/bryanthaboi/gen1recomp/releases/download/v0.3.39/gen1recomp++-0.3.39-ios.ipa",
+          "localizedDescription": "Good handful of buggies have been squashed. \n\n## Contributors\n\n- @bryanthaboi"
+        },
+        {
+          "version": "0.3.38",
+          "date": "2026-09-30",
+          "size": 44812985,
+          "downloadURL": "https://github.com/bryanthaboi/gen1recomp/releases/download/v0.3.38/gen1recomp++-0.3.38-ios.ipa",
+          "localizedDescription": "Lots of bug fixes and further performance enhancing drugs for Gen 3 \n\n## Issues closed\n\n- #2564 Able to bike in doors\n- #2570 [Emerald] Oldale's Pokemon Center incomplete text\n- #2572 Unable to return speed to normal (Emerald)\n- #2573 Graphical Glitch with Textboxes (Emerald)\n- #2577 battle.low_health_alarm hook not working on gen3 games.\n\n## Contributors\n\n- @1Jamie\n- @bryanthaboi\n- Shane McGovern"
+        },
+        {
+          "version": "0.3.37",
+          "date": "2026-09-30",
+          "size": 44766547,
+          "downloadURL": "https://github.com/bryanthaboi/gen1recomp/releases/download/v0.3.37/gen1recomp++-0.3.37-ios.ipa",
+          "localizedDescription": "Em perf 3\n\n## Contributors\n\n- @bryanthaboi"
+        },
+        {
+          "version": "0.3.36",
+          "date": "2026-09-30",
+          "size": 44765924,
+          "downloadURL": "https://github.com/bryanthaboi/gen1recomp/releases/download/v0.3.36/gen1recomp++-0.3.36-ios.ipa",
+          "localizedDescription": "Em perf enhance 2\n\n## Contributors\n\n- @bryanthaboi"
+        },
+        {
+          "version": "0.3.35",
+          "date": "2026-09-30",
+          "size": 44773569,
+          "downloadURL": "https://github.com/bryanthaboi/gen1recomp/releases/download/v0.3.35/gen1recomp++-0.3.35-ios.ipa",
+          "localizedDescription": "Performance fix 1 for em\n\n## Contributors\n\n- @bryanthaboi"
+        },
+        {
+          "version": "0.3.34",
+          "date": "2026-09-30",
+          "size": 44765185,
+          "downloadURL": "https://github.com/bryanthaboi/gen1recomp/releases/download/v0.3.34/gen1recomp++-0.3.34-ios.ipa",
+          "localizedDescription": "Maybe fix this maybe fix that idk blame goia\n\n## Contributors\n\n- @1Jamie\n- @bryanthaboi"
+        },
+        {
+          "version": "0.3.33",
+          "date": "2026-09-29",
+          "size": 44763900,
+          "downloadURL": "https://github.com/bryanthaboi/gen1recomp/releases/download/v0.3.33/gen1recomp++-0.3.33-ios.ipa",
+          "localizedDescription": "Just a couple gne 1 buggies.\n\n## Issues closed\n\n- #2548 PC layout issues\n- #2554 \"Use next Pokemon?\" options issue\n- #2557 Extra poison flash when healing in center\n\n## Contributors\n\n- @bryanthaboi"
+        },
+        {
+          "version": "0.3.32",
+          "date": "2026-09-29",
+          "size": 44763689,
+          "downloadURL": "https://github.com/bryanthaboi/gen1recomp/releases/download/v0.3.32/gen1recomp++-0.3.32-ios.ipa",
+          "localizedDescription": "spooky season\n\n## Issues closed\n\n- #2524 Dialogue progresses automatically\n- #2540 Level up text displayed again after learning new move\n- #2541 X-item sound effect played when animations are off\n- #2542 Poison & Leech Seed deal combined damage\n\n## Contributors\n\n- @bryanthaboi"
+        },
+        {
+          "version": "0.3.31",
+          "date": "2026-09-29",
+          "size": 41386677,
+          "downloadURL": "https://github.com/bryanthaboi/gen1recomp/releases/download/v0.3.31/gen1recomp++-0.3.31-ios.ipa",
+          "localizedDescription": "Goober nation rise up\n\n## Contributors\n\n- @1Jamie\n- @bryanthaboi"
+        },
+        {
+          "version": "0.3.30",
+          "date": "2026-09-29",
+          "size": 41376542,
+          "downloadURL": "https://github.com/bryanthaboi/gen1recomp/releases/download/v0.3.30/gen1recomp++-0.3.30-ios.ipa",
+          "localizedDescription": "Just some tweaks\n\n## Contributors\n\n- @bryanthaboi"
+        },
+        {
+          "version": "0.3.29",
+          "date": "2026-09-28",
+          "size": 41342753,
+          "downloadURL": "https://github.com/bryanthaboi/gen1recomp/releases/download/v0.3.29/gen1recomp++-0.3.29-ios.ipa",
+          "localizedDescription": "Download the right version for your device below.\n\n## Issues closed\n\n- #2515 Moving through trees during cut animation\n- #2516 Wrong message when trying to use rod\n- #2518 Unique items have their quantity displayed\n- #2519 Cannot trade farfetched from gen 1 to gen 2\n- #2521 A couple of bugs when using the PC in Pallet Town\n- #2522 Wrong stylization in Oak's lab\n- #2523 Town Map disappears too late\n- #2525 Low HP warning sound stops too late after healing\n- #2526 No Water Reflection\n\n## Contributors\n\n- @1Jamie\n- @bryanthaboi"
+        },
+        {
+          "version": "0.3.27",
+          "date": "2026-09-28",
+          "size": 41347000,
+          "downloadURL": "https://github.com/bryanthaboi/gen1recomp/releases/download/v0.3.27/gen1recomp++-0.3.27-ios.ipa",
+          "localizedDescription": "performance updates\n\n## Contributors\n\n- @bryanthaboi"
+        },
+        {
+          "version": "0.3.26",
+          "date": "2026-09-28",
+          "size": 41333830,
+          "downloadURL": "https://github.com/bryanthaboi/gen1recomp/releases/download/v0.3.26/gen1recomp++-0.3.26-ios.ipa",
+          "localizedDescription": "another quick update\n\n## Contributors\n\n- @bryanthaboi"
+        },
+        {
+          "version": "0.3.25",
+          "date": "2026-09-28",
+          "size": 40671628,
+          "downloadURL": "https://github.com/bryanthaboi/gen1recomp/releases/download/v0.3.25/gen1recomp++-0.3.25-ios.ipa",
+          "localizedDescription": "Download the right version for your device below.\n\n## Contributors\n\n- @bryanthaboi"
+        },
+        {
+          "version": "0.3.24",
+          "date": "2026-09-28",
+          "size": 40671687,
+          "downloadURL": "https://github.com/bryanthaboi/gen1recomp/releases/download/v0.3.24/gen1recomp++-0.3.24-ios.ipa",
+          "localizedDescription": "This update turned pikachu into punkachu.\nJust kidding.\n\n## Contributors\n\n- @bryanthaboi"
+        },
+        {
+          "version": "0.3.23",
+          "date": "2026-09-28",
+          "size": 40680707,
+          "downloadURL": "https://github.com/bryanthaboi/gen1recomp/releases/download/v0.3.23/gen1recomp++-0.3.23-ios.ipa",
+          "localizedDescription": "Download the right version for your device below.\n\n## Issues closed\n\n- #2494 Managed to break my party on fire red.\n- #2520 Teaching a HM and TM does not show \"Able!\" or \" Not Able!\"\n\n## Contributors\n\n- @bryanthaboi\n- shanemcgovernie"
+        },
+        {
+          "version": "0.3.22",
+          "date": "2026-09-27",
+          "size": 38596309,
+          "downloadURL": "https://github.com/bryanthaboi/gen1recomp/releases/download/v0.3.22/gen1recomp++-0.3.22-ios.ipa",
+          "localizedDescription": "goia fixed her thing maybe\n\n## Issues closed\n\n- #1697 Standardize identification of mod-created options/settings screens\n- #1699 [Save editor] Option to sort out the items\n- #1701 Trading inside the game\n- #2452 Xbox controller loses connection to game periodically\n- #2493 Performance option change freezes game/recomp on Android\n- #2496 Timing is off when using switches in the Mansion\n- #2499 Secret Key jingle wrong\n- #2500 Top half of grass not rendered on top of character sprites\n- #2501 PP Color Doesnt Show when PP is 0 or close to 0\n- #2502 Shiny Animation Not Showing\n- #2503 Not evolving right\n\n## Contributors\n\n- @1Jamie\n- @bryanthaboi"
+        },
+        {
+          "version": "0.3.21",
+          "date": "2026-09-26",
+          "size": 38592835,
+          "downloadURL": "https://github.com/bryanthaboi/gen1recomp/releases/download/v0.3.21/gen1recomp++-0.3.21-ios.ipa",
+          "localizedDescription": "If it's broken blame nexhas or gaia\n\n## Contributors\n\n- @1Jamie\n- @bryanthaboi\n- @Nexhas28"
+        },
+        {
+          "version": "0.3.20",
+          "date": "2026-09-26",
+          "size": 38583490,
+          "downloadURL": "https://github.com/bryanthaboi/gen1recomp/releases/download/v0.3.20/gen1recomp++-0.3.20-ios.ipa",
+          "localizedDescription": "Download the right version for your device below.\n\n## Issues closed\n\n- #2479 Textbox not closing automatically after picking up item\n- #2481 Pokemon cry issues during intro\n- #2483 Can't leave Safari Zone immediately\n- #2485 Moving up and down should adjust the radio frequency by 0.5 Hz, rather than just cycling through some stations\n\n## Contributors\n\n- @bryanthaboi"
+        },
+        {
+          "version": "0.3.19",
+          "date": "2026-09-26",
+          "size": 38583540,
+          "downloadURL": "https://github.com/bryanthaboi/gen1recomp/releases/download/v0.3.19/gen1recomp++-0.3.19-ios.ipa",
+          "localizedDescription": "Download the right version for your device below.\n\n## Contributors\n\n- @1Jamie\n- @bryanthaboi"
+        },
+        {
+          "version": "0.3.18",
+          "date": "2026-09-25",
+          "size": 38580776,
+          "downloadURL": "https://github.com/bryanthaboi/gen1recomp/releases/download/v0.3.18/gen1recomp++-0.3.18-ios.ipa",
+          "localizedDescription": "Download the right version for your device below.\n\n## Contributors\n\n- @bryanthaboi"
+        },
+        {
+          "version": "0.3.17",
+          "date": "2026-09-25",
+          "size": 38569796,
+          "downloadURL": "https://github.com/bryanthaboi/gen1recomp/releases/download/v0.3.17/gen1recomp++-0.3.17-ios.ipa",
+          "localizedDescription": "Download the right version for your device below.\n\n## Issues closed\n\n- #2477 Freezing game after picking up items on one island\n\n## Contributors\n\n- @bryanthaboi"
+        },
+        {
+          "version": "0.3.16",
+          "date": "2026-09-25",
+          "size": 38565957,
+          "downloadURL": "https://github.com/bryanthaboi/gen1recomp/releases/download/v0.3.16/gen1recomp++-0.3.16-ios.ipa",
+          "localizedDescription": "subtle fix and option to disable or mute splash\n\n## Contributors\n\n- @bryanthaboi"
+        },
+        {
+          "version": "0.3.15",
+          "date": "2026-09-25",
+          "size": 38575791,
+          "downloadURL": "https://github.com/bryanthaboi/gen1recomp/releases/download/v0.3.15/gen1recomp++-0.3.15-ios.ipa",
+          "localizedDescription": "This one's for the bois\n\n## Issues closed\n\n- #2347 Pikachu's Flash interaction in Rock Tunnel is missing\n- #2384 Two small issues with the mart menu\n- #2456 Six island disappear\n- #2460 Youngster Dave hiding behind pokemart\n- #2461 Firered save import shows 0 caught, fine in game\n- #2468 Save files generated on the recomp client don't work when I transfer them into original cartridges\n- #2470 Grass not cutting\n- #2471 Speed modifiers incorrectly \"capped\" on Android\n- #2472 Following an NPC out of bounds in Pewter City\n- #2473 Previous pokemon getting exp when switched out\n\n## Contributors\n\n- @bryanthaboi"
+        },
+        {
+          "version": "0.3.14",
+          "date": "2026-09-24",
+          "size": 37794320,
+          "downloadURL": "https://github.com/bryanthaboi/gen1recomp/releases/download/v0.3.14/gen1recomp++-0.3.14-ios.ipa",
+          "localizedDescription": "Download the right version for your device below.\n\n## Contributors\n\n- @bryanthaboi"
+        },
+        {
+          "version": "0.3.13",
+          "date": "2026-09-24",
+          "size": 37781583,
+          "downloadURL": "https://github.com/bryanthaboi/gen1recomp/releases/download/v0.3.13/gen1recomp++-0.3.13-ios.ipa",
+          "localizedDescription": "another online fix maybe for gen 3\\\n\n## Contributors\n\n- @bryanthaboi"
+        },
+        {
+          "version": "0.3.12",
+          "date": "2026-09-24",
+          "size": 37781319,
+          "downloadURL": "https://github.com/bryanthaboi/gen1recomp/releases/download/v0.3.12/gen1recomp++-0.3.12-ios.ipa",
+          "localizedDescription": "Download the right version for your device below.\n\n## Contributors\n\n- @bryanthaboi"
+        },
+        {
+          "version": "0.3.11",
+          "date": "2026-09-24",
+          "size": 37968880,
+          "downloadURL": "https://github.com/bryanthaboi/gen1recomp/releases/download/v0.3.11/gen1recomp++-0.3.11-ios.ipa",
+          "localizedDescription": "Download the right version for your device below.\n\n## Contributors\n\n- @bryanthaboi"
+        },
+        {
+          "version": "0.3.10",
+          "date": "2026-09-24",
+          "size": 37969396,
+          "downloadURL": "https://github.com/bryanthaboi/gen1recomp/releases/download/v0.3.10/gen1recomp++-0.3.10-ios.ipa",
+          "localizedDescription": "another little baby mystery gift clean up for modern day lifestyles and cool people type hobbyists\n\n## Contributors\n\n- @bryanthaboi"
+        },
+        {
+          "version": "0.3.9",
+          "date": "2026-09-24",
+          "size": 37968553,
+          "downloadURL": "https://github.com/bryanthaboi/gen1recomp/releases/download/v0.3.9/gen1recomp++-0.3.9-ios.ipa",
+          "localizedDescription": "little clean up for mystery gifts\n\n## Contributors\n\n- @bryanthaboi"
+        },
+        {
+          "version": "0.3.8",
+          "date": "2026-09-24",
+          "size": 37969773,
+          "downloadURL": "https://github.com/bryanthaboi/gen1recomp/releases/download/v0.3.8/gen1recomp++-0.3.8-ios.ipa",
+          "localizedDescription": "Download the right version for your device below.\n\n## Contributors\n\n- @bryanthaboi"
+        },
+        {
+          "version": "0.3.7",
+          "date": "2026-09-24",
+          "size": 37970343,
+          "downloadURL": "https://github.com/bryanthaboi/gen1recomp/releases/download/v0.3.7/gen1recomp++-0.3.7-ios.ipa",
+          "localizedDescription": "Download the right version for your device below.\n\n## Issues closed\n\n- #2441 some safari zone tiles not solid\n- #2444 Importing saves not working\n- #2445 Fire Red: premier ball is a pokeball\n- #2448 Sevii Island quest - seagallop transition softlock\n- #2450 Pokemons trying to learn a new move in the same level that they evolve Issue\n\n## Contributors\n\n- @bryanthaboi"
+        },
+        {
+          "version": "0.3.6",
+          "date": "2026-09-24",
+          "size": 37936082,
+          "downloadURL": "https://github.com/bryanthaboi/gen1recomp/releases/download/v0.3.6/gen1recomp++-0.3.6-ios.ipa",
+          "localizedDescription": "Try playing online in gen 3\n\n## Contributors\n\n- @bryanthaboi\n- @colsonrice"
+        },
+        {
+          "version": "0.3.5",
+          "date": "2026-09-23",
+          "size": 37730523,
+          "downloadURL": "https://github.com/bryanthaboi/gen1recomp/releases/download/v0.3.5/gen1recomp++-0.3.5-ios.ipa",
+          "localizedDescription": "Download the right version for your device below.\n\n## Contributors\n\n- @bryanthaboi"
+        },
+        {
+          "version": "0.3.4",
+          "date": "2026-09-23",
+          "size": 37730446,
+          "downloadURL": "https://github.com/bryanthaboi/gen1recomp/releases/download/v0.3.4/gen1recomp++-0.3.4-ios.ipa",
+          "localizedDescription": "the world is a better place when we all just get along\n\n## Issues closed\n\n- #2425 Infinite Oran Berry Issue\n- #2428 Petal Dance animation not playing.\n- #2431 Using Outrage Move\n- #2432 Hm can't deleted by move deleter\n- #2433 Move max PP decreasing\n- #2435 Names of Pokémon in trading menu not showing up when not given a nickname (FR/LG)\n- #2436 FR/LG Trading does not work (lua error)\n- #2437 Mod menu game selection is broken/scrolling doesn't work/menu box too small\n- #2440 Hall of fame save loop\n\n## Contributors\n\n- @1Jamie\n- @bryanthaboi\n- @Nexhas28\n- @thibautbus"
+        },
+        {
+          "version": "0.3.3",
+          "date": "2026-09-23",
+          "size": 37674471,
+          "downloadURL": "https://github.com/bryanthaboi/gen1recomp/releases/download/v0.3.3/gen1recomp++-0.3.3-ios.ipa",
+          "localizedDescription": "after this, it should be able to remember ur roms and import them automatically if needed\n\n## Issues closed\n\n- #2430 Town map for Sevii island showing kanto map\n\n## Contributors\n\n- @bryanthaboi"
+        },
+        {
+          "version": "0.3.2",
+          "date": "2026-09-23",
+          "size": 37578962,
+          "downloadURL": "https://github.com/bryanthaboi/gen1recomp/releases/download/v0.3.2/gen1recomp++-0.3.2-ios.ipa",
+          "localizedDescription": "Anything is possible\n\n## Issues closed\n\n- #2408 aide requirement for everstone listed as 0 pokemon in dialog\n- #2411 Bill's transformation is too fast\n- #2413 Indigo Plateau guards refer to badges as numbers\n- #2414 Whatever this is\n- #2415 PC missing log on sound\n- #2416 Berry powder man is a liar\n- #2417 Mr Fuji disappears when talking to him in pokemon tower\n- #2418 Icefall Cave ice tiles don't break\n- #2419 Fishing tile alignment\n- #2420 Pp max, pp up, ether, max ether \"it wont have an effect\"\n- #2422 safari zone not working\n- #2423 surf issues\n- #2424 boulder pushing sound not playing\n\n## Contributors\n\n- @1Jamie\n- @bryanthaboi\n- @thibautbus"
+        },
+        {
+          "version": "0.3.1",
+          "date": "2026-09-22",
+          "size": 37528942,
+          "downloadURL": "https://github.com/bryanthaboi/gen1recomp/releases/download/v0.3.1/gen1recomp++-0.3.1-ios.ipa",
+          "localizedDescription": "we combined our powers and DOMINATED bugs plz wish list boya coya on steam\n\n## Issues closed\n\n- #1951 [Save editor] Move itens btw bag and PC directly by Save Editor\n- #2037 (Feature Request) Command Argument to update mods\n- #2177 Mod load order configuring in app\n- #2186 Add an option to implement vanilla overworld map palette swapping\n- #2290 Boulder message\n- #2291 Bugs when buying items\n- #2305 Full Poke Flute tune played when waking up Pokemon\n- #2320 Small bugs when using ability enhancers or teaching moves\n- #2332 Wrong sound effect timing & missing line break when using ability enhancer\n- #2335 Pikachu/Jigglypuff interaction in Pewter City missing\n- #2338 Bide has a \"storing energy\" message\n- #2340 Issues with Team Rocket cutscene in Mt. Moon\n- #2344 Pikachu's happiness isn't displayed correctly\n- #2352 Fishing at the goldenrod city south entrance\n- #2367 Unable to delete downloaded custom cart Wild Green\n- #2368 Intro video being rendered larger than the ingame world render in RED/BLUE/YELLOW\n- #2378 Gold Item Duplication\n- #2382 Cannot battle Gold/Silver with Crystal\n- #2385 Wrong colors in the opening\n- #2403 Mother on S.S. Anne battle\n- #2404 Bill's PC listed as Someone's\n- #2405 Save screen not showing badges\n\n## Contributors\n\n- @bryanthaboi\n- @Nexhas28"
+        },
+        {
+          "version": "0.3.0",
+          "date": "2026-09-22",
+          "size": 37504222,
+          "downloadURL": "https://github.com/bryanthaboi/gen1recomp/releases/download/v0.3.0/gen1recomp++-0.3.0-ios.ipa",
+          "localizedDescription": "bazinga [release 0.3.0]\n\n## Issues closed\n\n- #2299 Pokemon crystal: Thunder should not miss while raining\n- #2369 API Bug: mod.content.encounters:patch fails silently on Pokémon Crystal\n\n## Contributors\n\n- @bryanthaboi\n- @Nexhas28\n- @sergiomele97"
+        },
+        {
+          "version": "0.2.75",
+          "date": "2026-09-22",
+          "size": 24672540,
+          "downloadURL": "https://github.com/bryanthaboi/gen1recomp/releases/download/v0.2.75/gen1recomp++-0.2.75-ios.ipa",
+          "localizedDescription": "Download the right version for your device below.\n\n## Issues closed\n\n- #2394 Surfing: Collision errors (?) on route 20&21 + missing water animation on Route 20; reaching Seafoam Islands impossible\n\n## Contributors\n\n- @bryanthaboi\n- @thibautbus"
+        },
+        {
+          "version": "0.2.74",
+          "date": "2026-09-22",
+          "size": 24670882,
+          "downloadURL": "https://github.com/bryanthaboi/gen1recomp/releases/download/v0.2.74/gen1recomp++-0.2.74-ios.ipa",
+          "localizedDescription": "Just some tweaks and what not for an all around smoother experience and uh... yeah. Wish list boya coya on steam thanks.\n\n## Contributors\n\n- @bryanthaboi\n- @Nexhas28"
+        },
+        {
+          "version": "0.2.73",
+          "date": "2026-09-22",
+          "size": 24663523,
+          "downloadURL": "https://github.com/bryanthaboi/gen1recomp/releases/download/v0.2.73/gen1recomp++-0.2.73-ios.ipa",
+          "localizedDescription": "Download the right version for your device below.\n\n## Contributors\n\n- @1Jamie\n- @bryanthaboi"
+        },
+        {
+          "version": "0.2.72",
+          "date": "2026-09-21",
+          "size": 24663778,
+          "downloadURL": "https://github.com/bryanthaboi/gen1recomp/releases/download/v0.2.72/gen1recomp++-0.2.72-ios.ipa",
+          "localizedDescription": "Download the right version for your device below.\n\n## Contributors\n\n- @1Jamie\n- @bryanthaboi"
+        },
+        {
+          "version": "0.2.71",
+          "date": "2026-09-21",
+          "size": 24663670,
+          "downloadURL": "https://github.com/bryanthaboi/gen1recomp/releases/download/v0.2.71/gen1recomp++-0.2.71-ios.ipa",
+          "localizedDescription": "Download the right version for your device below.\n\n## Contributors\n\n- @1Jamie\n- @bryanthaboi\n- @Nexhas28"
+        },
+        {
+          "version": "0.2.70",
+          "date": "2026-09-21",
+          "size": 24632268,
+          "downloadURL": "https://github.com/bryanthaboi/gen1recomp/releases/download/v0.2.70/gen1recomp++-0.2.70-ios.ipa",
+          "localizedDescription": "Download the right version for your device below.\n\n## Issues closed\n\n- #2362 Badge Guide in Cerulean City Locks the Game\n- #2364 hidden items respawn\n- #2366 Celadon Mansion interior can be entered but not left\n- #2380 Ghost in Lavender Tower respawns endlessly\n\n## Contributors\n\n- @bryanthaboi\n- @thibautbus"
+        },
+        {
+          "version": "0.2.69",
+          "date": "2026-09-21",
+          "size": 24625148,
+          "downloadURL": "https://github.com/bryanthaboi/gen1recomp/releases/download/v0.2.69/gen1recomp++-0.2.69-ios.ipa",
+          "localizedDescription": "Download the right version for your device below.\n\n## Contributors\n\n- @bryanthaboi"
+        },
+        {
+          "version": "0.2.68",
+          "date": "2026-09-21",
+          "size": 24370430,
+          "downloadURL": "https://github.com/bryanthaboi/gen1recomp/releases/download/v0.2.68/gen1recomp++-0.2.68-ios.ipa",
+          "localizedDescription": "Download the right version for your device below.\n\n## Issues closed\n\n- #2303 Pokemon Fire Red - Gym Leader battles\n- #2306 (Fire Red) Multiple Incorrect or Premature Sound Effects\n- #2307 FireRed: NPCs can walk through the player in the overworld\n- #2309 FireRed: \"Void Fill: Trees\" option renders broken visuals\n- #2310 FireRed: Professor Oak's advice during the first rival battle is missing\n- #2312 FireRed: Pokédex new-catch registration screen has no bubble around the info text\n- #2317 FireRed: object placements survive an in-app reset — only a full app restart clears them (e.g. Blue stuck at the entrance to Oak's Lab)\n- #2356 FireRed: Veridian City gym is open by default\n- #2357 FireRed: Pokémon PC UI broken\n- #2358 Fainted Pokemon in first slot is sent out in battle\n- #2361 Policeman in Cerulean City does not move after speaking with Bill\n\n## Contributors\n\n- @1Jamie\n- @bryanthaboi\n- @thibautbus"
+        },
+        {
+          "version": "0.2.67",
+          "date": "2026-09-20",
+          "size": 24250287,
+          "downloadURL": "https://github.com/bryanthaboi/gen1recomp/releases/download/v0.2.67/gen1recomp++-0.2.67-ios.ipa",
+          "localizedDescription": "Download the right version for your device below.\n\n## Issues closed\n\n- #2339 Wrong jingle for receiving the Boulderbadge\n\n## Contributors\n\n- @bryanthaboi\n- @Nexhas28\n- @thibautbus"
+        },
+        {
+          "version": "0.2.66",
+          "date": "2026-09-19",
+          "size": 24206470,
+          "downloadURL": "https://github.com/bryanthaboi/gen1recomp/releases/download/v0.2.66/gen1recomp++-0.2.66-ios.ipa",
+          "localizedDescription": "Download the right version for your device below.\n\n## Issues closed\n\n- #2313 FireRed: no \"caught Pokémon\" Poké Ball marker on the opponent's battle HUD\n- #2314 FireRed: hidden items are unreachable — no hidden-item runtime or ITEMFINDER (e.g. Viridian Forest hidden Antidote)\n- #2315 FireRed: default-moveset trainer Pokémon all use Tackle — Charmander never uses Scratch\n- #2322 PC box UI is broken — Gen 3 (FireRed) storage screen renders without any chrome\n- #2325 Pewter City Pokecenter woman skips the profile phrase picker and replies as if you already gave her a phrase\n\n## Contributors\n\n- @1Jamie\n- @bryanthaboi\n- @TheRealSolidusSnake\n- @thibautbus"
+        },
+        {
+          "version": "0.2.65",
+          "date": "2026-09-19",
+          "size": 24174611,
+          "downloadURL": "https://github.com/bryanthaboi/gen1recomp/releases/download/v0.2.65/gen1recomp++-0.2.65-ios.ipa",
+          "localizedDescription": "Download the right version for your device below.\n\n## Issues closed\n\n- #2316 FireRed: in-battle item use shows stale (pre-battle) party HP, so a Potion is refused with \"It won't have any effect.\"\n- #2319 FireRed: Pokémon sprite in the nickname window renders at half size (16×16 instead of 32×32)\n- #2323 Most locations never show their Location Preview — preview art is never extracted from the ROM\n- #2324 Level-up stat box stays on screen after the battle moves on and can no longer be dismissed\n- #2328 Save screen shows the engine's internal map id (FR_ROUTE_22) instead of the location name, and the names aren't read from the ROM\n\n## Contributors\n\n- @bryanthaboi\n- @campavao\n- @Nexhas28"
+        },
+        {
+          "version": "0.2.64",
+          "date": "2026-09-19",
+          "size": 24153580,
+          "downloadURL": "https://github.com/bryanthaboi/gen1recomp/releases/download/v0.2.64/gen1recomp++-0.2.64-ios.ipa",
+          "localizedDescription": "Download the right version for your device below.\n\n## Issues closed\n\n- #1039 Encounter rate grace period not working\n- #1229 Encounter rate grace period not working\n- #2297 FireRed: Leaving the house through a wall\n\n## Contributors\n\n- @1Jamie\n- @bryanthaboi\n- @Nexhas28"
+        },
+        {
+          "version": "0.2.63",
+          "date": "2026-09-19",
+          "size": 24142328,
+          "downloadURL": "https://github.com/bryanthaboi/gen1recomp/releases/download/v0.2.63/gen1recomp++-0.2.63-ios.ipa",
+          "localizedDescription": "Download the right version for your device below.\n\n## Contributors\n\n- @1Jamie\n- @bryanthaboi"
+        },
+        {
+          "version": "0.2.62",
+          "date": "2026-09-18",
+          "size": 24138802,
+          "downloadURL": "https://github.com/bryanthaboi/gen1recomp/releases/download/v0.2.62/gen1recomp++-0.2.62-ios.ipa",
+          "localizedDescription": "Download the right version for your device below.\n\n## Contributors\n\n- @1Jamie\n- @bryanthaboi\n- @Nexhas28"
+        },
+        {
+          "version": "0.2.61",
+          "date": "2026-09-16",
+          "size": 22599085,
+          "downloadURL": "https://github.com/bryanthaboi/gen1recomp/releases/download/v0.2.61/gen1recomp++-0.2.61-ios.ipa",
+          "localizedDescription": "Download the right version for your device below.\n\n## Issues closed\n\n- #2089 Update all mods doesn’t actually update anything when you have a custom cart selected\n- #2198 Trading inaccurate\n- #2227 shaders fail to convert when portable.txt is active\n- #2246 The game may freeze when an other audio source is playing on Android\n- #2277 Lift key is not dropping game corner bapsement\n- #2278 More inaccuracies when trading\n- #2280 Crystal Surf Sprite Incorrect\n- #2281 Fossil menu issues\n- #2282 Wrong message for Hypnosis failing\n- #2283 Export save slot failing for 2nd generation\n- #2286 [Audio] Bicycle music restarts on zone transition instead of playing new zone track\n\n## Contributors\n\n- @bryanthaboi\n- @campavao"
+        },
+        {
+          "version": "0.2.60",
+          "date": "2026-09-13",
+          "size": 22589573,
+          "downloadURL": "https://github.com/bryanthaboi/gen1recomp/releases/download/v0.2.60/gen1recomp++-0.2.60-ios.ipa",
+          "localizedDescription": "Download the right version for your device below.\n\n## Issues closed\n\n- #2235 some shaders have artifacts\n- #2245 GSC save import doesn't correctly set world event flags\n- #2252 Menu visible during Trash\n- #2253 Dojo Master dialogue wrong before choosing Pokemon\n- #2257 status effect damege timing\n- #2261 Music missing when interacting with Voltorb or Electrode in the Power Plant\n- #2262 Pidgeot cry not played in Saffron City\n- #2263 Dust animation after moving boulder incorrect\n- #2264 Nidorino's & Jigglypuff's colors are wrong in opening cutscene\n- #2267 Surfing bugs\n- #2268 Pokemon sprites don't have the correct color in the menu\n- #2272 Game Corner 12th Hidden Item\n- #2273 Pokemon's options don't close after using Strength\n- #2274 Falling into the current on Seafoam Islands is broken\n- #2275 Articuno fight starts right after its cry\n\n## Contributors\n\n- @AverageConsumer\n- @bryanthaboi"
+        },
+        {
+          "version": "0.2.59",
+          "date": "2026-09-12",
+          "size": 22584503,
+          "downloadURL": "https://github.com/bryanthaboi/gen1recomp/releases/download/v0.2.59/gen1recomp++-0.2.59-ios.ipa",
+          "localizedDescription": "Download the right version for your device below.\n\n## Issues closed\n\n- #274 Monster Party Sprites coloration\n- #2120 Tilt screen in 2 gen pokèmon\n\n## Contributors\n\n- @bryanthaboi\n- @Code-Grub"
+        },
+        {
+          "version": "0.2.58",
+          "date": "2026-09-11",
+          "size": 22583485,
+          "downloadURL": "https://github.com/bryanthaboi/gen1recomp/releases/download/v0.2.58/gen1recomp++-0.2.58-ios.ipa",
+          "localizedDescription": "Download the right version for your device below.\n\n## Issues closed\n\n- #1709 (GSC) Missing some battle options\n- #2202 (Crystal) Various issues in the Battle Tower\n- #2217 (Modding API) function SummaryMenu.new inaccessible for pokemon.sprite hook\n- #2234 (GSC) Missing SFX and instant text when giving/taking items and clicking on pokémon in your party\n- #2237 (GSC) Darker dialogue box when choosing day of the week and time of the day\n- #2238 (GSC) Issues when depositing pokémon\n- #2239 (GSC) NPCs appearing before they should when landing from FLY\n- #2240 (GSC) Issue #2193 not properly fixed\n- #2241 Rival dialogue issue in the Silph Co. Office Building\n- #2242 Wrong rival path in Silph Co. Office Building\n- #2243 Wrong order of messages when getting Lapras\n- #2244 Silph Co. nurse dialogue progresses automatically\n- #2247 Menu inaccurate when tossing\n- #2248 Pidgey cry missing in Saffron City\n- #2249 Chansey cry missing in Saffron City\n- #2250 Copycat's dolls not turning to face original direction\n- #2251 Missing text in the Fighting Dojo\n\n## Contributors\n\n- @bryanthaboi"
+        },
+        {
+          "version": "0.2.57",
+          "date": "2026-09-09",
+          "size": 21626440,
+          "downloadURL": "https://github.com/bryanthaboi/gen1recomp/releases/download/v0.2.57/gen1recomp++-0.2.57-ios.ipa",
+          "localizedDescription": "Download the right version for your device below.\n\n## Issues closed\n\n- #2166 camera zooms all the way in after leaving options menu\n- #2185 locked myself in the tower with the dogs\n- #2188 Fading issues during intro\n- #2189 Captain on S.S. Anne turning around\n- #2190 Pikachu cutscene & interaction in Fan Club inaccurate\n- #2191 Crash with Custom Touch Skin\n- #2192 Ditto/Transform XP bug in Crystal\n- #2193 (GSC) Falling from a hole has the player sprite at the bottom at the begning of the animation\n- #2194 (GSC) Some issues in the intro\n- #2195 Prize box at the Game Corner closes right away\n- #2196 Pikachu's shadow missing before healing\n- #2197 Pikachu not spawning next to the player when entering buildings\n- #2199 Small errors when opening Pokedex entry\n- #2200 Player stays visible during map change\n- #2203 (GSC) Wrong HUD behavior when depositing pokémon\n- #2204 No X item animation\n- #2205 Couple of issues with entering the Safari Zone\n- #2206 Couple of issues with leaving the Safari Zone\n- #2212 Trainer Card looks inaccurate\n- #2214 Escape Rope can be used mid-battle\n- #2218 Menu width & Safari Ball count\n- #2219 Fuchsia City Warden bugs\n- #2223 Jingle not played when giving drink to Saffron City guard\n- #2224 Pokeballs have wrong color in Pokemon Center & fights\n- #2225 Errors when using teleporters\n- #2226 Card Key jingle too late\n- #2230 Various graphical glitches and subsequencially crash during the New Game sequence when using a Skin/Overlay\n- #2232 Game Softlock after receiving Pokegear from Mom\n\n## Contributors\n\n- @AverageConsumer\n- @BountyHunterKanden\n- @bryanthaboi\n- @claude\n- @HighDrexler"
+        },
+        {
+          "version": "0.2.56",
+          "date": "2026-09-04",
+          "size": 21614868,
+          "downloadURL": "https://github.com/bryanthaboi/gen1recomp/releases/download/v0.2.56/gen1recomp++-0.2.56-ios.ipa",
+          "localizedDescription": "Download the right version for your device below.\n\n## Issues closed\n\n- #2114 Always the same speed on Cycling Road\n- #2115 Not automatically getting off the slope at the end of Cycling Road\n- #2116 Visual Indicator for Text\n- #2117 Bill dont do Face Rotation\n- #2118 Name & HP bar of opposing trainer's Pokemon appear along with the sprite\n- #2124 Pokemon Box different Details\n- #2125 Using Heal Items in Bag missing Transition\n- #2126 Pokemon 2nd Pokemon Switch is Missing\n- #2141 (GSC) Transitions are broken/too fast\n- #2148 Paralysis/speed modification interaction is off.\n- #2149 Rival can spawn incorrectly at Nugget Bridge\n- #2150 Rival's sprite not visible during battle transition\n- #2151 Dialogue issue after rival fight at Nugget Bridge\n- #2152 Map coloring in Yellow incorrect\n- #2153 Poison Sting miss using the Modern Clean ruleset\n- #2155 Item Bag - Using Elixir / Max Elixir is Missing Sound and Pokemon Menu is closing to early\n- #2156 Jingles before Nugget Bridge Rocket\n- #2158 Item Bag - Ether / Max Ether Different Layout\n- #2159 Text & jingle missing when receiving Charmander\n- #2161 Old text when using rare candy\n- #2162 Buying Items if Item is Max Closes menu instant\n- #2163 Pokedex Seen Pokemon is different\n- #2164 S.S Anne Player already looking to Rivals Path Spot\n- #2165 Pikachu in Bill's house\n- #2170 (GSC) Talking to an NPC doesn't cancel the walking animation\n- #2171 (GSC) Various issues in the intro\n- #2173 (GSC) The first pokémon in a trainer battle is being sent out two times\n- #2174 (GSC) Missing dialogue arrow in some situations\n- #2175 (GSC) Switching to a pokémon that is already in battle should keep you in the party menu\n- #2176 (GSC) Missing SFX and animation for falling into a hole\n- #2178 (GSC) Missing animation for DIG in the overworld\n- #2179 (RBY) Dig animation in the overworld is sped up\n- #2180 (RBY) Incorrrect transition effect for entering/exiting places\n- #2181 (RBY) Incorrect SFX for climbing ladders and sometimes for getting out of places\n- #2182 (RBY) Wrong SFX and missing animation for falling from boulder holes\n\n## Contributors\n\n- @bryanthaboi"
+        },
+        {
+          "version": "0.2.55",
+          "date": "2026-09-03",
+          "size": 21602159,
+          "downloadURL": "https://github.com/bryanthaboi/gen1recomp/releases/download/v0.2.55/gen1recomp++-0.2.55-ios.ipa",
+          "localizedDescription": "Download the right version for your device below.\n\n## Issues closed\n\n- #2079 issues with touch controls.\n- #2103 saving out images doesnt work on android\n\n## Contributors\n\n- @1Jamie\n- @bryanthaboi\n- @thibautbus"
+        },
+        {
+          "version": "0.2.54",
+          "date": "2026-09-03",
+          "size": 21600332,
+          "downloadURL": "https://github.com/bryanthaboi/gen1recomp/releases/download/v0.2.54/gen1recomp++-0.2.54-ios.ipa",
+          "localizedDescription": "Download the right version for your device below.\n\n## Issues closed\n\n- #2119 Prof. Oak's sprite disappears in battle transition before Pikachu\n- #2121 Rival missing dialogue after winning first fight\n- #2122 Old Man's position wrong after catching tutorial\n- #2123 Nurse broken in Yellow again\n- #2127 Pokeballs don't adapt to caught Pokemon's color in Yellow\n- #2130 (GSC) White screen during dialogues after battles\n- #2131 (GSC) Game unable to show the whole dialogue for overwriting the previous save\n- #2132 (GSC) Missing transparency sorrounding the arrow in some dialogues\n- #2134 (GSC) Some instances of incomplete message for sending out a pokémon\n- #2135 (GSC) Player sprite shouldn't be visible right before the Hall of Fame\n- #2136 (GSC) Missing animation for being kicked by the rival at the start of the game\n- #2137 (GSC) Uncentered text in the intro before Prof. Oak appears\n- #2138 (GSC) White screen while choosing the day of the week\n- #2139 (GSC) Dig in battles still causing issues\n- #2140 (GSC) Curse animation issues\n- #2142 (GSC) Missing double beep when switching pokémon\n- #2143 (GSC) Text speed is instant when changing boxes\n- #2144 shader applies to entire screen not just the inner square of gameboy fandom someone once called the \"eternal square of lustful visions\" (abraham lincoln)\n- #2145 add LOGIC CLOCK option so people can have their era accurate framerate-emulating-logic\n\n## Contributors\n\n- @bryanthaboi"
+        },
+        {
+          "version": "0.2.53",
+          "date": "2026-09-03",
+          "size": 21595269,
+          "downloadURL": "https://github.com/bryanthaboi/gen1recomp/releases/download/v0.2.53/gen1recomp++-0.2.53-ios.ipa",
+          "localizedDescription": "Download the right version for your device below.\n\n## Issues closed\n\n- #2038 Skins screen is extremely slow on handheld devices (options file re-read and decoded every frame)\n- #2080 (GSC) Issues with grass transparency\n\n## Contributors\n\n- @1Jamie\n- @bryanthaboi\n- flowers"
+        },
+        {
           "version": "0.2.52",
           "date": "2026-09-02",
           "size": 21587460,

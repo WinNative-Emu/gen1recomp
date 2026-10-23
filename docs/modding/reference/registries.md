@@ -74,8 +74,8 @@ mod.content.ai_classes:patch("OPP_BROCK", { uses = 9 })
 - semantics: `record`
 - target: none
 
-Gen 2 only: Red, Blue and Yellow have no such system, so there is no
-Gen 1 table to merge into and a write here on a Gen 1 boot is dropped
+Gen 2 only: Red, Blue and Yellow have no native target for this registry.
+A write here on a Gen 1 boot is dropped
 and reported. See the Gold subsection below for where it does land.
 
 | field | type | required |
@@ -97,8 +97,8 @@ mod.content.apricorns:override("RED_APRICORN", { apricorn = "RED_APRICORN", ball
 
 ### On Gen 3
 
-Not available on Gen 3: the Gen 3 games have no counterpart, so a
-write here is dropped and reported on a Gen 3 boot.
+Not available on Gen 3: there is no native target for this registry.
+A write here is dropped and reported on a Gen 3 boot.
 
 ## audio
 
@@ -114,8 +114,8 @@ mod.content.audio:override("mapSongs", { ... })
 
 ### On Gen 3
 
-Not available on Gen 3: the Gen 3 games have no counterpart, so a
-write here is dropped and reported on a Gen 3 boot.
+Not available on Gen 3: there is no native target for this registry.
+A write here is dropped and reported on a Gen 3 boot.
 
 ## balls
 
@@ -246,8 +246,8 @@ scale composes with the send-out grow animation.
 
 ### On Gen 3
 
-Not available on Gen 3: the Gen 3 games have no counterpart, so a
-write here is dropped and reported on a Gen 3 boot.
+Not available on Gen 3: there is no native target for this registry.
+A write here is dropped and reported on a Gen 3 boot.
 
 ## commands
 
@@ -360,8 +360,8 @@ mod.content.constants:patch("speciesOrder", { [252] = "MODMON" })
 
 ### On Gen 3
 
-Not available on Gen 3: the Gen 3 games have no counterpart, so a
-write here is dropped and reported on a Gen 3 boot.
+Not available on Gen 3: there is no native target for this registry.
+A write here is dropped and reported on a Gen 3 boot.
 
 ## cries
 
@@ -379,8 +379,8 @@ mod.content.cries:patch("PIKACHU", { pitch = 200 })
 - semantics: `record`
 - target: none
 
-Gen 2 only: Red, Blue and Yellow have no such system, so there is no
-Gen 1 table to merge into and a write here on a Gen 1 boot is dropped
+Gen 2 only: Red, Blue and Yellow have no native target for this registry.
+A write here on a Gen 1 boot is dropped
 and reported. See the Gold subsection below for where it does land.
 
 | field | type | required |
@@ -582,8 +582,8 @@ Gold reads only `boot`: the New Game spawn (`startMap`, `startX`, `startY`, `sta
 
 ### On Gen 3
 
-Not available on Gen 3: the Gen 3 games have no counterpart, so a
-write here is dropped and reported on a Gen 3 boot.
+Not available on Gen 3: there is no native target for this registry.
+A write here is dropped and reported on a Gen 3 boot.
 
 ## font
 
@@ -620,8 +620,8 @@ mod.content.growth_rates:register("ERRATIC", { expForLevel = fn })
 - semantics: `record`
 - target: none
 
-Gen 2 only: Red, Blue and Yellow have no such system, so there is no
-Gen 1 table to merge into and a write here on a Gen 1 boot is dropped
+Gen 2 only: Red, Blue and Yellow have no native target for this registry.
+A write here on a Gen 1 boot is dropped
 and reported. See the Gold subsection below for where it does land.
 
 | field | type | required |
@@ -641,8 +641,8 @@ mod.content.held_items:override("LEFTOVERS", { heldEffect = "HELD_LEFTOVERS", he
 
 ### On Gen 3
 
-Not available on Gen 3: the Gen 3 games have no counterpart, so a
-write here is dropped and reported on a Gen 3 boot.
+Not available on Gen 3: there is no native target for this registry.
+A write here is dropped and reported on a Gen 3 boot.
 
 ## icons
 
@@ -726,12 +726,14 @@ do not.
 | `ball` | balls id | no |
 | `effect` | item_effects id | no |
 | `id` | string | yes |
-| `index` | integer 0..255 | no |
+| `index` | integer 1..65535 | no |
 | `machine` | {kind, move, number} | no |
 | `name` | string | yes |
 | `needsTarget` | boolean | no |
 | `price` | integer >= 0 | yes |
 | `tossable` | boolean | no |
+
+New records receive an unused script index above the native range, up to 65535. Existing indices cannot change; collisions and reserved species 253, move 255 and item 255 are rejected. Cartridge save export refuses named records whose index exceeds one byte.
 
 ### On Gen 3
 
@@ -763,8 +765,8 @@ do not.
 - semantics: `record`
 - target: none
 
-Gen 2 only: Red, Blue and Yellow have no such system, so there is no
-Gen 1 table to merge into and a write here on a Gen 1 boot is dropped
+Gen 2 only: Red, Blue and Yellow have no native target for this registry.
+A write here on a Gen 1 boot is dropped
 and reported. See the Gold subsection below for where it does land.
 
 | field | type | required |
@@ -841,8 +843,8 @@ to do for each one.
 
 ### On Gen 3
 
-Not available on Gen 3: the Gen 3 games have no counterpart, so a
-write here is dropped and reported on a Gen 3 boot.
+Not available on Gen 3: there is no native target for this registry.
+A write here is dropped and reported on a Gen 3 boot.
 
 ## map_scripts
 
@@ -950,6 +952,121 @@ do not.
 mod.content.maps:patch("FR_PALLET_TOWN", { weather = 2 })
 ```
 
+## marts
+
+- semantics: `record`
+- target: none
+
+Gen 2 only: Red, Blue and Yellow have no native target for this registry.
+A write here on a Gen 1 boot is dropped
+and reported. See the Gold subsection below for where it does land.
+
+Id = a top-level key of the target table. The set below is **closed**:
+an id that is not one of these is rejected rather than merged, because
+the engine reads this table by name and a key it does not name is a
+write nothing reads.
+
+| key | type |
+|---|---|
+| `0` | list of items id |
+| `1` | list of items id |
+| `10` | list of items id |
+| `11` | list of items id |
+| `12` | list of items id |
+| `13` | list of items id |
+| `14` | list of items id |
+| `15` | list of items id |
+| `16` | list of items id |
+| `17` | list of items id |
+| `18` | list of items id |
+| `19` | list of items id |
+| `2` | list of items id |
+| `20` | list of items id |
+| `21` | list of items id |
+| `22` | list of items id |
+| `23` | list of items id |
+| `24` | list of items id |
+| `25` | list of items id |
+| `26` | list of items id |
+| `27` | list of items id |
+| `28` | list of items id |
+| `29` | list of items id |
+| `3` | list of items id |
+| `30` | list of items id |
+| `31` | list of items id |
+| `32` | list of items id |
+| `33` | list of items id |
+| `4` | list of items id |
+| `5` | list of items id |
+| `6` | list of items id |
+| `7` | list of items id |
+| `8` | list of items id |
+| `9` | list of items id |
+| `bargain` | list of {item, price} |
+
+<!-- snippet: illustrative -->
+```lua
+mod.content.marts:patch("0", { "ULTRA_BALL" })
+```
+
+Gen 2 only. Ids "0".."33" are the script mart numbers, not MART_* names. The "bargain" id takes ordered { item, price } rows. Patches replace the whole list, including an empty list; remove leaves an empty shelf. Append and prepend wrappers are not accepted. Ordinary prices come from items.
+
+### On Gold (Gen 2)
+
+- semantics: `record`
+- target: `Data.gen2Marts`
+
+The record differs; the registry name, the verbs and the id space
+do not.
+
+Id = a top-level key of the target table. The set below is **closed**:
+an id that is not one of these is rejected rather than merged, because
+the engine reads this table by name and a key it does not name is a
+write nothing reads.
+
+| key | type |
+|---|---|
+| `0` | list of items id |
+| `1` | list of items id |
+| `10` | list of items id |
+| `11` | list of items id |
+| `12` | list of items id |
+| `13` | list of items id |
+| `14` | list of items id |
+| `15` | list of items id |
+| `16` | list of items id |
+| `17` | list of items id |
+| `18` | list of items id |
+| `19` | list of items id |
+| `2` | list of items id |
+| `20` | list of items id |
+| `21` | list of items id |
+| `22` | list of items id |
+| `23` | list of items id |
+| `24` | list of items id |
+| `25` | list of items id |
+| `26` | list of items id |
+| `27` | list of items id |
+| `28` | list of items id |
+| `29` | list of items id |
+| `3` | list of items id |
+| `30` | list of items id |
+| `31` | list of items id |
+| `32` | list of items id |
+| `33` | list of items id |
+| `4` | list of items id |
+| `5` | list of items id |
+| `6` | list of items id |
+| `7` | list of items id |
+| `8` | list of items id |
+| `9` | list of items id |
+| `bargain` | list of {item, price} |
+
+### On Gen 3
+
+Not available on Gen 3: there is no native target for this registry.
+A write here is dropped and reported on a Gen 3 boot.
+
 ## migrations
 
 - semantics: `compose`
@@ -1039,7 +1156,7 @@ do not.
 | `fixedDamage` | integer >= 1 \| function | no |
 | `highCrit` | boolean | no |
 | `id` | string | yes |
-| `index` | integer 0..255 | no |
+| `index` | integer 1..65535 | no |
 | `multiHit` | integer >= 1 \| list of integer >= 1 | no |
 | `name` | string | yes |
 | `power` | integer 0..255 | yes |
@@ -1047,6 +1164,8 @@ do not.
 | `priority` | integer -7..7 | no |
 | `semiInvulnerable` | boolean | no |
 | `type` | type_chart id | yes |
+
+New records receive an unused script index above the native range, up to 65535. Existing indices cannot change; collisions and reserved species 253, move 255 and item 255 are rejected. Cartridge save export refuses named records whose index exceeds one byte.
 
 ### On Gen 3
 
@@ -1138,8 +1257,8 @@ mod.content.palettes:patch("pokemon", { TOTODILE = { shiny = { {255,255,255}, {2
 - semantics: `record`
 - target: none
 
-Gen 2 only: Red, Blue and Yellow have no such system, so there is no
-Gen 1 table to merge into and a write here on a Gen 1 boot is dropped
+Gen 2 only: Red, Blue and Yellow have no native target for this registry.
+A write here on a Gen 1 boot is dropped
 and reported. See the Gold subsection below for where it does land.
 
 | field | type | required |
@@ -1151,16 +1270,19 @@ and reported. See the Gold subsection below for where it does land.
 | `callerKey` | string | no |
 | `callerTime` | integer 0..7 | no |
 | `class` | string | no |
-| `index` | integer >= 0 | yes |
+| `index` | integer 0..255 | no |
 | `map` | maps id | no |
 | `member` | string | no |
 | `name` | string | no |
 | `number` | integer 0..255 | no |
+| `rematchEvent` | integer 0..2047 | no |
 
 <!-- snippet: illustrative -->
 ```lua
 mod.content.phone_contacts:patch("PHONE_YOUNGSTER_JOEY", { map = "ROUTE_31" })
 ```
+
+New contacts may omit index to append after the mounted game's native book. Indices are 1..255; native rows and holes are reserved and existing indices cannot change. Supply a name or trainer class/member, and callerKey/calleeKey map_scripts keys for enabled time masks. rematchEvent is a numeric event bit. The saved book keeps ten numeric slots; use explicit indices for stability when changing the enabled mod set.
 
 ### On Gold (Gen 2)
 
@@ -1169,8 +1291,8 @@ mod.content.phone_contacts:patch("PHONE_YOUNGSTER_JOEY", { map = "ROUTE_31" })
 
 ### On Gen 3
 
-Not available on Gen 3: the Gen 3 games have no counterpart, so a
-write here is dropped and reported on a Gen 3 boot.
+Not available on Gen 3: there is no native target for this registry.
+A write here is dropped and reported on a Gen 3 boot.
 
 ## pokemon
 
@@ -1237,7 +1359,7 @@ do not.
 | `growthRate` | growth_rates id | yes |
 | `growthRateId` | integer 0..255 | no |
 | `id` | string | yes |
-| `index` | integer 0..255 | no |
+| `index` | integer 1..65535 | no |
 | `items` | list of items id | no |
 | `levelMoves` | list of {level, move} | yes |
 | `name` | string | yes |
@@ -1254,6 +1376,8 @@ do not.
 ```lua
 mod.content.pokemon:patch("TOTODILE", { baseStats = { specialAttack = 80 } })
 ```
+
+New records receive an unused script index above the native range, up to 65535. Existing indices cannot change; collisions and reserved species 253, move 255 and item 255 are rejected. Cartridge save export refuses named records whose index exceeds one byte.
 
 ### On Gen 3
 
@@ -1300,8 +1424,8 @@ mod.content.pokemon:patch("MEW", { baseStats = { specialAttack = 120 } })
 - semantics: `record`
 - target: none
 
-Gen 2 only: Red, Blue and Yellow have no such system, so there is no
-Gen 1 table to merge into and a write here on a Gen 1 boot is dropped
+Gen 2 only: Red, Blue and Yellow have no native target for this registry.
+A write here on a Gen 1 boot is dropped
 and reported. See the Gold subsection below for where it does land.
 
 | field | type | required |
@@ -1321,8 +1445,8 @@ mod.content.radio_channels:register("PIRATE_RADIO", { channel = 9, name = "PIRAT
 
 ### On Gen 3
 
-Not available on Gen 3: the Gen 3 games have no counterpart, so a
-write here is dropped and reported on a Gen 3 boot.
+Not available on Gen 3: there is no native target for this registry.
+A write here is dropped and reported on a Gen 3 boot.
 
 ## render_pipelines
 
@@ -1353,8 +1477,8 @@ mod.content.render_pipelines:register("voxel", { label = "VOXEL", levels = { "OF
 - semantics: `record`
 - target: none
 
-Gen 2 only: Red, Blue and Yellow have no such system, so there is no
-Gen 1 table to merge into and a write here on a Gen 1 boot is dropped
+Gen 2 only: Red, Blue and Yellow have no native target for this registry.
+A write here on a Gen 1 boot is dropped
 and reported. See the Gold subsection below for where it does land.
 - value: string
 
@@ -1400,8 +1524,8 @@ to do for each one.
 
 ### On Gen 3
 
-Not available on Gen 3: the Gen 3 games have no counterpart, so a
-write here is dropped and reported on a Gen 3 boot.
+Not available on Gen 3: there is no native target for this registry.
+A write here is dropped and reported on a Gen 3 boot.
 
 ## screens
 
@@ -1577,8 +1701,8 @@ to do for each one.
 
 ### On Gen 3
 
-Not available on Gen 3: the Gen 3 games have no counterpart, so a
-write here is dropped and reported on a Gen 3 boot.
+Not available on Gen 3: there is no native target for this registry.
+A write here is dropped and reported on a Gen 3 boot.
 
 ## tilesets
 
@@ -1612,8 +1736,8 @@ mod.content.tilesets:register("MY_TILES", { image = "...", blocks = { ... } })
 
 ### On Gen 3
 
-Not available on Gen 3: the Gen 3 games have no counterpart, so a
-write here is dropped and reported on a Gen 3 boot.
+Not available on Gen 3: there is no native target for this registry.
+A write here is dropped and reported on a Gen 3 boot.
 
 ## tokens
 
@@ -1730,8 +1854,8 @@ mod.content.transitions:register("dissolve", { frames = 30, draw = fn })
 
 ### On Gen 3
 
-Not available on Gen 3: the Gen 3 games have no counterpart, so a
-write here is dropped and reported on a Gen 3 boot.
+Not available on Gen 3: there is no native target for this registry.
+A write here is dropped and reported on a Gen 3 boot.
 
 ## type_chart
 

@@ -42,10 +42,10 @@ local function dataFor(generation)
   end
   local data = T.fixtures.fresh()
   data.pokemon.MEW = Merge.deepCopy(data.pokemon.FIXMON_A)
-  data.pokemon.MEW.id, data.pokemon.MEW.name = "MEW", "MEW"
+  data.pokemon.MEW.id, data.pokemon.MEW.name, data.pokemon.MEW.index = "MEW", "MEW", 4
   data.pokemon.MEW.types, data.pokemon.MEW.evolutions = { "NORMAL" }, {}
   data.moves.POUND = Merge.deepCopy(data.moves.FIX_TACKLE)
-  data.moves.POUND.id, data.moves.POUND.name = "POUND", "POUND"
+  data.moves.POUND.id, data.moves.POUND.name, data.moves.POUND.index = "POUND", "POUND", 5
   data.pokemon.MEW.level1Moves = { "POUND" }
   data.pokemon.MEW.learnset = { { level = 1, move = "POUND" } }
   data.moves.OBSERVED = { id = "OBSERVED", index = 49, name = "OBSERVED", type = "NORMAL",
@@ -184,6 +184,11 @@ if mod.generation == 3 then
 end
 
 local before = must(moves:get("FX_POISON"))
+if mod.generation == 2 then
+  rejected(function() return moves:patch("FX_POISON", {
+    effect = "PARALYZE_EFFECT", index = must(moves:get("POUND")).index }) end)
+  assert(same(moves:get("FX_POISON"), before), "colliding index mutated move effect or index")
+end
 local invalidEffects = { 17, {}, "native:9:POISON" }
 if mod.generation ~= 1 then invalidEffects[#invalidEffects + 1] = "NOT_AN_EFFECT" end
 for _, effect in ipairs(invalidEffects) do

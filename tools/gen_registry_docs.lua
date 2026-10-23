@@ -175,8 +175,8 @@ for _, name in ipairs(names) do
   -- rather than as the deliberate one-generation registry it is.
   if Schemas.gatedFor(name, 1) then
     line("")
-    line("Gen 2 only: Red, Blue and Yellow have no such system, so there is no")
-    line("Gen 1 table to merge into and a write here on a Gen 1 boot is dropped")
+    line("Gen 2 only: Red, Blue and Yellow have no native target for this registry.")
+    line("A write here on a Gen 1 boot is dropped")
     line("and reported. See the Gold subsection below for where it does land.")
   end
   renderSchema(spec)
@@ -236,8 +236,8 @@ for _, name in ipairs(names) do
     line("")
     line("### On Gen 3")
     line("")
-    line("Not available on Gen 3: the Gen 3 games have no counterpart, so a")
-    line("write here is dropped and reported on a Gen 3 boot.")
+    line("Not available on Gen 3: there is no native target for this registry.")
+    line("A write here is dropped and reported on a Gen 3 boot.")
   elseif gen3Target ~= spec.target or gen3Shaped or #overlays > 0 then
     local gen3 = Schemas.shapeFor(name, spec, 3)
     line("")

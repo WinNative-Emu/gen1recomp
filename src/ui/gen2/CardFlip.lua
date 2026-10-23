@@ -840,8 +840,8 @@ end
 function CardFlip:cursorBounds()
   local x, y = self.cursorX, self.cursorY
   if y == 0 then
-    -- Pokemon Pair: spans 4 columns (32px), 1 row (8px)
-    local px = (MON_COL[x] or 12) * 8
+    -- pokecrystal/engine/games/card_flip.asm:1349
+    local px = (MON_COL[x - x % 2] or 12) * 8
     local py = MON_PAIR_ROW * 8
     return px, py, 32, 8
   elseif y == 1 then
@@ -872,34 +872,23 @@ function CardFlip:cursorBounds()
   end
 end
 
-local FACE_DOWN_TILES = {
-  { 0x08, 0x09, 0x09, 0x09, 0x0a },
-  { 0x0b, 0x28, 0x2b, 0x28, 0x0c },
-  { 0x0b, 0x2c, 0x2d, 0x2e, 0x0c },
-  { 0x0b, 0x2f, 0x30, 0x31, 0x0c },
-  { 0x0b, 0x32, 0x33, 0x34, 0x0c },
-  { 0x0d, 0x0e, 0x0e, 0x0e, 0x0f },
-}
-
-local FACE_UP_TILES = {
-  { 0x18, 0x19, 0x19, 0x19, 0x1a },
-  { 0x1b, 0x35, 0x28, 0x28, 0x1c },
-  { 0x0b, 0x28, 0x28, 0x28, 0x0c },
-  { 0x0b, 0x28, 0x28, 0x28, 0x0c },
-  { 0x0b, 0x28, 0x28, 0x28, 0x0c },
-  { 0x1d, 0x1e, 0x1e, 0x1e, 0x1f },
-}
-
-local MON_ANCHORS = {
-  [0] = 24, -- Pikachu (tiles 24..32 in card_flip_2)
-  [1] = 33, -- Jigglypuff (tiles 33..41 in card_flip_2)
-  [2] = 42, -- Poliwag (tiles 42..50 in card_flip_2)
-  [3] = 51, -- Oddish (tiles 51..59 in card_flip_2)
-}
+local function drawFontTile(code, tx, ty, palette)
+  Chrome.paletteFill(tx * 8, ty * 8, 8, 8, palette)
+  local _, drawGlyph, finish = Chrome.paletteGlyphs(palette)
+  drawGlyph(code, tx * 8, ty * 8)
+  finish()
+end
 
 -- Draw face-down, flipping, or face-up card at (2, 0) or (2, 6)
 function CardFlip:drawCards()
+  local data = self.game and self.game.data
+  local gfx = assert(data and data.gen2MenuGfx and data.gen2MenuGfx.cardFlip,
+    "Card Flip cache data is missing")
+  assert(type(gfx.faceDown) == "table" and #gfx.faceDown == 30
+    and type(gfx.faceUp) == "table" and #gfx.faceUp == 30
+    and type(gfx.deck) == "table" and #gfx.deck == 48, "Card Flip cache tables are incomplete")
   local s1, s2 = self:sheets()
+  assert(s1:available() and s2:available(), "Card Flip cache graphics are missing")
 
   for slot = 1, 2 do
     local box = CARD_BOX[slot]
@@ -910,25 +899,31 @@ function CardFlip:drawCards()
 
     if isFaceUp or (isFlipping and (self.flipTimer or 0) >= 4) then
       local activeCard = self.faceUp or self.targetCard or 0
-      local lvl = CardFlip.level(activeCard) + 1
+      local levelCode = gfx.deck[activeCard * 2 + 1]
       local mon = CardFlip.mon(activeCard)
       local monPal = CARDFLIP_PALS.bg[mon + 1] or CARDFLIP_PALS.bg[1]
 
-      s1.palette = CARDFLIP_PALS.bg[0]
+      -- pokecrystal/engine/games/card_flip.asm:448
+      s1.palette = monPal
       for cy = 1, 6 do
         for cx = 1, 5 do
-          local tid = FACE_UP_TILES[cy][cx]
-          s1:draw(tid, box.x + cx - 1, box.y + cy - 1)
+          local tid = gfx.faceUp[(cy - 1) * 5 + cx]
+          -- pokecrystal/engine/games/card_flip.asm:458
+          if tid == 0x7f then
+            drawFontTile(tid, box.x + cx - 1, box.y + cy - 1, monPal)
+          else
+            s1:draw(tid, box.x + cx - 1, box.y + cy - 1)
+          end
         end
       end
 
       -- Level digit at (box.x + 3, box.y + 1)
       if isFaceUp or (isFlipping and (self.flipTimer or 0) >= 8) then
-        Chrome.print(tostring(lvl), box.x + 3, box.y + 1)
+        drawFontTile(levelCode, box.x + 3, box.y + 1, monPal)
 
         -- Draw 3x3 Pokemon pic from card_flip_2 (s2) at (box.x + 1, box.y + 2)
         s2.palette = monPal
-        local anchor = MON_ANCHORS[mon] or 24
+        local anchor = gfx.deck[activeCard * 2 + 2] - 0x3e + 8
         for py = 0, 2 do
           for px = 0, 2 do
             local tid = anchor + py * 3 + px
@@ -940,7 +935,7 @@ function CardFlip:drawCards()
       s1.palette = CARDFLIP_PALS.bg[0]
       for cy = 1, 6 do
         for cx = 1, 5 do
-          local tid = FACE_DOWN_TILES[cy][cx]
+          local tid = gfx.faceDown[(cy - 1) * 5 + cx]
           s1:draw(tid, box.x + cx - 1, box.y + cy - 1)
         end
       end

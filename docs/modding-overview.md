@@ -2,7 +2,7 @@
 
 The game ships a native mod platform: content registries, events and hooks,
 per-mod saves and options, and an in-game manager (F10). The full modding
-book (getting started, a twelve-rung tutorial ladder, a cookbook, and the
+book (getting started, a thirteen-step tutorial ladder (00 to 12), a cookbook, and the
 generated reference) lives on the
 [project wiki](https://github.com/bryanthaboi/gen1recomp/wiki).
 

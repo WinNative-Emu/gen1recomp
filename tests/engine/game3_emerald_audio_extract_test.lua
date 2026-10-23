@@ -143,4 +143,23 @@ do
   if prevG then GameVersion.set(prevG) end
 end
 
+do
+  local prev = Versions.active()
+  Versions.select("firered")
+  local audio = Versions.AUDIO
+  -- pokefirered/src/data/pokemon/cry_ids.h:3
+  for _, row in ipairs({ { "firered", 0x2539D4 }, { "leafgreen", 0x2539B0 }, { "firered", 0x2539D4 } }) do
+    Versions.select(row[1])
+    eq(Versions.AUDIO, audio, "FRLG audio table identity survives edition switching")
+    eq(audio.cry_id_table, row[2], row[1] .. " species cry table offset")
+    eq(audio.cry_id_count, 135, row[1] .. " species cry table count")
+  end
+  local off = audio.cry_id_table
+  audio.cry_id_table = nil
+  local ok, err = pcall(E.run, "", { write = function() return true end }, {})
+  check(not ok and tostring(err):find("AUDIO", 1, true), "missing species cry table rejects the audio metadata")
+  audio.cry_id_table = off
+  Versions.select(prev)
+end
+
 T.finish("game3_emerald_audio_extract_test")

@@ -1445,6 +1445,7 @@ return {
   [0x252BC8] = 0x252BA4, -- pokemon.o:sTMHMLearnsets + 0
   [0x2538A8] = 0x253884, -- :gFacilityClassToPicIndex + 0
   [0x25393E] = 0x25391A, -- :gFacilityClassToTrainerClass + 0
+  [0x2539D4] = 0x2539B0, -- pokemon.o:sHoennSpeciesIdToCryId + 0
   [0x254784] = 0x254760, -- :gSpeciesInfo + 0
   [0x259754] = 0x259734, -- :gEvolutionTable + 0
   [0x25D7B4] = 0x25D794, -- :gLevelUpLearnsets + 0

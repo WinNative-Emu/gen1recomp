@@ -6578,7 +6578,19 @@ function RomExtractorGen2:extractMenuGfx()
     cardFlip = cardFlip or {}
     cardFlip.tilemap = "assets/generated/card_flip/card_flip.tilemap"
   end
-  if cardFlip then out.cardFlip = cardFlip end
+  if cardFlip then
+    local function readCardTable(name, count)
+      local symbol = self:symbol(name)
+      return self.rom:bytes(symbol.bank, symbol.address, count)
+    end
+    -- engine/games/card_flip.asm:388
+    cardFlip.faceDown = readCardTable("PlaceCardFaceDown.FaceDownCardTilemap", 30)
+    -- engine/games/card_flip.asm:458
+    cardFlip.faceUp = readCardTable("CardFlip_DisplayCardFaceUp.FaceUpCardTilemap", 30)
+    -- engine/games/card_flip.asm:466
+    cardFlip.deck = readCardTable("CardFlip_DisplayCardFaceUp.Deck", 48)
+    out.cardFlip = cardFlip
+  end
 
   self:write("menu_gfx", out)
   self:tick("Menu graphics", 1, 1)

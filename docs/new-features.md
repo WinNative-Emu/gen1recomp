@@ -2,6 +2,9 @@
 
 Features intentionally added to the games themselves, beyond what the original cartridges shipped with:
 
+* **Gen 2 mod script indices**, automatic species, move and item numbering through 65535
+* **Gen 2 mod shop stock**, regular shelves and bargain prices
+* **Gen 2 mod phone contacts**, caller scripts and rematch events
 * **Survey zoom** with connected-map rendering and configurable void fill
 * **Perspective tilt mode** for an HD-2D-style overworld
 * **Multiple color modes**, including original, SGB, advanced GBC, monochrome, and classic green

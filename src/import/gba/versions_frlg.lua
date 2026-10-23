@@ -43,18 +43,21 @@ Versions.ROM_SIZE = 16777216
 -- v115: LeafGreen profiles, edition-specific title assets and Deoxys stats.
 -- v121: chrome/fonts/japanese_{normal,small}_* and japanese_widths.lua, the
 --       cart's Japanese fonts, for text a Japanese translation mod prints.
-Versions.CACHE_VERSION = 139
+Versions.CACHE_VERSION = 140
 Versions.NATIVE_VERSION = 6
 Versions.OW_VERSION = 3
 Versions.ANIM_VERSION = 1
 -- Audio pack (M4A banks / DirectSound samples / cries).
-Versions.AUDIO_VERSION = 6
+Versions.AUDIO_VERSION = 7
 -- FireRed USA 1.0 (BPRE): located by structural scan (entry0 ms=me=0, SE_SELECT ms=me=2).
 Versions.AUDIO = {
   song_table = 0x4A32CC,   -- gSongTable file offset
   song_count = 347,        -- ids 0 .. MUS_TEACHY_TV_MENU (346)
   cry_table = 0x48C914,    -- gCryTable (ToneData × 388)
   cry_count = 388,
+  -- pokefirered/src/data/pokemon/cry_ids.h:3
+  cry_id_table = 0x2539D4,
+  cry_id_count = 135,
 }
 -- game3 FieldView prefers pret 4bpp path when native cache is ready.
 Versions.NATIVE_RENDER = true

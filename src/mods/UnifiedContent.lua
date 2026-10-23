@@ -15,7 +15,7 @@ local VERBS = { "register", "override", "patch", "remove" }
 local PASSTHROUGH = { text = true, rom_text = true, field = true,
   decorations = true, landmarks = true, battle_anims = true, constants = true,
   icons = true, map_scripts = true, palettes = true, sprites = true,
-  balls = true, maps = true }
+  balls = true, maps = true, marts = true }
 local UNSUPPORTED = "unsupported: "
 
 local function refuse(reason) error(UNSUPPORTED .. reason, 0) end
@@ -1290,6 +1290,8 @@ local function accessor(loader, name, native, generation, version, mod)
       if not patch then payload.id = payload.id or id end
       if generation == 3 and (name == "pokemon" or name == "moves" or name == "items") then
         gen3Index(loader, name, id, payload, old)
+      elseif generation == 2 then
+        payload = Schemas.gen2Index(registry, id, payload)
       end
       local spec = Schemas.shapeFor(name, Schemas.REGISTRIES[name], generation)
       checkDeletes(payload, { kind = "rec", fields = spec.fields }, name, generation)
@@ -1321,6 +1323,7 @@ local function accessor(loader, name, native, generation, version, mod)
     expect(valid, detail or "schema mismatch")
     if patch and value ~= DELETE and (name == "pokemon" or name == "trainers" or name == "moves") then
       local source = copy(value)
+      if generation == 2 and payload.index ~= nil then source.index = payload.index end
       local function stripMetadata(row)
         if type(row) ~= "table" or row == DELETE then return end
         row.native = nil

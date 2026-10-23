@@ -1284,6 +1284,13 @@ function Loader:_contentApi(mod, registry, deprecation)
     if apiLevel >= 2 then error(err, 0) end
     Logger.warn("[%s] %s", modId, err)
   end
+  local function prepare(id, value, mode)
+    if loader.generation == 2 then
+      if registry.name == "marts" then return Schemas.gen2MartValue(id, value) end
+      return Schemas.gen2Index(registry, id, value, loader.baseData, mode)
+    end
+    return value
+  end
   -- A registry with no home in this generation (Schemas.routing) takes the
   -- write and drops it.  Reported once per mod per registry, into the same feed
   -- the manager shows, because a mod that declared gen2compat and then wrote
@@ -1314,6 +1321,7 @@ function Loader:_contentApi(mod, registry, deprecation)
     register = function(_, id, value)
       note()
       if dropped() then return nil end
+      value = prepare(id, value)
       validate("register", id, value)
       loader:_journal(registry.name)
       return registry:register(id, value, modId)
@@ -1321,6 +1329,7 @@ function Loader:_contentApi(mod, registry, deprecation)
     override = function(_, id, value)
       note()
       if dropped() then return nil end
+      value = prepare(id, value)
       validate("override", id, value)
       loader:_journal(registry.name)
       return registry:override(id, value, modId)
@@ -1328,13 +1337,18 @@ function Loader:_contentApi(mod, registry, deprecation)
     patch = function(_, id, partial)
       note()
       if dropped() then return nil end
+      partial = prepare(id, partial, "patch")
       validate("patch", id, partial)
       loader:_journal(registry.name)
+      if loader.generation == 2 and registry.name == "marts" then
+        return registry:override(id, partial, modId)
+      end
       return registry:patch(id, partial, modId)
     end,
     remove = function(_, id)
       note()
       if dropped() then return nil end
+      if loader.generation == 2 and registry.name == "marts" then prepare(id, Merge.DELETE) end
       loader:_journal(registry.name)
       return registry:remove(id, modId)
     end,

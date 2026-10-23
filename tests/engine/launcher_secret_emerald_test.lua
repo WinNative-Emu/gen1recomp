@@ -4,6 +4,15 @@ local T = require("tests.harness")
 local check = T.check
 love = love or require("tests.love_stub")
 
+local realRead, buildInfo, buildReads = love.filesystem.read, nil, 0
+love.filesystem.read = function(path, ...)
+  if path == "build-info.json" then
+    buildReads = buildReads + 1
+    return buildInfo
+  end
+  return realRead(path, ...)
+end
+
 local realTime, now = os.time, 1790855999
 os.time = function(t)
   if t then return realTime(t) end
@@ -206,5 +215,81 @@ local initial = RomImporter.new(function() end, { launcher = true, initialTab = 
 T.eq(initial.tab, "emerald", "a fresh deadline boot unlocks before initial tab validation")
 check(SaveData.loadOptions().secretEmerald == true, "a fresh deadline boot persists the unlock")
 
+local Json = require("src.link.Json")
+local function buildCase(info)
+  SaveData.saveOptions = realSaveOptions
+  SaveData.saveOptions({ secretEmerald = false })
+  buildInfo, buildReads, writes, now = info, 0, 0, 0
+  SecretGames.reload()
+  SaveData.saveOptions = function(...)
+    writes = writes + 1
+    return realSaveOptions(...)
+  end
+end
+
+buildCase(Json.encode({ builtAt = "2026-10-21T02:37:42Z" }))
+local explicitDue = SecretGames.update(1790855999)
+check(not explicitDue and writes == 0, "an explicit pre-release time overrides released-build metadata")
+local beforeBuildRev = SecretGames.rev
+local oldClock = RomImporter.new(function() end, { launcher = true, initialTab = "emerald" })
+oldClock.isNX = true
+T.eq(oldClock.tab, "emerald", "released build accepts Emerald on a fresh old-clock boot")
+local oldClockTabs = LauncherView.gameTabs(oldClock)
+T.eq(#oldClockTabs, #GameVersion.ORDER, "released build exposes all eleven games with an old clock")
+check(oldClock:_versionForSha1(emeraldSha) == "emerald", "released build recognizes Emerald with an old clock")
+oldClock._gamePopup = true
+rects = drawRects(oldClock)
+check(rects["gamepop-emerald"] ~= nil and rects["secret-ok"] == nil,
+  "old-clock NX Choose game exposes Emerald without confirmation")
+oldClock._gamePopup = nil
+for _ = 1, 3 do oldClock:update(1 / 60) oldClock:_logoTap() end
+T.eq(writes, 1, "released build unlock persists only once")
+T.eq(SecretGames.rev, beforeBuildRev + 1, "released build invalidates visibility once")
+T.eq(buildReads, 1, "build metadata is read once between reloads")
+T.eq(LauncherView.gameTabs(oldClock), oldClockTabs, "released build game list remains cached")
+check(oldClock._secretPopup == nil and oldClock._logoTaps == nil, "released build never opens BLITZ on an old clock")
+SecretGames.reload()
+check(SecretGames.visible("emerald") and writes == 1, "released build unlock survives reload without another write")
+
+for _, stamp in ipairs({ "2026-10-01T12:00:00Z", "2028-02-29T00:00:00Z", "2400-02-29T00:00:00Z" }) do
+  buildCase(Json.encode({ builtAt = stamp }))
+  check(SecretGames.visible("emerald") and writes == 1, "valid released build unlocks: " .. stamp)
+end
+
+for _, info in ipairs({
+  "", "not json", '{"builtAt":"2026-10-21T02:37:42Z"', "{}",
+  '{"builtAt":false}', '{"builtAt":1792548000}',
+  Json.encode({ builtAt = "2026-10-01T11:59:59Z" }),
+  Json.encode({ builtAt = "0000-10-21T02:37:42Z" }),
+  Json.encode({ builtAt = "2026-00-21T02:37:42Z" }),
+  Json.encode({ builtAt = "2026-13-21T02:37:42Z" }),
+  Json.encode({ builtAt = "2026-10-00T02:37:42Z" }),
+  Json.encode({ builtAt = "2026-10-32T02:37:42Z" }),
+  Json.encode({ builtAt = "2027-04-31T02:37:42Z" }),
+  Json.encode({ builtAt = "2027-02-29T02:37:42Z" }),
+  Json.encode({ builtAt = "2100-02-29T02:37:42Z" }),
+  Json.encode({ builtAt = "2026-10-21T24:37:42Z" }),
+  Json.encode({ builtAt = "2026-10-21T02:60:42Z" }),
+  Json.encode({ builtAt = "2026-10-21T02:37:60Z" }),
+  Json.encode({ builtAt = "2026-10-21T02:37:42+00:00" }),
+  Json.encode({ builtAt = "2026-10-21T02:37:42Z trailing" }),
+}) do
+  buildCase(info)
+  check(not SecretGames.visible("emerald") and writes == 0,
+    "old-clock prerelease or malformed build stays locked: " .. info)
+end
+buildCase(nil)
+check(not SecretGames.visible("emerald") and writes == 0, "missing metadata preserves the prerelease gate")
+check(SecretGames.update(1790856000) and writes == 1, "an explicit deadline still unlocks without metadata")
+buildCase(nil)
+local metadataRead = love.filesystem.read
+love.filesystem.read = function(path, ...)
+  if path == "build-info.json" then error("unreadable build metadata") end
+  return metadataRead(path, ...)
+end
+check(not SecretGames.visible("emerald") and writes == 0, "unreadable metadata preserves the prerelease gate")
+
+love.filesystem.read = realRead
+SaveData.saveOptions = realSaveOptions
 os.time = realTime
 T.finish("launcher secret emerald")

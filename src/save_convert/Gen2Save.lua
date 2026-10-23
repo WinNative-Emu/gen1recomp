@@ -1081,7 +1081,13 @@ local function indexOf(map, id, what)
   if id == nil then return 0 end
   if type(id) == "number" then return math.floor(id) % 256 end
   local n = map[id]
-  if n then return n end
+  if n then
+    if type(n) ~= "number" or n % 1 ~= 0 or n < 1 or n > 255 then
+      refuse(("%s %s has index %s, which does not fit its cartridge byte")
+        :format(what, tostring(id), tostring(n)))
+    end
+    return n
+  end
   refuse(("%s %s has no index in this game's data, so it cannot be written to a "
     .. "cartridge"):format(what, tostring(id)))
 end

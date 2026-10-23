@@ -5,6 +5,7 @@
 -- are generated from it, so neither can drift from the engine.
 -- Pure Lua, no love.*, so the headless loader and doc generator run it.
 local Merge = require("src.mods.Merge")
+local Phone = require("src.core.gen2.Phone")
 
 local Schemas = {}
 
@@ -542,6 +543,7 @@ Schemas.GEN2 = {
   -- strings ("55:4067") rather than TEXT_* names, and a Gen 2 tileset carries
   -- its walkability as `collision` where Gen 1 says `walkable`.
   maps = "gen2Maps", tilesets = "gen2Tilesets", sprites = "gen2Sprites",
+  marts = "gen2Marts",
   text = "gen2Text",
   -- Label-keyed engine prose is extracted separately from the VM's
   -- bank:address script text.  Keep a distinct public registry name while
@@ -637,7 +639,7 @@ Schemas.GEN2 = {
 Schemas.GEN1 = {
   held_items = false, phone_contacts = false, decorations = false,
   apricorns = false, landmarks = false, radio_channels = false,
-  rom_text = false,
+  rom_text = false, marts = false,
 }
 
 Schemas.GEN3 = {
@@ -654,7 +656,7 @@ Schemas.GEN3 = {
   battle_sprite_scales = false,
   font = "gen3Font", audio = false,
   held_items = false, phone_contacts = false, decorations = false,
-  apricorns = false, radio_channels = false,
+  apricorns = false, radio_channels = false, marts = false,
   landmarks = "gen3Landmarks",
 }
 
@@ -848,6 +850,73 @@ local movesGen2BaseAt, movesGen2BaseIds, movesGen2ReservedIds =
   recordMapExcept("generation", "source")
 local itemsGen2BaseAt, itemsGen2BaseIds, itemsGen2ReservedIds =
   recordMapExcept("generation", "source", "pockets")
+
+function Schemas.gen2Index(registry, id, value, data, mode)
+  local floors = { pokemon = 251, moves = 251, items = 250 }
+  local floor = floors[registry.name]
+  local phone = registry.name == "phone_contacts"
+  local order = phone and data and data.gen2Constants and data.gen2Constants.phoneContactOrder
+  if phone then floor = type(order) == "table" and #order - 1 or 0 end
+  if not floor or type(value) ~= "table" or value == Merge.DELETE then return value end
+  local limit = phone and 255 or 65535
+  local used, previous = {}, nil
+  local function reserve(other, row)
+    local index = type(row) == "table" and row.index
+    if type(index) ~= "number" or index % 1 ~= 0 then return end
+    if other == id then previous = previous or index end
+    if used[index] ~= nil and used[index] ~= other then used[index] = true
+    else used[index] = other end
+  end
+  local base = registry.base and registry.base()
+  for other, row in pairs(base or {}) do reserve(other, row) end
+  for other, row in registry:each() do reserve(other, row) end
+  for other, ops in pairs(registry.ops) do
+    for _, op in ipairs(ops) do reserve(other, op.value) end
+  end
+  -- pokegold/constants/pokemon_constants.asm:271
+  -- pokegold/constants/item_constants.asm:300
+  -- pokegold/constants/move_constants.asm:262
+  if phone then
+    for index = 0, floor do
+      if used[index] == nil then used[index] = true end
+    end
+  else used[registry.name == "pokemon" and 253 or 255] = true end
+  local out = Merge.deepCopy(value)
+  local index = out.index
+  if previous ~= nil and index ~= nil and index ~= previous then
+    error(registry.name .. ": changing a Gen 2 index is unsupported", 0)
+  end
+  index = index or previous
+  if index == nil then
+    for candidate = floor + 1, limit do
+      if used[candidate] == nil then index = candidate break end
+    end
+  end
+  if type(index) ~= "number" or index % 1 ~= 0 or index < (previous == 0 and 0 or 1) or index > limit then
+    error(registry.name .. ": invalid Gen 2 index", 0)
+  end
+  if used[index] ~= nil and used[index] ~= id then
+    error(registry.name .. ": Gen 2 index collision: " .. index, 0)
+  end
+  out.index = index
+  if phone then
+    local effective = mode == "patch"
+      and Merge.deepMerge(Merge.deepCopy(registry:get(id) or {}), out, registry.spec.semantics) or out
+    if previous == nil and not (type(effective.name) == "string" and effective.name ~= "")
+        and not (type(effective.class) == "string" and type(effective.member) == "string") then
+      error("phone_contacts: new contact needs a name or trainer identity", 0)
+    end
+    for _, direction in ipairs({ "callee", "caller" }) do
+      local key = effective[direction .. "Key"]
+      if type(effective[direction .. "Time"]) == "number" and effective[direction .. "Time"] > 0
+          and not (type(key) == "string" and key ~= "")
+          and not (previous ~= nil and previous <= floor and Phone.scriptKey(effective[direction])) then
+        error("phone_contacts: enabled " .. direction .. " needs a script key", 0)
+      end
+    end
+  end
+  return out
+end
 
 local G3 = {}
 Schemas.gen3View = G3
@@ -2045,7 +2114,7 @@ R.pokemon = {
   -- happens to work, which is the worst of both.
   gen2Fields = {
     id = f.str, name = f.str, dex = f.int(1),
-    index = f.opt(f.int(0, 255)),
+    index = f.opt(f.int(1, 65535)),
     types = f.list(f.id("type_chart")),
     baseStats = f.rec{ hp = f.int(1, 255), attack = f.int(1, 255),
                        defense = f.int(1, 255), speed = f.int(1, 255),
@@ -2217,6 +2286,20 @@ R.items = {
     effect = f.opt(f.union{ f.id("item_effects"), f.list(f.int(0, 255)) }),
   },
 }
+
+for _, name in ipairs({ "moves", "items" }) do
+  local fields = {}
+  for key, field in pairs(R[name].fields) do fields[key] = field end
+  fields.index = f.opt(f.int(1, 65535))
+  R[name].gen2Fields = fields
+end
+
+for _, name in ipairs({ "pokemon", "moves", "items" }) do
+  R[name].gen2Notes = "New records receive an unused script index above the native range, "
+    .. "up to 65535. Existing indices cannot change; collisions and reserved "
+    .. "species 253, move 255 and item 255 are rejected. Cartridge save export "
+    .. "refuses named records whose index exceeds one byte."
+end
 
 R.maps = {
   semantics = "record", target = "maps",
@@ -3607,17 +3690,65 @@ R.held_items = {
     .. '{ heldEffect = "HELD_LEFTOVERS", heldParameter = 0 })',
 }
 
--- data/phone/phone_contacts.asm, one record per PHONE_* row.  The id space is
--- data.gen2Constants.phoneContactOrder, so PHONE_YOUNGSTER_JOEY names the row
--- the cart calls PHONE_YOUNGSTER_JOEY; `index` is that row's byte, which is
--- what the save's contact list holds and what src/core/gen2/Phone.lua keys
--- every one of its own lookups by.  The four PHONE_UNUSED const_skip holes are
--- not registered -- they are copies of the wrong-number filler row, and one id
--- cannot name four of them.
+local martKeys = { bargain = f.list(f.rec({
+  item = f.id("items"), price = f.int(0, 65535),
+}, { strict = true })) }
+for index = 0, 33 do martKeys[tostring(index)] = f.list(f.id("items")) end
+
+function Schemas.gen2MartValue(id, value)
+  if not martKeys[id] then error("marts: expected id 0..33 or bargain", 0) end
+  if value == Merge.DELETE then return value end
+  if type(value) ~= "table" then error("marts: expected ordered stock list", 0) end
+  local count = 0
+  for key in pairs(value) do
+    if type(key) ~= "number" or key % 1 ~= 0 or key < 1 then
+      error("marts: expected contiguous stock list", 0)
+    end
+    count = count + 1
+  end
+  for index = 1, count do
+    if value[index] == nil then error("marts: expected contiguous stock list", 0) end
+  end
+  return Merge.deepCopy(value)
+end
+
+R.marts = {
+  semantics = "record", keys = martKeys, keysClosed = true,
+  gen2BaseAt = function(base, id)
+    if id == "bargain" then return base.bargain end
+    local index = tonumber(id)
+    return index and base.lists and base.lists[index + 1] or nil
+  end,
+  gen2BaseIds = function(base)
+    local ids = {}
+    for index, row in pairs(base.lists or {}) do
+      if type(index) == "number" and index >= 1 and index <= 34 and type(row) == "table" then
+        ids[#ids + 1] = tostring(index - 1)
+      end
+    end
+    if base.bargain ~= nil then ids[#ids + 1] = "bargain" end
+    return ids
+  end,
+  gen2Write = function(target, registry)
+    target.lists = target.lists or {}
+    for id in pairs(registry.ops) do
+      local value = Merge.deepCopy(registry:get(id) or {})
+      if id == "bargain" then target.bargain = value
+      else target.lists[tonumber(id) + 1] = value end
+    end
+  end,
+  example = 'mod.content.marts:patch("0", { "ULTRA_BALL" })',
+  notes = 'Gen 2 only. Ids "0".."33" are the script mart numbers, not MART_* names. '
+    .. 'The "bargain" id takes ordered { item, price } rows. Patches replace the '
+    .. 'whole list, including an empty list; remove leaves an empty shelf. '
+    .. 'Append and prepend wrappers are not accepted. Ordinary prices come from items.',
+}
+
 R.phone_contacts = {
   semantics = "record",
   fields = {
-    index = f.int(0),
+    index = f.opt(f.int(0, 255)),
+    rematchEvent = f.opt(f.int(0, 2047)),
     -- non-trainer rows (MOM, BILL, ELM, the BIKE SHOP) carry a PHONECONTACT_*
     -- number instead of a trainer; trainer rows carry the class and the
     -- roster member, which is what the rematch machinery and the caller's
@@ -3639,6 +3770,12 @@ R.phone_contacts = {
   },
   example = 'mod.content.phone_contacts:patch("PHONE_YOUNGSTER_JOEY", '
     .. '{ map = "ROUTE_31" })',
+  notes = "New contacts may omit index to append after the mounted game's native book. "
+    .. "Indices are 1..255; native rows and holes are reserved and existing indices "
+    .. "cannot change. Supply a name or trainer class/member, and callerKey/calleeKey "
+    .. "map_scripts keys for enabled time masks. rematchEvent is a numeric event bit. "
+    .. "The saved book keeps ten numeric slots; use explicit indices for stability "
+    .. "when changing the enabled mod set.",
 }
 
 -- data/decorations/attributes.asm, one record per DECO_* row.  The cart's

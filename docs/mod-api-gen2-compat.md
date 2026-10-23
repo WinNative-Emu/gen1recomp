@@ -927,17 +927,39 @@ the same as "the hook sees everything":
   `Battle.statusRecordFor(data, status).hudLabel`. The values are identical
   today, so nothing vanilla is affected.
 
+## Mod script indices, shops and phone contacts
+
+New `pokemon`, `moves` and `items` records receive an unused numeric script
+index above the native range when `index` is omitted. Explicit indices may
+reach 65535. Existing indices cannot change, collisions are rejected, and
+species 253, move 255 and item 255 are reserved. Scripts can use the returned
+record's `index`; normal saves keep string ids. Cartridge save export refuses
+named records whose indices do not fit one byte.
+
+`mod.content.marts:patch("0", { "ULTRA_BALL" })` replaces a shelf in
+`data.gen2Marts`. The ids are decimal strings `"0"` through `"33"`, matching
+the script's mart number. `"bargain"` takes ordered `{ item, price }` rows.
+An empty patch or removal leaves an empty shelf without shifting other shops.
+MART names and append/prepend wrappers are not accepted; ordinary shelves use
+the item definition's price.
+
+`phone_contacts:register` may omit `index` to append beyond the mounted game's
+native contacts, preserving the native holes and Crystal's contact 37. Supply
+a display name or trainer class/member, time masks and direct `calleeKey` /
+`callerKey` keys registered in `map_scripts`. Optional `rematchEvent` names a
+numeric event bit from 0 through 2047. Contact indices fit one byte and cannot
+change after registration. The saved book still has ten numeric slots; use
+explicit indices for stable saved contacts across changes to enabled mods.
+
 ## Gen 2 tables with no registry
 
-`Game2:load` assigns 24 `data.gen2*` tables and 12 of them are registry-backed,
-so twelve sit in `game.data` on a Gold boot with no registry pointing at them:
-`gen2Marts`, `gen2Roofs`, `gen2StdScripts`, `gen2EventTables` (the phone book,
+Some generated tables still have no complete registry view:
+`gen2Roofs`, `gen2StdScripts`, `gen2EventTables` (the phone book,
 in-game trades, elevator labels, decoration descriptions), `gen2InitialEvents`,
 `gen2Pokedex` (its kind, height, weight and text are reachable through the
 `pokemon` registry's `dexEntry`, see below), `gen2MenuGfx`, `gen2Intro`,
-`gen2Credits`, `gen2Diploma`, `gen2Trade`, and `gen2Scripts` (which the
-`map_scripts` registry does reach, so it is the one of the twelve that is not
-out of reach). Naming registries for the rest is new API surface rather than a
+`gen2Credits`, `gen2Diploma`, and `gen2Trade`. `gen2Scripts` is reached through
+`map_scripts`, and `gen2Marts` through `marts`. Naming registries for the rest is new API surface rather than a
 routing change, so it is deliberately not done yet.
 
 `mod.content.pokemon:patch(id, { dexEntry = { kind, text, text2, height,

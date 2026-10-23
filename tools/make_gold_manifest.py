@@ -847,6 +847,12 @@ REQUIRED_SYMBOLS = {
     "Slots1LZ", "Slots2LZ", "Slots3LZ", "SlotsTilemap",
     "CardFlipLZ01", "CardFlipLZ02", "CardFlipLZ03",
     "CardFlipOnButtonGFX", "CardFlipOffButtonGFX", "CardFlipTilemap",
+    # engine/games/card_flip.asm:388
+    "PlaceCardFaceDown.FaceDownCardTilemap",
+    # engine/games/card_flip.asm:458
+    "CardFlip_DisplayCardFaceUp.FaceUpCardTilemap",
+    # engine/games/card_flip.asm:466
+    "CardFlip_DisplayCardFaceUp.Deck",
     # Emote bubbles (data/sprites/emotes.asm): showemote's ! over a trainer
     # who just spotted the player, and the other faces scripts use.
     "ShockEmote", "QuestionEmote", "HappyEmote", "SadEmote",

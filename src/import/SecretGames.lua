@@ -1,4 +1,5 @@
 local GameVersion = require("src.core.GameVersion")
+local Json = require("src.link.Json")
 
 local SecretGames = {}
 
@@ -7,7 +8,7 @@ SecretGames.TAPS = 20
 SecretGames.EMERALD_RELEASE_AT = 1790856000
 SecretGames.rev = 0
 
-local unlocked
+local unlocked, releasedBuild
 
 local function load()
   unlocked = {}
@@ -17,6 +18,25 @@ local function load()
   for id, key in pairs(SecretGames.GAMES) do
     unlocked[id] = ok and type(opts) == "table" and opts[key] == true
   end
+  releasedBuild = false
+  local fs = love and love.filesystem
+  local okRead, raw
+  if fs and fs.read then okRead, raw = pcall(fs.read, "build-info.json") end
+  local okInfo, info = false, nil
+  if okRead and type(raw) == "string" then okInfo, info = pcall(Json.decode, raw) end
+  local stamp = okInfo and type(info) == "table" and info.builtAt
+  if type(stamp) ~= "string" then return end
+  local year, month, day, hour, minute, second = stamp:match(
+    "^(%d%d%d%d)%-(%d%d)%-(%d%d)T(%d%d):(%d%d):(%d%d)Z$")
+  if not year then return end
+  year, month, day = tonumber(year), tonumber(month), tonumber(day)
+  hour, minute, second = tonumber(hour), tonumber(minute), tonumber(second)
+  local days = { 31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31 }
+  if year % 4 == 0 and (year % 100 ~= 0 or year % 400 == 0) then days[2] = 29 end
+  releasedBuild = year >= 1 and month >= 1 and month <= 12
+    and day >= 1 and day <= days[month]
+    and hour <= 23 and minute <= 59 and second <= 59
+    and stamp >= "2026-10-01T12:00:00Z"
 end
 
 function SecretGames.reload()
@@ -64,6 +84,7 @@ end
 function SecretGames.update(now)
   if not unlocked then load() end
   local due = (now or os.time()) >= SecretGames.EMERALD_RELEASE_AT
+  if now == nil then due = due or releasedBuild end
   local changed = due and unlocked.emerald ~= true
   if changed then SecretGames.unlock() end
   return due, changed

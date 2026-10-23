@@ -13441,6 +13441,14 @@
       56,
       22809
     ],
+    "CardFlip_DisplayCardFaceUp.Deck": [
+      56,
+      19569
+    ],
+    "CardFlip_DisplayCardFaceUp.FaceUpCardTilemap": [
+      56,
+      19539
+    ],
     "CardStatusGFX": [
       9,
       22287
@@ -16564,6 +16572,10 @@
     "PinsirPokedexEntry": [
       105,
       23276
+    ],
+    "PlaceCardFaceDown.FaceDownCardTilemap": [
+      56,
+      19430
     ],
     "PlaceUnownPrinterFrontpic": [
       5,

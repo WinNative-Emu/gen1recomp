@@ -17,6 +17,7 @@ return function(game)
   local originalSecret = SaveData.loadOptions().secretEmerald == true
   local realTime, now = os.time, 1790855999
   local realSaveOptions = SaveData.saveOptions
+  local realRead, buildInfo = love.filesystem.read, nil
   local originalDraw, originalUpdate = rawget(game, "draw"), rawget(game, "update")
   local failures, drawn, writes = 0, 0, 0
   local imp
@@ -29,6 +30,7 @@ return function(game)
 
   local function finish()
     os.time = realTime
+    love.filesystem.read = realRead
     SaveData.saveOptions = realSaveOptions
     SaveData.saveOptions({ secretEmerald = originalSecret })
     game.draw, game.update = originalDraw, originalUpdate
@@ -39,6 +41,10 @@ return function(game)
   os.time = function(t)
     if t then return realTime(t) end
     return now
+  end
+  love.filesystem.read = function(path, ...)
+    if path == "build-info.json" then return buildInfo end
+    return realRead(path, ...)
   end
   SaveData.saveOptions({ secretEmerald = false })
   SecretGames.reload()
@@ -74,7 +80,7 @@ return function(game)
   local function navHas(id)
     for i = 1, Kit._navPrevN or 0 do
       local slot = Kit._nav[i]
-      if slot and slot.id == id then return true end
+      if slot and slot.id == id then return slot end
     end
     return false
   end
@@ -86,7 +92,7 @@ return function(game)
 
   imp._gamePopup = true
   local lockedTabs = LauncherView.gameTabs(imp)
-  check(#lockedTabs == 8 and not SecretGames.visible("emerald"), "before deadline Emerald remains hidden")
+  check(#lockedTabs == #GameVersion.ORDER - 1 and not SecretGames.visible("emerald"), "before deadline Emerald remains hidden")
   if not shot("90005_before_deadline_choose_game") then finish() return end
   check(not navHas("gamepop-emerald"), "before deadline Choose game has no Emerald row")
 
@@ -97,7 +103,7 @@ return function(game)
   now = 1790856000
   imp:update(1 / 60)
   local releasedTabs = LauncherView.gameTabs(imp)
-  check(#releasedTabs == 9 and releasedTabs ~= lockedTabs, "deadline refreshes the same launcher's cached tabs")
+  check(#releasedTabs == #GameVersion.ORDER and releasedTabs ~= lockedTabs, "deadline refreshes the same launcher's cached tabs")
   check(SaveData.loadOptions().secretEmerald == true and writes == 1, "deadline persists once")
   check(imp._secretPopup == nil and imp._logoTaps == nil, "deadline opens no BLITZ popup")
   if not shot("90005_deadline_choose_game_emerald") then finish() return end
@@ -130,5 +136,63 @@ return function(game)
   now = 1790855999
   SecretGames.reload()
   check(SecretGames.visible("emerald"), "persisted release survives clock rollback")
+
+  SaveData.saveOptions = realSaveOptions
+  SaveData.saveOptions({ secretEmerald = false })
+  buildInfo = '{"builtAt":"2026-10-21T02:37:42Z"}'
+  now, writes = 0, 0
+  SecretGames.reload()
+  SaveData.saveOptions = function(...)
+    writes = writes + 1
+    return realSaveOptions(...)
+  end
+  imp = RomImporter.new(function() end, {
+    launcher = true, reduceMotion = true, initialTab = "emerald",
+  })
+  imp.isNX = true
+  imp._gamePopup = true
+  check(imp.tab == "emerald" and #LauncherView.gameTabs(imp) == #GameVersion.ORDER,
+    "released_build_old_clock_emerald")
+  check(writes == 1 and SaveData.loadOptions().secretEmerald == true,
+    "released_build_unlock_once")
+  if not shot("3043_released_build_old_clock_choose_game") then finish() return end
+  for _ = 1, 20 do imp:update(1 / 60) imp:_logoTap() end
+  check(imp._secretPopup == nil and imp._logoTaps == nil and not navHas("secret-ok"),
+    "released_build_no_blitz")
+  imp._gamePopup = nil
+  if not shot("3043_released_build_old_clock_emerald_panel") then finish() return end
+
+  love.window.setMode(480, 854, flags)
+  imp.isNX = false
+  imp:_switchTab("red")
+  imp._gamePopup = true
+  if not shot("3043_released_build_touch_choose_game") then finish() return end
+  local width, height = love.graphics.getDimensions()
+  for _, version in ipairs(GameVersion.ORDER) do
+    local row = navHas("gamepop-" .. version)
+    check(row and row.x >= 0 and row.y >= 0 and row.x + row.w <= width
+      and row.y + row.h <= height and row.h >= Kit.tapMin(),
+      "touch_game_row_" .. version)
+  end
+  local close = navHas("gamepop-close")
+  if check(close and close.y >= 0 and close.y + close.h <= height,
+      "touch_close_visible") then
+    local x, y = close.x + close.w / 2, close.y + close.h / 2
+    imp:touchpressed("release-close", x, y, 0, 0, 1)
+    imp:touchreleased("release-close", x, y, 0, 0, 0)
+    if not drawFrames(2) then finish() return end
+    check(imp._gamePopup == nil, "touch_close_dismisses_choose_game")
+  end
+  imp._gamePopup = true
+  if not drawFrames(2) then finish() return end
+  local emerald = navHas("gamepop-emerald")
+  if check(emerald ~= false, "touch_emerald_visible") then
+    local x, y = emerald.x + emerald.w / 2, emerald.y + emerald.h / 2
+    imp:touchpressed("release-emerald", x, y, 0, 0, 1)
+    imp:touchreleased("release-emerald", x, y, 0, 0, 0)
+    if not drawFrames(2) then finish() return end
+    check(imp.tab == "emerald" and imp._gamePopup == nil, "touch_selects_emerald")
+    if not shot("3043_released_build_touch_emerald_panel") then finish() return end
+  end
   finish()
 end

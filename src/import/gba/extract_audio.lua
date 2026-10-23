@@ -573,25 +573,6 @@ function ExtractAudio.buildMapSongsRse(data, C, mapIdFor)
   return mapSongs
 end
 
-local function species_to_cry_index_frlg(species, cryCount)
-  species = tonumber(species) or 0
-  -- Audible mapping: Bulbasaur (1) → gCryTable[0]. pret SpeciesToCryId(1)=1 indexes
-  -- the next slot; we store cryIds for playCry to use directly into cries[].
-  if species < 1 then return 0 end
-  if species < 251 then
-    return species - 1
-  end
-  if species <= 276 then -- OLD_UNOWN_Z = 276
-    return 200 -- SPECIES_UNOWN - 1
-  end
-  -- Hoenn: approximate national order into cry table (Treecko≈277 → cry ~251+)
-  -- Full sHoennSpeciesIdToCryId is large; use contiguous gCryTable indices 251+.
-  local idx = 251 + (species - 277)
-  if idx < 0 then idx = 0 end
-  if idx >= cryCount then idx = cryCount - 1 end
-  return idx
-end
-
 -- pokeemerald/src/pokemon.c:5701
 function ExtractAudio.cryIdsFromTable(data, tableOff, tableCount, species, numSpecies)
   local celebi = species.SPECIES_CELEBI
@@ -643,8 +624,9 @@ end
 
 local function audio_params()
   local A = Versions.AUDIO
-  if type(A) ~= "table" or not (A.song_table and A.song_count and A.cry_table and A.cry_count) then
-    error("extract_audio: " .. game_id() .. " has no AUDIO table")
+  if type(A) ~= "table" or not (A.song_table and A.song_count and A.cry_table and A.cry_count
+      and A.cry_id_table and A.cry_id_count) then
+    error("extract_audio: " .. game_id() .. " has incomplete AUDIO table")
   end
   return A
 end
@@ -750,14 +732,8 @@ function ExtractAudio.run(rom, cache, opts)
     criesReverse = read_cries(data, cryTableReverse, n, sampleMap, sampleParts, sampleCursor)
   end
 
-  if A.cry_id_table then
-    cryIds = ExtractAudio.cryIdsFromTable(data, A.cry_id_table, A.cry_id_count, C.species.byName,
-      A.cry_id_species_count or Versions.NUM_SPECIES)
-  else
-    for species = 1, 411 do
-      cryIds[species] = species_to_cry_index_frlg(species, cryCount)
-    end
-  end
+  cryIds = ExtractAudio.cryIdsFromTable(data, A.cry_id_table, A.cry_id_count, C.species.byName,
+    A.cry_id_species_count or Versions.NUM_SPECIES)
 
   -- Flatten sampleMap → sampleIndex by id
   for _, meta in pairs(sampleMap) do

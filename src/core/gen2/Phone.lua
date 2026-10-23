@@ -56,6 +56,7 @@
 -- (the ring, the Click!, the countdown restart) is src/core/gen2/PhoneRing.lua.
 
 local Runtime = require("src.mods.Runtime")
+local Merge = require("src.mods.Merge")
 
 local Phone = {}
 
@@ -256,38 +257,50 @@ for index = 0, Phone.NUM_PHONE_CONTACTS do
   end
 end
 
--- ------------------------------------------------------- the registry
---
--- The `phone_contacts` registry (src/mods/Schemas.lua), one of the Gen 2-only
--- six: Red has no Pokegear, so the name is gated under Gen 1 and routed to
--- data.gen2PhoneContacts under Gen 2.  src/mods/Builtins.lua seeds it with the
--- rows above, engine-owned, so a mod's register of PHONE_YOUNGSTER_JOEY
--- collides and has to say override -- the same contract every other seeded
--- registry keeps.
---
--- The id space is the cart's own PHONE_* constants, which arrive as
--- data.gen2Constants.phoneContactOrder; `index` on each record is the row byte
--- every lookup in this file keys by, and it is what puts a merged record back
--- on the right row.  The four PHONE_UNUSED const_skip holes are not
--- registered: one id cannot name four rows, and all four are copies of the
--- wrong-number filler.
---
--- Rows are applied ONTO Phone.CONTACTS rather than read through it, because
--- every reader here (and every caller in src/ui/gen2/) has the contact byte
--- and not the dataset -- the same shape Phone.useExtracted already has for the
--- cache's own rows.  The order is literal -> cache -> registry: useExtracted
--- re-applies the stored rows at its tail, so a mod's edit survives the cache
--- overlay whichever of the two runs second.
-local registryRows = nil
+-- pokegold/data/phone/phone_contacts.asm:12
+local registryRows, registryOrder, registryConstants
+local defaultContacts = Merge.deepCopy(Phone.CONTACTS)
+local nativeContacts = Merge.deepCopy(defaultContacts)
+
+local function overlayExtracted(book, events, constants)
+  local count = 0
+  for index, row in pairs(type(events) == "table" and events.phone or {}) do
+    if type(index) == "number" and type(row) == "table" then
+      local dest = book[index] or { index = index }
+      dest.map, dest.calleeTime, dest.callerTime = row.map, row.calleeTime, row.callerTime
+      dest.calleeKey, dest.callerKey = row.callee, row.caller
+      if constants and row.trainerClass then
+        local class = (constants.trainerClassOrder or {})[row.trainerClass + 1]
+        if row.trainerClass ~= 0 and class then
+          dest.class = class
+          dest.member = ((constants.trainerClassMembers or {})[class] or {})[row.number]
+        end
+      end
+      if not dest.class and row.number ~= nil then dest.number = row.number end
+      book[index] = dest
+      count = count + 1
+    end
+  end
+  return count
+end
+
+local function nativeBook(data)
+  local book = Merge.deepCopy(defaultContacts)
+  overlayExtracted(book, data and data.gen2EventTables, data and data.gen2Constants)
+  return book
+end
 
 local function applyRegistryRows()
+  Phone.CONTACTS = Merge.deepCopy(nativeContacts)
   if not registryRows then return 0 end
+  for index, id in ipairs(registryOrder or {}) do
+    if id ~= "PHONE_UNUSED" and registryRows[id] == nil then Phone.CONTACTS[index - 1] = nil end
+  end
   local applied = 0
   for _, record in pairs(registryRows) do
     local index = type(record) == "table" and record.index
-    local dest = index and Phone.CONTACTS[index]
-    if dest then
-      for key, value in pairs(record) do dest[key] = value end
+    if type(index) == "number" then
+      Phone.CONTACTS[index] = Merge.deepCopy(record)
       applied = applied + 1
     end
   end
@@ -300,10 +313,11 @@ end
 function Phone.registerInto(registry, data, owner)
   local order = data and data.gen2Constants and data.gen2Constants.phoneContactOrder
   if type(order) ~= "table" then return 0 end
+  local book = nativeBook(data)
   local count = 0
-  for index = 0, Phone.NUM_PHONE_CONTACTS do
+  for index = 0, #order - 1 do
     local id = order[index + 1]
-    local row = Phone.CONTACTS[index]
+    local row = book[index]
     if type(id) == "string" and id ~= "PHONE_UNUSED" and row then
       registry:register(id, row, owner)
       count = count + 1
@@ -316,6 +330,9 @@ end
 -- nil to forget it (a second dataset in one process).
 function Phone.useRegistry(data)
   registryRows = data and data.gen2PhoneContacts or nil
+  registryConstants = data and data.gen2Constants
+  registryOrder = registryConstants and registryConstants.phoneContactOrder
+  nativeContacts = data and nativeBook(data) or Merge.deepCopy(defaultContacts)
   return applyRegistryRows()
 end
 
@@ -400,40 +417,11 @@ function Phone.scriptKey(label)
   return label and Phone.SCRIPT_KEYS[label] or nil
 end
 
--- Take the contact rows and the special-call rows out of the CACHE instead of
--- out of the two tables above.
---
--- Those tables were written when nothing pointed into bank $41 and the port
--- had to name every script by its pokegold label and its symbol-file address.
--- The extractor follows PhoneContacts and SpecialPhoneCallList now, so the
--- rows arrive already resolved and a repointed table cannot silently call the
--- wrong script -- the same reason `special` is dispatched by name through
--- specialOrder rather than by a counted index.
---
--- Only the fields the cart actually stores are overlaid.  `class`, `member`
--- and the SCRIPT_KEYS labels stay: they are what the trainer rematch
--- machinery and Phone.contactName read, and the ROM row carries a trainer
--- class BYTE rather than a name.  A cache with no events.lua leaves both
--- tables exactly as they are.
+-- pokegold/data/phone/phone_contacts.asm:12
 function Phone.useExtracted(events)
   local rows = type(events) == "table" and events.phone
   if type(rows) ~= "table" then return false end
-  local applied = 0
-  for index = 0, Phone.NUM_PHONE_CONTACTS do
-    local row, dest = rows[index], Phone.CONTACTS[index]
-    if type(row) == "table" and dest then
-      dest.map = row.map
-      dest.calleeTime = row.calleeTime
-      dest.callerTime = row.callerTime
-      dest.calleeKey = row.callee
-      dest.callerKey = row.caller
-      -- A row the cart fills with UnusedPhoneScript has a real number of 0;
-      -- keep the hand-ported number for the four PHONECONTACT_* rows, whose
-      -- ids the rest of this file compares against by name.
-      if row.number and row.number ~= 0 then dest.number = row.number end
-      applied = applied + 1
-    end
-  end
+  local applied = overlayExtracted(nativeContacts, events, registryConstants)
   for _, row in ipairs(events.specialCalls or {}) do
     local dest = Phone.SPECIAL_CALLS[row.id]
     if dest then
@@ -1182,6 +1170,8 @@ end
 -- ------------------------------------------------------- rematches
 
 function Phone.rematchEvent(id)
+  local contact = Phone.CONTACTS[id or -1]
+  if contact and contact.rematchEvent ~= nil then return contact.rematchEvent end
   return Phone.REMATCH_EVENTS[id or -1]
 end
 
