@@ -477,7 +477,7 @@ do
   check(pending ~= nil, "the event mon is queued for the battle")
   eq(pending and pending.species, Deoxys.SPECIES_DEOXYS, "the queued mon is Deoxys")
   eq(pending and pending.level, 30, "at level 30")
-  check(pending and pending.fatefulEncounter == true, "as a fateful encounter")
+  check(pending and pending.modernFatefulEncounter == true, "as a fateful encounter")
 
   local started = nil
   local adapters = {

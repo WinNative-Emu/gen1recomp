@@ -120,6 +120,34 @@ function vfs.newFileData(data, name)
   return { __filedata = true, data = data, name = name }
 end
 
+function vfs.newFile(name)
+  local f = { pos = 1, buf = {} }
+  function f:open(mode)
+    if mode == "w" and failWriteOnce == name then
+      failWriteOnce = nil
+      return false, "simulated write failure"
+    end
+    if mode == "r" and files[name] == nil then return false, "missing" end
+    self.mode = mode
+    return true
+  end
+  function f:read(n)
+    local out = (files[name] or ""):sub(self.pos, self.pos + n - 1)
+    self.pos = self.pos + #out
+    return out, #out
+  end
+  function f:write(data)
+    self.buf[#self.buf + 1] = data
+    return true
+  end
+  function f:close()
+    if self.mode == "w" then files[name] = table.concat(self.buf) end
+    self.mode = nil
+    return true
+  end
+  return f
+end
+
 function vfs.getSaveDirectory()
   return "/tmp/pokeport-install-zip-test"
 end
@@ -221,8 +249,6 @@ check(files["mods/WildsOfKanto-1.5.0/manifest.json"] == nil,
 check(files["mods/" .. MOD_ID .. "/manifest.json"] ~= nil,
   "replace still lands in mods/<id>")
 
--- User-selected baseroms belong to the installation, not the downloaded mod
--- archive, and survive the same replacement path.
 resetFs()
 files["mods/OldFolder/manifest.json"] =
   ('{"id":"%s","name":"Old Copy","version":"0.9.0","entry":"main.lua"}')
@@ -234,12 +260,10 @@ ok, err = LauncherMods.installZip("imports/mods/update-with-rom.zip",
   { replace = true, expectId = MOD_ID })
 check(ok == true, "replace with a baserom succeeds (" .. tostring(err) .. ")")
 eq(files["mods/" .. MOD_ID .. "/baseroms/stadium2.z64"], "user-owned-rom",
-  "replace preserves user-owned baseroms under the canonical mod folder")
+  "replace moves user-owned baseroms under the canonical mod folder")
 check(files["mods/OldFolder/baseroms/stadium2.z64"] == nil,
-  "the shadow mod tree is still removed after preservation")
+  "the shadow mod tree is removed after its baseroms drain")
 
--- A preservation write failure keeps recovery bytes outside mods/, where
--- discovery cannot mistake a baseroms-only directory for an installed mod.
 resetFs()
 files["mods/OldFolder/manifest.json"] =
   ('{"id":"%s","name":"Old Copy","version":"0.9.0","entry":"main.lua"}')
@@ -250,20 +274,32 @@ files["imports/mods/preserve-fail.zip"] = "PK\3\4update"
 failWriteOnce = "mods/" .. MOD_ID .. "/baseroms/stadium2.z64"
 ok, err = LauncherMods.installZip("imports/mods/preserve-fail.zip",
   { replace = true, expectId = MOD_ID })
-check(not ok, "preservation failure rejects the update")
-check(files["mods/" .. MOD_ID .. "/manifest.json"] == nil,
-  "preservation failure leaves no manifest-less tree under mods")
-eq(files["imports/baseroms-recovery/" .. MOD_ID .. "/stadium2.z64"],
-  "user-owned-rom", "preservation failure stages recovery outside mods")
+check(not ok, "drain failure rejects the update")
+check(files["mods/" .. MOD_ID .. "/manifest.json"] ~= nil,
+  "drain failure leaves mods/<id> with a manifest")
+check(files["mods/" .. MOD_ID .. "/baseroms/stadium2.z64"] == nil,
+  "drain failure leaves no partial baserom")
+eq(files["mods/OldFolder/baseroms/stadium2.z64"], "user-owned-rom",
+  "drain failure keeps the source baserom")
 
 files["imports/mods/preserve-retry.zip"] = "PK\3\4update"
 ok, err = LauncherMods.installZip("imports/mods/preserve-retry.zip",
   { replace = true, expectId = MOD_ID })
-check(ok == true, "retry restores staged baseroms (" .. tostring(err) .. ")")
+check(ok == true, "retry drains the baserom (" .. tostring(err) .. ")")
 eq(files["mods/" .. MOD_ID .. "/baseroms/stadium2.z64"], "user-owned-rom",
-  "retry restores the recovered baserom into the installed mod")
+  "retry moves the baserom into the installed mod")
+check(files["mods/OldFolder/manifest.json"] == nil,
+  "successful retry removes the shadow tree")
+
+resetFs()
+files["imports/baseroms-recovery/" .. MOD_ID .. "/stadium2.z64"] = "user-owned-rom"
+files["imports/mods/recover.zip"] = "PK\3\4update"
+ok, err = LauncherMods.installZip("imports/mods/recover.zip")
+check(ok == true, "install drains legacy recovery baseroms (" .. tostring(err) .. ")")
+eq(files["mods/" .. MOD_ID .. "/baseroms/stadium2.z64"], "user-owned-rom",
+  "recovered baserom lands in the installed mod")
 check(files["imports/baseroms-recovery/" .. MOD_ID .. "/stadium2.z64"] == nil,
-  "successful retry clears baserom recovery debris")
+  "successful install clears baserom recovery debris")
 
 -- #834: a manifest-less mods/<id> tree (interrupted copy debris) must not
 -- block a plain re-import as "already installed"

@@ -73,40 +73,15 @@ local function ptr_to_offset(addr)
   return addr - 0x08000000
 end
 
-local function ensure_dir(dir)
-  pcall(function()
-    local lfs = require("lfs")
-    local current = ""
-    for part in dir:gmatch("[^/]+") do
-      current = current == "" and part or (current .. "/" .. part)
-      lfs.mkdir(current)
-    end
-  end)
-end
-
 local function write_file(cache, path, data)
+  local ok, err
   if cache and cache.write then
-    cache:write(path, data)
-    return true
+    ok, err = cache:write(path, data)
+  else
+    ok, err = require("src.import.CacheFs").write(path, data)
   end
-  local okC, CacheFs = pcall(require, "src.import.CacheFs")
-  if okC and CacheFs and CacheFs.write then
-    local ok = pcall(CacheFs.write, path, data)
-    if ok then return true end
-  end
-  if love and love.filesystem and love.filesystem.write then
-    local ok = pcall(love.filesystem.write, path, data)
-    if ok then return true end
-  end
-  local dir = path:match("^(.*)/[^/]+$")
-  if dir then ensure_dir(dir) end
-  local f = io.open(path, "wb")
-  if f then
-    f:write(data)
-    f:close()
-    return true
-  end
-  return false
+  if ok == false then error("storage: could not write " .. path .. ": " .. tostring(err)) end
+  return true
 end
 
 local function read_palette(rom, off, count)
@@ -303,9 +278,6 @@ function StorageChromeExtract.extract(rom, opts)
     return { ok = false, root = outDir, count = 0, err = "storage chrome needs a ROM" }
   end
 
-  ensure_dir(outDir)
-  ensure_dir(outDir .. "/wallpapers")
-
   local palOff = Versions.STORAGE_PALETTES or {}
   local sheetOff = Versions.STORAGE_SHEETS or {}
   local mapOff = Versions.STORAGE_TILEMAPS or {}
@@ -498,7 +470,6 @@ end
 function StorageChromeExtract.extractFriends(rom, cache, outDir)
   local F = Versions.STORAGE_FRIENDS
   local dir = outDir .. "/" .. StorageChromeExtract.FRIENDS_SUB
-  ensure_dir(dir)
   local written = 0
   local lines = { "return {", "  patterns = {" }
   for i = 0, F.patternCount - 1 do

@@ -333,7 +333,7 @@ function LT.checkValidityOfTradeMons(slot, partnerSlot)
   local peerMon = LT.peerParty[(tonumber(partnerSlot) or 1)]
   local species = tonumber(peerMon and peerMon.species) or 0
   -- pokefirered/include/constants/species.h:155
-  if (species == 151 or species == 410) and peerMon and peerMon.fatefulEncounter == false then
+  if (species == 151 or species == 410) and peerMon and peerMon.modernFatefulEncounter == false then
     return LT.PARTNER_MON_INVALID
   end
   if alive == 0 then return LT.PLAYER_MON_INVALID end

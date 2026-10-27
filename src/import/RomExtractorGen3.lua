@@ -211,10 +211,7 @@ function RomExtractorGen3:writeRequiredMarkers(sha1)
   end
 
   for _, d in ipairs(self.plan.dirs or {}) do
-    if love and love.filesystem and love.filesystem.createDirectory then
-      local p = (CacheFs.prefix or "") .. GBA_ROOT .. d
-      pcall(love.filesystem.createDirectory, p)
-    end
+    CacheFs.createDirectory(GBA_ROOT .. d)
   end
 end
 

@@ -98,6 +98,7 @@ local function loadExtractorWithStubs(pokeRun, sectionsRun)
     read = function(rel) return files[rel] end,
     exists = function(rel) return files[rel] ~= nil end,
     remove = function(rel) files[rel] = nil; return true end,
+    createDirectory = function() return true end,
   }
   package.loaded["src.import.LuaWriter"] = {
     write = function(rel) files[rel] = "return {}"; return true end,
@@ -122,7 +123,7 @@ local function loadExtractorWithStubs(pokeRun, sectionsRun)
     "items_extract", "pokedex_chrome_extract", "storage_chrome_extract",
     "text_chrome_extract", "trainer_card_extract", "seagallop_extract",
     "cave_transition_extract", "weather_extract", "ingame_trades_extract",
-    "union_room_classes_extract", "map_preview_extract",
+    "union_room_classes_extract", "map_preview_extract", "tm_case_extract",
   }) do
     package.loaded["src.import.gba." .. sibling] = { run = function() return true end }
   end
@@ -230,7 +231,7 @@ for _, sibling in ipairs({
   "items_extract", "pokedex_chrome_extract", "storage_chrome_extract",
   "text_chrome_extract", "trainer_card_extract", "seagallop_extract",
   "cave_transition_extract", "ingame_trades_extract", "union_room_classes_extract",
-  "map_preview_extract",
+  "map_preview_extract", "tm_case_extract",
 }) do
   package.loaded["src.import.gba." .. sibling] = nil
 end

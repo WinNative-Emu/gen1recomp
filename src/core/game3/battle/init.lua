@@ -317,6 +317,8 @@ local function foe_mon_from(foe, link, trainerPolicy)
     ability = foe.ability or foe.abilityId,
     dvs = foe.dvs,
     friendship = foe.friendship,
+    -- pokefirered/src/pokemon.c:2029
+    modernFatefulEncounter = foe.modernFatefulEncounter,
   }
   if nativeTrainer or foe.otId ~= nil or foe.otSecretId ~= nil then
     mon.otId, mon.otSecretId = foe.otId, foe.otSecretId

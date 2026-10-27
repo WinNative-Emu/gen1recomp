@@ -114,26 +114,13 @@ local function escape_lua(s)
 end
 
 local function write_file(cache, relPath, content)
-  local wrote = false
+  local ok, err
   if cache and cache.write then
-    cache:write(relPath, content)
-    wrote = true
+    ok, err = cache:write(relPath, content)
+  else
+    ok, err = require("src.import.CacheFs").write(relPath, content)
   end
-  if not wrote then
-    local okC, CacheFs = pcall(require, "src.import.CacheFs")
-    if okC and CacheFs and CacheFs.write then
-      local ok = pcall(CacheFs.write, relPath, content)
-      if ok then wrote = true end
-    end
-  end
-  if not wrote and love and love.filesystem and love.filesystem.write then
-    pcall(love.filesystem.write, relPath, content)
-  end
-  local f = io.open(relPath, "wb") or io.open("data/generated/gba/" .. relPath:gsub("^data/generated/gba/", ""), "wb")
-  if f then
-    f:write(content)
-    f:close()
-  end
+  if ok == false then error("pokedex: could not write " .. relPath .. ": " .. tostring(err)) end
 end
 
 --- Extract entries.lua from ROM gPokedexEntries table

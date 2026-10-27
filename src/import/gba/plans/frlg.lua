@@ -20,6 +20,7 @@ return {
     "src.import.gba.weather_extract",
     "src.import.gba.ingame_trades_extract",
     "src.import.gba.union_room_classes_extract",
+    "src.import.gba.tm_case_extract",
   },
 
   auxSteps = 21,

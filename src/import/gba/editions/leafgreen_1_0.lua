@@ -4319,6 +4319,8 @@ return {
   [0x463150] = 0x462B70, -- tm_case.o:sMenuActions + 0
   [0x463178] = 0x462B98, -- tm_case.o:sText_ClearTo18 + 0
   [0x46317C] = 0x462B9C, -- tm_case.o:sText_SingleSpace + 0
+  [0x463180] = 0x462BA0, -- tm_case.o:sPal3Override + 0
+  [0x463238] = 0x462C58, -- tm_case.o:sTMSpritePaletteOffsetByType + 0
   [0x46325C] = 0x462C7C, -- menu_indicators.o:sScrollIndicatorTemplates + 0
   [0x463308] = 0x462D28, -- menu_indicators.o:sRedArrowPal + 0
   [0x463328] = 0x462D48, -- menu_indicators.o:sRedArrowOtherGfx + 0

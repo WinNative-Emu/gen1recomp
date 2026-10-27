@@ -540,7 +540,8 @@ end
 -- deliberately written beside options.lua so every platform's native shell
 -- can use the same filesystem contract.
 function Loader:_writeOptionSchemas()
-  if not self.fs.write then return end
+  local fs = SaveData.persistenceFs(self.fs)
+  if not (fs and fs.write) then return end
 
   local mods = {}
   for id, mod in pairs(self.mods) do
@@ -569,7 +570,7 @@ function Loader:_writeOptionSchemas()
   -- snapshot when the current boot has no schemas so disabled/failed mods do
   -- not leave stale native settings rows behind.
   if next(mods) == nil
-      and not (self.fs.getInfo and self.fs.getInfo(OPTION_SCHEMAS_FILENAME)) then
+      and not (fs.getInfo and fs.getInfo(OPTION_SCHEMAS_FILENAME)) then
     return
   end
 
@@ -581,7 +582,7 @@ function Loader:_writeOptionSchemas()
     Logger.warn("mod option schema export: failed to encode: %s", tostring(encoded))
     return
   end
-  local written, err = self.fs.write(OPTION_SCHEMAS_FILENAME, encoded)
+  local written, err = fs.write(OPTION_SCHEMAS_FILENAME, encoded)
   if not written then
     Logger.warn("mod option schema export: failed to write: %s", tostring(err))
   end

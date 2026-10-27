@@ -43,7 +43,7 @@ Versions.ROM_SIZE = 16777216
 -- v115: LeafGreen profiles, edition-specific title assets and Deoxys stats.
 -- v121: chrome/fonts/japanese_{normal,small}_* and japanese_widths.lua, the
 --       cart's Japanese fonts, for text a Japanese translation mod prints.
-Versions.CACHE_VERSION = 140
+Versions.CACHE_VERSION = 141
 Versions.NATIVE_VERSION = 6
 Versions.OW_VERSION = 3
 Versions.ANIM_VERSION = 1
@@ -1642,6 +1642,8 @@ Versions.TM_CASE_DISC_GFX = 0xE84D90             -- gTMCaseDisc_Gfx (LZ 4bpp, 10
 Versions.TM_CASE_DISC_TYPES1_PAL = 0xE84F20      -- gTMCaseDiscTypes1_Pal (LZ 16 banks, 512 bytes)
 Versions.TM_CASE_DISC_TYPES2_PAL = 0xE85068      -- gTMCaseDiscTypes2_Pal (LZ 1 bank, 32 bytes)
 Versions.TM_CASE_HM_GFX = 0xE99118               -- gTMCaseHM_Gfx (raw 4bpp, 128 bytes)
+Versions.TM_CASE_DISC_PAL_OFFSETS = 0x463238     -- src/tm_case.c:396 sTMSpritePaletteOffsetByType
+Versions.TM_CASE_PAL3_OVERRIDE = 0x463180        -- src/tm_case.c:235 sPal3Override
 
 -- Berry Pouch (LZ-compressed; FireRed USA 1.0).
 Versions.BERRY_POUCH_SPRITE_GFX = 0xE8560C       -- gBerryPouchSpriteTiles (LZ 4bpp 64x64, 2048 bytes)

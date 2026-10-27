@@ -374,6 +374,15 @@ A write here is dropped and reported on a Gen 3 boot.
 mod.content.cries:patch("PIKACHU", { pitch = 200 })
 ```
 
+### On Gold (Gen 2)
+
+- semantics: `record`
+- target: `Data.audio.cries`
+
+The record differs; the registry name, the verbs and the id space
+do not.
+- value: {header, length, pitch} | {file} | {base, length?, pitch?} | {chip, length?, pitch?}
+
 ## decorations
 
 - semantics: `record`
@@ -572,13 +581,14 @@ write nothing reads.
 | key | type |
 |---|---|
 | `boot` | {namePresets?, rivalName?, startFacing?, startMap?, startMoney?, startX?, startY?} |
+| `emotes` | {bolt?, cutGrass?, fish?, fishing?, fishingFemale?, grassRustle?, happy?, heart?, jumpShadow?, order?, question?, sad?, shock?, sleep?} |
 
 <!-- snippet: illustrative -->
 ```lua
 mod.content.field:patch("boot", { startMap = "NEW_BARK_TOWN", startX = 6, startY = 8 })
 ```
 
-Gold reads only `boot`: the New Game spawn (`startMap`, `startX`, `startY`, `startFacing`, replacing SPAWN_HOME), the starting money, the rival's starting name and the naming presets. Every other Gen 1 key has no Gold consumer: `ledges` (Gold's ledges are tile collision types), `hiddenItems` (bg events in `maps`), `badgeGates`, `townMap` (`landmarks`), `flyOrder` (the flypoint table), `playerPics`, and `boot.lastHeal`, `boot.screens`, `boot.starterScript`, `boot.title`, `boot.playerName`.
+Gold reads `boot` and `emotes`. `boot` is the New Game spawn (`startMap`, `startX`, `startY`, `startFacing`, replacing SPAWN_HOME), the starting money, the rival's starting name and the naming presets. `emotes` is the overworld emote art, one image path per sheet: the showemote bubbles listed in `order`, `grassRustle`, `jumpShadow`, `cutGrass`, the fishing pose `fishing` and Crystal's `fishingFemale`; a patched path is the sheet the overworld draws. Every other Gen 1 key has no Gold consumer: `ledges` (Gold's ledges are tile collision types), `hiddenItems` (bg events in `maps`), `badgeGates`, `townMap` (`landmarks`), `flyOrder` (the flypoint table), `playerPics`, and `boot.lastHeal`, `boot.screens`, `boot.starterScript`, `boot.title`, `boot.playerName`.
 
 ### On Gen 3
 
@@ -728,7 +738,7 @@ do not.
 | `id` | string | yes |
 | `index` | integer 1..65535 | no |
 | `machine` | {kind, move, number} | no |
-| `name` | string | yes |
+| `name` | string | no |
 | `needsTarget` | boolean | no |
 | `price` | integer >= 0 | yes |
 | `tossable` | boolean | no |
@@ -774,8 +784,8 @@ and reported. See the Gold subsection below for where it does land.
 | `id` | string | no |
 | `index` | integer >= 0 | yes |
 | `name` | string | yes |
-| `x` | integer >= 0 | yes |
-| `y` | integer >= 0 | yes |
+| `x` | integer -8..247 | yes |
+| `y` | integer -16..239 | yes |
 
 <!-- snippet: illustrative -->
 ```lua
@@ -1668,6 +1678,10 @@ mod.content.text:override("_PalletTownText1", "HELLO!")
 - semantics: `record`
 - target: `Data.gen2Text`
 
+The record differs; the registry name, the verbs and the id space
+do not.
+- value: string
+
 ### On Gen 3
 
 - semantics: `record`
@@ -1733,6 +1747,24 @@ mod.content.tilesets:register("MY_TILES", { image = "...", blocks = { ... } })
 
 - semantics: `record`
 - target: `Data.gen2Tilesets`
+
+The record differs; the registry name, the verbs and the id space
+do not.
+
+| field | type | required |
+|---|---|---|
+| `animation` | string | no |
+| `blocks` | list of any value | yes |
+| `counterTiles` | any value | no |
+| `doorTiles` | any value | no |
+| `id` | string | no |
+| `image` | file path | yes |
+| `imageHeight` | integer >= 1 | no |
+| `imageWidth` | integer >= 1 | no |
+| `tilesPerRow` | integer >= 1 | no |
+| `trueColor` | boolean | no |
+| `walkable` | any value | no |
+| `warpTiles` | any value | no |
 
 ### On Gen 3
 

@@ -8,13 +8,14 @@ local ExtractIntro = {}
 ExtractIntro.ASSETS = Versions.INTRO
 
 local function write(cache, path, data)
+  local ok, err
   if cache and cache.write then
-    return cache:write(path, data)
+    ok, err = cache:write(path, data)
+  else
+    ok, err = require("src.import.CacheFs").write(path, data)
   end
-  if love and love.filesystem and love.filesystem.write then
-    return love.filesystem.write(path, data)
-  end
-  return false
+  if ok == false then error("intro: could not write " .. path .. ": " .. tostring(err)) end
+  return true
 end
 
 local function romBytes(rom)

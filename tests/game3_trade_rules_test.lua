@@ -328,11 +328,11 @@ eq(Trade.canTradeSelectedMon({
   "a Ruby partner is not asked for its National Dex")
 -- pokefirered/src/trade.c:2795
 eq(Trade.canTradeSelectedMon({
-  { species = 410, nickname = "DEOXYS", level = 30, fatefulEncounter = false }, party[2],
+  { species = 410, nickname = "DEOXYS", level = 30, modernFatefulEncounter = false }, party[2],
 }, 0, { nationalDex = true }), Trade.CANT_TRADE_INVALID_MON,
   "an illegal DEOXYS cannot be traded")
 eq(Trade.canTradeSelectedMon({
-  { species = 151, nickname = "MEW", level = 30, fatefulEncounter = false }, party[2],
+  { species = 151, nickname = "MEW", level = 30, modernFatefulEncounter = false }, party[2],
 }, 0, { nationalDex = true }), Trade.CANT_TRADE_INVALID_MON,
   "an illegal MEW cannot be traded")
 eq(Trade.canTradeSelectedMon({

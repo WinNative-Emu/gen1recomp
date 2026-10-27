@@ -317,7 +317,7 @@ end
 local function egg_origin_index(mon, heldByOt)
   if mon.isBadEgg then return 0 end
   local metLocation = tonumber(mon.metLocation) or 0
-  if metLocation == METLOC_FATEFUL_ENCOUNTER or mon.fatefulEncounter == true then return 4 end
+  if metLocation == METLOC_FATEFUL_ENCOUNTER or mon.modernFatefulEncounter == true then return 4 end
   local idx = 0
   local game = tonumber(mon.metGame)
   if game ~= nil and game ~= 4 and game ~= 5 then
@@ -368,7 +368,7 @@ function SummaryData.formatTrainerMemo(mon, playerState, opts)
   if metLevel == 0 then metLevel = 5 end
   local metLocation = tonumber(mon.metLocation) or 0
   local fatefulMet = metLocation == METLOC_FATEFUL_ENCOUNTER
-  local fatefulFlag = mon.fatefulEncounter == true
+  local fatefulFlag = mon.modernFatefulEncounter == true
 
   local key
   local mapName

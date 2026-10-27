@@ -15,6 +15,7 @@ local GEN2_MODULES = {
   "pokemon", "moves", "items", "type_chart", "audio", "font", "maps",
   "tilesets", "text", "rom_text", "trainers", "encounters", "sprites",
   "palettes", "icons", "battle_anims", "constants", "landmarks",
+  "menu_gfx",
 }
 
 local CONTINUATIONS = {
@@ -59,11 +60,50 @@ local function defaults(version)
     matchups = { { attacker = "NORMAL", defender = "ROCK", multiplier = 5 } },
     types = {},
   }
+  local tilesets, text, encounters, audio, landmarks = {}, {}, {}, {}, {}
+  local menuGfx = {}
   if generation == 2 then
     pokemon.growthRates = {}
     pokemon.tmhmMoves = {}
+    if version == "crystal" then
+      pokemon.tutorMoves = { "FLAMETHROWER", "THUNDERBOLT", "ICE_BEAM" }
+    end
     moves.generation, moves.source = 2, "fixture moves"
     items.generation, items.source, items.pockets = 2, "fixture items", {}
+    items.timeCapsule = { [0x19] = "LEFTOVERS" }
+    items.ITEM_C3 = { id = "ITEM_C3", index = 0xC3, price = 39321,
+      heldEffect = "HELD_NONE", heldParameter = 0 }
+    audio.generation, audio.source = 2, "fixture audio"
+    audio.cries = { FIXMON = { header = { bank = 60, address = 29929,
+      generation = 2 }, pitch = 65529, length = 320 } }
+    encounters.generation, encounters.source = 2, "fixture encounters"
+    encounters.timeFishGroups = {
+      [0] = { day = { species = "FIXMON", level = 20 },
+              nite = { species = "FIXMON", level = 20 } },
+    }
+    landmarks.generation, landmarks.source = 2, "fixture landmarks"
+    landmarks.landmarks = { LANDMARK_SPECIAL = { id = "LANDMARK_SPECIAL",
+      name = "SPECIAL", index = 0, x = -8, y = -16 } }
+    text.generation = 2
+    text.labels = { _FixtureText = "6f:5d96" }
+    text["6f:5d96"] = "FIXTURE"
+    tilesets.waterFrames = "assets/generated/tilesets/water_frames.png"
+    tilesets.flowerFrames = "assets/generated/tilesets/flower_frames.png"
+    tilesets.flowerCgbFrames = { 2, 4 }
+    tilesets.animFrames = { tower_5d = {
+      image = "assets/generated/tilesets/anim/tower_5d.png", frames = 5 } }
+    menuGfx.battleHud = { balls = "assets/generated/battle/hud/balls.png" }
+    menuGfx.emotes = {
+      shock = "assets/generated/emotes/shock.png",
+      grassRustle = "assets/generated/emotes/grass_rustle.png",
+      fishing = "assets/generated/emotes/fishing.png",
+      order = { "shock" },
+    }
+    if version == "crystal" then
+      menuGfx.emotes.fishingFemale = "assets/generated/emotes/fishing_female.png"
+    end
+    tilesets.TILESET_FIXTURE = { id = "TILESET_FIXTURE",
+      image = "assets/generated/tilesets/fixture.png", blocks = {} }
     for index, id in ipairs(CONTINUATIONS) do
       pokemon[id] = species(id, 168 + index, generation)
     end
@@ -79,12 +119,13 @@ local function defaults(version)
       heldEffect = "HELD_LEFTOVERS", heldParameter = 0 }
   end
   return {
-    constants = {}, maps = {}, tilesets = {}, text = {}, rom_text = {},
+    constants = {}, maps = {}, tilesets = tilesets, text = text, rom_text = {},
     text_pointers = {},
     trainer_headers = {}, font = {}, sprites = {}, pokemon = pokemon,
     moves = moves, items = items, type_chart = typeChart, trainers = {},
-    encounters = {}, field = { oakSpeech = {} }, battle_anims = {},
-    audio = {}, palettes = {}, icons = {}, landmarks = {},
+    encounters = encounters, field = { oakSpeech = {} }, battle_anims = {},
+    audio = audio, palettes = {}, icons = {}, landmarks = landmarks,
+    menu_gfx = menuGfx,
   }
 end
 
@@ -116,6 +157,14 @@ function Fixture.cache(files, version, overrides)
       if type(row) == "table" and row.spriteFront then
         files[prefix .. row.spriteFront] = "front"
         files[prefix .. row.spriteBack] = "back"
+      end
+    end
+  end
+  local emotes = type(values.menu_gfx) == "table" and values.menu_gfx.emotes
+  if type(emotes) == "table" then
+    for key, path in pairs(emotes) do
+      if key ~= "order" and type(path) == "string" then
+        files[prefix .. path] = "emote"
       end
     end
   end

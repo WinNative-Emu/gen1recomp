@@ -1080,6 +1080,12 @@ function Game2:syncEngine()
   return eng
 end
 
+function Game2.applyFieldEmotes(data)
+  if data.gen2MenuGfx and data.field then
+    data.gen2MenuGfx.emotes = data.field.emotes
+  end
+end
+
 function Game2:load(opts)
   opts = opts or {}
   local arena = opts.arena
@@ -1177,6 +1183,7 @@ function Game2:load(opts)
   -- through both; World:load used to set this from a second disk read, which
   -- is what dropped a merge on the floor.
   self.data.trainers = self.data.gen2Trainers
+  require("src.core.DatasetHydration").seedGen2Field(self.data)
 
   -- Mods.  Discovery and the manager are generation-agnostic -- they read
   -- manifests and the enable/disable state, not game data -- so Gold gets the
@@ -1223,6 +1230,7 @@ function Game2:load(opts)
   -- consumers (src/core/gen2/Nests.lua, src/ui/gen2/MapRadio.lua) read
   -- game.data at the point of use.
   ItemEffects.applyHeldItems(self.data, heldBefore)
+  Game2.applyFieldEmotes(self.data)
   require("src.core.gen2.Phone").useRegistry(self.data)
   require("src.core.gen2.Decorations").useRegistry(self.data)
   require("src.core.gen2.Apricorns").useRegistry(self.data)

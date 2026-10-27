@@ -48,8 +48,8 @@ NativesEventIslands.BY_NAME = {
     local Enc = require("src.core.game3.encounters")
     local item = Rse.specialVar(ctx, 0x8006)
     Enc.setWildBattle(Rse.specialVar(ctx, 0x8004), Rse.specialVar(ctx, 0x8005), item ~= 0 and item or nil)
-    -- pokeemerald/src/pokemon.c:2635
-    if Enc._pendingWild then Enc._pendingWild.fatefulEncounter = true end
+    -- pokeemerald/src/pokemon.c:2638
+    if Enc._pendingWild then Enc._pendingWild.modernFatefulEncounter = true end
     return false
   end,
   -- pokeemerald/src/field_specials.c:3389

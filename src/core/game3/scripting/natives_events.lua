@@ -85,9 +85,9 @@ Events.BY_NAME = {
     local item = varGet(ctx, VAR_0x8006)
     Enc.setWildBattle(varGet(ctx, VAR_0x8004), varGet(ctx, VAR_0x8005),
       item ~= 0 and item or nil)
-    -- pokefirered/src/pokemon.c:2026
+    -- pokefirered/src/pokemon.c:2029
     local pending = Enc._pendingWild
-    if pending then pending.fatefulEncounter = true end
+    if pending then pending.modernFatefulEncounter = true end
     return false
   end,
   -- pokefirered/src/safari_zone.c:27

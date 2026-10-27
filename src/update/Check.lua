@@ -180,29 +180,85 @@ local function target()
   return { os = osName, arch = arch, port = port }
 end
 
-local function readPersistedFullRequirement()
-  if not (love and love.filesystem and love.filesystem.getInfo) then return nil end
-  local path = "updates/full-update.json"
-  if not love.filesystem.getInfo(path) then return nil end
-  local text = love.filesystem.read(path)
+local FULL_UPDATE_PATH = "updates/full-update.json"
+local NOTES_CACHE_PATH = "updates/notes_cache.json"
+
+local function persistenceFs()
+  return require("src.core.SaveData").persistenceFs()
+end
+
+local function readJsonFile(fs, path)
+  if not (fs and fs.getInfo and fs.read) then return nil end
+  if not fs.getInfo(path) then return nil end
+  local text = fs.read(path)
   if type(text) ~= "string" then return nil end
-  local ok, Json = pcall(require, "src.link.Json")
-  if not ok or not Json then return nil end
-  local decodedOk, requirement = pcall(Json.decode, text)
-  if not decodedOk or type(requirement) ~= "table" then return nil end
-  if type(requirement.version) ~= "string" then return nil end
+  local decodedOk, doc = pcall(require("src.link.Json").decode, text)
+  if not decodedOk or type(doc) ~= "table" then return nil end
+  return doc
+end
+
+local function writeUpdatesFile(fs, path, doc)
+  local ok, encoded = pcall(require("src.link.Json").encode, doc)
+  if not ok or type(encoded) ~= "string" then return end
+  if fs.createDirectory then fs.createDirectory("updates") end
+  fs.write(path, encoded)
+end
+
+local function readPersistedFullRequirement()
+  local requirement = readJsonFile(persistenceFs(), FULL_UPDATE_PATH)
+  if not requirement or type(requirement.version) ~= "string" then return nil end
   return requirement
 end
 
-local persistedRequirement = readPersistedFullRequirement()
-if persistedRequirement then
-  cache = {
-    status = "needs_full",
-    latest = persistedRequirement.version,
-    reason = persistedRequirement.reason,
-    full = persistedRequirement.full,
-  }
+local persistedLoaded = false
+local function loadPersistedRequirement()
+  if persistedLoaded then return end
+  persistedLoaded = true
+  local persistedRequirement = readPersistedFullRequirement()
+  if persistedRequirement and cache.status == "idle" then
+    cache = {
+      status = "needs_full",
+      latest = persistedRequirement.version,
+      reason = persistedRequirement.reason,
+      full = persistedRequirement.full,
+    }
+  end
 end
+
+local notesPersisted = {}
+local function persistMessage(msg)
+  if type(msg.latest) ~= "string" then return end
+  local fs = persistenceFs()
+  if not (fs and fs.write) then return end
+  if type(msg.notes) == "string" and msg.notes ~= ""
+      and notesPersisted[msg.latest] ~= msg.notes then
+    notesPersisted[msg.latest] = msg.notes
+    local existing = readJsonFile(fs, NOTES_CACHE_PATH) or {}
+    existing[msg.latest] = msg.notes
+    writeUpdatesFile(fs, NOTES_CACHE_PATH, existing)
+  end
+  if msg.status == "needs_full" or msg.status == "full_ready" then
+    local full = type(msg.full) == "table" and msg.full or nil
+    writeUpdatesFile(fs, FULL_UPDATE_PATH, {
+      version = msg.latest,
+      reason = msg.reason or "full_package_required",
+      full = full and { name = full.name, url = full.url, size = full.size } or nil,
+    })
+  elseif msg.clearFull and fs.remove then
+    fs.remove(FULL_UPDATE_PATH)
+  end
+end
+
+local function ingest(msg)
+  if type(msg) ~= "table" then return end
+  if msg.status == "checking" then notesPersisted = {} end
+  pcall(persistMessage, msg)
+  if type(msg.notes) ~= "string" and type(cache.notes) == "string" then
+    msg.notes = cache.notes
+  end
+  cache = msg
+end
+Check._ingestForTests = ingest
 
 local function ensureWorker()
   if os.getenv("POKEPORT_PORTMASTER_MANAGED") == "1" then return false end
@@ -234,14 +290,11 @@ end
 -- Pull every pending snapshot off the state channel (keeping the newest) and
 -- surface a worker crash as a soft error the UI can hide on.
 local function drain()
+  loadPersistedRequirement()
   if stateCh then
     local msg = stateCh:pop()
     while msg do
-      if type(msg) == "table" and type(msg.notes) ~= "string"
-          and type(cache.notes) == "string" then
-        msg.notes = cache.notes
-      end
-      cache = msg
+      ingest(msg)
       msg = stateCh:pop()
     end
   end

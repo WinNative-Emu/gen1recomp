@@ -81,6 +81,7 @@ tests/engine/crystal_phone_rematch_landmark_bug2832.lua
 tests/engine/dark_cave_battle_balls_bug2562.lua
 tests/engine/dataset_views_lazy_validation.lua
 tests/engine/dataset_views_no_mod_parity.lua
+tests/engine/dataset_views_real_cache_walk.lua
 tests/engine/dataset_views_warning_policy.lua
 tests/engine/date_time.lua
 tests/engine/desktop_companion.lua
@@ -130,8 +131,10 @@ tests/engine/game3_door_exit_wipe_2895.lua
 tests/engine/game3_em_bike_doors_2637.lua
 tests/engine/game3_em_catch_prompt_2637.lua
 tests/engine/game3_emerald_audio_extract_test.lua
+tests/engine/game3_event_mon_fateful_3062.lua
 tests/engine/game3_frlg_trainer_approach_facing.lua
 tests/engine/game3_frontier_obedience_2638.lua
+tests/engine/game3_link_fateful_3062.lua
 tests/engine/game3_match_call_step_consumed_2826.lua
 tests/engine/game3_npc_pose_2879.lua
 tests/engine/game3_old_man_bag_2894.lua
@@ -155,6 +158,7 @@ tests/engine/game3_teachy_fade_2891.lua
 tests/engine/game3_teachy_walk_text_2890.lua
 tests/engine/game3_tent_save_reload_2638.lua
 tests/engine/game3_tilt_roof_2765.lua
+tests/engine/game3_tm_case_disc_bank_3061.lua
 tests/engine/game3_trainer_sight_test.lua
 tests/engine/game3_wailmer_pail_2697_test.lua
 tests/engine/game_display_chord_test.lua
@@ -335,6 +339,7 @@ tests/engine/gen2_new_seams.lua
 tests/engine/gen2_night_shade_text_pal_bug1961.lua
 tests/engine/gen2_night_shade_top_row_bug1921.lua
 tests/engine/gen2_no_checkhit_chain_audit.lua
+tests/engine/gen2_oak_music_after_clock_3059.lua
 tests/engine/gen2_offmap_object_bug1923.lua
 tests/engine/gen2_options_menu_translation_test.lua
 tests/engine/gen2_orientation_bug2586_test.lua
@@ -481,6 +486,7 @@ tests/engine/launcher_gold_touch_rows.lua
 tests/engine/launcher_mod_downloads.lua
 tests/engine/launcher_mod_scope_dropdown.lua
 tests/engine/launcher_modal_focus_input_test.lua
+tests/engine/launcher_mods_update_baseroms_bug3057.lua
 tests/engine/launcher_navigation_perf.lua
 tests/engine/launcher_nx_pad_cursor_test.lua
 tests/engine/launcher_nx_version_chip_test.lua
@@ -623,7 +629,9 @@ tests/engine/pokedex_counts_bug639.lua
 tests/engine/pokedex_entry_layout_bug1341.lua
 tests/engine/pokedex_quit_bug571.lua
 tests/engine/pokedex_seen_placeholders_bug2163.lua
+tests/engine/portable_gen3_import_3048.lua
 tests/engine/portable_writable_probe_test.lua
+tests/engine/portable_writers_2517.lua
 tests/engine/pp_restore_jingle_menu_2155.lua
 tests/engine/present_probe.lua
 tests/engine/present_sync_logic.lua
@@ -828,6 +836,7 @@ tests/game3_cry_modes_test.lua
 tests/game3_cut_grass_mow_test.lua
 tests/game3_cycling_road_bike_test.lua
 tests/game3_daycare_menu_emerald_test.lua
+tests/game3_deoxys_test.lua
 tests/game3_display_fit_test.lua
 tests/game3_doors_viewport_test.lua
 tests/game3_elevation_oam_priority_test.lua
@@ -850,6 +859,7 @@ tests/game3_link_client_relay_test.lua
 tests/game3_link_continue_warp_test.lua
 tests/game3_link_relay_transport_test.lua
 tests/game3_link_rse_groups_test.lua
+tests/game3_link_trade_test.lua
 tests/game3_link_union_chat_test.lua
 tests/game3_menu_sfx_test.lua
 tests/game3_message_speed_test.lua
@@ -885,6 +895,7 @@ tests/game3_se_source_cache_test.lua
 tests/game3_seagallop_anim_test.lua
 tests/game3_seam_warm_budget_test.lua
 tests/game3_set_invisible_2712_test.lua
+tests/game3_special_events_test.lua
 tests/game3_special_ids_test.lua
 tests/game3_ss_anne_departure_test.lua
 tests/game3_stitchfield_flash_test.lua
@@ -894,6 +905,7 @@ tests/game3_strings_catalog_test.lua
 tests/game3_tileset_anim_seams_test.lua
 tests/game3_time_events_store_test.lua
 tests/game3_tm_able_desc_2520_test.lua
+tests/game3_tm_case_disc_cache_3061_test.lua
 tests/game3_trainer_card_stats_test.lua
 tests/game3_trainer_dialogs_test.lua
 tests/game3_trainer_rewards_dialogs_test.lua
@@ -904,16 +916,20 @@ tests/gen2_double_faint_loss_test.lua
 tests/gen2_fly_map_test.lua
 tests/gen2_gamecorner_test.lua
 tests/gen2_menus_test.lua
+tests/launcher_mods_install_zip_test.lua
 tests/mod_graphics_tests.lua
 tests/mod_link_tests.lua
 tests/mod_world_tests.lua
 tests/modkit/cases/bag_capacity.lua
+tests/modkit/cases/dataset_views_gen2_emotes.lua
+tests/modkit/cases/dataset_views_gen2_metadata.lua
 tests/modkit/cases/gen2_marts_registry.lua
 tests/modkit/cases/gen2_native_index_range.lua
 tests/modkit/cases/gen2_phone_contacts.lua
 tests/modkit/cases/link_desync.lua
 tests/modkit/cases/mod_map_outdoor_encounters.lua
 tests/modkit/cases/unified_effects.lua
+tests/modkit/cases/unified_gen2_battle_scale.lua
 tests/online_convert.lua
 tests/parity_D.lua
 tests/parity_F.lua

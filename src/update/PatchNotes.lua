@@ -53,9 +53,16 @@ local function readPath(path)
   return nonempty(text) and text or nil
 end
 
+local function readCachePath(path)
+  local fs = require("src.core.SaveData").persistenceFs()
+  if not (fs and fs.read) then return nil end
+  local ok, text = pcall(fs.read, path)
+  return ok and nonempty(text) and text or nil
+end
+
 function PatchNotes.fromCache(engine)
   for _, path in ipairs(PatchNotes.CACHE_FILES) do
-    local text = readPath(path)
+    local text = readCachePath(path)
     if text then
       local ok, doc = pcall(Json.decode, text)
       if ok and type(doc) == "table" then

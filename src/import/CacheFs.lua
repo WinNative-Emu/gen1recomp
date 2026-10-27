@@ -320,6 +320,18 @@ local function ensureDirectory(parent)
   return false, "could not create " .. parent .. ": " .. reason
 end
 
+function CacheFs.createDirectory(rel)
+  rel = withPrefix(rel)
+  if unsafe_rel(rel) then return false, "unsafe cache path" end
+  local root, rootErr = resolveWriteRoot()
+  if not root and rootErr then return false, rootErr end
+  if root then
+    ensureParents(root, rel .. "/_")
+    return true
+  end
+  return ensureDirectory(rel)
+end
+
 -- write cache-relative `rel` (forward-slash path) with the given bytes;
 -- returns ok, err like love.filesystem.write
 function CacheFs.write(rel, data)

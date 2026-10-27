@@ -820,49 +820,135 @@ local function topLevelPaths(mount)
   return paths
 end
 
--- Copy the mounted archive subtree at `src` to the install path `dst`.  Reads
--- come from love.filesystem (the .zip is mounted there); every write goes
--- through CacheFs so it lands in the portable game folder when portable.txt is
--- in play and in the OS save directory otherwise (#330).  No explicit mkdir:
--- CacheFs.write creates the parent chain on both paths, which also means an
--- empty folder inside the .zip is simply not carried over (it holds nothing).
-local function copyTree(src, dst)
+-- mods/<id>/baseroms/ holds user imports and their receipts; installs never open it.
+local function isBaseromPath(rel)
+  return rel == "baseroms" or rel:sub(1, 9) == "baseroms/"
+end
+
+local function listPackage(path, files, dirs, rel)
   local fs = love.filesystem
-  for _, name in ipairs(fs.getDirectoryItems(src)) do
-    local s = src .. "/" .. name
-    local d = dst .. "/" .. name
-    local info = fs.getInfo(s)
-    if info and info.type == "directory" then
-      local ok, err = copyTree(s, d)
-      if not ok then return nil, err end
-    else
-      local data = fs.read(s)
-      if data == nil then return nil, "could not read " .. name end
-      local ok, err = CacheFs.write(d, data)
-      if not ok then return nil, "could not write " .. name .. ": " .. tostring(err) end
+  files, dirs = files or {}, dirs or {}
+  for _, name in ipairs(fs.getDirectoryItems(path) or {}) do
+    local r = rel and (rel .. "/" .. name) or name
+    if not isBaseromPath(r) then
+      local info = fs.getInfo(path .. "/" .. name)
+      if info and info.type == "directory" then
+        dirs[#dirs + 1] = r
+        listPackage(path .. "/" .. name, files, dirs, r)
+      elseif info then
+        files[#files + 1] = r
+      end
     end
+  end
+  return files, dirs
+end
+
+local function removeBoth(path)
+  CacheFs.remove(path)
+  love.filesystem.remove(path)
+end
+
+local function pruneEmptyDirs(dest, dirs)
+  local fs = love.filesystem
+  for i = #dirs, 1, -1 do
+    local path = dest .. "/" .. dirs[i]
+    if #(fs.getDirectoryItems(path) or {}) == 0 then
+      CacheFs.removeDir(path)
+      fs.remove(path)
+    end
+  end
+end
+
+local STREAM_CHUNK = 4 * 1024 * 1024
+
+local function streamCopy(src, dst)
+  local fs = love.filesystem
+  local input = fs.newFile and fs.newFile(src)
+  if not (input and input:open("r")) then return nil, "could not open " .. src end
+  local output, openErr = CacheFs.openWrite(dst)
+  if not output then
+    input:close()
+    return nil, "could not create " .. dst .. ": " .. tostring(openErr)
+  end
+  local failure
+  while true do
+    local chunk = input:read(STREAM_CHUNK)
+    if not chunk or #chunk == 0 then break end
+    local wrote, writeErr = output:write(chunk)
+    if not wrote then
+      failure = "could not copy " .. src .. ": " .. tostring(writeErr or "write failed")
+      break
+    end
+    if #chunk < STREAM_CHUNK then break end
+  end
+  input:close()
+  output:close()
+  if failure then
+    CacheFs.remove(dst)
+    return nil, failure
   end
   return true
 end
 
--- User-supplied baseroms are install state, not package content.  Snapshot
--- them before replacing a mod tree so an update cannot make the player select
--- the same cartridge again (or destroy their only reusable copy if the new
--- archive later fails to copy).
-local function snapshotTree(path, into, relative)
+local function drainBaseroms(src, dst)
   local fs = love.filesystem
-  into, relative = into or {}, relative or ""
-  local info = fs.getInfo(path)
-  if not info then return into end
+  local info = fs.getInfo(src)
+  if not info then return true end
   if info.type == "directory" then
-    for _, name in ipairs(fs.getDirectoryItems(path) or {}) do
-      local rel = relative == "" and name or (relative .. "/" .. name)
-      snapshotTree(path .. "/" .. name, into, rel)
+    for _, name in ipairs(fs.getDirectoryItems(src) or {}) do
+      local ok, err = drainBaseroms(src .. "/" .. name, dst .. "/" .. name)
+      if not ok then return nil, err end
     end
-  elseif relative ~= "" and into[relative] == nil then
-    into[relative] = fs.read(path)
+    return true
   end
-  return into
+  if fs.getInfo(dst) then return true end
+  return streamCopy(src, dst)
+end
+
+local function installPackage(src, dest, manifestRaw)
+  local fs = love.filesystem
+  if type(manifestRaw) ~= "string" then return nil, "could not read manifest.json" end
+  local hadManifest = fs.getInfo(dest .. "/manifest.json", "file") ~= nil
+  -- a portable install can carry a legacy save-dir twin, which physfs reads before the game folder
+  local portable = CacheFs.root() ~= nil
+  local keep, written, failure = {}, {}, nil
+  for _, rel in ipairs((listPackage(src))) do
+    keep[rel] = true
+    if rel ~= "manifest.json" then
+      local data = fs.read(src .. "/" .. rel)
+      if data == nil then failure = "could not read " .. rel; break end
+      local ok, err = CacheFs.write(dest .. "/" .. rel, data)
+      if not ok then
+        failure = "could not write " .. rel .. ": " .. tostring(err)
+        break
+      end
+      if portable then fs.remove(dest .. "/" .. rel) end
+      written[#written + 1] = rel
+    end
+  end
+  if not failure then
+    local oldFiles, oldDirs = listPackage(dest)
+    for _, rel in ipairs(oldFiles) do
+      if not keep[rel] and rel ~= "manifest.json" then removeBoth(dest .. "/" .. rel) end
+    end
+    pruneEmptyDirs(dest, oldDirs)
+    local ok, err = CacheFs.write(dest .. "/manifest.json", manifestRaw)
+    if ok then
+      if portable then fs.remove(dest .. "/manifest.json") end
+      return true
+    end
+    failure = "could not write manifest.json: " .. tostring(err)
+  end
+  if not hadManifest then
+    for _, rel in ipairs(written) do removeBoth(dest .. "/" .. rel) end
+    local _, leftDirs = listPackage(dest)
+    pruneEmptyDirs(dest, leftDirs)
+    if #(fs.getDirectoryItems(dest) or {}) == 0 then
+      CacheFs.removeDir(dest)
+      fs.remove(dest)
+    end
+  end
+  return nil, failure
 end
 
 -- Delete an installed mod subtree.  Enumeration stays on love.filesystem (the
@@ -987,8 +1073,11 @@ local function findStrays(fs, adopt, installed)
         local savedPrefix = CacheFs.prefix
         CacheFs.prefix = ""
         local dest = "mods/" .. row.id
-        local copied, copyErr = copyTree(row.path, dest)
-        if not copied then removeTree(dest) end
+        local copied, copyErr = installPackage(row.path, dest,
+          fs.read(row.path .. "/manifest.json"))
+        if copied then
+          copied, copyErr = drainBaseroms(row.path .. "/baseroms", dest .. "/baseroms")
+        end
         CacheFs.prefix = savedPrefix
         if not copied then row.err = copyErr or "could not copy the files" end
       end
@@ -1026,11 +1115,11 @@ function LauncherMods.adoptStrays() return scanStrays(true) end
 -- installZip(source [, opts]) -> true, id  |  nil, errString
 -- source is an external path or a love DroppedFile.  The archive is validated
 -- BEFORE anything is copied; every path unmounts and clears the staged temp
--- file, and a failed copy rolls its partial tree back.  A dropped file outside
--- the save dir is staged into a save-dir temp first, because
--- love.filesystem.mount only reaches a save-directory-relative path.
--- opts.replace = true uninstalls an existing same-id mod first (updates /
--- rollbacks).  opts.expectId, when set, refuses a zip whose manifest id differs.
+-- file.  A dropped file outside the save dir is staged into a save-dir temp
+-- first, because love.filesystem.mount only reaches a save-directory-relative
+-- path.  opts.replace = true updates an existing same-id mod in place
+-- (updates / rollbacks).  opts.expectId, when set, refuses a zip whose
+-- manifest id differs.
 function LauncherMods.installZip(source, opts)
   local ok, result, res2, res3 = pcall(LauncherMods._installZipInner, source, opts)
   if not ok then return nil, "import failed: " .. tostring(result) end
@@ -1121,58 +1210,23 @@ function LauncherMods._installZipInner(source, opts)
     cleanup()
     return nil, "a mod named '" .. manifest.id .. "' is already installed"
   end
-  local preservedBaseroms = {}
-  -- A previous failed update may have staged the user's files outside mods/ so
-  -- discovery cannot mistake recovery debris for an installed mod.
-  snapshotTree(baseromRecovery, preservedBaseroms)
-  if #existing > 0 then
-    for _, path in ipairs(existing) do
-      snapshotTree(path .. "/baseroms", preservedBaseroms)
-    end
-    -- drop every old tree before copy -- mods/<id> and any same-id folder
-    -- under another name, or the survivor keeps winning discover()'s
-    -- first-id-wins race after the "successful" update (#801).  A tree with
-    -- no readable manifest is debris from an interrupted copy: it never
-    -- refuses the install, it only gets cleared (#834).  Enable-flag is
-    -- preserved (uninstall would clear it, which would surprise an update).
-    local savedPrefix = CacheFs.prefix
-    CacheFs.prefix = ""
-    for _, path in ipairs(existing) do removeTree(path) end
-    CacheFs.prefix = savedPrefix
-  end
-
-  -- CacheFs.prefix steers ROM-cache writes into a version subtree (blue/...);
-  -- the mods tree is shared by Red and Blue, so pin the prefix to the root for
-  -- the copy and the rollback, then hand back whatever the launcher had set
-  -- (an import coroutine leaves it pointed at that version -- RomImporter.lua).
-  -- No fs.createDirectory("mods") here any more: CacheFs.write creates the
-  -- parent chain in both homes, and doing it through love.filesystem would
-  -- only ever make the directory in the save dir (#330).
   local savedPrefix = CacheFs.prefix
   CacheFs.prefix = ""
-  local copied, copyErr = copyTree(root, dest)
-  if not copied then removeTree(dest) end
-  local preserveErr
-  for rel, bytes in pairs(preservedBaseroms) do
-    if bytes ~= nil then
-      local restored, restoreErr = CacheFs.write(dest .. "/baseroms/" .. rel, bytes)
-      if not restored and not preserveErr then
-        preserveErr = "could not preserve baseroms/" .. rel .. ": "
-          .. tostring(restoreErr)
-      end
+  local copied, copyErr = installPackage(root, dest, raw)
+  local exactDest = false
+  for _, name in ipairs(fs.getDirectoryItems("mods") or {}) do
+    if name == manifest.id then exactDest = true end
+  end
+  for _, path in ipairs(existing) do
+    local sameDir = path == dest or (not exactDest and path:lower() == dest:lower())
+    if copied and not sameDir then
+      copied, copyErr = drainBaseroms(path .. "/baseroms", dest .. "/baseroms")
+      if copied then removeTree(path) end
     end
   end
-  if preserveErr then
-    -- Do not report a successful update that discarded user-owned input, and
-    -- do not leave a manifest-less baseroms tree that resembles an install.
-    removeTree(dest)
-    removeTree(baseromRecovery)
-    for rel, bytes in pairs(preservedBaseroms) do
-      if bytes ~= nil then CacheFs.write(baseromRecovery .. "/" .. rel, bytes) end
-    end
-    copied, copyErr = nil, preserveErr
-  elseif copied then
-    removeTree(baseromRecovery)
+  if copied then
+    copied, copyErr = drainBaseroms(baseromRecovery, dest .. "/baseroms")
+    if copied then removeTree(baseromRecovery) end
   end
   CacheFs.prefix = savedPrefix
   if not copied then

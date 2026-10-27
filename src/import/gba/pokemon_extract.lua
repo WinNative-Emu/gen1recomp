@@ -1274,11 +1274,6 @@ function PokemonExtract.run(rom, cache, opts)
     TrainerCardExtract.run(rom, cache, { cacheRoot = cacheRoot })
   end)
 
-  local TmCaseExtract = require("src.import.gba.tm_case_extract")
-  pcall(function()
-    TmCaseExtract.run(rom, cache, { cacheRoot = cacheRoot })
-  end)
-
   local BerryPouchExtract = require("src.import.gba.berry_pouch_extract")
   pcall(function()
     BerryPouchExtract.run(rom, cache, { cacheRoot = cacheRoot })

@@ -162,50 +162,9 @@ local function gatePasses(rel)
   return true
 end
 
-local function persistFullRequirement(rel, reason)
-  if not (rel and rel.version and Json) then return end
-  local full = rel.full
-  local record = {
-    version = rel.version,
-    reason = reason or "full_package_required",
-    full = full and { name = rel.fullName, url = full.url, size = full.size } or nil,
-  }
-  pcall(function()
-    love.filesystem.createDirectory("updates")
-    love.filesystem.write("updates/full-update.json", Json.encode(record))
-  end)
-end
-
 local function postFullRequirement(rel, reason)
-  persistFullRequirement(rel, reason)
   post({ status = "needs_full", latest = rel and rel.version, reason = reason,
     full = rel and rel.full and { name = rel.fullName, url = rel.full.url, size = rel.full.size } or nil })
-end
-
-local function clearFullRequirement()
-  pcall(function() love.filesystem.remove("updates/full-update.json") end)
-end
-
-local function cacheNotes(ver, notes)
-  if not (ver and type(notes) == "string" and notes ~= "" and Json) then return end
-  if not (love and love.filesystem) then return end
-  pcall(function()
-    love.filesystem.createDirectory("updates")
-    local cachePath = "updates/notes_cache.json"
-    local existing = {}
-    if love.filesystem.getInfo and love.filesystem.getInfo(cachePath) then
-      local text = love.filesystem.read(cachePath)
-      if text then
-        local ok, doc = pcall(Json.decode, text)
-        if ok and type(doc) == "table" then existing = doc end
-      end
-    end
-    existing[ver] = notes
-    local ok, encoded = pcall(Json.encode, existing)
-    if ok and encoded then
-      love.filesystem.write(cachePath, encoded)
-    end
-  end)
 end
 
 -- ---------------------------------------------------------------------------
@@ -234,9 +193,6 @@ local function doCheck(target)
     return
   end
   pending = rel
-  if rel.version and type(rel.notes) == "string" and rel.notes ~= "" then
-    cacheNotes(rel.version, rel.notes)
-  end
 
   -- Unstamped dev build: the working tree always looks "newer", so never
   -- pester the developer with an update (contract item, Check design).
@@ -255,8 +211,7 @@ local function doCheck(target)
   if compareVersions(rel.version, currentEngine) <= 0 then
     -- We are now running a native shell at least as new as GitHub's latest
     -- release, so a former minShell/payloadHost prompt no longer applies.
-    clearFullRequirement()
-    post({ status = "uptodate", latest = rel.version })
+    post({ status = "uptodate", latest = rel.version, clearFull = true })
     return
   end
 
@@ -491,7 +446,6 @@ local function doDownloadFull()
     love.filesystem.write(doneRel, data)
     love.filesystem.remove(partRel)
   end
-  persistFullRequirement(rel, "full_package_required")
   post({ status = "full_ready", latest = rel.version, reason = "full_package_required",
     full = { name = name, url = asset.url, size = asset.size, path = doneAbs } })
 end

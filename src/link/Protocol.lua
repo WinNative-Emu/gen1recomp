@@ -602,6 +602,7 @@ function Protocol.packMon3(mon)
     if mon.modernFatefulEncounter and not has then ribbonWord = ribbonWord + 2147483648 end
     if not mon.modernFatefulEncounter and has then ribbonWord = ribbonWord - 2147483648 end
   end
+  local fateful = math.floor(ribbonWord / 2147483648) % 2 == 1
   local abilityNum = mon.abilityNum
   if abilityNum == nil then abilityNum = pair[2] ~= 0 and ability == pair[2] and 1 or 0 end
   local otFull = clampInt(mon.otId, 0, U32 - 1, 0)
@@ -641,8 +642,9 @@ function Protocol.packMon3(mon)
     ribbons = ribbonWord,
     markings = clampInt(mon.markings, 0, 15, 0),
     isEgg = egg,
-    fatefulEncounter = mon.fatefulEncounter == true,
-    modernFatefulEncounter = math.floor(ribbonWord / 2147483648) % 2 == 1,
+    -- fatefulEncounter is the key older releases read for Mew/Deoxys trade legality
+    fatefulEncounter = fateful,
+    modernFatefulEncounter = fateful,
     eggCycles = egg and clampInt(mon.eggCycles, 0, 255, 0) or 0,
   }
 end
@@ -882,7 +884,6 @@ function Protocol.unpackMon3(data, packed, opts)
     markings = field(packed.markings, 0, 15, 0),
     isEgg = isEgg,
     eggCycles = isEgg and field(packed.eggCycles, 0, 255, 0) or 0,
-    fatefulEncounter = packed.fatefulEncounter == true,
     modernFatefulEncounter = packed.modernFatefulEncounter == true
       or math.floor((tonumber(packed.ribbons) or 0) / 2147483648) % 2 == 1,
   }

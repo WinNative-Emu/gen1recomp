@@ -269,7 +269,10 @@ Records containing functions, userdata, threads, metatables, or cycles are not
 exposed. Each open call receives an independent facade, so one mod cannot
 replace another mod view method. Canonical boot shaping is included, such as
 Gen 1 defaults and Yellow corrections, and Gold's Foresight matchup rows and
-derived `held_items`.
+derived `held_items`. Gold, Silver and Crystal also expose their overworld
+emote sheets as `content.field:get("emotes")`, path strings for
+`view.assets:path` / `info` that include the fishing pose `fishing` and
+Crystal's `fishingFemale`; the same key is patchable in game.
 
 `open` checks the completion marker, exact version-specific file inventory,
 source/cache boundary, and file-size bounds without reading or decoding the
@@ -797,7 +800,9 @@ mod.content.pokemon:patch("MEW", { battleScaleBack = 1.5 })
 ```
 
 `battleScaleFront` scales the enemy pic, `battleScaleBack` the player pic;
-both take a number in `0.25 .. 4.0`.
+both take a number in `0.25 .. 4.0`. Both work on Gen 1 and Gen 2 under
+`api` 2 and `api` 3. Gen 3 has no species pic scale: an `api` 3 write there
+returns `nil, reason`.
 
 Per image, on the `battle_sprite_scales` registry, keyed by the asset path
 exactly as the data references it:
@@ -1699,6 +1704,7 @@ The portable registries are `pokemon`, `moves`, `items`, `trainers` and `encount
 
 - Species: `baseStats.hp`, `attack`, `defense`, `speed`, `special`; `level1Moves`, `learnset = { { level = 9, move = "TACKLE" } }`, `evolutions = { { method = "LEVEL", level = 16, species = "CHARMELEON" } }`; string species, move, item, type and growth-rate IDs.
 - Gen 2 `levelMoves` and `into`, and Gen 3 numeric tables, are translated to that shape. Writing `special` sets both later Special stats; optional `specialAttack` and `specialDefense` carry the split, and Gen 1 requires them equal.
+- Species `battleScaleFront`, `battleScaleBack` and `battleTheme` are top-level fields on Gen 1 and Gen 2. Gen 3 refuses them with `nil, reason`. The other Gen 1 presentation fields (`icon`, `cry`, `palette`) and the Gen 1 move extras (`anim`, `highCrit`, `fixedDamage`, `multiHit`, `chargeText`, `semiInvulnerable`, `counterable`) are Gen 1 only.
 - Moves use Gen 1 effect IDs such as `NO_ADDITIONAL_EFFECT`.
 - Trainers: `parties = { { { species = "MEW", level = 5 } } }` plus `partyNames`. Encounter slots: `{ species = "MEW", level = 5 }`; a shared encounter write applies to every Gen 2 time of day.
 - Text keeps the Gen 1 control characters with symbolic placeholders such as `{PLAYER}`.

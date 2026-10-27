@@ -392,28 +392,14 @@ function MapSectionsExtract.run(rom, cache, opts)
   end
   local root = opts.cacheRoot or "data/generated/gba"
   local content = MapSectionsExtract.formatLua()
-  if cache and cache.write then
-    cache:write(root .. "/region_map/map_sections.lua", content)
-    cache:write(root .. "/map_sections.lua", content)
-  else
-    local okFs, CacheFs = pcall(require, "src.import.CacheFs")
-    local wrote = false
-    if okFs and CacheFs and CacheFs.write then
-      local ok1 = pcall(CacheFs.write, root .. "/region_map/map_sections.lua", content)
-      local ok2 = pcall(CacheFs.write, root .. "/map_sections.lua", content)
-      if ok1 or ok2 then wrote = true end
+  for _, rel in ipairs({ root .. "/region_map/map_sections.lua", root .. "/map_sections.lua" }) do
+    local ok, err
+    if cache and cache.write then
+      ok, err = cache:write(rel, content)
+    else
+      ok, err = require("src.import.CacheFs").write(rel, content)
     end
-    if not wrote then
-      local function write_file(path, str)
-        local dir = path:match("^(.*)/[^/]+$")
-        if dir then pcall(os.execute, "mkdir -p '" .. dir .. "'") end
-        local f = io.open(path, "w")
-        if f then f:write(str); f:close(); return true end
-        return false
-      end
-      write_file(root .. "/region_map/map_sections.lua", content)
-      write_file(root .. "/map_sections.lua", content)
-    end
+    if ok == false then error("map_sections: could not write " .. rel .. ": " .. tostring(err)) end
   end
   return true
 end

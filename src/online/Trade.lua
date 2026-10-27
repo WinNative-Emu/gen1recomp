@@ -1625,7 +1625,7 @@ function Remote3:_partnerMonValid()
     }) == require("src.core.game3.scripting.natives_trade").CAN_TRADE_MON
   end
   local species = tonumber(mon.species) or 0
-  if (species == 151 or species == 410) and mon.fatefulEncounter == false then
+  if (species == 151 or species == 410) and mon.modernFatefulEncounter == false then
     return false
   end
   return true

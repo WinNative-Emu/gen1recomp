@@ -164,7 +164,7 @@ do
   T.eq(why, "that's your only POKéMON for battle", "the last mon can't be traded")
 
   local mew = makeSave("firered", "RED", 1, {
-    { species = 151, level = 5, extra = { fatefulEncounter = false } },
+    { species = 151, level = 5, extra = { modernFatefulEncounter = false } },
     { species = 25, level = 5 },
   }, true)
   _, why = Trade.plan({ from = handle("firered", "s", mew),

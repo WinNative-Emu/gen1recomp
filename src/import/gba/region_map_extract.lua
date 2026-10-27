@@ -252,22 +252,7 @@ local function write_file(cache, path, bytes)
   if cache and cache.write then
     return cache:write(path, bytes)
   end
-  local okC, CacheFs = pcall(require, "src.import.CacheFs")
-  if okC and CacheFs and CacheFs.write then
-    local ok = pcall(CacheFs.write, path, bytes)
-    if ok then return true end
-  end
-  if love and love.filesystem and love.filesystem.write then
-    local ok = pcall(love.filesystem.write, path, bytes)
-    if ok then return true end
-  end
-  local f = io.open(path, "wb")
-  if f then
-    f:write(bytes)
-    f:close()
-    return true
-  end
-  return false
+  return require("src.import.CacheFs").write(path, bytes)
 end
 
 -- src/region_map.c:939

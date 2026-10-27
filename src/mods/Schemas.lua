@@ -186,7 +186,9 @@ checkValue = function(t, value, path, patchMode, errors, top)
   if kind == "map" then
     if type(value) ~= "table" then return fail(errors, path, t.desc, value) end
     for k, v in pairs(value) do
-      if not t.key.check(k) then
+      local keyErrors = {}
+      checkValue(t.key, k, path, false, keyErrors)
+      if #keyErrors > 0 then
         fail(errors, path .. "." .. tostring(k), "key " .. t.key.desc, k)
       end
       checkValue(t.value, v, path .. "." .. tostring(k), patchMode, errors)
@@ -259,7 +261,7 @@ end
 -- per-generation shape first (Schemas.shapeFor), and omitting it validates
 -- against the Gen 1 shape, which is what every Gen 1 call site wants and what
 -- a caller already holding a derived spec has anyway.
-function Schemas.check(spec, registryName, id, value, mode, generation)
+local function checkRecord(spec, registryName, id, value, mode, generation)
   if generation ~= nil then
     spec = Schemas.shapeFor(registryName, spec, generation)
   end
@@ -295,7 +297,7 @@ function Schemas.check(spec, registryName, id, value, mode, generation)
   elseif spec.value then
     checkValue(spec.value, value, path, patchMode, errors, true)
     if #errors == 0 and not patchMode and spec.extra then
-      local problem = spec.extra(id, value)
+      local problem = spec.extra(id, value, mode)
       if problem then errors[#errors + 1] = ("%s: %s"):format(path, problem) end
     end
   elseif spec.fields then
@@ -323,7 +325,7 @@ function Schemas.check(spec, registryName, id, value, mode, generation)
         end
       end
       if #errors == 0 and not patchMode and spec.extra then
-        local problem = spec.extra(id, value)
+        local problem = spec.extra(id, value, mode)
         if problem then
           errors[#errors + 1] = ("%s: %s"):format(path, problem)
         end
@@ -332,6 +334,14 @@ function Schemas.check(spec, registryName, id, value, mode, generation)
   end
   if #errors == 0 then return true end
   return nil, table.concat(errors, "; ")
+end
+
+function Schemas.check(spec, registryName, id, value, mode, generation)
+  local ok, valid, detail = pcall(checkRecord, spec, registryName, id, value,
+    mode, generation)
+  if ok then return valid, detail end
+  return nil, ("%s.%s: %s"):format(tostring(registryName), tostring(id),
+    tostring(valid))
 end
 
 -- ------- cross-reference pass
@@ -845,11 +855,15 @@ local function recordMapExcept(...)
 end
 
 local pokemonGen2BaseAt, pokemonGen2BaseIds, pokemonGen2ReservedIds =
-  recordMapExcept("growthRates", "tmhmMoves")
+  recordMapExcept("growthRates", "tmhmMoves", "tutorMoves")
 local movesGen2BaseAt, movesGen2BaseIds, movesGen2ReservedIds =
   recordMapExcept("generation", "source")
 local itemsGen2BaseAt, itemsGen2BaseIds, itemsGen2ReservedIds =
-  recordMapExcept("generation", "source", "pockets")
+  recordMapExcept("generation", "source", "pockets", "timeCapsule")
+local tilesetsGen2BaseAt, tilesetsGen2BaseIds, tilesetsGen2ReservedIds =
+  recordMapExcept("waterFrames", "flowerFrames", "flowerCgbFrames", "animFrames")
+local textGen2BaseAt, textGen2BaseIds, textGen2ReservedIds =
+  recordMapExcept("generation", "labels")
 
 function Schemas.gen2Index(registry, id, value, data, mode)
   local floors = { pokemon = 251, moves = 251, items = 250 }
@@ -2294,6 +2308,21 @@ for _, name in ipairs({ "moves", "items" }) do
   R[name].gen2Fields = fields
 end
 
+R.items.gen2Fields.name = f.opt(f.str)
+local gen2NamelessItems = {
+  ITEM_C3 = 0xC3, -- pokegold/constants/item_constants.asm:224
+  ITEM_DC = 0xDC, -- pokegold/constants/item_constants.asm:249
+  ITEM_FA = 0xFA, -- pokegold/constants/item_constants.asm:297
+}
+R.items.gen2Extra = function(id, value, mode)
+  if value.name ~= nil then return nil end
+  if mode == "base" and gen2NamelessItems[id] ~= nil
+      and value.index == gen2NamelessItems[id] then
+    return nil
+  end
+  return "name: missing required field (string)"
+end
+
 for _, name in ipairs({ "pokemon", "moves", "items" }) do
   R[name].gen2Notes = "New records receive an unused script index above the native range, "
     .. "up to 65535. Existing indices cannot change; collisions and reserved "
@@ -2362,6 +2391,8 @@ R.maps = {
 
 R.tilesets = {
   semantics = "record", target = "tilesets",
+  gen2BaseAt = tilesetsGen2BaseAt, gen2BaseIds = tilesetsGen2BaseIds,
+  gen2ReservedIds = tilesetsGen2ReservedIds,
   fields = {
     id = f.opt(f.str), image = f.path,
     imageWidth = f.opt(f.int(1)), imageHeight = f.opt(f.int(1)),
@@ -2708,6 +2739,8 @@ R.text = {
   semantics = "record", target = "text",
   value = f.str,
   example = 'mod.content.text:override("_PalletTownText1", "HELLO!")',
+  gen2BaseAt = textGen2BaseAt, gen2BaseIds = textGen2BaseIds,
+  gen2ReservedIds = textGen2ReservedIds,
   gen3Value = f.union{ f.str, f.list(f.any) },
   gen3Write = G3.textWrite,
 }
@@ -3238,16 +3271,22 @@ R.sfx = {
 
 -- base names the species whose header a derived cry borrows, so it resolves
 -- against this same registry (13.9)
+local function cryValue(max)
+  return f.union{
+    f.rec{ header = f.any, pitch = f.int(0, max), length = f.int(0, max) },
+    f.rec{ file = f.path },
+    f.rec{ base = f.id("cries"), pitch = f.opt(f.int(0, max)),
+           length = f.opt(f.int(0, max)) },
+    f.rec{ chip = chipProgram, pitch = f.opt(f.int(0, max)),
+           length = f.opt(f.int(0, max)) },
+  }
+end
+
 R.cries = {
   semantics = "record", target = "audio.cries",
-  value = f.union{
-    f.rec{ header = f.any, pitch = f.int(0, 255), length = f.int(0, 255) },
-    f.rec{ file = f.path },
-    f.rec{ base = f.id("cries"), pitch = f.opt(f.int(0, 255)),
-           length = f.opt(f.int(0, 255)) },
-    f.rec{ chip = chipProgram, pitch = f.opt(f.int(0, 255)),
-           length = f.opt(f.int(0, 255)) },
-  },
+  value = cryValue(255),
+  -- pokegold/data/pokemon/cries.asm:3
+  gen2Value = cryValue(65535),
   example = 'mod.content.cries:patch("PIKACHU", { pitch = 200 })',
 }
 
@@ -3625,13 +3664,25 @@ R.field = {
       namePresets = f.opt(f.rec{ player = f.opt(f.list(f.str)),
                                  rival = f.opt(f.list(f.str)) }),
     },
+    -- data/sprites/emotes.asm:8, engine/events/fishing_gfx.asm:23
+    emotes = f.rec{
+      shock = f.opt(f.path), question = f.opt(f.path), happy = f.opt(f.path),
+      sad = f.opt(f.path), heart = f.opt(f.path), bolt = f.opt(f.path),
+      sleep = f.opt(f.path), fish = f.opt(f.path),
+      grassRustle = f.opt(f.path), jumpShadow = f.opt(f.path),
+      cutGrass = f.opt(f.path), fishing = f.opt(f.path),
+      fishingFemale = f.opt(f.path), order = f.opt(f.list(f.str)) },
   },
   gen2KeysClosed = true,
   gen2Example = 'mod.content.field:patch("boot", { startMap = "NEW_BARK_TOWN", '
     .. 'startX = 6, startY = 8 })',
-  gen2Notes = "Gold reads only `boot`: the New Game spawn (`startMap`, "
-    .. "`startX`, `startY`, `startFacing`, replacing SPAWN_HOME), the starting "
-    .. "money, the rival's starting name and the naming presets. Every other "
+  gen2Notes = "Gold reads `boot` and `emotes`. `boot` is the New Game spawn "
+    .. "(`startMap`, `startX`, `startY`, `startFacing`, replacing SPAWN_HOME), "
+    .. "the starting money, the rival's starting name and the naming presets. "
+    .. "`emotes` is the overworld emote art, one image path per sheet: the "
+    .. "showemote bubbles listed in `order`, `grassRustle`, `jumpShadow`, "
+    .. "`cutGrass`, the fishing pose `fishing` and Crystal's `fishingFemale`; "
+    .. "a patched path is the sheet the overworld draws. Every other "
     .. "Gen 1 key has no Gold consumer: `ledges` (Gold's ledges are tile "
     .. "collision types), `hiddenItems` (bg events in `maps`), `badgeGates`, "
     .. "`townMap` (`landmarks`), `flyOrder` (the flypoint table), "
@@ -3851,8 +3902,8 @@ R.landmarks = {
     id = f.opt(f.str),
     -- the two-line name the town map prints, "\n" and all
     name = f.str,
-    -- the marker's tile position on the 20x18 town map
-    x = f.int(0), y = f.int(0),
+    -- pokegold/data/maps/landmarks.asm:3
+    x = f.int(-8, 247), y = f.int(-16, 239),
     -- LANDMARK_*: the byte a map header carries, and what
     -- src/core/gen2/Nests.lua's region split reads
     index = f.int(0),

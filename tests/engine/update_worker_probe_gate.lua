@@ -81,10 +81,16 @@ local function runWorker(boot, cached)
   }
   os.rename = function() return false end
   local ok, err = pcall(dofile, "src/update/check_worker.lua")
+  local workerFiles = {}
+  for path, data in pairs(files) do workerFiles[path] = data end
+  local SaveData = require("src.core.SaveData")
+  SaveData._resetPortableCacheForTests()
+  for _, state in ipairs(states) do Check._ingestForTests(state) end
+  SaveData._resetPortableCacheForTests()
   _G.love, os.rename = savedLove, savedRename
   for _, name in ipairs(moduleNames) do package.loaded[name] = savedModules[name] end
   assert(ok, err)
-  return states, files
+  return states, files, workerFiles
 end
 
 local cases = {
@@ -105,7 +111,9 @@ for _, cached in ipairs({ true, false }) do
   local route = cached and "cached" or "downloaded"
   for _, case in ipairs(cases) do
     local label = route .. " " .. case.name
-    local states, files = runWorker(case.boot, cached)
+    local states, files, workerFiles = runWorker(case.boot, cached)
+    eq(workerFiles["updates/full-update.json"], nil, label .. " worker leaves the record to the main thread")
+    eq(workerFiles["updates/notes_cache.json"], nil, label .. " worker leaves the notes cache to the main thread")
     local final = states[#states]
     eq(final.status, "needs_full", label .. " requires a native package")
     eq(final.reason, case.reason, label .. " reports its reason")

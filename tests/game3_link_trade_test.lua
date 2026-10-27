@@ -223,7 +223,7 @@ eq(LT.checkValidityOfTradeMons(1, 2), LT.PLAYER_MON_INVALID,
 session.party = keepParty
 local keepPeerParty, keepPeerPacked = LT.peerParty, LT._peerPacked
 -- pokefirered/src/trade.c:1955 the partner cannot trade an illegitimate DEOXYS or MEW
-peerParty({ mon(410, 30, nil, { fatefulEncounter = false }) }, { version = 0, progressFlags = 1 })
+peerParty({ mon(410, 30, nil, { modernFatefulEncounter = false }) }, { version = 0, progressFlags = 1 })
 LT.pump()
 eq(LT.checkValidityOfTradeMons(1, 1), LT.PARTNER_MON_INVALID,
   "an illegitimate DEOXYS on the other machine is PARTNER_MON_INVALID")
@@ -741,7 +741,7 @@ peer:take(LT.MSG.MON)
 pumpPeer()
 -- pokefirered/src/trade.c:1955
 peerSend({ type = LT.MSG.MON, name = "BLUE", trainerId = 0x2222,
-  mon = Protocol.packMon3(mon(151, 30, nil, { fatefulEncounter = false })) })
+  mon = Protocol.packMon3(mon(151, 30, nil, { modernFatefulEncounter = false })) })
 LT.update(0)
 eq(LT.state, "canceled", "an illegitimate MEW in place of the SQUIRTLE is refused")
 eq(LT.lastResult, "bad_mon", "as bad_mon")

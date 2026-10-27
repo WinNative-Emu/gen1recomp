@@ -192,7 +192,7 @@ function Trade.canTradeSelectedMon(party, monIdx, opts)
 
   -- pokefirered/src/trade.c:2795
   if species[idx] == SPECIES_DEOXYS or species[idx] == SPECIES_MEW then
-    if party[idx] and party[idx].fatefulEncounter == false then
+    if party[idx] and party[idx].modernFatefulEncounter == false then
       return Trade.CANT_TRADE_INVALID_MON
     end
   end

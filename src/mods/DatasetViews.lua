@@ -46,7 +46,7 @@ local GEN2_ROOTS = {
   gen2Sprites = "sprites", gen2Palettes = "palettes",
   gen2Icons = "icons", gen2BattleAnims = "battle_anims",
   gen2Constants = "constants", gen2Landmarks = "landmarks",
-  gen2Scripts = "scripts",
+  gen2Scripts = "scripts", gen2MenuGfx = "menu_gfx",
 }
 
 local GEN3_ROOTS = {
@@ -298,6 +298,10 @@ function DatasetViews:_data(view)
   local data = {}
   setmetatable(data, {
     __index = function(target, root)
+      if root == "field" and view.generation == 2 then
+        rawset(target, root, {})
+        return DatasetHydration.seedGen2Field(target)
+      end
       local value = self:_module(view, root)
       if value ~= nil then rawset(target, root, value) end
       return value
@@ -346,7 +350,7 @@ function DatasetViews:_registry(view, name)
   local function validate(registry, id, value)
     if value == nil then return true end
     local ok, detail = Schemas.check(registry.spec, registry.name, id,
-      value, "override")
+      value, "base")
     if ok then return true end
     local target = registry.spec.target
       or Schemas.targetFor(registry.name, registry.spec, view.generation)

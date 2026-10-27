@@ -7,7 +7,23 @@ local Lz77 = require("src.import.gba.lz77")
 local TmCaseExtract = {}
 
 TmCaseExtract.CACHE_SUB = "items/tm_case"
-TmCaseExtract.FORMAT_VERSION = 1
+TmCaseExtract.FORMAT_VERSION = 2
+-- include/constants/pokemon.h:115 NUMBER_OF_MON_TYPES
+TmCaseExtract.DISC_TYPES = 18
+
+TmCaseExtract.REQUIRED = {
+  TmCaseExtract.CACHE_SUB .. "/manifest.lua",
+  TmCaseExtract.CACHE_SUB .. "/bg_male.rgba",
+  TmCaseExtract.CACHE_SUB .. "/bg_female.rgba",
+  TmCaseExtract.CACHE_SUB .. "/cover_male.rgba",
+  TmCaseExtract.CACHE_SUB .. "/cover_female.rgba",
+  TmCaseExtract.CACHE_SUB .. "/hm_icon.rgba",
+}
+for t = 0, TmCaseExtract.DISC_TYPES - 1 do
+  local R = TmCaseExtract.REQUIRED
+  R[#R + 1] = string.format("%s/disc_%d.rgba", TmCaseExtract.CACHE_SUB, t)
+  R[#R + 1] = string.format("%s/disc_hm_%d.rgba", TmCaseExtract.CACHE_SUB, t)
+end
 
 local function default_cache_root()
   local ok, Extract = pcall(require, "src.import.gba.extract_island1")
@@ -263,33 +279,40 @@ function TmCaseExtract.run(rom, cache, opts)
   cache:write(root .. "/cover_male.rgba", coverMale)
   cache:write(root .. "/cover_female.rgba", coverFemale)
 
-  -- 3. Discs (TM + HM for each type 0..16)
   local discGfx = Lz77.decompress(get, Versions.TM_CASE_DISC_GFX)
   local discPal1 = Lz77.decompress(get, Versions.TM_CASE_DISC_TYPES1_PAL)
   local discPal2 = Lz77.decompress(get, Versions.TM_CASE_DISC_TYPES2_PAL)
-  local banks1 = load_pal_banks(discPal1, 16)
-  local banks2 = load_pal_banks(discPal2, 1)
+  -- src/tm_case.c:1727 LoadDiscTypePalettes
+  local colors = {}
+  local function load_colors(bytes, base)
+    for c = 0, math.floor(byte_len(bytes) / 2) - 1 do
+      colors[base + c] = (bytes[c * 2 + 1] or 0) + (bytes[c * 2 + 2] or 0) * 256
+    end
+  end
+  load_colors(discPal1, 0)
+  load_colors(discPal2, 0x100)
 
-  local discBanks = {}
-  for b = 0, 15 do discBanks[b] = banks1[b] end
-  discBanks[16] = banks2[0] -- Dragon type
-
-  for typeIdx = 0, 16 do
-    local bank = discBanks[typeIdx] or {}
-    local discRgba = bake_disc_rgba(discGfx, bank, false)
-    cache:write(string.format("%s/disc_%d.rgba", root, typeIdx), discRgba)
-    local hmDiscRgba = bake_disc_rgba(discGfx, bank, true)
-    cache:write(string.format("%s/disc_hm_%d.rgba", root, typeIdx), hmDiscRgba)
+  -- src/tm_case.c:1649 TintDiscpriteByType
+  for typeIdx = 0, TmCaseExtract.DISC_TYPES - 1 do
+    local at = Versions.TM_CASE_DISC_PAL_OFFSETS + typeIdx * 2
+    local offset = get(at) + get(at + 1) * 256
+    local bank = {}
+    for c = 0, 15 do
+      bank[c] = assert(colors[offset + c], string.format("tm case disc palette offset 0x%X out of range", offset))
+    end
+    cache:write(string.format("%s/disc_%d.rgba", root, typeIdx), bake_disc_rgba(discGfx, bank, false))
+    cache:write(string.format("%s/disc_hm_%d.rgba", root, typeIdx), bake_disc_rgba(discGfx, bank, true))
   end
 
   -- 4. HM Icon (16x16 tiled bitmap in ROM, 16x12 visible; FRLG tm_case.c:1491,1589)
   local hmGfx = {}
   for i = 1, 128 do hmGfx[i] = rom:get(Versions.TM_CASE_HM_GFX + i - 1) end
-  -- FRLG sPal3Override on WIN_LIST palette 15: color 6 = RGB(8,8,8), color 7 = RGB(30,16,6)
+  -- src/tm_case.c:1491
+  local ov = Versions.TM_CASE_PAL3_OVERRIDE
   local hmPal = {
     [0] = 0,
-    [6] = 8 + 8 * 32 + 8 * 1024,      -- RGB(8, 8, 8) = 0x2108 (dark grey)
-    [7] = 30 + 16 * 32 + 6 * 1024,    -- RGB(30, 16, 6) = 0x1A1E (orange)
+    [6] = get(ov) + get(ov + 1) * 256,
+    [7] = get(ov + 2) + get(ov + 3) * 256,
   }
   local hmRgba = bake_hm_icon_rgba(hmGfx, hmPal)
   cache:write(root .. "/hm_icon.rgba", hmRgba)
@@ -301,26 +324,29 @@ return {
   height = %d,
   discW = 32,
   discH = 32,
-  discCount = 17,
+  discCount = %d,
   hmW = 16,
   hmH = 12,
 }
-]], TmCaseExtract.FORMAT_VERSION, W, H)
+]], TmCaseExtract.FORMAT_VERSION, W, H, TmCaseExtract.DISC_TYPES)
   cache:write(root .. "/manifest.lua", manifest)
 
-  print(string.format("[tm_case_extract] TM Case chrome baked (2 BGs, 2 Covers, 17 TM discs, 17 HM discs, HM icon) -> %s", root))
+  print(string.format("[tm_case_extract] TM Case chrome baked (2 BGs, 2 Covers, %d TM discs, %d HM discs, HM icon) -> %s",
+    TmCaseExtract.DISC_TYPES, TmCaseExtract.DISC_TYPES, root))
   return {
     root = root,
     width = W,
     height = H,
-    discCount = 17,
+    discCount = TmCaseExtract.DISC_TYPES,
   }
 end
 
 function TmCaseExtract.ready(cache, cacheRoot)
-  local root = (cacheRoot or default_cache_root()) .. "/" .. TmCaseExtract.CACHE_SUB
   if cache and cache.exists then
-    return cache:exists(root .. "/bg_male.rgba") and cache:exists(root .. "/cover_male.rgba") and cache:exists(root .. "/disc_0.rgba")
+    for _, rel in ipairs(TmCaseExtract.REQUIRED) do
+      if not cache:exists((cacheRoot or default_cache_root()) .. "/" .. rel) then return false end
+    end
+    return true
   end
   return false
 end

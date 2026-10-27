@@ -63,7 +63,7 @@ do
     "otId", "otSecretId", "otName", "otGender", "nature", "ability", "gender", "ivs",
     "evs", "moves", "item", "friendship", "pokerus", "metLocation", "metLevel",
     "metGame", "pokeball", "ribbons", "markings", "isEgg", "fatefulEncounter",
-    "eggCycles" }
+    "modernFatefulEncounter", "eggCycles" }
   for _, key in ipairs(keys) do
     T.check(packed[key] ~= nil, "packMon3 always emits " .. key)
   end

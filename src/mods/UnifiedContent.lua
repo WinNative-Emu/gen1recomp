@@ -147,9 +147,15 @@ local ENCOUNTER_FIELDS = fields("id grass water rocks fishing swarmGrass swarmWa
 local EXTRA_ENCOUNTERS = fields("fishGroups timeFishGroups treeSets treeMonsAsleep "
   .. "bugContest roamMaps roamMons")
 local MAP_KINDS = { "grass", "water", "swarmGrass", "swarmWater", "trees", "rocks" }
+local MON_BATTLE_FIELDS = fields("battleScaleFront battleScaleBack battleTheme")
 
 local function coreFields(name, allowed, generation)
-  if generation ~= 1 then return allowed end
+  if generation ~= 1 then
+    if name ~= "pokemon" then return allowed end
+    local out = copy(allowed)
+    for key in pairs(MON_BATTLE_FIELDS) do out[key] = true end
+    return out
+  end
   local out = copy(allowed)
   local nativeSchema = Schemas.shapeFor(name, Schemas.REGISTRIES[name], generation)
   for key in pairs(nativeSchema.fields or {}) do
@@ -387,7 +393,11 @@ local function monWrite(value, old, generation, patch)
     for _, key in ipairs({ "eggMoves", "genderRatio", "eggCycles", "itemCommon", "itemRare" }) do
       if value[key] ~= nil then refuse(key .. " has no Gen 1 representation") end
     end
-  elseif value.frontSize ~= nil then refuse("frontSize has no Gen 3 representation") end
+  else
+    for _, key in ipairs({ "frontSize", "battleScaleFront", "battleScaleBack", "battleTheme" }) do
+      if value[key] ~= nil then refuse(key .. " has no Gen 3 representation") end
+    end
+  end
   if generation == 3 and value.trueColor ~= nil and value.trueColor ~= (old or {}).trueColor then
     refuse("trueColor has no Gen 3 representation")
   end

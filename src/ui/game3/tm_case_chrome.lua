@@ -11,8 +11,8 @@ TmCaseChrome._bgMale = nil
 TmCaseChrome._bgFemale = nil
 TmCaseChrome._coverMale = nil
 TmCaseChrome._coverFemale = nil
-TmCaseChrome._discs = {} -- typeIdx (0..16) -> Image (TM)
-TmCaseChrome._discsHm = {} -- typeIdx (0..16) -> Image (HM)
+TmCaseChrome._discs = {}
+TmCaseChrome._discsHm = {}
 TmCaseChrome._hmIcon = nil
 TmCaseChrome._manifest = nil
 TmCaseChrome._logged = false
@@ -135,13 +135,7 @@ function TmCaseChrome.loadDisc(typeIdx, isHm)
   local filename = isHm and string.format("%s/disc_hm_%d.rgba", tm_root(), typeIdx)
     or string.format("%s/disc_%d.rgba", tm_root(), typeIdx)
   local raw = read_bytes(filename)
-  if not raw or #raw < 32 * 32 * 4 then
-    if isHm then
-      -- Fallback to standard TM disc if HM disc not baked yet
-      return TmCaseChrome.loadDisc(typeIdx, false)
-    end
-    return nil
-  end
+  if not raw or #raw < 32 * 32 * 4 then return nil end
   local img = rgba_to_image(raw, 32, 32)
   tbl[typeIdx] = img
   return img

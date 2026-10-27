@@ -176,7 +176,7 @@ check(staged ~= nil, "a wild is pending after CreateEnemyEventMon")
 eq(staged and staged.species, 249, "staged species")
 eq(staged and staged.level, 70, "staged level")
 eq(staged and staged.item, nil, "ITEM_NONE stages no held item")
-check(staged and staged.fatefulEncounter == true, "the event mon is a fateful encounter")
+check(staged and staged.modernFatefulEncounter == true, "the event mon is a fateful encounter")
 
 local ctx6b = newCtx()
 -- pokefirered/include/constants/species.h:419

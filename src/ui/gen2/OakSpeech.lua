@@ -271,8 +271,7 @@ function OakSpeech:buildSteps()
   return hooked
 end
 
--- `ld de, MUSIC_ROUTE_30 / call PlayMusic`, after InitGender's fade.
--- ../pokecrystal/engine/menus/intro_menu.asm:632-633, init_gender.asm:59-65
+-- ../pokegold/engine/menus/intro_menu.asm:495-500
 function OakSpeech:startMusic()
   if self.musicStarted then return end
   self.musicStarted = true
@@ -282,13 +281,23 @@ function OakSpeech:startMusic()
   end
 end
 
+-- ../pokegold/engine/rtc/timeset.asm:13-18, ../pokecrystal/engine/menus/init_gender.asm:60-65
+OakSpeech.SILENCE_FADE = 0x10
+
+function OakSpeech:silenceMusic()
+  self.musicStarted = false
+  local data = self.game and self.game.data
+  if data and data.audio and data.audio.runtime then
+    Music.fadeOut(OakSpeech.SILENCE_FADE)
+  end
+end
+
+local SILENT_KINDS = { gender = true, initclock = true }
+
 function OakSpeech:enter()
   self.step = 0
   self.answers = {}
   self.steps = self:buildSteps()
-  if not (self.steps[1] and self.steps[1].kind == "gender") then
-    self:startMusic()
-  end
   if Runtime.wants("intro.oak_speech.started") then
     Runtime.emit("intro.oak_speech.started", { speech = self, steps = self.steps })
   end
@@ -429,6 +438,7 @@ function OakSpeech:openInitClock()
   self.busy = true
   local faded = self.faded
   self.faded = false
+  self:silenceMusic()
   local pushed = Screens.push(game, "Gen2InitClock", {
     mode = "clock",
     save = game.save,
@@ -438,6 +448,7 @@ function OakSpeech:openInitClock()
     onDone = function()
       game.stack:pop()
       -- ../pokecrystal/engine/menus/intro_menu.asm:629-635
+      self:startMusic()
       if self.autoConfirm then
         self.busy = false
         return self:advance()
@@ -454,16 +465,12 @@ function OakSpeech:openInitClock()
   end
 end
 
--- InitGender, pushed where PlayerProfileSetup farcalls it: before the speech
--- says anything and before its music starts
--- (../pokecrystal/engine/menus/intro_menu.asm:79-83).
+-- ../pokecrystal/engine/menus/intro_menu.asm:79-83
 function OakSpeech:openGenderSelect(step)
   local game = self.game
-  if not (game and game.stack) then
-    self:startMusic()
-    return self:advance()
-  end
+  if not (game and game.stack) then return self:advance() end
   self.busy = true
+  self:silenceMusic()
   local pushed = Screens.push(game, "Gen2GenderSelect", {
     save = game.save,
     fades = not self.autoConfirm,
@@ -481,13 +488,11 @@ function OakSpeech:openGenderSelect(step)
       end
       self:recordAnswer(step, gender == "female" and 2 or 1,
         gender == "female" and "Girl" or "Boy", gender)
-      self:startMusic()
       self:advance()
     end,
   })
   if not pushed then
     self.busy = false
-    self:startMusic()
     self:advance()
   end
 end
@@ -715,6 +720,7 @@ function OakSpeech:advance()
       speech = self, step = step, index = self.step,
     })
   end
+  if not SILENT_KINDS[step.kind] then self:startMusic() end
   self:runStep(step)
 end
 

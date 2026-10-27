@@ -51,6 +51,10 @@ local OWNED = {
   "src/core/TouchSkin.lua",
   "src/import/LauncherSettings.lua",
   "src/import/LauncherView.lua",
+  "src/import/RomExtractorGen3.lua",
+  "src/mods/Loader.lua",
+  "src/update/Check.lua",
+  "src/update/PatchNotes.lua",
 }
 
 local WRITERS = { "write", "newFile", "createDirectory", "append" }

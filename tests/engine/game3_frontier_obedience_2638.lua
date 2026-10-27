@@ -18,7 +18,7 @@ local function mon(species, otId, fateful)
   return { species = species, level = 30, hp = 200, maxHp = 200,
     attack = 80, defense = 80, spAtk = 80, spDef = 80, speed = 80, ability = 0,
     nickname = "RENTAL", otId = otId, otName = otId == 1 and "PLAYER" or "RENTAL",
-    fatefulEncounter = fateful, moves = { 33, 0, 0, 0 }, pp = { 35, 0, 0, 0 } }
+    modernFatefulEncounter = fateful, moves = { 33, 0, 0, 0 }, pp = { 35, 0, 0, 0 } }
 end
 
 local function run(o)

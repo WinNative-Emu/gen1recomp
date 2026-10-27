@@ -6,6 +6,14 @@ local GameVersion = require("src.core.GameVersion")
 
 local DatasetHydration = {}
 
+function DatasetHydration.seedGen2Field(data)
+  local field = data.field or {}
+  local menuGfx = data.gen2MenuGfx
+  field.emotes = menuGfx and menuGfx.emotes
+  data.field = field
+  return field
+end
+
 function DatasetHydration.applyGen2(data, moduleLoader)
   local chart = data.type_chart or {}
   chart.matchups = chart.matchups or {}

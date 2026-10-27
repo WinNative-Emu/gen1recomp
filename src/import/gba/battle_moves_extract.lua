@@ -89,37 +89,20 @@ function BattleMovesExtract.packToLua(pack)
   return table.concat(lines, "\n")
 end
 
---- Write via cache object (preferred) or filesystem outDir.
 function BattleMovesExtract.writeCache(pack, cacheOrDir, opts)
   opts = opts or {}
   local body = BattleMovesExtract.packToLua(pack)
   local root = (opts.cacheRoot or default_cache_root()) .. "/" .. BattleMovesExtract.CACHE_SUB
   local rel = root .. "/battle_moves.lua"
 
+  local ok, err
   if type(cacheOrDir) == "table" and cacheOrDir.write then
-    cacheOrDir:write(rel, body)
-    return rel
+    ok, err = cacheOrDir:write(rel, body)
+  else
+    ok, err = require("src.import.CacheFs").write(rel, body)
   end
-
-  local okC, CacheFs = pcall(require, "src.import.CacheFs")
-  if okC and CacheFs and CacheFs.write then
-    local ok = pcall(CacheFs.write, rel, body)
-    if ok then return rel end
-  end
-
-  if love and love.filesystem and love.filesystem.write then
-    local ok = pcall(love.filesystem.write, rel, body)
-    if ok then return rel end
-  end
-
-  local outDir = (type(cacheOrDir) == "string" and cacheOrDir) or root
-  pcall(os.execute, 'mkdir -p "' .. outDir .. '"')
-  local f = io.open(outDir .. "/battle_moves.lua", "wb")
-  if f then
-    f:write(body)
-    f:close()
-  end
-  return outDir .. "/battle_moves.lua"
+  if ok == false then error("battle_moves: could not write " .. rel .. ": " .. tostring(err)) end
+  return rel
 end
 
 function BattleMovesExtract.run(rom, cache, opts)

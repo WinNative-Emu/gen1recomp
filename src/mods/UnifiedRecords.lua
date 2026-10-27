@@ -1,7 +1,10 @@
 
 local Ids = require("src.mods.UnifiedIds")
+local Schemas = require("src.mods.Schemas")
 local Stats = require("src.pokemon.Stats")
 local Records = {}
+
+local RESERVED_REGISTRY = { species = "pokemon", move = "moves", item = "items" }
 
 local STAT_KEYS = { "hp", "attack", "defense", "speed", "special", "specialAttack", "specialDefense" }
 local STAT_ALIASES = {
@@ -137,11 +140,8 @@ end
 
 local function writeId(id, kind, generation, data, original, native)
   if type(id) ~= "string" or id == "" then error(kind .. " must be a string ID", 0) end
-  local reserved = generation == 2 and ({
-    species = { growthRates = true, tmhmMoves = true },
-    move = { generation = true, source = true },
-    item = { generation = true, source = true, pockets = true },
-  })[kind]
+  local registry = generation == 2 and Schemas.REGISTRIES[RESERVED_REGISTRY[kind]]
+  local reserved = registry and registry.gen2ReservedIds
   if reserved and reserved[id] then error("reserved engine metadata is not a " .. kind .. " ID", 0) end
   local rows, base = tables(kind, generation, data)
   id = Ids.native(id, kind, generation, function(key) return rows[key] ~= nil end)

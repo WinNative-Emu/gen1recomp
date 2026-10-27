@@ -491,7 +491,7 @@ local function canTradeRse(party, monIdx, opts, version)
     end
   end
   if species[idx] == DEOXYS or species[idx] == MEW then
-    if party[idx] and party[idx].fatefulEncounter == false then
+    if party[idx] and party[idx].modernFatefulEncounter == false then
       return Family.CANT_TRADE_INVALID_MON
     end
   end
