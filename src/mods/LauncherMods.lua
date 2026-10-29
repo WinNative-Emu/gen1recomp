@@ -836,6 +836,43 @@ local function readArchiveStepped(source, pause, st)
   if #parts == 0 then return readArchive(source) end
   return table.concat(parts)
 end
+LauncherMods.readStepped = readArchiveStepped
+
+LauncherMods.NX_MAX_ZIP_BYTES = 64 * 1024 * 1024
+
+local function archiveSize(source)
+  local t = type(source)
+  if (t == "userdata" or t == "table") and type(source.getSize) == "function" then
+    local ok, size = pcall(source.getSize, source)
+    return ok and tonumber(size) or nil
+  end
+  local fs = love and love.filesystem
+  if t == "string" and not isHostAbsolutePath(source) and fs and fs.getInfo then
+    local info = fs.getInfo(source, "file")
+    return info and tonumber(info.size) or nil
+  end
+  return nil
+end
+
+local function nxTooLargeText(label, size)
+  if not require("src.core.Platform").isNX() then return nil end
+  local cap = LauncherMods.NX_MAX_ZIP_BYTES
+  if not (size and size > cap) then return nil end
+  return ("%s is %.1f MiB. On Switch a mod .zip must be %d MiB or smaller, "
+    .. "because it is held in memory while it installs."):format(label,
+    size / (1024 * 1024), math.floor(cap / (1024 * 1024)))
+end
+
+local function nxZipTooLarge(source, label)
+  label = label or (type(source) == "string" and (source:match("[^/\\]+$") or source))
+    or "the .zip"
+  return nxTooLargeText(label, archiveSize(source))
+end
+
+function LauncherMods.nxReleaseTooLarge(label, release)
+  local zip = type(release) == "table" and release.zip
+  return nxTooLargeText(tostring(label), type(zip) == "table" and tonumber(zip.size) or nil)
+end
 
 -- Local PK\3\4 / empty-file check before mount (corrupt MTP / AppleDouble).
 local function zipLooksValid(data)
@@ -1231,6 +1268,8 @@ function LauncherMods._installZipInner(source, opts, yieldFn, jobState)
       end
     end
   end
+  local tooLarge = nxZipTooLarge(source, opts.label)
+  if tooLarge then return nil, tooLarge end
   local data, readErr
   if pause then
     data, readErr = readArchiveStepped(source, pause, st)
@@ -1411,13 +1450,15 @@ function LauncherMods.installFromRelease(modId, release)
     if type(release) ~= "table" or not release.zip or not release.zip.url then
       return nil, "release has no downloadable .zip"
     end
+    local tooLarge = LauncherMods.nxReleaseTooLarge(modId, release)
+    if tooLarge then return nil, tooLarge end
     local ModUpdate = require("src.mods.ModUpdate")
     local tmpName = ("mod_update_%s_%s.zip"):format(
       tostring(modId), tostring(release.version or os.time()))
     local localPath, dlErr = ModUpdate.downloadZip(release.zip.url, tmpName)
     if not localPath then return nil, dlErr end
     local installed, res = LauncherMods.installZip(localPath, {
-      replace = true, expectId = modId,
+      replace = true, expectId = modId, label = modId,
     })
     pcall(love.filesystem.remove, localPath)
     if not installed then return nil, res end
@@ -1441,7 +1482,7 @@ function LauncherMods.installDownloadedZip(modId, localPath, version)
       return nil, "missing downloaded archive"
     end
     local installed, res = LauncherMods.installZip(localPath, {
-      replace = true, expectId = modId,
+      replace = true, expectId = modId, label = modId,
     })
     pcall(love.filesystem.remove, localPath)
     if not installed then return nil, res end

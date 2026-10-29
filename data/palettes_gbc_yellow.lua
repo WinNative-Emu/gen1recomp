@@ -238,9 +238,9 @@ return {
       [62] = 3, -- SPRITE_SANDSHREW
       [63] = 2, -- SPRITE_ODDISH
       [64] = 2, -- SPRITE_BULBASAUR
-      [65] = 0, -- SPRITE_JIGGLYPUFF
-      [66] = 0, -- SPRITE_CLEFAIRY
-      [67] = 0, -- SPRITE_CHANSEY
+      [65] = 8, -- SPRITE_JIGGLYPUFF
+      [66] = 8, -- SPRITE_CLEFAIRY
+      [67] = 8, -- SPRITE_CHANSEY
       [68] = 0, -- SPRITE_JESSIE
       [69] = 1, -- SPRITE_JAMES
       [70] = 0, -- SPRITE_POKE_BALL
@@ -265,6 +265,8 @@ return {
         { 230, 115, 0 },
         { 0, 0, 0 },
       },
+      -- pokered-gbc data/super_palettes.asm:149
+      [8] = require("data.palettes_gbc").palettes.PINKMON,
     },
   },
 }

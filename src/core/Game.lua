@@ -604,8 +604,8 @@ function Game.uiAnchorsHeldInStack(stack)
   return false
 end
 
-function Game.uiShiftRightInStack(stack)
-  for i = #(stack and stack.states or {}), 1, -1 do
+function Game.uiShiftRightInStack(stack, from)
+  for i = #(stack and stack.states or {}), from or 1, -1 do
     local state = stack.states[i]
     if state and state.uiShiftRight then return true end
   end
@@ -729,7 +729,7 @@ function Game:draw()
   Renderer.uiAnchorHold = Game.uiAnchorsHeldInStack(self.stack)
   local shiftRight = false
   if not Renderer.uiCentered and not Renderer.uiAnchorHold
-     and Game.uiShiftRightInStack(self.stack) then
+     and Game.uiShiftRightInStack(self.stack, drawFrom) then
     if ModRuntime.wantsHook("render.compose") then
       Renderer.uiAnchorHold = true
     else

@@ -999,3 +999,10 @@ tests/engine/gen2_crystal_rules_extract_test.lua
 tests/engine/gen2_crystal_status_test.lua
 tests/engine/gen2_crystal_battle_text_test.lua
 tests/modkit/cases/deferred_options_3046.lua
+tests/engine/game3_touch_carryover_F10b.lua
+tests/engine/gen2_options_value_spacing.lua
+tests/engine/gen2_touch_layout_home_F10.lua
+tests/engine/gen3_launcher_export_ability_f9.lua
+tests/engine/options_controls_caption_f3.lua
+tests/engine/shaderfx_docked_ui_grid_phase.lua
+tests/game3_swap_line_f7_test.lua

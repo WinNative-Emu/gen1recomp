@@ -595,6 +595,9 @@ local function buildRows(game)
     -- rebinding UI (gap C2, 12-ui-extensibility 4.4); captured inputs
     -- live in options.bindings, so the row costs a vanilla install nothing
     { id = "controls", label = Strings("CONTROLS"),
+      value = function()
+        return Strings("%d OPTIONS", #require("src.ui.BindingsMenu").BUTTONS)
+      end,
       activate = function(g)
         require("src.ui.Screens").push(g, "BindingsMenu")
       end },

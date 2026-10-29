@@ -26,11 +26,6 @@ local Save = require("src.core.gen2.Save")
 local StateStack = require("src.core.StateStack")
 local Strings = require("src.core.Strings")
 local TextBox = require("src.render.TextBox")
--- The mobile on-screen pad, shared with Gen 1 rather than reimplemented: the
--- same module, the same Xelu CC0 art under assets/touch/, the same
--- options.touchControls layout the launcher's editor writes, and the same
--- Input:overlayPressed source names.  A player who lays the pad out in Red
--- finds it in the same place in Gold.
 local TouchControls = require("src.core.TouchControls")
 local World = require("src.world.gen2.World")
 local MapNameSign = require("src.world.gen2.MapNameSign")

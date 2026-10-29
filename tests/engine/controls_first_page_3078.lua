@@ -10,8 +10,6 @@ local Gen1Options = require("src.ui.OptionsMenu")
 local Gen2Options = require("src.ui.gen2.OptionsMenu")
 local LauncherSettings = require("src.import.LauncherSettings")
 
-local GEN2_VISIBLE_ROWS = 7
-
 local function newStack()
   local stack = { items = {} }
   function stack:push(s) self.items[#self.items + 1] = s end
@@ -92,9 +90,17 @@ for _, p in ipairs(platforms) do
       local view = menu:visible()
       local i = indexOf(view, "controls")
       check(i ~= nil, version .. " " .. tag .. ": CONTROLS is on the top level")
-      check(i and i <= GEN2_VISIBLE_ROWS,
-        version .. " " .. tag .. ": CONTROLS within the first "
-        .. GEN2_VISIBLE_ROWS .. " rows (got " .. tostring(i) .. ")")
+      menu.index, menu.scroll = 1, 0
+      menu:ensureVisible()
+      local firstPage = menu:layout(0)
+      local onFirst = false
+      for _, entry in ipairs(firstPage) do
+        if entry.index == i then onFirst = true end
+      end
+      check(onFirst, version .. " " .. tag .. ": CONTROLS drawn on the first page ("
+        .. #firstPage .. " rows, CONTROLS at " .. tostring(i) .. ")")
+      eq(firstPage[2] and firstPage[2].row.id, "controls",
+        version .. " " .. tag .. ": CONTROLS second on the first page")
       menu.index = i or #view
       menu.scroll = 0
       menu:ensureVisible()
@@ -199,34 +205,120 @@ local function findRow(model, label)
   end
 end
 
-for _, version in ipairs({ "gold", "silver", "crystal" }) do
+local TouchControls = require("src.core.TouchControls")
+local Gen2Save = require("src.core.gen2.Save")
+local Game3 = require("src.core.Game3")
+
+local function same(a, b)
+  if type(a) ~= "table" or type(b) ~= "table" then return a == b end
+  for k, v in pairs(a) do if not same(v, b[k]) then return false end end
+  for k in pairs(b) do if a[k] == nil then return false end end
+  return true
+end
+
+local STOCK = TouchControls.normalizeConfig(nil).layouts
+
+local function dragged(x)
+  return { landscape = { positions = { dpad = { x = x, y = 0.5 } }, scale = 1.3 } }
+end
+
+local function seedTouch(opts)
+  opts.bindings = { a = { key = "z" } }
+  opts.touchControls = { enabled = false, skin = "gb_anim", layouts = dragged(0.9) }
+  opts.gold = type(opts.gold) == "table" and opts.gold or {}
+  opts.gold.bindings = { speedUp = false, b = { key = "x" } }
+  opts.gold.touchControls = { layouts = dragged(0.5) }
+  opts.game3 = { touchControls = { layouts = dragged(0.3) } }
+end
+
+local function gen1Layout(opts)
+  return TouchControls.normalizeConfig(opts.touchControls).layouts
+end
+
+local function gen2Layout(opts)
+  return TouchControls.normalizeConfig(Gen2Save.touchControls(opts)).layouts
+end
+
+local function gen3Config(opts)
+  local got
+  local game = setmetatable({
+    touchControls = { applyOptions = function(_, o) got = o end },
+  }, { __index = Game3 })
+  Game3.applyTouchOptions(game, opts)
+  return TouchControls.normalizeConfig(got and got.touchControls)
+end
+
+local function resetOn(version, mutate)
   local model = LauncherSettings.open({}, version)
   local reset = findRow(model, "RESET REBINDS")
   check(reset ~= nil and type(reset.action) == "function",
     version .. " gear offers RESET REBINDS")
-  if reset then
-    model.opts.bindings = { a = { key = "z" } }
-    model.opts.gold.bindings = { speedUp = false, b = { key = "x" } }
-    model.opts.touchControls = { layouts = { landscape = {} } }
-    reset.action()
-    eq(model.opts.gold.bindings, nil, version .. " reset clears gold.bindings")
-    check(type(model.opts.bindings) == "table" and model.opts.bindings.a ~= nil,
-      version .. " reset leaves the Gen 1 bindings alone")
-    check(model.opts.touchControls.layouts ~= nil,
-      version .. " reset leaves the shared touch layouts alone")
-  end
+  seedTouch(model.opts)
+  if mutate then mutate(model.opts) end
+  local before = {
+    red = gen1Layout(model.opts),
+    gold = gen2Layout(model.opts),
+    g3 = gen3Config(model.opts).layouts,
+  }
+  if reset then reset.action() end
+  return model.opts, before
 end
 
-do
-  local model = LauncherSettings.open({}, "red")
-  local reset = findRow(model, "RESET REBINDS")
-  check(reset ~= nil, "red gear offers RESET REBINDS")
-  model.opts.bindings = { a = { key = "z" } }
-  model.opts.gold = { bindings = { speedUp = false } }
-  reset.action()
-  eq(model.opts.bindings, nil, "red reset clears the Gen 1 bindings")
-  check(model.opts.gold.bindings and model.opts.gold.bindings.speedUp == false,
-    "red reset leaves gold.bindings alone")
+for _, version in ipairs({ "gold", "silver", "crystal" }) do
+  local opts, before = resetOn(version)
+  eq(opts.gold.bindings, nil, version .. " reset clears gold.bindings")
+  check(type(opts.bindings) == "table" and opts.bindings.a ~= nil,
+    version .. " reset leaves the Gen 1 bindings alone")
+  check(same(gen2Layout(opts), STOCK), version .. " reset puts Gen 2 on the stock layout")
+  check(same(gen1Layout(opts), before.red), version .. " reset leaves the Red layout alone")
+  check(same(gen3Config(opts).layouts, before.g3),
+    version .. " reset leaves the Gen 3 layout alone")
+  eq(opts.touchControls.enabled, false, version .. " reset keeps the TOUCH PAD switch")
+  eq(opts.touchControls.skin, "gb_anim", version .. " reset keeps the skin")
+
+  opts = resetOn(version, function(o)
+    o.gold.touchControls = { positions = { dpad = { x = 0.5, y = 0.5 } }, scale = 1.4 }
+  end)
+  check(same(gen2Layout(opts), STOCK),
+    version .. " reset clears a migrated legacy positions layout")
+end
+
+for _, version in ipairs({ "red", "blue", "yellow" }) do
+  local opts, before = resetOn(version)
+  eq(opts.bindings, nil, version .. " reset clears the Gen 1 bindings")
+  check(same(gen1Layout(opts), STOCK), version .. " reset puts Gen 1 on the stock layout")
+  check(opts.gold.bindings and opts.gold.bindings.speedUp == false,
+    version .. " reset leaves gold.bindings alone")
+  check(same(gen2Layout(opts), before.gold), version .. " reset leaves the Gold layout alone")
+  check(same(gen3Config(opts).layouts, before.g3),
+    version .. " reset leaves the Gen 3 layout alone")
+  eq(opts.touchControls.enabled, false, version .. " reset keeps the TOUCH PAD switch")
+  eq(opts.touchControls.skin, "gb_anim", version .. " reset keeps the skin")
+
+  opts = resetOn(version, function(o)
+    o.touchControls.layouts = nil
+    o.touchControls.positions = { dpad = { x = 0.9, y = 0.1 } }
+    o.touchControls.scale = 1.4
+  end)
+  check(same(gen1Layout(opts), STOCK),
+    version .. " reset clears a legacy positions layout")
+end
+
+for _, version in ipairs({ "firered", "leafgreen", "emerald", "ruby", "sapphire" }) do
+  local opts, before = resetOn(version)
+  eq(opts.bindings, nil, version .. " reset clears the flat bindings Gen 3 reads")
+  local cfg = gen3Config(opts)
+  check(same(cfg.layouts, STOCK), version .. " reset puts Gen 3 on the stock layout")
+  eq(cfg.enabled, false, version .. " reset keeps the TOUCH PAD switch")
+  eq(cfg.skin, "gb_anim", version .. " reset keeps the skin")
+  check(same(gen1Layout(opts), before.red), version .. " reset leaves the Red layout alone")
+  check(opts.gold.bindings and opts.gold.bindings.speedUp == false,
+    version .. " reset leaves gold.bindings alone")
+  check(same(gen2Layout(opts), before.gold), version .. " reset leaves the Gold layout alone")
+
+  opts = resetOn(version, function(o) o.game3 = nil end)
+  check(same(gen3Config(opts).layouts, STOCK),
+    version .. " reset without a game3 block does not fall back to the Red layout")
 end
 
 T.finish("controls first page 3078")

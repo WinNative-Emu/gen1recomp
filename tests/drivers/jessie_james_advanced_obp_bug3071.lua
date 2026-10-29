@@ -67,9 +67,15 @@ return function(game)
   U.teleport(game, "PEWTER_POKECENTER", 3, 4, "up")
   ow = game.overworld
   U.wait(30)
-  expect("pewter pokecenter jigglypuff SPR_PAL_ORANGE", bySource(ow, 65), 0)
-  expect("pewter pokecenter chansey SPR_PAL_ORANGE", bySource(ow, 67), 0)
-  U.still(game, DIR .. "/3071_05_pewter_pokecenter_jigglypuff_chansey.png")
+  expect("pewter pokecenter jigglypuff PINKMON", bySource(ow, 65), 8)
+  expect("pewter pokecenter chansey PINKMON", bySource(ow, 67), 8)
+  U.still(game, DIR .. "/F8_01_pewter_pokecenter_jigglypuff_chansey_pink.png")
+
+  U.teleport(game, "POKEMON_FAN_CLUB", 3, 6, "up")
+  ow = game.overworld
+  U.wait(30)
+  expect("fan club clefairy PINKMON", bySource(ow, 66), 8)
+  U.still(game, DIR .. "/F8_02_fan_club_clefairy_pink.png")
 
   print(ok and "PASS jessie_james_advanced_obp_bug3071" or "FAIL jessie_james_advanced_obp_bug3071")
   love.event.quit(ok and 0 or 1)

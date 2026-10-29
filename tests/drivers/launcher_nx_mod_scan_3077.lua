@@ -100,13 +100,13 @@ return function()
     local press = love.timer.getTime() - t0
     local worst = press
     local frames = 1
-    while importer._modScanJob and importer._pumpModScanJob do
+    while importer._inboxJob and importer._pumpInboxJob do
       U.wait(1)
       local f0 = love.timer.getTime()
-      local job = importer._modScanJob
+      local job = importer._inboxJob
       local before = job and job.install and job.install.progress and job.install.progress.done
       local idx = job and job.index
-      importer:_pumpModScanJob()
+      importer:_pumpInboxJob()
       local dt = love.timer.getTime() - f0
       if dt > 0.02 then
         local after = job and job.install and job.install.progress and job.install.progress.done
