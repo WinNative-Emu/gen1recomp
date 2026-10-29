@@ -1924,7 +1924,7 @@ local function build(L)
     c.dynamicWarp = Gen3Save.cartWarp(save.dynamicWarp) or L.EMPTY_WARP
     c.escapeWarp = Gen3Save.cartWarp(save.escapeWarp) or L.EMPTY_WARP
     local ci = type(save.modData) == "table" and type(save.modData.cartImport) == "table" and save.modData.cartImport or {}
-    local heal = Gen3Save.cartWarp(ci.lastHealLocation) or (opts.healWarp and opts.healWarp(save.healMap))
+    local heal = Gen3Save.cartWarp(ci.lastHealLocation) or (opts.healWarp and opts.healWarp(save.healMap, tonumber(save.healX), tonumber(save.healY)))
     if heal then
       c.lastHealLocation = heal
     elseif not blocks then

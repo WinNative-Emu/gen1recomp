@@ -994,10 +994,49 @@ local function retireImportedSav(path)
   return true
 end
 
--- Rescan imports/mods/: install each .zip via _installMod / installZip.
--- Never deletes inbox zips (success or failure). Empty inbox → MTP notice.
+local MODS_RECEIPTS = MODS_INBOX_DIR .. "/.installed"
+
+local function modZipStamp(path)
+  local info = pfs().getInfo(path, "file")
+  if not info then return nil end
+  return table.concat({ path:match("[^/]+$") or path,
+    tostring(info.size), tostring(info.modtime) }, "\t")
+end
+
+local function loadModReceipts()
+  local receipts = {}
+  local raw = pfs().read(MODS_RECEIPTS)
+  if type(raw) ~= "string" then return receipts end
+  for line in raw:gmatch("[^\r\n]+") do
+    local stamp, id = line:match("^(.*)\t([^\t]+)$")
+    if stamp then receipts[stamp] = id end
+  end
+  return receipts
+end
+
+local function saveModReceipt(receipts, stamp, id)
+  if not (stamp and type(id) == "string" and id ~= "") then return end
+  local name = stamp:match("^([^\t]*)\t")
+  for old in pairs(receipts) do
+    if old:match("^([^\t]*)\t") == name then receipts[old] = nil end
+  end
+  receipts[stamp] = id
+  local lines = {}
+  for s, modId in pairs(receipts) do lines[#lines + 1] = s .. "\t" .. modId end
+  table.sort(lines)
+  pfs().write(MODS_RECEIPTS, table.concat(lines, "\n") .. "\n")
+end
+
+local function modTreeInstalled(id)
+  return love.filesystem.getInfo("mods/" .. id .. "/manifest.json", "file") ~= nil
+end
+
+function RomImporter:modScanBusy()
+  return self._modScanJob ~= nil
+end
+
 function RomImporter:rescanModsAction()
-  if self.workState == "working" then return end
+  if self.workState == "working" or self._modScanJob then return end
   self.tab = "mods"
   self:ensureModsInboxDir()
   local candidates = self:scanModsInbox()
@@ -1005,35 +1044,109 @@ function RomImporter:rescanModsAction()
     self:_setNxModsInboxNotice()
     return
   end
-  local anyOk = false
-  local lastOk = nil
-  local lastFail = nil
-  local failCount = 0
+  local receipts = loadModReceipts()
+  local items = {}
+  local conflicts, lastConflict = 0, nil
   for _, path in ipairs(candidates) do
-    -- Reuse _installMod carefully: it must not remove the inbox source.
-    self:_installMod(path)
-    if self.modNotice and self.modNotice.ok then
-      anyOk = true
-      lastOk = self.modNotice
-    else
-      failCount = failCount + 1
-      lastFail = self.modNotice
+    local stamp = modZipStamp(path)
+    local id = stamp and receipts[stamp]
+    local conflict = id and id:sub(1, 1) == "!"
+    if conflict then id = id:sub(2) end
+    if not (id and modTreeInstalled(id)) then
+      items[#items + 1] = { path = path, stamp = stamp,
+        name = path:match("[^/]+$") or path }
+    elseif conflict then
+      conflicts = conflicts + 1
+      lastConflict = { ok = false, text = "a mod named '" .. id .. "' is already installed" }
     end
   end
-  -- Success wins overall ok=true so a leftover MTP junk sibling cannot hide
-  -- a good install; still append the last failure so a real broken zip is
-  -- visible beside the success line.
-  if anyOk and lastFail then
-    local okText = (lastOk and lastOk.text) or "Installed"
-    local failText = (lastFail and lastFail.text) or "unknown error"
+  if #items == 0 then
+    self.modNotice = lastConflict or { ok = true,
+      text = Strings("Every .zip in %s/ is already installed.", MODS_INBOX_DIR) }
+    return
+  end
+  self._modScanJob = { items = items, index = 0, receipts = receipts,
+    anyOk = false, failCount = conflicts, lastFail = lastConflict }
+  self:_pumpModScanJob()
+end
+
+function RomImporter:_modScanResult(item, installed, res, extra)
+  local job = self._modScanJob
+  if installed then
+    job.anyOk = true
+    job.lastOk = { ok = true, text = "Installed " .. tostring(res) }
+    saveModReceipt(job.receipts, item.stamp, res)
+    local LauncherMods = require("src.mods.LauncherMods")
+    local checkTarget = type(extra) == "table" and extra.id and extra
+      or (type(res) == "string" and { id = res }) or nil
+    if checkTarget and LauncherMods.checkDependencies then
+      local depCheck = LauncherMods.checkDependencies(checkTarget)
+      if depCheck and depCheck.hasIssues then self._modDepResolver = depCheck end
+    end
+  else
+    if type(extra) == "table" and extra.alreadyInstalled then
+      saveModReceipt(job.receipts, item.stamp, "!" .. extra.alreadyInstalled)
+    end
+    job.failCount = job.failCount + 1
+    job.lastFail = { ok = false, text = tostring(res) }
+  end
+end
+
+function RomImporter:_cancelModScanJob()
+  local job = self._modScanJob
+  if not job then return end
+  self._modScanJob = nil
+  if job.install then require("src.mods.LauncherMods").cancelInstall(job.install) end
+end
+
+function RomImporter:_finishModScanJob()
+  local job = self._modScanJob
+  self._modScanJob = nil
+  if job.anyOk then pcall(self._refreshMods, self) end
+  if job.anyOk and job.lastFail then
     self.modNotice = {
       ok = true,
-      text = Strings("%s\n(%d failed: %s)", okText, failCount, failText),
+      text = Strings("%s\n(%d failed: %s)", job.lastOk.text, job.failCount,
+        job.lastFail.text),
     }
-  elseif anyOk then
-    self.modNotice = lastOk
-  elseif lastFail then
-    self.modNotice = lastFail
+  else
+    self.modNotice = job.lastOk or job.lastFail or self.modNotice
+  end
+end
+
+function RomImporter:_pumpModScanJob(budget, clock)
+  local job = self._modScanJob
+  if not job then return end
+  local LauncherMods = require("src.mods.LauncherMods")
+  clock = clock or (love.timer and love.timer.getTime) or os.clock
+  local deadline = clock() + (budget or LauncherMods.STEP_BUDGET)
+  while true do
+    if not job.install then
+      job.index = job.index + 1
+      if not job.items[job.index] then
+        self:_finishModScanJob()
+        return
+      end
+      job.install = LauncherMods.beginInstallZip(job.items[job.index].path)
+    end
+    local left = deadline - clock()
+    if left <= 0 then break end
+    local state, installed, res, extra = LauncherMods.stepInstall(job.install, left, clock)
+    if state ~= "done" then break end
+    job.install = nil
+    self:_modScanResult(job.items[job.index], installed, res, extra)
+  end
+  local item = job.items[job.index]
+  local progress = job.install and job.install.progress
+  local text
+  if progress and (progress.total or 0) > 0 then
+    text = Strings("Installing %s (%d of %d): %d/%d files", item.name, job.index,
+      #job.items, progress.done, progress.total)
+  else
+    text = Strings("Installing %s (%d of %d) ...", item.name, job.index, #job.items)
+  end
+  if not (self.modNotice and self.modNotice.text == text) then
+    self.modNotice = { ok = true, text = text }
   end
 end
 
@@ -2906,7 +3019,7 @@ end
 -- source is whatever LauncherMods.installZip accepts: an absolute path string
 -- or a love DroppedFile.
 function RomImporter:_installMod(source)
-  if self.workState == "working" then return end
+  if self.workState == "working" or self._modScanJob then return end
   self.tab = "mods"
   local ok, installed, res, manifest = pcall(function()
     local LauncherMods = require("src.mods.LauncherMods")
@@ -2963,7 +3076,7 @@ end
 function RomImporter:chooseMod()
   if self:_importerPickPending() then return end
   if self.workState == "working" then return end
-  if self._hostPick or self._modInboxInstall then return end
+  if self._hostPick or self._modInboxInstall or self._modScanJob then return end
   if self:_inboxImport() then
     self:ensureModsInboxDir()
     self:rescanModsAction()
@@ -3940,6 +4053,7 @@ function RomImporter:update(dt)
   self:_pumpReimport()
   self:_pumpHostPick()
   self:_pumpModPickOpen(dt)
+  self:_pumpModScanJob()
   self:_pumpModInboxInstall()
   -- Dev harness: POKEPORT_LAUNCHER_SHOT=/path.png resizes the window from
   -- POKEPORT_WIN=WxH, lets the view settle, then captures one frame and
@@ -4778,6 +4892,10 @@ end
 function RomImporter:play(version, fade)
   if self.workState == "working" then return end
   if self._hostPick then return end
+  if self._modScanJob then
+    self.tab = "mods"
+    return
+  end
   if not self.ready[version] then return end
   if fade then
     if not self._launchFade then
@@ -7136,6 +7254,7 @@ end
 
 function RomImporter:playArena(version, cartId, spec)
   if not version or not spec then return false end
+  self:_cancelModScanJob()
   self._handedOff = true
   resetPointerCursor(self)
   if self._flex then require("src.import.LauncherView").detach(self) end
@@ -8678,6 +8797,7 @@ end
 
 -- NX / desktop / Android labels and inbox hints for the FlexLove view.
 function RomImporter:_modsImportButtonLabel()
+  if self._modScanJob then return Strings("Installing...") end
   if self:_inboxImport() then return Strings("Scan again") end
   return Strings("Import mod .zip")
 end

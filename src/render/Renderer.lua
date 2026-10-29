@@ -367,6 +367,7 @@ function Renderer:beginFrame(transparent)
   self.screenVeil = nil
   -- edge-anchored UI regions, re-declared by their elements each frame
   self.uiAnchors = nil
+  self.uiShiftRight = false
   -- last frame's trueColor rects and sprite redraws go before anything
   -- draws this one
   PaletteFX.clearTrueColor()
@@ -870,6 +871,7 @@ function Renderer:setUIAnchor(x, y, w, h, anchor)
   -- battle -- keeps every element inside it, so the box blits where it was
   -- drawn in the canvas instead of being pulled to the window edge.
   if self.uiAnchorHold then return end
+  if self.uiShiftRight then return end
   addUIAnchor(self, x, y, w, h, anchor, false, self.canvas, true)
 end
 
@@ -927,6 +929,9 @@ function Renderer:frameRects()
   r.Up, r.Ux, r.Uy = Up, Up / dpiX, Up / dpiY
   r.uvpw, r.uvph = uiw * r.Ux, uih * r.Uy
   r.uox = (vx + math.floor((pw - uiw * Up) / 2)) / dpiX
+  if self.uiShiftRight and not self.uiCentered then
+    r.uox = (vx + math.floor(pw - uiw * Up)) / dpiX
+  end
   r.uoy = (vy + math.max(0, math.floor((ph - uih * Up) / 2) - r.lift)) / dpiY
   return r
 end

@@ -791,6 +791,16 @@ local function gen2Rows(opts, hooks, shared)
   addTouchRows(rows, add, shared, hooks)
   addOrientationRow(add, shared)
 
+  rows[#rows + 1] = {
+    label = Strings("RESET REBINDS"),
+    actionLabel = Strings("Reset"),
+    danger = true,
+    action = function()
+      opts.bindings = nil
+      return true
+    end,
+  }
+
   return rows
 end
 

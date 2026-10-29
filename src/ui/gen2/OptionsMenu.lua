@@ -543,7 +543,7 @@ local GROUPS = {
 }
 
 local ORDER = {
-  "group.speed", "group.video", "group.graphics", "group.audio",
+  "group.speed", "controls", "group.video", "group.graphics", "group.audio",
   "performance", "group.battle", "group.extras",
 }
 

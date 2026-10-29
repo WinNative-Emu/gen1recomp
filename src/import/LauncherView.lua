@@ -2633,6 +2633,7 @@ local function buildModsPanel(imp, x, y, w, availH, m)
   -- bulk actions (Enable all / Disable all) into More... on compact viewports.
   local bh = m.btnH
   local importLabel = imp:_modsImportButtonLabel()
+  local importOk = not (imp.modScanBusy and imp:modScanBusy())
   local importW = Kit.textWidth("small", importLabel) + math.floor(24 * m.s)
 
   if #mods > 0 then
@@ -2653,7 +2654,7 @@ local function buildModsPanel(imp, x, y, w, availH, m)
     if fullReq <= w then
       -- Tier 1 (Desktop / Wide): Show all 5 full-text buttons
       btn(imp, place(importW), cy, importW, bh, "mods-import", importLabel, {
-        kind = "accent", font = "small",
+        kind = "accent", font = "small", enabled = importOk,
         action = function() imp:chooseMod() end })
       btn(imp, place(disableW), cy, disableW, bh, "mods-disable-all", Strings("Disable all"), {
         kind = "warn", font = "small",
@@ -2677,7 +2678,7 @@ local function buildModsPanel(imp, x, y, w, availH, m)
     elseif medReq <= w then
       -- Tier 2 (Medium / Compact): Surface Import, Updates, and Sort directly
       btn(imp, place(importW), cy, importW, bh, "mods-import", importLabel, {
-        kind = "accent", font = "small",
+        kind = "accent", font = "small", enabled = importOk,
         action = function() imp:chooseMod() end })
       btn(imp, place(checkShortW), cy, checkShortW, bh, "mods-check-updates", Strings("Updates"), {
         font = "small",
@@ -2696,7 +2697,7 @@ local function buildModsPanel(imp, x, y, w, availH, m)
       local useImportW = (miniReq <= w) and importShortW or importW
 
       btn(imp, place(useImportW), cy, useImportW, bh, "mods-import", (miniReq <= w) and importShortLabel or importLabel, {
-        kind = "accent", font = "small",
+        kind = "accent", font = "small", enabled = importOk,
         action = function() imp:chooseMod() end })
       btn(imp, place(sortW), cy, sortW, bh, "mods-sort", Strings("Sort"), {
         font = "small",
@@ -2708,7 +2709,7 @@ local function buildModsPanel(imp, x, y, w, availH, m)
   else
     local place = Layout.rightCluster(x, w, math.floor(6 * m.s))
     btn(imp, place(importW), cy, importW, bh, "mods-import", importLabel, {
-      kind = "accent", font = "small",
+      kind = "accent", font = "small", enabled = importOk,
       action = function() imp:chooseMod() end })
     if #cartsWithUpdates(imp) > 0 then
       local updateAllW = Kit.textWidth("small", Strings("Update all"))

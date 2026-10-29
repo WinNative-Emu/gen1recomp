@@ -238,11 +238,11 @@ return {
       [62] = 3, -- SPRITE_SANDSHREW
       [63] = 2, -- SPRITE_ODDISH
       [64] = 2, -- SPRITE_BULBASAUR
-      [65] = "random", -- SPRITE_JIGGLYPUFF
-      [66] = "random", -- SPRITE_CLEFAIRY
-      [67] = "random", -- SPRITE_CHANSEY
-      [68] = "random", -- SPRITE_JESSIE
-      [69] = "random", -- SPRITE_JAMES
+      [65] = 0, -- SPRITE_JIGGLYPUFF
+      [66] = 0, -- SPRITE_CLEFAIRY
+      [67] = 0, -- SPRITE_CHANSEY
+      [68] = 0, -- SPRITE_JESSIE
+      [69] = 1, -- SPRITE_JAMES
       [70] = 0, -- SPRITE_POKE_BALL
       [71] = 0, -- SPRITE_FOSSIL
       [72] = 3, -- SPRITE_BOULDER

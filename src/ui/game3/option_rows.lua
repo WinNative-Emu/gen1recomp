@@ -615,8 +615,8 @@ Rows.GROUPS = {
 }
 
 Rows.ORDER = {
-  "group.speed", "group.video", "group.graphics", "group.audio",
-  "performance", "group.battle", "group.extras", "buttonMode", "controls", "mods",
+  "group.speed", "controls", "group.video", "group.graphics", "group.audio",
+  "performance", "group.battle", "group.extras", "buttonMode", "mods",
 }
 
 function Rows.group(rows, openPage)

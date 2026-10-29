@@ -2228,13 +2228,13 @@ function Game2:hotkey(key)
   elseif hk == "1" then
     if self:speedLocked() then return true end
     local GameSpeed = require("src.core.GameSpeed")
-    options.speed = GameSpeed.cycle(options.speed, 1)
+    options.speed = GameSpeed.step(options.speed, 1)
     persist()
     return true
   elseif hk == "0" then
     if self:speedLocked() then return true end
     local GameSpeed = require("src.core.GameSpeed")
-    options.speed = GameSpeed.cycle(options.speed, -1)
+    options.speed = GameSpeed.step(options.speed, -1)
     persist()
     return true
   elseif hk == "2" then
@@ -2571,7 +2571,7 @@ end
 function Game2:_cycleSpeed(dir)
   if self:speedLocked() then return end
   local GameSpeed = require("src.core.GameSpeed")
-  self.options.speed = GameSpeed.cycle(self.options.speed, dir)
+  self.options.speed = GameSpeed.step(self.options.speed, dir)
   if self.save then self.save.options = self.options end
   self:persistOptions()
 end

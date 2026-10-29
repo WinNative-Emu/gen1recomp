@@ -760,7 +760,7 @@ local GROUPS = {
 -- The top level's order, groups and singles alike.  Anything not named here
 -- (a mod's row, the touch rows) keeps its flat position after these.
 local ORDER = {
-  "group.speed", "group.video", "group.graphics", "group.audio",
+  "group.speed", "controls", "group.video", "group.graphics", "group.audio",
   "performance", "ruleset", "group.battle", "group.extras", "mods",
 }
 
