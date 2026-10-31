@@ -2,7 +2,6 @@
 
 Features intentionally added to the games themselves, beyond what the original cartridges shipped with:
 
-* **Seasonal launcher videos**, launches from November 1, 2026 at local midnight restore the normal intro and disable the animated background
 * **Gen 2 mod script indices**, automatic species, move and item numbering through 65535
 * **Gen 2 mod shop stock**, regular shelves and bargain prices
 * **Gen 2 mod phone contacts**, caller scripts and rematch events
