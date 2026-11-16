@@ -238,7 +238,7 @@ function Game2:enterArena(spec)
   if spec and spec.slotId then
     pcall(SaveData.setActiveSlot, version, spec.slotId)
   end
-  local ok, loaded = pcall(Save.load, version)
+  local ok, loaded = pcall(Save.load, version, self.data)
   if ok and loaded then
     local activeMods = self.modStatus and self.modStatus.loaded
     SaveData.runMigrations(loaded, self.mods and self.mods.migrations, activeMods)
@@ -289,6 +289,7 @@ function Game2:newGame()
   local boot = self.data and self.data.field and self.data.field.boot
   self.save = Save.newGame({
     playerName = self.save.player.name,
+    data = self.data,
     startMoney = boot and boot.startMoney,
     rivalName = boot and boot.rivalName,
   })
@@ -1139,6 +1140,7 @@ function Game2:load(opts)
   -- read by src/battle/gen2/AnimRunner.lua.
   self.data.gen2BattleAnims = loadGenerated("data/generated/battle_anims.lua")
   self.data.gen2Constants = loadGenerated("data/generated/constants.lua")
+  require("src.core.gen2.EngineFlags").ensure(self.data)
   -- The overworld's own tables.  src/world/gen2/World.lua:load used to read
   -- these straight off disk into World fields, which meant they never passed
   -- through game.data and a registry had no Data path to merge into -- the one
@@ -1224,8 +1226,10 @@ function Game2:load(opts)
   -- actually uses.  `landmarks` and `radio_channels` need no call: their
   -- consumers (src/core/gen2/Nests.lua, src/ui/gen2/MapRadio.lua) read
   -- game.data at the point of use.
+  require("src.core.gen2.EngineFlags").ensure(self.data)
   ItemEffects.applyHeldItems(self.data, heldBefore)
   Game2.applyFieldEmotes(self.data)
+  Clock.useData(self.data)
   require("src.core.gen2.Phone").useRegistry(self.data)
   require("src.core.gen2.Decorations").useRegistry(self.data)
   require("src.core.gen2.Apricorns").useRegistry(self.data)
@@ -1268,6 +1272,8 @@ function Game2:load(opts)
   -- given it exactly once, here.
   -- seed=true keeps what entry chunks wrote through mod.save before any save
   -- existed, the way Gen 1 seeds its boot skeleton (src/core/Game.lua:78).
+  self.save.player.name = self.save.player.name
+    or Save.defaultPlayerName(self.data, self.save.player.gender)
   self:adoptSave(self.save, true)
   ModRuntime.emit("save.created", { save = self.save })
 
@@ -2273,7 +2279,7 @@ function Game2:hotkey(key)
     return true
   elseif key == "f2" then
     if not self:quickSaveAllowed() then return true end
-    local loaded = Save.load()
+    local loaded = Save.load(nil, self.data)
     if loaded then self:continueGame(loaded) end
     return true
   elseif hk == "1" then
